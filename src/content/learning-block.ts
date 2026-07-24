@@ -168,10 +168,28 @@ const STYLES = `
   background: transparent;
   color: inherit;
   font: inherit;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    transform 80ms ease;
+}
+
+.retry:hover:enabled {
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.retry:active:enabled {
+  transform: translateY(1px);
+}
+
+.retry:disabled {
+  cursor: default;
+  opacity: 0.6;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .component {
+  .component,
+  .retry {
     transition: none;
   }
 }
@@ -528,6 +546,24 @@ export class SyntaxLearningBlock {
     detail.append(createElement("div", "detail-summary", detailAnalysis.explanation));
   }
 
+  #createRetry(sentenceId: string, focus: TokenRange): HTMLButtonElement {
+    const retry = createElement("button", "retry", "重新解析");
+    retry.type = "button";
+    retry.addEventListener("click", () => {
+      if (retry.disabled) return;
+      retry.disabled = true;
+      retry.textContent = "解析中…";
+      this.dispatchEvent(
+        new CustomEvent<SyntaxFocusEventDetail>("syntax-reanalyze-request", {
+          bubbles: true,
+          composed: true,
+          detail: eventDetail(sentenceId, focus),
+        }),
+      );
+    });
+    return retry;
+  }
+
   renderError(sentenceId: string, focus: TokenRange, message: string): void {
     this.#assertExpected(sentenceId);
     const detail = this.#findDetail(sentenceId, focus);
@@ -537,18 +573,7 @@ export class SyntaxLearningBlock {
     detail.className = "detail detail-error";
     detail.removeAttribute("aria-busy");
     detail.replaceChildren(createElement("span", "error-message", message));
-    const retry = createElement("button", "retry", "重新解析");
-    retry.type = "button";
-    retry.addEventListener("click", () => {
-      this.dispatchEvent(
-        new CustomEvent<SyntaxFocusEventDetail>("syntax-reanalyze-request", {
-          bubbles: true,
-          composed: true,
-          detail: eventDetail(sentenceId, focus),
-        }),
-      );
-    });
-    detail.append(retry);
+    detail.append(this.#createRetry(sentenceId, focus));
     this.#resolvedSentenceIds.add(sentenceId);
   }
 
@@ -560,18 +585,7 @@ export class SyntaxLearningBlock {
       createElement("span", "original-sentence", sentence),
       createElement("span", "error-message", ` ${message}`),
     );
-    const retry = createElement("button", "retry", "重新解析");
-    retry.type = "button";
-    retry.addEventListener("click", () => {
-      this.dispatchEvent(
-        new CustomEvent<SyntaxFocusEventDetail>("syntax-reanalyze-request", {
-          bubbles: true,
-          composed: true,
-          detail: eventDetail(sentenceId, { startToken: 0, endToken: 0 }),
-        }),
-      );
-    });
-    failure.append(retry);
+    failure.append(this.#createRetry(sentenceId, { startToken: 0, endToken: 0 }));
     this.#placeSentenceSection(sentenceId, failure);
     this.#resolvedSentenceIds.add(sentenceId);
   }

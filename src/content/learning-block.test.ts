@@ -293,6 +293,44 @@ describe("SyntaxLearningBlock", () => {
     });
   });
 
+  it("整句失败的重试按钮点击后禁用、显示解析中且只派发一次事件", () => {
+    const element = block();
+    element.setExpectedSentenceIds(["sentence-1"]);
+    element.renderFailure("sentence-1", sentence, "网络请求失败");
+    let dispatched = 0;
+    element.addEventListener("syntax-reanalyze-request", () => {
+      dispatched += 1;
+    });
+    const retry = element.host.shadowRoot!.querySelector<HTMLButtonElement>(".retry")!;
+
+    retry.click();
+    retry.click();
+
+    expect(retry.disabled).toBe(true);
+    expect(retry.textContent).toBe("解析中…");
+    expect(dispatched).toBe(1);
+
+    // 再次失败重渲染后，按钮复原为可点击的「重新解析」
+    element.renderFailure("sentence-1", sentence, "网络请求失败");
+    const rerendered = element.host.shadowRoot!.querySelector<HTMLButtonElement>(".retry")!;
+    expect(rerendered.disabled).toBe(false);
+    expect(rerendered.textContent).toBe("重新解析");
+  });
+
+  it("成分详解失败的重试按钮点击后同样进入解析中状态", () => {
+    const element = block();
+    document.body.append(element.host);
+    element.renderCore(sentence, tokens, analysis);
+    element.setDetailLoading("sentence-1", { startToken: 1, endToken: 1 });
+    element.renderError("sentence-1", { startToken: 1, endToken: 1 }, "网络请求失败");
+    const retry = element.host.shadowRoot!.querySelector<HTMLButtonElement>(".retry")!;
+
+    retry.click();
+
+    expect(retry.disabled).toBe(true);
+    expect(retry.textContent).toBe("解析中…");
+  });
+
   it("re-renders a sentence in place instead of moving it below its later siblings", () => {
     const element = block();
     document.body.append(element.host);
