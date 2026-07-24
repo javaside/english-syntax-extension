@@ -47,6 +47,19 @@ const STYLES = `
   overflow-wrap: anywhere;
 }
 
+.sentence {
+  display: inline-flex;
+  vertical-align: bottom;
+  margin-inline-end: 0.75em;
+  margin-block-end: 0.55em;
+}
+
+/* 打开详解面板的句子独占整行，保证面板以栏宽展示；关闭后自动恢复共行。 */
+.sentence:has(.detail) {
+  display: flex;
+  margin-inline-end: 0;
+}
+
 .component {
   appearance: none;
   display: inline-grid;
@@ -97,6 +110,7 @@ const STYLES = `
 .annotation-translation {
   font-size: max(12px, 0.8em);
   opacity: 0.78;
+  max-inline-size: 16em;
 }
 
 .punctuation {
