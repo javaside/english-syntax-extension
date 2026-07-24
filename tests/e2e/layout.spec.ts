@@ -31,12 +31,8 @@ test("紧凑布局：短句共行、无孤行标点、译文不撑卡、详解�
     ],
     "profile-layout",
   );
-  harness.fakeModel.script("layout-model", [
-    { kind: "compound" },
-    { kind: "compound" },
-    { kind: "compound" },
-    { kind: "compound" },
-  ]);
+  // 不用 fakeModel.script：脚本队列按请求 FIFO 不看类型，core 合并/预载/详解请求会错位消费
+  // outcome（详解点击可能拿到 core 形状响应）。默认 auto 对本测试所有块几何结果相同。
   const page = await startSession(harness, "layout-article.html");
   const hosts = page.locator("[data-syntax-learning-block]");
   await expect(hosts).toHaveCount(4, { timeout: 20_000 });

@@ -6,4 +6,5 @@ test-results/
 .playwright-profile/
 .superpowers/
 .idea/
+.codetui/
 .DS_Store
