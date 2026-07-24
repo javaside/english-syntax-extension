@@ -29,7 +29,7 @@ lint 基线**恰好 1 个既有错误**（`src/options/options.test.ts`），不
 - Modify: `src/content/learning-block.ts`（`renderCore` 约第 366-447 行、`#appendPunctuation` 约第 645-655 行）
 - Test: `src/content/learning-block.test.ts`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 沿用文件内既有 `block()` / `sentence` / `tokens` / `analysis` 夹具（`analysis` 的 OBJECT 成分区间 2-3，token 3 是句号）。新增：
 
@@ -86,12 +86,12 @@ it("成分间隙的标点附加到前一成分英文行，句首标点保持独�
 
 （`Token`、`CoreAnalysis`、`CORE_SCHEMA_VERSION`、`GrammarRole` 已在测试文件 import。若 `#validateCoreInput` 对 `«Yes, learners read.` 的重建校验报错，说明 start/end 偏移写错——按报错信息修 token 偏移，不改产品校验逻辑。若 happy-dom 不支持 `:scope >` 选择器，等价改用 `[...sentenceElement.children].filter((c) => c.className === "punctuation")` 断言，意图不变。）
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `npx vitest run src/content/learning-block.test.ts`
 Expected: FAIL——现状标点是 sentence 直接子节点，`:scope > .punctuation` 非空、english 文本不含标点。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 `src/content/learning-block.ts` 的 `renderCore`（约第 366-447 行）三处：
 
@@ -162,12 +162,12 @@ this.#appendPunctuation(lastEnglish ?? sentenceElement, tokens, nextToken, token
 }
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `npx vitest run src/content/learning-block.test.ts`
 Expected: 全部 PASS。既有用例若有对标点为独立子节点的隐含依赖（如子节点计数），按新归属修正断言（文本顺序类断言不应变）。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 npm run format:check
@@ -185,7 +185,7 @@ git commit -m "fix: 成分后标点并入前一成分英文行，消除句号孤
 
 CSS 无法在 happy-dom 单测断言，行为由 Task 3 的 E2E 几何断言覆盖；本任务只改样式并保证既有测试不回归。
 
-- [ ] **Step 1: 实现**
+- [x] **Step 1: 实现**
 
 STYLES 中，在 `.sentence, .detail-annotations { ... }` 共享块（保持原样）之后插入：
 
@@ -204,7 +204,7 @@ STYLES 中，在 `.sentence, .detail-annotations { ... }` 共享块（保持原�
 }
 ```
 
-`.translation, .annotation-translation` 块加一行译文宽度上限（约 20 个汉字；否决方案与理由见 spec 改动二，勿"优化"回退）：
+`.translation, .annotation-translation` 块加一行译文宽度上限（约 16 个汉字；否决方案与理由见 spec 改动二，勿"优化"回退）：
 
 ```css
 .translation,
@@ -215,12 +215,12 @@ STYLES 中，在 `.sentence, .detail-annotations { ... }` 共享块（保持原�
 }
 ```
 
-- [ ] **Step 2: 跑单测确认无回归**
+- [x] **Step 2: 跑单测确认无回归**
 
 Run: `npx vitest run src/content/learning-block.test.ts`
 Expected: 全部 PASS（纯样式字符串改动）。
 
-- [ ] **Step 3: 提交**
+- [x] **Step 3: 提交**
 
 ```bash
 npm run format:check
@@ -238,14 +238,14 @@ git commit -m "feat: 短句卡片共行展示，译文宽度16em封顶不再撑�
 - Create: `tests/e2e/layout.spec.ts`
 - Delete: `tests/e2e/layout-probe.spec.ts`（临时探针）
 
-- [ ] **Step 1: 转正 fixture 并删除临时探针**
+- [x] **Step 1: 转正 fixture 并删除临时探针**
 
 ```bash
 mv tests/fixtures/pages/probe-long.html tests/fixtures/pages/layout-article.html
 rm tests/e2e/layout-probe.spec.ts
 ```
 
-- [ ] **Step 2: 写 E2E（几何断言，不用截图不用墙钟）**
+- [x] **Step 2: 写 E2E（几何断言，不用截图不用墙钟）**
 
 `tests/e2e/layout.spec.ts`：
 
@@ -366,12 +366,12 @@ test("紧凑布局：短句共行、无孤行标点、译文不撑卡、详解�
 
 注意：`.component` 是 Shadow DOM 内元素，Playwright locator 能穿透 open shadow root；若 `shortHost.locator(".component")` 定位失败，改用 `page.evaluate` 内 `dispatchEvent(new MouseEvent("click", { bubbles: true }))` 点击并说明原因。detail 由假模型 `detail` 响应自动生成（`detectKind` 识别，无需脚本）。
 
-- [ ] **Step 3: 运行新 E2E**
+- [x] **Step 3: 运行新 E2E**
 
 Run: `npx playwright test tests/e2e/layout.spec.ts`
 Expected: PASS。失败时先读断言值：(a) 失败多为共行 CSS 未生效；(c) 失败看 16em 是否被其他规则覆盖；(d) 失败看 `:has` 选择器。
 
-- [ ] **Step 4: 提交**
+- [x] **Step 4: 提交**
 
 ```bash
 npm run format:check
@@ -388,10 +388,10 @@ git commit -m "test: 卡片紧凑布局 E2E 几何回归(共行/标点归属/译
 
 **Files:** 无新改动（只跑验证与勾选）
 
-- [ ] **Step 1: 全量单测** — Run: `npm test`，Expected: 全部 PASS。
-- [ ] **Step 2: 全量 E2E** — Run: `npx playwright test`，Expected: 全部 PASS。既有用例若因标点归属结构断言失败，按 spec 语义最小修正测试断言（不得为过测试改产品语义）。
-- [ ] **Step 3: lint/格式/构建** — Run: `npm run lint; npm run format:check && npm run build`，Expected: lint 恰好 1 个既有错误、其余通过。
-- [ ] **Step 4: 勾掉计划复选框并提交**
+- [x] **Step 1: 全量单测** — Run: `npm test`，Expected: 全部 PASS。
+- [x] **Step 2: 全量 E2E** — Run: `npx playwright test`，Expected: 全部 PASS。既有用例若因标点归属结构断言失败，按 spec 语义最小修正测试断言（不得为过测试改产品语义）。
+- [x] **Step 3: lint/格式/构建** — Run: `npm run lint; npm run format:check && npm run build`，Expected: lint 恰好 1 个既有错误、其余通过。
+- [x] **Step 4: 勾掉计划复选框并提交**
 
 ```bash
 git add docs/superpowers/plans/2026-07-24-card-layout-compaction.md
