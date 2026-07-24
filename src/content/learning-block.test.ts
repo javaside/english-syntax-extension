@@ -143,7 +143,8 @@ describe("SyntaxLearningBlock", () => {
       ],
       [
         ["role", "宾语"],
-        ["english", "books"],
+        // 区间尾句号并入宾语英文行（不再是 sentence 的独立标点子节点）。
+        ["english", "books."],
         ["translation", "书籍"],
       ],
     ]);
@@ -152,6 +153,55 @@ describe("SyntaxLearningBlock", () => {
     expect(root.querySelector(".sentence")!.textContent?.match(/\./gu)).toHaveLength(1);
     expect(root.querySelector(".punctuation")?.textContent).toBe(".");
     expect(root.querySelector(".punctuation .translation")).toBeNull();
+  });
+
+  it("成分区间尾与句间标点并入对应成分的英文行，不再是独立盒子", () => {
+    const element = block();
+    element.setExpectedSentenceIds(["sentence-1"]);
+    element.renderCore(sentence, tokens, analysis);
+    const sentenceElement = element.host.shadowRoot!.querySelector(".sentence")!;
+
+    // 句号（token 3，OBJECT 区间尾）在宾语成分的英文行内，sentence 无独立标点子节点
+    expect(sentenceElement.querySelector(":scope > .punctuation")).toBeNull();
+    const objectEnglish = sentenceElement.querySelectorAll(".component .english")[2]!;
+    expect(objectEnglish.textContent).toBe("books.");
+    // 文本重建顺序不变
+    expect(sentenceElement.textContent).toContain("Learners");
+  });
+
+  it("成分间隙的标点附加到前一成分英文行，句首标点保持独立", () => {
+    const gapTokens: Token[] = [
+      { id: 0, text: "«", start: 0, end: 1, leadingWhitespace: "", punctuation: true },
+      { id: 1, text: "Yes", start: 1, end: 4, leadingWhitespace: "", punctuation: false },
+      { id: 2, text: ",", start: 4, end: 5, leadingWhitespace: "", punctuation: true },
+      { id: 3, text: "learners", start: 6, end: 14, leadingWhitespace: " ", punctuation: false },
+      { id: 4, text: "read", start: 15, end: 19, leadingWhitespace: " ", punctuation: false },
+      { id: 5, text: ".", start: 19, end: 20, leadingWhitespace: "", punctuation: true },
+    ];
+    const gapAnalysis: CoreAnalysis = {
+      schemaVersion: CORE_SCHEMA_VERSION,
+      sentenceId: "sentence-1",
+      components: [
+        { startToken: 1, endToken: 1, role: GrammarRole.INDEPENDENT_ELEMENT, translation: "是的" },
+        { startToken: 3, endToken: 3, role: GrammarRole.SUBJECT, translation: "学习者" },
+        { startToken: 4, endToken: 5, role: GrammarRole.PREDICATE, translation: "阅读" },
+      ],
+      modelProfileId: "profile-1",
+    };
+    const element = block();
+    element.setExpectedSentenceIds(["sentence-1"]);
+    element.renderCore("«Yes, learners read.", gapTokens, gapAnalysis);
+    const sentenceElement = element.host.shadowRoot!.querySelector(".sentence")!;
+
+    // 句首 « 无前置成分，保持独立子节点
+    expect(sentenceElement.firstElementChild!.className).toBe("punctuation");
+    // 逗号（成分间隙）并入第一个成分的英文行
+    const englishSpans = sentenceElement.querySelectorAll(".component .english");
+    expect(englishSpans[0]!.textContent).toBe("Yes,");
+    // 句号（谓语区间尾）并入谓语英文行
+    expect(englishSpans[2]!.textContent).toBe("read.");
+    // 除句首外没有其他独立标点
+    expect(sentenceElement.querySelectorAll(":scope > .punctuation")).toHaveLength(1);
   });
 
   it("keeps script-like model strings as inert text", () => {
@@ -189,13 +239,12 @@ describe("SyntaxLearningBlock", () => {
     });
 
     const sentenceRow = element.host.shadowRoot!.querySelector(".sentence")!;
+    // 句首 " 无前置成分独立成子节点；成分间隙逗号并入前一成分英文行、句尾句号并入谓语英文行。
     expect([...sentenceRow.children].map((child) => child.className)).toEqual([
       "punctuation",
       "component",
-      "punctuation",
       "component",
       "component",
-      "punctuation",
     ]);
     expect(
       [...sentenceRow.querySelectorAll(".punctuation")].map((node) => node.textContent),

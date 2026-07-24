@@ -375,8 +375,14 @@ export class SyntaxLearningBlock {
     ).length;
     let coordinateClauseIndex = 0;
     let nextToken = 0;
+    let lastEnglish: HTMLElement | null = null;
     for (const component of analysis.components) {
-      this.#appendPunctuation(sentenceElement, tokens, nextToken, component.startToken - 1);
+      this.#appendPunctuation(
+        lastEnglish ?? sentenceElement,
+        tokens,
+        nextToken,
+        component.startToken - 1,
+      );
       let label = GRAMMAR_LABELS[component.role];
       let accessibleLabel = label;
       if (component.role === GrammarRole.COORDINATE_CLAUSE && coordinateClauseTotal >= 2) {
@@ -405,9 +411,6 @@ export class SyntaxLearningBlock {
         // underline into that gap and blur the component boundary.
         const leadingWhitespace = index === component.startToken ? "" : token.leadingWhitespace;
         if (token.punctuation) {
-          if (index === component.endToken) {
-            continue;
-          }
           english.append(createElement("span", "punctuation", leadingWhitespace + token.text));
         } else {
           english.append(document.createTextNode(leadingWhitespace + token.text));
@@ -432,17 +435,10 @@ export class SyntaxLearningBlock {
       });
       sentenceElement.append(componentElement);
 
-      for (let index = component.startToken; index <= component.endToken; index += 1) {
-        const token = tokens[index];
-        if (token?.punctuation === true && index === component.endToken) {
-          sentenceElement.append(
-            createElement("span", "punctuation", token.leadingWhitespace + token.text),
-          );
-        }
-      }
+      lastEnglish = english;
       nextToken = component.endToken + 1;
     }
-    this.#appendPunctuation(sentenceElement, tokens, nextToken, tokens.length - 1);
+    this.#appendPunctuation(lastEnglish ?? sentenceElement, tokens, nextToken, tokens.length - 1);
     this.#placeSentenceSection(analysis.sentenceId, sentenceElement);
     this.#resolvedSentenceIds.add(analysis.sentenceId);
   }
@@ -639,8 +635,9 @@ export class SyntaxLearningBlock {
     return null;
   }
 
+  /** 把 [startToken, endToken] 里的标点追加到 target：有前置成分时是其英文行，否则是句容器。 */
   #appendPunctuation(
-    sentence: HTMLElement,
+    target: HTMLElement,
     tokens: readonly Token[],
     startToken: number,
     endToken: number,
@@ -648,7 +645,7 @@ export class SyntaxLearningBlock {
     for (let index = startToken; index <= endToken; index += 1) {
       const token = tokens[index];
       if (token?.punctuation === true) {
-        sentence.append(createElement("span", "punctuation", token.leadingWhitespace + token.text));
+        target.append(createElement("span", "punctuation", token.leadingWhitespace + token.text));
       }
     }
   }
