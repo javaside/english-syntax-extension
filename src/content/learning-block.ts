@@ -281,9 +281,9 @@ function structureLabel(index: number, role: string): string {
 }
 
 /**
- * 按 token 闭区间还原英文原文：首 token 去掉前导空格、区间末尾的标点不入下划线
- * （均与正文标注一致），其余 token 保留前导空格。区间反转、越界或不完整时返回
- * undefined。
+ * 按 token 闭区间还原英文原文：首 token 去掉前导空格、区间末尾的标点省略
+ * （标注是摘录，不同于正文标注会把成分后标点并入英文行），其余 token 保留
+ * 前导空格。区间反转、越界或不完整时返回 undefined。
  */
 function annotationEnglish(tokens: readonly Token[], range: TokenRange): string | undefined {
   if (

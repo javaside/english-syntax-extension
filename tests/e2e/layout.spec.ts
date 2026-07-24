@@ -62,13 +62,16 @@ test("紧凑布局：短句共行、无孤行标点、译文不撑卡、详解�
   expect(new Set(shortRowTops).size).toBe(1);
 
   // (b) 无孤行标点：任何句子都没有跟在成分后的独立标点子节点
+  // （句首可以有多个独立标点——不变量是「前面出现过成分」的标点必须已并入英文行）
   const strayPunctuation = await page.evaluate(() =>
     [...document.querySelectorAll("[data-syntax-learning-block]")]
       .flatMap((host) => [...host.shadowRoot!.querySelectorAll(".sentence")])
       .map(
         (sentence) =>
           [...sentence.children].filter(
-            (child, index) => child.className === "punctuation" && index > 0,
+            (child, index, children) =>
+              child.className === "punctuation" &&
+              children.slice(0, index).some((prior) => prior.classList.contains("component")),
           ).length,
       )
       .reduce((sum, count) => sum + count, 0),
