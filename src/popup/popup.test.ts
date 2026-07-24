@@ -337,6 +337,12 @@ describe("cache-only mode (no profile configured)", () => {
     expect(primary().textContent).toBe("继续学习");
   });
 
+  it("未配置模型时即使预载开启也不追加预载文案", async () => {
+    await createPopupPage(root(), noProfile({ getPrefetchDetail: () => Promise.resolve(true) }));
+
+    expect(subline().textContent).not.toContain("预载详解已开启");
+  });
+
   it("keeps the setup entry on unsupported pages", async () => {
     const subject = noProfile({
       getActiveTab: vi.fn(() => Promise.resolve({ id: 7, url: "chrome://extensions" })),

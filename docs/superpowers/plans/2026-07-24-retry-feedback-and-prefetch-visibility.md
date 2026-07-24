@@ -27,7 +27,7 @@ lint 基线是**恰好 1 个既有错误**（`src/options/options.test.ts` 的 `
 - Modify: `src/popup/popup.ts`（interface 第 12-19 行、`createPopupPage` 第 84-98 行、`runtimeDependencies` 第 182 行起）
 - Test: `src/popup/popup.test.ts`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 在 `src/popup/popup.test.ts` 的 `dependencies()` 工厂（第 33 行起）加入默认实现（否则接口收紧后全文件类型报错）：
 
@@ -84,12 +84,12 @@ it("运行中的「详解预载中 n/m」仍覆盖副标题", async () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `npx vitest run src/popup/popup.test.ts`
 Expected: 类型错误或断言失败（`getPrefetchDetail` 不在 `PopupDependencies` 上 / 副标题无追加文案）。
 
-- [ ] **Step 3: 最小实现**
+- [x] **Step 3: 最小实现**
 
 `src/popup/popup.ts` 三处改动。
 
@@ -130,12 +130,12 @@ const modelLine =
 getPrefetchDetail: () => repository.getPrefetchDetail(),
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `npx vitest run src/popup/popup.test.ts`
 Expected: 全部 PASS（含既有用例——默认 `false` 不改变旧断言）。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add src/popup/popup.ts src/popup/popup.test.ts
@@ -151,7 +151,7 @@ git commit -m "feat: 弹窗副标题显示预载成分详解开关状态"
 - Modify: `src/content/learning-block.ts`（STYLES 的 `.retry` 块约第 164-171 行、reduced-motion 块约第 174 行、`renderError` 第 540 行、`renderFailure` 第 563 行）
 - Test: `src/content/learning-block.test.ts`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 在 `src/content/learning-block.test.ts` 新增（沿用文件内既有的 `block()` / `sentence` / `tokens` / `analysis` 夹具；详解错误路径参照第 264 行既有用例的 `renderCore → setDetailLoading → renderError` 流程）：
 
@@ -195,12 +195,12 @@ it("成分详解失败的重试按钮点击后同样进入解析中状态", () =
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `npx vitest run src/content/learning-block.test.ts`
 Expected: FAIL——点击后 `disabled` 为 `false`、文案仍为「重新解析」。
 
-- [ ] **Step 3: 实现——抽取 `#createRetry` 并加样式**
+- [x] **Step 3: 实现——抽取 `#createRetry` 并加样式**
 
 `src/content/learning-block.ts` 中，在 `renderError` 上方新增私有方法（类内）：
 
@@ -279,12 +279,12 @@ reduced-motion 块（约第 174 行）扩展为：
 }
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `npx vitest run src/content/learning-block.test.ts`
 Expected: 全部 PASS（含第 288 行点击既有用例——事件仍派发）。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add src/content/learning-block.ts src/content/learning-block.test.ts
@@ -300,7 +300,7 @@ git commit -m "feat: 重新解析按钮增加手型/悬停/按下样式与点击
 - Modify: `src/content/learning-block.ts`（类字段区约第 285-290 行、公开方法区）
 - Test: `src/content/learning-block.test.ts`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```ts
 it("resetRetry 恢复按钮为可点击的重新解析", () => {
@@ -366,12 +366,12 @@ it("resetRetry 重复提示不叠加计时器，只影响目标句", () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `npx vitest run src/content/learning-block.test.ts`
 Expected: FAIL——`element.resetRetry is not a function`。
 
-- [ ] **Step 3: 实现 `resetRetry`**
+- [x] **Step 3: 实现 `resetRetry`**
 
 `src/content/learning-block.ts`：模块顶部（`STYLES` 定义之前）加常量：
 
@@ -418,12 +418,12 @@ resetRetry(sentenceId: string, hint?: string): void {
 
 依赖的 DOM 事实（已存在，无需改）：`renderFailure` 的 `section.dataset.sentenceId` 与句子元素的 `dataset.sentenceId` 都在 `#sentences` 内，`closest` 能命中。
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `npx vitest run src/content/learning-block.test.ts`
 Expected: 全部 PASS。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add src/content/learning-block.ts src/content/learning-block.test.ts
@@ -439,7 +439,7 @@ git commit -m "feat: 学习卡片支持 resetRetry 恢复重试按钮并短暂�
 - Modify: `src/content/session-controller.ts`（`ControllerBlock` 接口第 32-42 行、`requestDetail` 约第 324 行、`submitCorrection` 第 380 行、`retryCore` 第 680 行）
 - Test: `src/content/session-controller.test.ts`（`FakeLearningBlock` 第 21 行起）
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 `FakeLearningBlock`（第 21 行起）加记录字段与方法：
 
@@ -504,12 +504,12 @@ it("暂停时点详解重试：同样恢复按钮并提示", async () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `npx vitest run src/content/session-controller.test.ts`
 Expected: 新用例 FAIL——`retryResets` 为空（现有代码静默 return）。
 
-- [ ] **Step 3: 实现——接口与三处守卫**
+- [x] **Step 3: 实现——接口与三处守卫**
 
 `ControllerBlock` 接口（第 32-42 行）在 `renderError` 之后加：
 
@@ -558,12 +558,12 @@ if (this.state !== "running") {
 
 说明：普通成分点击（非重试）在暂停时也会走 `requestDetail` 的该分支，此时句内没有 `.retry` 按钮，`resetRetry` 是无害空操作，无需区分来源。
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `npx vitest run src/content/session-controller.test.ts`
 Expected: 全部 PASS（既有用例不受影响——运行态路径未变）。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add src/content/session-controller.ts src/content/session-controller.test.ts
@@ -576,22 +576,22 @@ git commit -m "fix: 会话暂停时点击重新解析给出提示而非静默忽
 
 **Files:** 无新改动（只跑验证；若 E2E 因文案断言失败才回改对应断言）
 
-- [ ] **Step 1: 全量单测**
+- [x] **Step 1: 全量单测**
 
 Run: `npm test`
 Expected: 全部 PASS。
 
-- [ ] **Step 2: E2E**
+- [x] **Step 2: E2E**
 
 Run: `npx playwright test`
 Expected: 全部 PASS。已核对现有 E2E 只用 `button.retry` 类选择器（`tests/e2e/extension.spec.ts:414,420`）、不断言按钮文案；点击后按钮短暂禁用由 Playwright 自动等待覆盖。若有失败，先读失败断言再最小修正测试（不得为过测试改产品语义）。
 
-- [ ] **Step 3: lint 基线 + 格式 + 构建**
+- [x] **Step 3: lint 基线 + 格式 + 构建**
 
 Run: `npm run lint; npm run format:check && npm run build`
 Expected: lint 恰好 1 个既有错误（`src/options/options.test.ts`），格式与构建通过。格式不过就 `npx prettier --write <文件>` 后重查。
 
-- [ ] **Step 4: 勾掉计划复选框并提交计划文档**
+- [x] **Step 4: 勾掉计划复选框并提交计划文档**
 
 ```bash
 git add docs/superpowers/plans/2026-07-24-retry-feedback-and-prefetch-visibility.md

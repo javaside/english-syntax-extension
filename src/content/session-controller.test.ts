@@ -947,6 +947,29 @@ describe("SessionController", () => {
     );
   });
 
+  it("暂停时带纠错反馈的重试同样恢复按钮并提示", async () => {
+    const subject = harness(undefined, undefined, {
+      requestFeedback: () => "Readers is the subject.",
+    });
+    await startAndEmit(subject);
+    subject.controller.pause();
+
+    document.dispatchEvent(
+      new CustomEvent("syntax-reanalyze-request", {
+        detail: { sentenceId: "sentence-1", focus: { startToken: 0, endToken: 1 } },
+      }),
+    );
+
+    await vi.waitFor(() =>
+      expect(subject.learningBlocks[0]!.retryResets).toEqual([
+        { sentenceId: "sentence-1", hint: "会话已暂停" },
+      ]),
+    );
+    expect(
+      subject.transport.sent.filter(({ type }) => type === "REANALYZE_WITH_FEEDBACK"),
+    ).toHaveLength(0);
+  });
+
   it("keeps a detail response valid while unrelated page analysis starts", async () => {
     const detailPending = deferred<ResponseMessage>();
     const transport = new FakeTransport((message) =>
