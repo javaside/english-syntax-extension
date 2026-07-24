@@ -31,10 +31,10 @@ jobs:
       # lint 基线:恰好 1 个错误、0 个警告(见 AGENTS.md),偏离即失败
       - name: Lint(基线校验)
         run: |
-          npx eslint . --format json --output-file eslint-report.json || true
+          npx eslint . --format json --output-file /tmp/eslint-report.json || true
           node --input-type=module -e "
             import { readFileSync } from 'node:fs';
-            const report = JSON.parse(readFileSync('eslint-report.json', 'utf8'));
+            const report = JSON.parse(readFileSync('/tmp/eslint-report.json', 'utf8'));
             const errors = report.reduce((sum, file) => sum + file.errorCount, 0);
             const warnings = report.reduce((sum, file) => sum + file.warningCount, 0);
             console.log('eslint: ' + errors + ' error(s), ' + warnings + ' warning(s)');
