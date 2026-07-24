@@ -38,6 +38,7 @@ export interface ControllerBlock {
   closeDetails(): void;
   renderDetail(analysis: DetailAnalysis): void;
   renderError(sentenceId: string, focus: TokenRange, message: string): void;
+  resetRetry(sentenceId: string, hint?: string): void;
   isReadyToReplace(): boolean;
 }
 
@@ -323,7 +324,11 @@ export class SessionController {
 
   async requestDetail(detail: SyntaxFocusEventDetail): Promise<void> {
     const located = this.locateSentence(detail.sentenceId);
-    if (located === undefined || located.sentence.core === undefined || this.state !== "running") {
+    if (located === undefined || located.sentence.core === undefined) {
+      return;
+    }
+    if (this.state !== "running") {
+      located.block.learningBlock.resetRetry(detail.sentenceId, "会话已暂停");
       return;
     }
     // Only one explanation panel is open at a time across the whole page, so
@@ -382,9 +387,12 @@ export class SessionController {
     if (
       located === undefined ||
       located.sentence.core === undefined ||
-      feedback.trim().length === 0 ||
-      this.state !== "running"
+      feedback.trim().length === 0
     ) {
+      return;
+    }
+    if (this.state !== "running") {
+      located.block.learningBlock.resetRetry(sentenceId, "会话已暂停");
       return;
     }
     const version = ++this.operationVersion;
@@ -679,7 +687,11 @@ export class SessionController {
 
   private async retryCore(sentenceId: string): Promise<void> {
     const located = this.locateSentence(sentenceId);
-    if (located === undefined || this.state !== "running") return;
+    if (located === undefined) return;
+    if (this.state !== "running") {
+      located.block.learningBlock.resetRetry(sentenceId, "会话已暂停");
+      return;
+    }
     const { block, sentence } = located;
     const version = ++this.operationVersion;
     block.operationVersion = version;

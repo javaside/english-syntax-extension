@@ -28,6 +28,7 @@ class FakeLearningBlock implements ControllerBlock {
   errors: Array<{ sentenceId: string; message: string }> = [];
   loading: string[] = [];
   closedDetails = 0;
+  retryResets: Array<{ sentenceId: string; hint?: string }> = [];
 
   setExpectedSentenceIds(ids: readonly string[]): void {
     this.expected = [...ids];
@@ -66,6 +67,10 @@ class FakeLearningBlock implements ControllerBlock {
 
   isReadyToReplace(): boolean {
     return this.expected.length > 0 && this.expected.every((id) => this.resolved.has(id));
+  }
+
+  resetRetry(sentenceId: string, hint?: string): void {
+    this.retryResets.push({ sentenceId, hint });
   }
 }
 
@@ -891,6 +896,55 @@ describe("SessionController", () => {
 
     await vi.waitFor(() => expect(subject.transport.sent).toHaveLength(2));
     expect(subject.transport.sent[1]).toMatchObject({ type: "ANALYZE_CORE" });
+  });
+
+  it("暂停时点整句重试：按钮恢复并提示会话已暂停，不发请求", async () => {
+    const subject = harness(
+      undefined,
+      new FakeTransport((message) =>
+        Promise.resolve({
+          version: 1,
+          requestId: message.requestId,
+          type: "CORE_RESULT",
+          analyses: [],
+        }),
+      ),
+    );
+    await subject.controller.start();
+    subject.viewport.emit();
+    await vi.waitFor(() => expect(subject.controller.status.failed).toBe(1));
+    subject.controller.pause();
+
+    document.dispatchEvent(
+      new CustomEvent("syntax-reanalyze-request", {
+        detail: { sentenceId: "sentence-1", focus: { startToken: 0, endToken: 0 } },
+      }),
+    );
+
+    await vi.waitFor(() =>
+      expect(subject.learningBlocks[0]!.retryResets).toEqual([
+        { sentenceId: "sentence-1", hint: "会话已暂停" },
+      ]),
+    );
+    expect(subject.transport.sent).toHaveLength(1); // 仅最初的 ANALYZE_CORE
+  });
+
+  it("暂停时点详解重试：同样恢复按钮并提示", async () => {
+    const subject = harness();
+    await startAndEmit(subject);
+    subject.controller.pause();
+
+    document.dispatchEvent(
+      new CustomEvent("syntax-reanalyze-request", {
+        detail: { sentenceId: "sentence-1", focus: { startToken: 0, endToken: 1 } },
+      }),
+    );
+
+    await vi.waitFor(() =>
+      expect(subject.learningBlocks[0]!.retryResets).toEqual([
+        { sentenceId: "sentence-1", hint: "会话已暂停" },
+      ]),
+    );
   });
 
   it("keeps a detail response valid while unrelated page analysis starts", async () => {
