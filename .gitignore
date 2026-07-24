@@ -6,3 +6,4 @@ test-results/
 .playwright-profile/
 .superpowers/
 .idea/
+.DS_Store

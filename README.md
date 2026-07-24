@@ -2,8 +2,6 @@
 
 一个 Manifest V3 Chrome 扩展：把网页中的英文段落替换为**逐句句法拆解卡片**（成分角色 / 英文原文 / 成分中文释义三行对照），点击任意成分再懒加载该成分的详细语法解析。分析由你自己配置的 OpenAI 兼容模型完成（DeepSeek、本地 Ollama、任何兼容 `/chat/completions` 的服务）。
 
-> 本目录是**独立的 npm 项目**，不参与仓库根部的 Maven 构建。
-
 ## 环境要求
 
 - Node.js ≥ 20（本项目在 Node 22 上开发验证）
@@ -13,6 +11,7 @@
 ## 安装与构建
 
 ```bash
+git clone https://github.com/javaside/english-syntax-extension.git
 cd english-syntax-extension
 npm ci          # 安装依赖
 npm run build   # 类型检查 + 产出 dist/
@@ -118,7 +117,7 @@ E2E 说明：MV3 可选主机权限的授权框是**原生对话框**，无法�
 
 ```
 english-syntax-extension
-├── manifest.config.ts      # MV3 清单（构建期生成 dist/manifest.json）
+├── manifest.json           # MV3 清单（构建期生成 dist/manifest.json）
 ├── src
 │   ├── background/         # Service Worker：消息路由、分析服务、缓存、调度、OpenAI 兼容适配器
 │   ├── content/            # 内容脚本：扫描、视口观察、学习卡片（Shadow DOM）、原文替换/还原
@@ -130,3 +129,7 @@ english-syntax-extension
     ├── support/            # 本地 OpenAI 兼容伪服务
     └── fixtures/           # 固定页面与教学语料
 ```
+
+## 许可证
+
+[MIT](LICENSE)
