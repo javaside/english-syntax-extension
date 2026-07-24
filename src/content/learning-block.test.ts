@@ -331,6 +331,68 @@ describe("SyntaxLearningBlock", () => {
     expect(retry.textContent).toBe("解析中…");
   });
 
+  it("resetRetry 恢复按钮为可点击的重新解析", () => {
+    const element = block();
+    element.setExpectedSentenceIds(["sentence-1"]);
+    element.renderFailure("sentence-1", sentence, "网络请求失败");
+    const retry = element.host.shadowRoot!.querySelector<HTMLButtonElement>(".retry")!;
+    retry.click();
+
+    element.resetRetry("sentence-1");
+
+    expect(retry.disabled).toBe(false);
+    expect(retry.textContent).toBe("重新解析");
+  });
+
+  it("resetRetry 带提示时先显示提示，约 2 秒后恢复", () => {
+    vi.useFakeTimers();
+    try {
+      const element = block();
+      element.setExpectedSentenceIds(["sentence-1"]);
+      element.renderFailure("sentence-1", sentence, "网络请求失败");
+      const retry = element.host.shadowRoot!.querySelector<HTMLButtonElement>(".retry")!;
+      retry.click();
+
+      element.resetRetry("sentence-1", "会话已暂停");
+
+      expect(retry.textContent).toBe("会话已暂停");
+      expect(retry.disabled).toBe(true);
+
+      vi.advanceTimersByTime(2000);
+
+      expect(retry.textContent).toBe("重新解析");
+      expect(retry.disabled).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("resetRetry 重复提示不叠加计时器，只影响目标句", () => {
+    vi.useFakeTimers();
+    try {
+      const element = block();
+      element.setExpectedSentenceIds(["sentence-1", "sentence-2"]);
+      element.renderFailure("sentence-1", sentence, "网络请求失败");
+      element.renderFailure("sentence-2", sentence, "网络请求失败");
+      const buttons = element.host.shadowRoot!.querySelectorAll<HTMLButtonElement>(".retry");
+      const first = buttons[0]!;
+      const second = buttons[1]!;
+
+      element.resetRetry("sentence-1", "会话已暂停");
+      vi.advanceTimersByTime(1000);
+      element.resetRetry("sentence-1", "会话已暂停");
+      vi.advanceTimersByTime(1000);
+
+      expect(first.textContent).toBe("会话已暂停"); // 第二次提示重置了计时
+      expect(second.textContent).toBe("重新解析"); // 未点名的句子不受影响
+
+      vi.advanceTimersByTime(1000);
+      expect(first.textContent).toBe("重新解析");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("re-renders a sentence in place instead of moving it below its later siblings", () => {
     const element = block();
     document.body.append(element.host);

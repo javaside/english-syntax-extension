@@ -22,6 +22,8 @@ const ROLE_COLORS: Readonly<Record<GrammarRole, string>> = {
   [GrammarRole.CONJUNCTION]: "#6b7280",
 };
 
+const RETRY_HINT_DURATION_MS = 2000;
+
 const STYLES = `
 :host {
   display: block;
@@ -306,6 +308,7 @@ export class SyntaxLearningBlock {
   #expectedSentenceOrder: string[] = [];
   #resolvedSentenceIds = new Set<string>();
   #tokensBySentence = new Map<string, readonly Token[]>();
+  #retryResetTimers = new Map<HTMLButtonElement, ReturnType<typeof setTimeout>>();
 
   constructor(ownerDocument: Document = document) {
     this.host = ownerDocument.createElement("div");
@@ -588,6 +591,33 @@ export class SyntaxLearningBlock {
     failure.append(this.#createRetry(sentenceId, { startToken: 0, endToken: 0 }));
     this.#placeSentenceSection(sentenceId, failure);
     this.#resolvedSentenceIds.add(sentenceId);
+  }
+
+  /** 恢复该句所有「重新解析」按钮；带 hint 时先短暂显示提示再恢复（如暂停时点击）。 */
+  resetRetry(sentenceId: string, hint?: string): void {
+    for (const retry of this.#sentences.querySelectorAll<HTMLButtonElement>(".retry")) {
+      if (retry.closest<HTMLElement>("[data-sentence-id]")?.dataset.sentenceId !== sentenceId) {
+        continue;
+      }
+      const timer = this.#retryResetTimers.get(retry);
+      if (timer !== undefined) clearTimeout(timer);
+      this.#retryResetTimers.delete(retry);
+      if (hint === undefined) {
+        retry.disabled = false;
+        retry.textContent = "重新解析";
+        continue;
+      }
+      retry.disabled = true;
+      retry.textContent = hint;
+      this.#retryResetTimers.set(
+        retry,
+        setTimeout(() => {
+          this.#retryResetTimers.delete(retry);
+          retry.disabled = false;
+          retry.textContent = "重新解析";
+        }, RETRY_HINT_DURATION_MS),
+      );
+    }
   }
 
   /** 纯缓存模式未命中：按原文渲染，无错误样式、无重试按钮。 */
