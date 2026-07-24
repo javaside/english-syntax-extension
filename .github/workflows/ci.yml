@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 安装 Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: 单元测试
+        run: npm test
+
+      - name: E2E 测试
+        run: npx playwright test
+
+      # lint 基线:恰好 1 个错误、0 个警告(见 AGENTS.md),偏离即失败
+      - name: Lint(基线校验)
+        run: |
+          npx eslint . --format json --output-file eslint-report.json || true
+          node --input-type=module -e "
+            import { readFileSync } from 'node:fs';
+            const report = JSON.parse(readFileSync('eslint-report.json', 'utf8'));
+            const errors = report.reduce((sum, file) => sum + file.errorCount, 0);
+            const warnings = report.reduce((sum, file) => sum + file.warningCount, 0);
+            console.log('eslint: ' + errors + ' error(s), ' + warnings + ' warning(s)');
+            if (errors !== 1 || warnings !== 0) {
+              console.error('偏离 lint 基线(恰好 1 error / 0 warning)');
+              process.exit(1);
+            }
+          "
+
+      - name: 格式检查
+        run: npm run format:check
+
+      - name: 构建
+        run: npm run build
+
+      - name: 上传 Playwright 报告
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
