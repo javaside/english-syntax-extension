@@ -16,6 +16,7 @@ export interface PopupDependencies {
   getStatus: (context: PopupTabContext) => Promise<SessionStatus>;
   sendCommand: (type: PopupCommand, context: PopupTabContext) => Promise<SessionStatus | undefined>;
   openOptions: () => void;
+  getPrefetchDetail: () => Promise<boolean>;
 }
 
 const EMPTY_STATUS: SessionStatus = {
@@ -81,10 +82,11 @@ export async function createPopupPage(
 
   root.append(header, primary, subline);
 
-  const [profiles, activeProfileId, activeTab] = await Promise.all([
+  const [profiles, activeProfileId, activeTab, prefetchDetail] = await Promise.all([
     dependencies.listProfiles(),
     dependencies.getActiveProfileId(),
     dependencies.getActiveTab(),
+    dependencies.getPrefetchDetail(),
   ]);
   const context: PopupTabContext | undefined =
     activeTab.id === undefined ? undefined : { tabId: activeTab.id, url: activeTab.url };
@@ -95,7 +97,9 @@ export async function createPopupPage(
       ? EMPTY_STATUS
       : await dependencies.getStatus(context).catch(() => EMPTY_STATUS);
 
-  const modelLine = profile === undefined ? "" : `${profile.name} · ${profile.model}`;
+  const prefetchSuffix = prefetchDetail ? " · 预载详解已开启" : "";
+  const modelLine =
+    profile === undefined ? "" : `${profile.name} · ${profile.model}${prefetchSuffix}`;
   const cacheOnly = profile === undefined;
   let command: PopupCommand = "START_SESSION";
 
@@ -209,6 +213,7 @@ export function runtimeDependencies(): PopupDependencies {
       if (response.type === "ERROR") throw new Error(response.error.message);
       return response.type === "SESSION_STATUS" ? response.status : undefined;
     },
+    getPrefetchDetail: () => repository.getPrefetchDetail(),
     openOptions: () => {
       void chrome.runtime.openOptionsPage();
     },

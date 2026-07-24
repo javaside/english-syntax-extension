@@ -38,6 +38,7 @@ function dependencies(overrides: Partial<PopupDependencies> = {}): PopupDependen
     getStatus: vi.fn(() => Promise.resolve(status({}))),
     sendCommand: vi.fn(() => Promise.resolve(status({}))),
     openOptions: vi.fn(),
+    getPrefetchDetail: vi.fn(() => Promise.resolve(false)),
     ...overrides,
   };
 }
@@ -62,6 +63,40 @@ describe("Popup", () => {
     expect(document.querySelector("[data-count]")).toBeNull();
     expect(primary().textContent).toBe("开始学习");
     expect(subline().textContent).toContain("DeepSeek · deepseek-v4-flash");
+  });
+
+  it("开启预载时副标题追加「预载详解已开启」", async () => {
+    await createPopupPage(root(), dependencies({ getPrefetchDetail: () => Promise.resolve(true) }));
+
+    expect(subline().textContent).toBe("DeepSeek · deepseek-v4-flash · 预载详解已开启");
+  });
+
+  it("关闭预载时副标题只有模型信息", async () => {
+    await createPopupPage(root(), dependencies());
+
+    expect(subline().textContent).toBe("DeepSeek · deepseek-v4-flash");
+  });
+
+  it("运行中的「详解预载中 n/m」仍覆盖副标题", async () => {
+    await createPopupPage(
+      root(),
+      dependencies({
+        getPrefetchDetail: () => Promise.resolve(true),
+        getStatus: () =>
+          Promise.resolve(
+            status({
+              state: "running",
+              discovered: 4,
+              ready: 2,
+              detailTotal: 6,
+              detailReady: 1,
+              detailFailed: 0,
+            }),
+          ),
+      }),
+    );
+
+    expect(subline().textContent).toBe("详解预载中 1/6");
   });
 
   it("starts a session from the stopped state", async () => {
