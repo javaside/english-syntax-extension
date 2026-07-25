@@ -272,8 +272,8 @@ function harness(
 }
 
 /** 真实 nearestSafeBlock 用模块级 principal root 缓存，harness 换 DOM 后须重算。 */
-function refreshPrincipalRoot(): void {
-  scanDocument(document);
+function refreshPrincipalRoot(): CandidateBlock[] {
+  return scanDocument(document);
 }
 
 async function startAndEmit(subject: Harness): Promise<void> {
@@ -1195,6 +1195,68 @@ describe("SessionController", () => {
     await subject.controller.parseHoveredBlock();
 
     expect(subject.controller.status.discovered).toBe(1);
+  });
+
+  it("升级扫描重新发现悬停块时不重复注册，卡片只替换一次", async () => {
+    // 扫描返回与悬停块同 id 的 candidate：真实 scanDocument 就是这样（id 按 element 记忆）。
+    let scanned: CandidateBlock[] = [];
+    const subject = harness("Readers understand complex sentences.", new FakeTransport(), {
+      scan: () => scanned,
+      hoverTarget: () => document.querySelector("p"),
+    });
+    scanned = refreshPrincipalRoot();
+    expect(scanned).toHaveLength(1);
+
+    await subject.controller.parseHoveredBlock();
+    await vi.waitFor(() => expect(subject.controller.status.ready).toBe(1));
+
+    await subject.controller.start();
+
+    expect(subject.controller.status.discovered).toBe(1);
+    expect(subject.replacements).toHaveLength(1);
+    expect(subject.replacements[0]!.shows).toBe(1);
+    expect(subject.transport.sent.filter(({ type }) => type === "ANALYZE_CORE")).toHaveLength(1);
+  });
+
+  it("升级时带 prefetchDetail 仍创建预载器（不丢标志）", async () => {
+    const subject = harness("Readers understand complex sentences.", new FakeTransport(), {
+      scan: () => [],
+      hoverTarget: () => document.querySelector("p"),
+    });
+    refreshPrincipalRoot();
+
+    await subject.controller.parseHoveredBlock();
+    await vi.waitFor(() => expect(subject.controller.status.ready).toBe(1));
+    expect("detailTotal" in subject.controller.status).toBe(false);
+
+    await subject.controller.start({ prefetchDetail: true });
+
+    // 预载器补建成功（状态出现 detail 字段）；升级前已 ready 的句子不回填，故计数为 0。
+    expect("detailTotal" in subject.controller.status).toBe(true);
+    expect(subject.controller.status.detailTotal).toBe(0);
+  });
+
+  it("轻量会话不因页面突变自动发现新段落", async () => {
+    vi.useFakeTimers();
+    const scan = vi.fn(() => {
+      throw new Error("lite session must not auto-discover new blocks");
+    });
+    const subject = harness("Readers understand complex sentences.", new FakeTransport(), {
+      scan,
+      hoverTarget: () => document.querySelector("p"),
+    });
+    refreshPrincipalRoot();
+
+    await subject.controller.parseHoveredBlock();
+    const added = document.createElement("p");
+    added.textContent = "Writers dynamically add another sufficiently long English sentence.";
+    document.querySelector("main")!.append(added);
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(scan).not.toHaveBeenCalled();
+    subject.controller.stop();
+    vi.useRealTimers();
   });
 });
 

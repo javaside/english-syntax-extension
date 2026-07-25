@@ -225,7 +225,8 @@ export class SessionController {
   async start(options?: { prefetchDetail?: boolean; scan?: boolean }): Promise<void> {
     const wantScan = options?.scan !== false;
     if (this.state === "running") {
-      // 轻量会话（快捷键冷启动）后用户点图标：补做全页扫描升级为完整会话。
+      // 轻量会话（快捷键冷启动）后用户点图标：补建预载器并补做全页扫描，升级为完整会话。
+      this.ensurePrefetcher(options);
       if (wantScan) {
         await this.performScan();
         this.emitStatus();
@@ -234,6 +235,7 @@ export class SessionController {
     }
     if (this.state === "paused") {
       this.resume();
+      this.ensurePrefetcher(options);
       if (wantScan) {
         await this.performScan();
         this.emitStatus();
@@ -241,12 +243,7 @@ export class SessionController {
       return;
     }
     this.state = "running";
-    if (options?.prefetchDetail === true) {
-      this.prefetcher = new DetailPrefetcher({
-        send: (item) => this.sendPrefetch(item.sentence, item.core),
-        onChange: () => this.emitStatus(),
-      });
-    }
+    this.ensurePrefetcher(options);
     this.document.addEventListener("contextmenu", this.recordContextTarget, true);
     this.document.addEventListener("syntax-detail-request", this.handleDetailEvent);
     this.document.addEventListener("syntax-reanalyze-request", this.handleCorrectionEvent);
@@ -259,11 +256,22 @@ export class SessionController {
     this.emitStatus();
   }
 
+  private ensurePrefetcher(options?: { prefetchDetail?: boolean }): void {
+    if (options?.prefetchDetail !== true || this.prefetcher !== undefined) return;
+    this.prefetcher = new DetailPrefetcher({
+      send: (item) => this.sendPrefetch(item.sentence, item.core),
+      onChange: () => this.emitStatus(),
+    });
+  }
+
   private async performScan(): Promise<void> {
     if (this.scanned) return;
     this.scanned = true;
     const candidates = this.scan(this.document);
-    await this.registerCandidates(candidates);
+    // 升级路径下扫描会以相同 id 重新发现悬停块：重复注册会覆盖 BlockRecord，
+    // 让孤儿记录的在途分析多渲染一张卡片、多发一次 ANALYZE_CORE。
+    const fresh = candidates.filter(({ id }) => !this.blocks.has(id));
+    await this.registerCandidates(fresh);
     this.viewport.observe(candidates);
   }
 
@@ -830,9 +838,12 @@ export class SessionController {
       this.blocks.delete(blockId);
     }
     const discovered = new Map<string, CandidateBlock>();
-    for (const root of roots) {
-      for (const candidate of this.scan(root)) {
-        if (!this.blocks.has(candidate.id)) discovered.set(candidate.id, candidate);
+    // 轻量会话（未做全页扫描）只解析悬停那一段：突变不得自动发现新内容并触发解析。
+    if (this.scanned) {
+      for (const root of roots) {
+        for (const candidate of this.scan(root)) {
+          if (!this.blocks.has(candidate.id)) discovered.set(candidate.id, candidate);
+        }
       }
     }
     const candidates = [...discovered.values()];
