@@ -13,6 +13,7 @@
 **门禁（每个任务的测试步骤只跑该文件；最后 Task 7 跑全量）：** `npm test && npx playwright test && npm run lint && npm run format:check && npm run build`
 
 **项目硬约定（来自 AGENTS.md，违反会静默出错）：**
+
 - 新增 `RequestMessage` 成员必须同步：`protocol.ts` 类型 + `isRequestMessage`、SW `route()` case（`route` 末尾有 `assertNever`，漏 case 过不了 `npm run build` 的 tsc）、`sendPageCommand` body 联合类型、content `ContentScriptRouter.route` switch、`RoutedController` 接口。
 - 本功能**不新增** `ResponseMessage` 成员、不新增提示词、不动缓存，所以 `isRuntimeResponse`、`tests/support/fake-openai-server.ts`、`analysis-cache.ts` 都不要碰。
 - lint 基线恰好 1 个已知错误，不要新增。
@@ -21,21 +22,21 @@
 
 ## File Structure（全部改动一览）
 
-| 文件 | 动作 | 职责 |
-| --- | --- | --- |
-| `src/shared/protocol.ts` | Modify | `PARSE_HOVERED_BLOCK` 请求类型 + guard |
-| `src/shared/protocol.test.ts` | Modify | guard 测试 |
-| `src/background/service-worker.ts` | Modify | `sendPageCommand` 联合类型、`route()` case、`commands.onCommand` 监听 |
-| `src/background/service-worker.test.ts` | Modify | chromeMock 增 `commands`、route/onCommand 测试 |
-| `manifest.json` | Modify | `commands` 段（Alt+T） |
-| `src/shared/manifest.test.ts` | Modify | commands 断言 |
-| `src/content/session-controller.ts` | Modify | `start({scan})`、`scanned` 升级、`parseHoveredBlock()`、`hoverTarget` 可注入 |
-| `src/content/session-controller.test.ts` | Modify | 控制器新行为测试 + router 测试（含既有 stub 补方法） |
-| `src/content/content-script.ts` | Modify | `RoutedController` 接口、router case、失败提示接线 |
-| `src/content/progress-pill.ts` | Modify | `notice()` 短暂提示 |
-| `src/content/progress-pill.test.ts` | Modify | notice 测试 |
-| `tests/e2e/extension.spec.ts` | Modify | 端到端用例 |
-| `README.md` | Modify | 使用说明补快捷键 |
+| 文件                                     | 动作   | 职责                                                                         |
+| ---------------------------------------- | ------ | ---------------------------------------------------------------------------- |
+| `src/shared/protocol.ts`                 | Modify | `PARSE_HOVERED_BLOCK` 请求类型 + guard                                       |
+| `src/shared/protocol.test.ts`            | Modify | guard 测试                                                                   |
+| `src/background/service-worker.ts`       | Modify | `sendPageCommand` 联合类型、`route()` case、`commands.onCommand` 监听        |
+| `src/background/service-worker.test.ts`  | Modify | chromeMock 增 `commands`、route/onCommand 测试                               |
+| `manifest.json`                          | Modify | `commands` 段（Alt+T）                                                       |
+| `src/shared/manifest.test.ts`            | Modify | commands 断言                                                                |
+| `src/content/session-controller.ts`      | Modify | `start({scan})`、`scanned` 升级、`parseHoveredBlock()`、`hoverTarget` 可注入 |
+| `src/content/session-controller.test.ts` | Modify | 控制器新行为测试 + router 测试（含既有 stub 补方法）                         |
+| `src/content/content-script.ts`          | Modify | `RoutedController` 接口、router case、失败提示接线                           |
+| `src/content/progress-pill.ts`           | Modify | `notice()` 短暂提示                                                          |
+| `src/content/progress-pill.test.ts`      | Modify | notice 测试                                                                  |
+| `tests/e2e/extension.spec.ts`            | Modify | 端到端用例                                                                   |
+| `README.md`                              | Modify | 使用说明补快捷键                                                             |
 
 ---
 
@@ -44,6 +45,7 @@
 `route()` 末尾的 `assertNever(request)` 要求联合类型每个成员都有 case，所以协议类型和 SW case 必须同一提交完成，否则 `npm run build`（tsc）失败。
 
 **Files:**
+
 - Modify: `src/shared/protocol.ts`
 - Modify: `src/background/service-worker.ts`
 - Test: `src/shared/protocol.test.ts`
@@ -61,9 +63,9 @@
 同文件 describe 内再加一个拒绝多余键的测试（与 `REANALYZE_VISIBLE` 的同类测试并列）：
 
 ```ts
-  it("rejects a hovered-block request with surplus keys", () => {
-    expect(isRequestMessage({ ...page, type: "PARSE_HOVERED_BLOCK", target: "body" })).toBe(false);
-  });
+it("rejects a hovered-block request with surplus keys", () => {
+  expect(isRequestMessage({ ...page, type: "PARSE_HOVERED_BLOCK", target: "body" })).toBe(false);
+});
 ```
 
 - [ ] **Step 2: 运行确认失败**
@@ -127,40 +129,40 @@ Expected: FAIL —— `accepts a valid PARSE_HOVERED_BLOCK request` 断言 `true
 `src/background/service-worker.test.ts` 的 `describe("service worker orchestration")` 内（`PARSE_CONTEXT_BLOCK` 相关测试之后）加。注意 `dispatch` 的默认 sender 是页面 tab，这里需要 popup sender（文件里 START_SESSION 测试已有同构造法，若已有常量则直接复用，不要重复定义）：
 
 ```ts
-  it("PARSE_HOVERED_BLOCK：可信 UI 触发时注入并原样转发到页面", async () => {
-    const subject = chromeMock();
-    registerServiceWorker(dependencies(), subject.api);
-    const popupSender = {
-      id: "extension-id",
-      url: "chrome-extension://extension-id/src/popup/popup.html",
-    };
+it("PARSE_HOVERED_BLOCK：可信 UI 触发时注入并原样转发到页面", async () => {
+  const subject = chromeMock();
+  registerServiceWorker(dependencies(), subject.api);
+  const popupSender = {
+    id: "extension-id",
+    url: "chrome-extension://extension-id/src/popup/popup.html",
+  };
 
-    const response = await dispatch(
-      subject.events.runtime.onMessage.listeners[0]!,
-      pageRequest({ type: "PARSE_HOVERED_BLOCK" }),
-      popupSender,
-    );
+  const response = await dispatch(
+    subject.events.runtime.onMessage.listeners[0]!,
+    pageRequest({ type: "PARSE_HOVERED_BLOCK" }),
+    popupSender,
+  );
 
-    expect(response).toMatchObject({ type: "ACK", acknowledgedType: "PARSE_HOVERED_BLOCK" });
-    expect(subject.events.scripting.executeScript).toHaveBeenCalledOnce();
-    expect(subject.events.tabs.sendMessage).toHaveBeenCalledWith(
-      7,
-      expect.objectContaining({ type: "PARSE_HOVERED_BLOCK" }),
-    );
-  });
+  expect(response).toMatchObject({ type: "ACK", acknowledgedType: "PARSE_HOVERED_BLOCK" });
+  expect(subject.events.scripting.executeScript).toHaveBeenCalledOnce();
+  expect(subject.events.tabs.sendMessage).toHaveBeenCalledWith(
+    7,
+    expect.objectContaining({ type: "PARSE_HOVERED_BLOCK" }),
+  );
+});
 
-  it("PARSE_HOVERED_BLOCK：网页侧伪造请求被拒绝", async () => {
-    const subject = chromeMock();
-    registerServiceWorker(dependencies(), subject.api);
+it("PARSE_HOVERED_BLOCK：网页侧伪造请求被拒绝", async () => {
+  const subject = chromeMock();
+  registerServiceWorker(dependencies(), subject.api);
 
-    const response = await dispatch(
-      subject.events.runtime.onMessage.listeners[0]!,
-      pageRequest({ type: "PARSE_HOVERED_BLOCK" }),
-    );
+  const response = await dispatch(
+    subject.events.runtime.onMessage.listeners[0]!,
+    pageRequest({ type: "PARSE_HOVERED_BLOCK" }),
+  );
 
-    expect(response).toMatchObject({ type: "ERROR", error: { code: "UNSUPPORTED_PAGE" } });
-    expect(subject.events.scripting.executeScript).not.toHaveBeenCalled();
-  });
+  expect(response).toMatchObject({ type: "ERROR", error: { code: "UNSUPPORTED_PAGE" } });
+  expect(subject.events.scripting.executeScript).not.toHaveBeenCalled();
+});
 ```
 
 - [ ] **Step 5: 运行两个测试文件确认通过**
@@ -180,6 +182,7 @@ git commit -m "feat: 协议新增 PARSE_HOVERED_BLOCK 请求并接入 SW 路由"
 ### Task 2: manifest `commands` 段（Alt+T）
 
 **Files:**
+
 - Modify: `manifest.json`
 - Test: `src/shared/manifest.test.ts`
 
@@ -188,14 +191,14 @@ git commit -m "feat: 协议新增 PARSE_HOVERED_BLOCK 请求并接入 SW 路由"
 `src/shared/manifest.test.ts` 的 describe 内加：
 
 ```ts
-  it("registers the hovered-block keyboard command", () => {
-    expect(manifest.commands).toEqual({
-      "parse-hovered-block": {
-        suggested_key: { default: "Alt+T" },
-        description: "解析鼠标悬停的段落",
-      },
-    });
+it("registers the hovered-block keyboard command", () => {
+  expect(manifest.commands).toEqual({
+    "parse-hovered-block": {
+      suggested_key: { default: "Alt+T" },
+      description: "解析鼠标悬停的段落",
+    },
   });
+});
 ```
 
 - [ ] **Step 2: 运行确认失败**
@@ -235,6 +238,7 @@ git commit -m "feat: manifest 注册 Alt+T 快捷键命令 parse-hovered-block"
 ### Task 3: SessionController 轻量启动 + `parseHoveredBlock()`
 
 **Files:**
+
 - Modify: `src/content/session-controller.ts`
 - Test: `src/content/session-controller.test.ts`
 
@@ -243,71 +247,71 @@ git commit -m "feat: manifest 注册 Alt+T 快捷键命令 parse-hovered-block"
 `src/content/session-controller.test.ts` 的 `describe("SessionController")` 内加四个测试。既有 `harness(text, transport, overrides)` 会把 `<main><p>${text}</p></main>` 写入 body 并接受 `SessionControllerOptions` 覆盖；`hoverTarget` 是本任务新增的可注入选项：
 
 ```ts
-  it("快捷键冷启动：轻量启动只解析悬停段落，不做全页扫描", async () => {
-    const scan = vi.fn(() => {
-      throw new Error("lite start must not scan the document");
-    });
-    const subject = harness("Readers understand complex sentences.", new FakeTransport(), {
-      scan,
-      hoverTarget: () => document.querySelector("p"),
-    });
-
-    const error = await subject.controller.parseHoveredBlock();
-
-    expect(error).toBeUndefined();
-    expect(scan).not.toHaveBeenCalled();
-    await vi.waitFor(() => expect(subject.controller.status.ready).toBe(1));
-    expect(subject.controller.status.state).toBe("running");
-    expect(subject.replacements[0]!.shows).toBe(1);
+it("快捷键冷启动：轻量启动只解析悬停段落，不做全页扫描", async () => {
+  const scan = vi.fn(() => {
+    throw new Error("lite start must not scan the document");
+  });
+  const subject = harness("Readers understand complex sentences.", new FakeTransport(), {
+    scan,
+    hoverTarget: () => document.querySelector("p"),
   });
 
-  it("轻量会话后完整 start() 补做全页扫描，且只补一次（升级路径）", async () => {
-    const scan = vi.fn(() => [
-      {
-        id: "scanned-block",
-        element: document.querySelector("p")! as HTMLElement,
-        text: "Readers understand complex sentences.",
-      },
-    ]);
-    const subject = harness("Readers understand complex sentences.", new FakeTransport(), {
-      scan,
-      hoverTarget: () => document.querySelector("p"),
-    });
+  const error = await subject.controller.parseHoveredBlock();
 
-    await subject.controller.parseHoveredBlock();
-    expect(scan).not.toHaveBeenCalled();
+  expect(error).toBeUndefined();
+  expect(scan).not.toHaveBeenCalled();
+  await vi.waitFor(() => expect(subject.controller.status.ready).toBe(1));
+  expect(subject.controller.status.state).toBe("running");
+  expect(subject.replacements[0]!.shows).toBe(1);
+});
 
-    await subject.controller.start();
-
-    expect(scan).toHaveBeenCalledOnce();
-    await subject.controller.start();
-    expect(scan).toHaveBeenCalledOnce(); // scanned 标记：完整 start 只扫一次
+it("轻量会话后完整 start() 补做全页扫描，且只补一次（升级路径）", async () => {
+  const scan = vi.fn(() => [
+    {
+      id: "scanned-block",
+      element: document.querySelector("p")! as HTMLElement,
+      text: "Readers understand complex sentences.",
+    },
+  ]);
+  const subject = harness("Readers understand complex sentences.", new FakeTransport(), {
+    scan,
+    hoverTarget: () => document.querySelector("p"),
   });
 
-  it("悬停处没有安全段落时返回明确错误", async () => {
-    const subject = harness("Readers understand complex sentences.", new FakeTransport(), {
-      hoverTarget: () => null,
-    });
+  await subject.controller.parseHoveredBlock();
+  expect(scan).not.toHaveBeenCalled();
 
-    const error = await subject.controller.parseHoveredBlock();
+  await subject.controller.start();
 
-    expect(error).toMatchObject({
-      code: "UNSAFE_CONTENT_BLOCK",
-      message: "未找到可解析的段落，请将鼠标悬停在正文段落上",
-    });
+  expect(scan).toHaveBeenCalledOnce();
+  await subject.controller.start();
+  expect(scan).toHaveBeenCalledOnce(); // scanned 标记：完整 start 只扫一次
+});
+
+it("悬停处没有安全段落时返回明确错误", async () => {
+  const subject = harness("Readers understand complex sentences.", new FakeTransport(), {
+    hoverTarget: () => null,
   });
 
-  it("同一段落重复触发快捷键幂等：不重复注册句子", async () => {
-    const subject = harness("Readers understand complex sentences.", new FakeTransport(), {
-      hoverTarget: () => document.querySelector("p"),
-    });
+  const error = await subject.controller.parseHoveredBlock();
 
-    await subject.controller.parseHoveredBlock();
-    await vi.waitFor(() => expect(subject.controller.status.ready).toBe(1));
-    await subject.controller.parseHoveredBlock();
-
-    expect(subject.controller.status.discovered).toBe(1);
+  expect(error).toMatchObject({
+    code: "UNSAFE_CONTENT_BLOCK",
+    message: "未找到可解析的段落，请将鼠标悬停在正文段落上",
   });
+});
+
+it("同一段落重复触发快捷键幂等：不重复注册句子", async () => {
+  const subject = harness("Readers understand complex sentences.", new FakeTransport(), {
+    hoverTarget: () => document.querySelector("p"),
+  });
+
+  await subject.controller.parseHoveredBlock();
+  await vi.waitFor(() => expect(subject.controller.status.ready).toBe(1));
+  await subject.controller.parseHoveredBlock();
+
+  expect(subject.controller.status.discovered).toBe(1);
+});
 ```
 
 说明：`parseHoveredBlock` 走 `nearestSafeBlock`（真实 DOM 判定，与既有 `parseContextBlock` 测试同机制），不吃 harness 的 `scan` 覆盖，所以第一个测试里 `scan` 抛错即可证明轻量启动没有扫描。文本必须 ≥20 字符且英文占优，`"Readers understand complex sentences."` 满足。
@@ -348,12 +352,12 @@ const HOVER_ERROR: ExtensionError = {
 构造函数里（`this.document` 赋值之后、`this.viewport = ...` 之前）：
 
 ```ts
-    this.hoverTarget =
-      options.hoverTarget ??
-      (() => {
-        const chain = this.document.querySelectorAll(":hover");
-        return chain.length > 0 ? (chain[chain.length - 1] ?? null) : null;
-      });
+this.hoverTarget =
+  options.hoverTarget ??
+  (() => {
+    const chain = this.document.querySelectorAll(":hover");
+    return chain.length > 0 ? (chain[chain.length - 1] ?? null) : null;
+  });
 ```
 
 4. 重写 `start()`（现第 210-235 行），把扫描部分抽成私有方法并支持升级：
@@ -410,7 +414,7 @@ const HOVER_ERROR: ExtensionError = {
 5. `stop()` 里（`this.state = "stopped";` 之后）加一行：
 
 ```ts
-    this.scanned = false;
+this.scanned = false;
 ```
 
 6. `parseContextBlock()` 之后加新方法：
@@ -444,6 +448,7 @@ git commit -m "feat: SessionController 支持轻量启动并解析悬停段落"
 ### Task 4: content 路由 + 进度胶囊失败提示
 
 **Files:**
+
 - Modify: `src/content/content-script.ts`
 - Modify: `src/content/progress-pill.ts`
 - Test: `src/content/progress-pill.test.ts`
@@ -454,74 +459,74 @@ git commit -m "feat: SessionController 支持轻量启动并解析悬停段落"
 `src/content/session-controller.test.ts` 的 `describe("ContentScriptRouter")` 内加：
 
 ```ts
-  it("PARSE_HOVERED_BLOCK 路由到控制器并回 ACK", async () => {
-    const parseHoveredBlock = vi.fn(() => Promise.resolve(undefined));
-    const router = new ContentScriptRouter({
-      controllerFactory: () => ({
-        documentId: "document-1",
-        status: { state: "running" as const, discovered: 0, queued: 0, ready: 0, failed: 0 },
-        start: vi.fn(() => Promise.resolve()),
-        pause: vi.fn(),
-        resume: vi.fn(),
-        stop: vi.fn(),
-        parseSelection: vi.fn(() => Promise.resolve(undefined)),
-        parseContextBlock: vi.fn(() => Promise.resolve(undefined)),
-        parseHoveredBlock,
-        reanalyzeVisible: vi.fn(),
-        switchProfile: vi.fn(),
-      }),
-      transportFactory: () => new FakeTransport(),
-    });
-
-    const response = await router.route({
-      version: 1,
-      requestId: "hover-1",
-      type: "PARSE_HOVERED_BLOCK",
-      tabId: 3,
+it("PARSE_HOVERED_BLOCK 路由到控制器并回 ACK", async () => {
+  const parseHoveredBlock = vi.fn(() => Promise.resolve(undefined));
+  const router = new ContentScriptRouter({
+    controllerFactory: () => ({
       documentId: "document-1",
-    });
-
-    expect(parseHoveredBlock).toHaveBeenCalledOnce();
-    expect(response).toMatchObject({ type: "ACK", acknowledgedType: "PARSE_HOVERED_BLOCK" });
+      status: { state: "running" as const, discovered: 0, queued: 0, ready: 0, failed: 0 },
+      start: vi.fn(() => Promise.resolve()),
+      pause: vi.fn(),
+      resume: vi.fn(),
+      stop: vi.fn(),
+      parseSelection: vi.fn(() => Promise.resolve(undefined)),
+      parseContextBlock: vi.fn(() => Promise.resolve(undefined)),
+      parseHoveredBlock,
+      reanalyzeVisible: vi.fn(),
+      switchProfile: vi.fn(),
+    }),
+    transportFactory: () => new FakeTransport(),
   });
 
-  it("PARSE_HOVERED_BLOCK 控制器报错时回 ERROR 响应", async () => {
-    const router = new ContentScriptRouter({
-      controllerFactory: () => ({
-        documentId: "document-1",
-        status: { state: "running" as const, discovered: 0, queued: 0, ready: 0, failed: 0 },
-        start: vi.fn(() => Promise.resolve()),
-        pause: vi.fn(),
-        resume: vi.fn(),
-        stop: vi.fn(),
-        parseSelection: vi.fn(() => Promise.resolve(undefined)),
-        parseContextBlock: vi.fn(() => Promise.resolve(undefined)),
-        parseHoveredBlock: vi.fn(() =>
-          Promise.resolve({
-            code: "UNSAFE_CONTENT_BLOCK" as const,
-            message: "未找到可解析的段落，请将鼠标悬停在正文段落上",
-            retryable: false,
-          }),
-        ),
-        reanalyzeVisible: vi.fn(),
-        switchProfile: vi.fn(),
-      }),
-      transportFactory: () => new FakeTransport(),
-    });
-
-    const response = await router.route({
-      version: 1,
-      requestId: "hover-2",
-      type: "PARSE_HOVERED_BLOCK",
-      tabId: 3,
-      documentId: "document-1",
-    });
-
-    expect(response).toMatchObject({
-      type: "ERROR",
-      error: { code: "UNSAFE_CONTENT_BLOCK" },
-    });
+  const response = await router.route({
+    version: 1,
+    requestId: "hover-1",
+    type: "PARSE_HOVERED_BLOCK",
+    tabId: 3,
+    documentId: "document-1",
   });
+
+  expect(parseHoveredBlock).toHaveBeenCalledOnce();
+  expect(response).toMatchObject({ type: "ACK", acknowledgedType: "PARSE_HOVERED_BLOCK" });
+});
+
+it("PARSE_HOVERED_BLOCK 控制器报错时回 ERROR 响应", async () => {
+  const router = new ContentScriptRouter({
+    controllerFactory: () => ({
+      documentId: "document-1",
+      status: { state: "running" as const, discovered: 0, queued: 0, ready: 0, failed: 0 },
+      start: vi.fn(() => Promise.resolve()),
+      pause: vi.fn(),
+      resume: vi.fn(),
+      stop: vi.fn(),
+      parseSelection: vi.fn(() => Promise.resolve(undefined)),
+      parseContextBlock: vi.fn(() => Promise.resolve(undefined)),
+      parseHoveredBlock: vi.fn(() =>
+        Promise.resolve({
+          code: "UNSAFE_CONTENT_BLOCK" as const,
+          message: "未找到可解析的段落，请将鼠标悬停在正文段落上",
+          retryable: false,
+        }),
+      ),
+      reanalyzeVisible: vi.fn(),
+      switchProfile: vi.fn(),
+    }),
+    transportFactory: () => new FakeTransport(),
+  });
+
+  const response = await router.route({
+    version: 1,
+    requestId: "hover-2",
+    type: "PARSE_HOVERED_BLOCK",
+    tabId: 3,
+    documentId: "document-1",
+  });
+
+  expect(response).toMatchObject({
+    type: "ERROR",
+    error: { code: "UNSAFE_CONTENT_BLOCK" },
+  });
+});
 ```
 
 同时给该 describe 里**所有既有的 controller stub 对象字面量**（`rejects malformed inbound…`、`控制器处理中抛异常…` 等约 4 处）补上一行 `parseHoveredBlock: vi.fn(() => Promise.resolve(undefined)),`（放在 `parseContextBlock` 之后），否则 `RoutedController` 接口收紧后 `npm run build` 类型报错。
@@ -529,15 +534,15 @@ git commit -m "feat: SessionController 支持轻量启动并解析悬停段落"
 `src/content/progress-pill.test.ts` 的 describe 内加（复用文件里已有的 `label()` / `spinnerVisible()` 辅助与 fake timers）：
 
 ```ts
-  it("notice 短暂展示提示文本后淡出", () => {
-    pill.notice("未找到可解析的段落，请将鼠标悬停在正文段落上");
+it("notice 短暂展示提示文本后淡出", () => {
+  pill.notice("未找到可解析的段落，请将鼠标悬停在正文段落上");
 
-    expect(pill.host.isConnected).toBe(true);
-    expect(label()).toBe("未找到可解析的段落，请将鼠标悬停在正文段落上");
-    expect(spinnerVisible()).toBe(false);
-    vi.advanceTimersByTime(2600);
-    expect(pill.host.isConnected).toBe(false);
-  });
+  expect(pill.host.isConnected).toBe(true);
+  expect(label()).toBe("未找到可解析的段落，请将鼠标悬停在正文段落上");
+  expect(spinnerVisible()).toBe(false);
+  vi.advanceTimersByTime(2600);
+  expect(pill.host.isConnected).toBe(false);
+});
 ```
 
 - [ ] **Step 2: 运行确认失败**
@@ -578,20 +583,20 @@ Expected: FAIL —— router 对 `PARSE_HOVERED_BLOCK` 落到 switch `default` �
 3. `installContentScript()` 里把 onMessage 监听改为在回包前接入失败提示（快捷键没有右键菜单那样的"已触发"反馈，未命中段落时必须就地告知；SW 侧对页面命令的响应是丢弃的，所以提示只能在 content 侧做）：
 
 ```ts
-  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-    void router.route(message).then((response) => {
-      if (
-        typeof message === "object" &&
-        message !== null &&
-        (message as { type?: unknown }).type === "PARSE_HOVERED_BLOCK" &&
-        response.type === "ERROR"
-      ) {
-        pill.notice(response.error.message);
-      }
-      sendResponse(response);
-    });
-    return true;
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  void router.route(message).then((response) => {
+    if (
+      typeof message === "object" &&
+      message !== null &&
+      (message as { type?: unknown }).type === "PARSE_HOVERED_BLOCK" &&
+      response.type === "ERROR"
+    ) {
+      pill.notice(response.error.message);
+    }
+    sendResponse(response);
   });
+  return true;
+});
 ```
 
 - [ ] **Step 4: 运行确认通过**
@@ -611,6 +616,7 @@ git commit -m "feat: content 路由 PARSE_HOVERED_BLOCK，未命中段落经进�
 ### Task 5: SW `commands.onCommand` 监听（快捷键入口）
 
 **Files:**
+
 - Modify: `src/background/service-worker.ts`
 - Test: `src/background/service-worker.test.ts`
 
@@ -621,7 +627,7 @@ git commit -m "feat: content 路由 PARSE_HOVERED_BLOCK，未命中段落经进�
 1. `chromeMock()` 里加命令事件。在 `const onContextClicked = ...` 之后加：
 
 ```ts
-  const onCommand = event<(command: string, tab?: chrome.tabs.Tab) => void>();
+const onCommand = event<(command: string, tab?: chrome.tabs.Tab) => void>();
 ```
 
 `api` 对象里（`contextMenus` 之后）加：
@@ -633,48 +639,48 @@ git commit -m "feat: content 路由 PARSE_HOVERED_BLOCK，未命中段落经进�
 2. describe 内加三个测试（放在右键菜单测试之后）：
 
 ```ts
-  it("快捷键在冷页面上注入并下发 PARSE_HOVERED_BLOCK", async () => {
-    const subject = chromeMock();
-    registerServiceWorker(dependencies(), subject.api);
+it("快捷键在冷页面上注入并下发 PARSE_HOVERED_BLOCK", async () => {
+  const subject = chromeMock();
+  registerServiceWorker(dependencies(), subject.api);
 
-    subject.events.commands.onCommand.listeners[0]!("parse-hovered-block", {
-      id: 7,
-    } as chrome.tabs.Tab);
-    await vi.waitFor(() => expect(subject.events.tabs.sendMessage).toHaveBeenCalledOnce());
+  subject.events.commands.onCommand.listeners[0]!("parse-hovered-block", {
+    id: 7,
+  } as chrome.tabs.Tab);
+  await vi.waitFor(() => expect(subject.events.tabs.sendMessage).toHaveBeenCalledOnce());
 
-    expect(subject.events.scripting.executeScript).toHaveBeenCalledOnce();
-    expect(subject.events.tabs.sendMessage).toHaveBeenCalledWith(
-      7,
-      expect.objectContaining({ type: "PARSE_HOVERED_BLOCK", tabId: 7 }),
-    );
-  });
+  expect(subject.events.scripting.executeScript).toHaveBeenCalledOnce();
+  expect(subject.events.tabs.sendMessage).toHaveBeenCalledWith(
+    7,
+    expect.objectContaining({ type: "PARSE_HOVERED_BLOCK", tabId: 7 }),
+  );
+});
 
-  it("快捷键忽略未知命令名与无 tab 的事件", async () => {
-    const subject = chromeMock();
-    registerServiceWorker(dependencies(), subject.api);
+it("快捷键忽略未知命令名与无 tab 的事件", async () => {
+  const subject = chromeMock();
+  registerServiceWorker(dependencies(), subject.api);
 
-    subject.events.commands.onCommand.listeners[0]!("other-command", { id: 7 } as chrome.tabs.Tab);
-    subject.events.commands.onCommand.listeners[0]!("parse-hovered-block", undefined);
-    await new Promise((resolve) => setTimeout(resolve, 0));
+  subject.events.commands.onCommand.listeners[0]!("other-command", { id: 7 } as chrome.tabs.Tab);
+  subject.events.commands.onCommand.listeners[0]!("parse-hovered-block", undefined);
+  await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(subject.events.scripting.executeScript).not.toHaveBeenCalled();
-    expect(subject.events.tabs.sendMessage).not.toHaveBeenCalled();
-  });
+  expect(subject.events.scripting.executeScript).not.toHaveBeenCalled();
+  expect(subject.events.tabs.sendMessage).not.toHaveBeenCalled();
+});
 
-  it("快捷键在不可注入页面上静默失败", async () => {
-    const subject = chromeMock();
-    subject.events.scripting.executeScript.mockRejectedValueOnce(
-      new Error("Cannot access a chrome:// URL"),
-    );
-    registerServiceWorker(dependencies(), subject.api);
+it("快捷键在不可注入页面上静默失败", async () => {
+  const subject = chromeMock();
+  subject.events.scripting.executeScript.mockRejectedValueOnce(
+    new Error("Cannot access a chrome:// URL"),
+  );
+  registerServiceWorker(dependencies(), subject.api);
 
-    subject.events.commands.onCommand.listeners[0]!("parse-hovered-block", {
-      id: 7,
-    } as chrome.tabs.Tab);
-    await new Promise((resolve) => setTimeout(resolve, 0));
+  subject.events.commands.onCommand.listeners[0]!("parse-hovered-block", {
+    id: 7,
+  } as chrome.tabs.Tab);
+  await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(subject.events.tabs.sendMessage).not.toHaveBeenCalled();
-  });
+  expect(subject.events.tabs.sendMessage).not.toHaveBeenCalled();
+});
 ```
 
 - [ ] **Step 2: 运行确认失败**
@@ -695,23 +701,23 @@ const HOVERED_BLOCK_COMMAND = "parse-hovered-block";
 2. `chromeApi.action?.onClicked.addListener(...)` 块之后加（流程镜像右键「解析选中文本」的冷启动分支）：
 
 ```ts
-  chromeApi.commands?.onCommand.addListener((command, tab) => {
-    if (command !== HOVERED_BLOCK_COMMAND) return;
-    const tabId = tab?.id;
-    if (tabId === undefined) return;
-    void (async () => {
-      const documentId = activeTabs.get(tabId)?.documentId ?? generatedDocumentId(tabId);
-      await inject(tabId);
-      const profile = await dependencies.configRepository.getActiveProfile();
-      activeTabs.set(tabId, {
-        documentId,
-        status: emptyStatus("running", profile?.id),
-      });
-      await sendPageCommand(tabId, documentId, { type: "PARSE_HOVERED_BLOCK" });
-    })().catch(() => {
-      // chrome:// 等不可注入页面：与其他入口一致，静默忽略。
+chromeApi.commands?.onCommand.addListener((command, tab) => {
+  if (command !== HOVERED_BLOCK_COMMAND) return;
+  const tabId = tab?.id;
+  if (tabId === undefined) return;
+  void (async () => {
+    const documentId = activeTabs.get(tabId)?.documentId ?? generatedDocumentId(tabId);
+    await inject(tabId);
+    const profile = await dependencies.configRepository.getActiveProfile();
+    activeTabs.set(tabId, {
+      documentId,
+      status: emptyStatus("running", profile?.id),
     });
+    await sendPageCommand(tabId, documentId, { type: "PARSE_HOVERED_BLOCK" });
+  })().catch(() => {
+    // chrome:// 等不可注入页面：与其他入口一致，静默忽略。
   });
+});
 ```
 
 （`chrome.commands.onCommand` 回调签名 `(command: string, tab?: chrome.tabs.Tab)` 来自 `@types/chrome`，无需扩展类型。快捷键属用户手势，Chrome 会授予 `activeTab`，`inject` 与点图标同权。）
@@ -735,6 +741,7 @@ git commit -m "feat: SW 监听 Alt+T 命令，注入后下发悬停段落解析"
 Playwright 无法向 `chrome.commands` 发送真实扩展快捷键，所以 E2E 覆盖「命令下发之后」的完整链路：真实鼠标悬停（Chromium 里 `page.hover()` 产生真实 `:hover` 链）→ 经 `dispatchFromUi` 走 SW `route()` 的 `PARSE_HOVERED_BLOCK` case（与 onCommand 共享注入+转发逻辑）→ 内容脚本冷启动 → 只有悬停段落变卡片。onCommand 监听器本身已由 Task 5 单测覆盖。
 
 **Files:**
+
 - Test: `tests/e2e/extension.spec.ts`
 
 - [ ] **Step 1: 确认 fixture 页面段落数**
@@ -785,6 +792,7 @@ git commit -m "test: E2E 覆盖悬停段落快捷键链路"
 ### Task 7: 文档 + 全量门禁
 
 **Files:**
+
 - Modify: `README.md`
 
 - [ ] **Step 1: README 使用说明补快捷键**

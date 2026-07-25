@@ -737,7 +737,7 @@ export function registerServiceWorker(
       });
       await sendPageCommand(tabId, documentId, { type: "PARSE_HOVERED_BLOCK" });
     })().catch(() => {
-      // chrome:// 等不可注入页面：与其他入口一致，静默忽略。
+      // chrome:// 等不可注入页面：静默忽略。
     });
   });
 
