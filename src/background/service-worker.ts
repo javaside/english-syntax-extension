@@ -258,7 +258,8 @@ export function registerServiceWorker(
     body:
       | { type: "START_SESSION"; prefetchDetail?: true }
       | { type: "PARSE_SELECTION"; selectionText: string }
-      | { type: "PARSE_CONTEXT_BLOCK" },
+      | { type: "PARSE_CONTEXT_BLOCK" }
+      | { type: "PARSE_HOVERED_BLOCK" },
   ): Promise<unknown> => {
     const message: RequestMessage = {
       ...body,
@@ -588,6 +589,17 @@ export function registerServiceWorker(
           if (active === undefined || active.status.state === "stopped") {
             return errorResponse(request.requestId, "UNSAFE_CONTENT_BLOCK");
           }
+          await chromeApi.tabs.sendMessage(request.tabId, request);
+          return {
+            version: MESSAGE_VERSION,
+            requestId: request.requestId,
+            type: "ACK",
+            acknowledgedType: request.type,
+          };
+        }
+        case "PARSE_HOVERED_BLOCK": {
+          if (!trustedExtensionUi) return errorResponse(request.requestId, "UNSUPPORTED_PAGE");
+          await inject(request.tabId);
           await chromeApi.tabs.sendMessage(request.tabId, request);
           return {
             version: MESSAGE_VERSION,

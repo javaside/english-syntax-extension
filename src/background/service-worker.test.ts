@@ -592,6 +592,41 @@ describe("service worker orchestration", () => {
     );
   });
 
+  it("PARSE_HOVERED_BLOCK：可信 UI 触发时注入并原样转发到页面", async () => {
+    const subject = chromeMock();
+    registerServiceWorker(dependencies(), subject.api);
+    const popupSender = {
+      id: "extension-id",
+      url: "chrome-extension://extension-id/src/popup/popup.html",
+    };
+
+    const response = await dispatch(
+      subject.events.runtime.onMessage.listeners[0]!,
+      pageRequest({ type: "PARSE_HOVERED_BLOCK" }),
+      popupSender,
+    );
+
+    expect(response).toMatchObject({ type: "ACK", acknowledgedType: "PARSE_HOVERED_BLOCK" });
+    expect(subject.events.scripting.executeScript).toHaveBeenCalledOnce();
+    expect(subject.events.tabs.sendMessage).toHaveBeenCalledWith(
+      7,
+      expect.objectContaining({ type: "PARSE_HOVERED_BLOCK" }),
+    );
+  });
+
+  it("PARSE_HOVERED_BLOCK：网页侧伪造请求被拒绝", async () => {
+    const subject = chromeMock();
+    registerServiceWorker(dependencies(), subject.api);
+
+    const response = await dispatch(
+      subject.events.runtime.onMessage.listeners[0]!,
+      pageRequest({ type: "PARSE_HOVERED_BLOCK" }),
+    );
+
+    expect(response).toMatchObject({ type: "ERROR", error: { code: "UNSUPPORTED_PAGE" } });
+    expect(subject.events.scripting.executeScript).not.toHaveBeenCalled();
+  });
+
   it("cancels only the recorded document on tab close and navigation", async () => {
     const subject = chromeMock();
     const deps = dependencies();

@@ -75,6 +75,7 @@ describe("request protocol guard", () => {
     ["CLEAR_CACHE", { version: 1, requestId: "request-1", type: "CLEAR_CACHE" }],
     ["PARSE_SELECTION", { ...page, type: "PARSE_SELECTION", selectionText: "Learners read." }],
     ["PARSE_CONTEXT_BLOCK", { ...page, type: "PARSE_CONTEXT_BLOCK" }],
+    ["PARSE_HOVERED_BLOCK", { ...page, type: "PARSE_HOVERED_BLOCK" }],
   ])("accepts a valid %s request", (_type, request) => {
     expect(isRequestMessage(request)).toBe(true);
   });
@@ -109,6 +110,10 @@ describe("request protocol guard", () => {
     expect(isRequestMessage({ ...page, type: "REANALYZE_VISIBLE", scope: "whole-document" })).toBe(
       false,
     );
+  });
+
+  it("rejects a hovered-block request with surplus keys", () => {
+    expect(isRequestMessage({ ...page, type: "PARSE_HOVERED_BLOCK", target: "body" })).toBe(false);
   });
 
   it("accepts ANALYZE_CORE with bypassCache: true and rejects other values", () => {

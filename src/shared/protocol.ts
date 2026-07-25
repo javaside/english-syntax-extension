@@ -48,7 +48,8 @@ export type RequestMessage =
   | (MessageBase & { type: "GET_CACHE_STATS" })
   | (MessageBase & { type: "CLEAR_CACHE" })
   | (PageRequestBase & { type: "PARSE_SELECTION"; selectionText: string })
-  | (PageRequestBase & { type: "PARSE_CONTEXT_BLOCK" });
+  | (PageRequestBase & { type: "PARSE_CONTEXT_BLOCK" })
+  | (PageRequestBase & { type: "PARSE_HOVERED_BLOCK" });
 
 export type SessionState = "stopped" | "running" | "paused";
 
@@ -206,6 +207,7 @@ export function isRequestMessage(value: unknown): value is RequestMessage {
     case "GET_SESSION_STATUS":
     case "REANALYZE_VISIBLE":
     case "PARSE_CONTEXT_BLOCK":
+    case "PARSE_HOVERED_BLOCK":
       return hasOnlyKeys(value, pageOnlyKeys) && hasPageContext(value);
     case "START_SESSION":
       return (
