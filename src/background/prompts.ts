@@ -27,7 +27,7 @@ const DETAIL_OUTPUT_SHAPE = [
   '{"sentenceId": string, "focus": {"startToken": number, "endToken": number}, "structures": [{"startToken": number, "endToken": number, "role": string, "explanation": string, "translation": string}], "grammarPoints": [string], "explanation": string}',
   "Echo the supplied sentenceId and focus unchanged. Write explanations, grammar points, and every structure's role field in Chinese. Use concise Chinese grammatical terms for roles (主语/谓语/宾语/定语/状语/系动词/引导词/连词 etc.), never English enum values.",
   "The structures array must break down the internal components of the focus range. Never return a single structure that covers the entire focus — split it into meaningful sub-components (subject, predicate, object, clauses, etc.).",
-  "Give every structure a concise Chinese translation of exactly its own English text in the translation field (a few words, like a gloss under the phrase); keep the longer analysis in explanation.",
+  "Give every structure a concise Chinese translation of exactly its own English text in the translation field (a few words, like a gloss under the phrase); keep the longer analysis in explanation. The translation field must be written in Chinese characters (中文译文) — copying the English words unchanged is invalid.",
 ].join("\n");
 
 const SENTENCE_DETAILS_OUTPUT_SHAPE = [
@@ -36,7 +36,7 @@ const SENTENCE_DETAILS_OUTPUT_SHAPE = [
   "Return exactly one details entry per requested focus range, echoing the supplied sentenceId and that focus unchanged.",
   "Write explanations, grammar points, and every structure's role field in Chinese. Use concise Chinese grammatical terms for roles (主语/谓语/宾语/定语/状语/系动词/引导词/连词 etc.), never English enum values.",
   "Each entry's structures array must break down the internal components of its focus range. Never return a single structure that covers the entire focus — split it into meaningful sub-components (subject, predicate, object, clauses, etc.).",
-  "Give every structure a concise Chinese translation of exactly its own English text in the translation field (a few words, like a gloss under the phrase); keep the longer analysis in explanation.",
+  "Give every structure a concise Chinese translation of exactly its own English text in the translation field (a few words, like a gloss under the phrase); keep the longer analysis in explanation. The translation field must be written in Chinese characters (中文译文) — copying the English words unchanged is invalid.",
 ].join("\n");
 
 export function buildCorePrompt(sentences: readonly SentenceInput[]): string {

@@ -261,6 +261,57 @@ describe("SyntaxLearningBlock", () => {
     ]);
   });
 
+  it("正文译文回显英文原文时不渲染译文行，卡片退回两行", () => {
+    const element = block();
+    document.body.append(element.host);
+
+    element.renderCore(sentence, tokens, {
+      ...analysis,
+      components: [
+        // 与英文行等值（含大小写/空白差异）→ 回显，不渲染
+        { ...analysis.components[0]!, translation: " learners " },
+        // 正常中文译文 → 照常渲染
+        analysis.components[1]!,
+        analysis.components[2]!,
+      ],
+    });
+
+    const root = element.host.shadowRoot!;
+    const components = [...root.querySelectorAll<HTMLElement>(".component")];
+    expect(components[0]!.querySelector(".translation")).toBeNull();
+    expect(components[1]!.querySelector(".translation")?.textContent).toBe("阅读");
+  });
+
+  it("详解标注译文回显英文原文时退回两行标注", () => {
+    const element = block();
+    document.body.append(element.host);
+    element.renderCore(sentence, tokens, analysis);
+    element.setDetailLoading("sentence-1", { startToken: 0, endToken: 0 });
+
+    element.renderDetail({
+      sentenceId: "sentence-1",
+      focus: { startToken: 0, endToken: 0 },
+      structures: [
+        {
+          startToken: 0,
+          endToken: 1,
+          role: "谓语",
+          explanation: "回显英文",
+          translation: "Learners  READ",
+        },
+        { startToken: 2, endToken: 2, role: "宾语", explanation: "正常", translation: "书籍" },
+      ],
+      grammarPoints: [],
+      explanation: "整体讲解",
+      modelProfileId: "profile-1",
+    });
+
+    const root = element.host.shadowRoot!;
+    const annotations = [...root.querySelectorAll<HTMLElement>(".annotation")];
+    expect(annotations[0]!.querySelector(".annotation-translation")).toBeNull();
+    expect(annotations[1]!.querySelector(".annotation-translation")?.textContent).toBe("书籍");
+  });
+
   it("keeps script-like model strings as inert text", () => {
     const element = block();
     document.body.append(element.host);

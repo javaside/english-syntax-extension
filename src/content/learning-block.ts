@@ -251,6 +251,13 @@ function createElement<K extends keyof HTMLElementTagNameMap>(
 // 16em 封顶按译文字号约等于 16 个汉字；超过则改用铺开模式（见 .translation-wide）。
 const WIDE_TRANSLATION_MIN_CHARS = 17;
 
+// 小参数本地模型偶尔把英文原文回填进 translation 字段（提示词要求中文也拦不住）。
+// 与英文等值的"译文"没有信息量，视为无译文，卡片/标注退回两行展示。
+function isEchoTranslation(translation: string, english: string): boolean {
+  const normalize = (value: string) => value.toLowerCase().replace(/\s+/gu, " ").trim();
+  return normalize(translation) === normalize(english);
+}
+
 function translationElement(className: string, text: string): HTMLSpanElement {
   const element = createElement("span", className, text);
   if ([...text].length >= WIDE_TRANSLATION_MIN_CHARS) {
@@ -459,8 +466,10 @@ export class SyntaxLearningBlock {
         }
       }
 
-      const translation = translationElement("translation", component.translation);
-      componentElement.append(role, english, translation);
+      componentElement.append(role, english);
+      if (!isEchoTranslation(component.translation, english.textContent ?? "")) {
+        componentElement.append(translationElement("translation", component.translation));
+      }
       componentElement.addEventListener("click", () => {
         // A second click on the component whose explanation is already open
         // toggles it closed instead of re-requesting the analysis.
@@ -560,8 +569,12 @@ export class SyntaxLearningBlock {
           createElement("span", "annotation-role", structureLabel(index, structure.role)),
           createElement("span", "annotation-english", english),
         );
-        // 第三行译文与正文同构；旧缓存/模型缺省时退回两行标注。
-        if (structure.translation !== undefined && structure.translation.trim().length > 0) {
+        // 第三行译文与正文同构；旧缓存/模型缺省/回显英文时退回两行标注。
+        if (
+          structure.translation !== undefined &&
+          structure.translation.trim().length > 0 &&
+          !isEchoTranslation(structure.translation, english)
+        ) {
           annotation.append(translationElement("annotation-translation", structure.translation));
         }
         annotations.append(annotation);
