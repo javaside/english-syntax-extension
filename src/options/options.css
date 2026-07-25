@@ -72,6 +72,30 @@ body {
   color: CanvasText;
 }
 
+/* 按钮交互反馈：hover 变亮/变暗、按下微沉、异步进行时禁用变淡——
+   与学习卡「重新解析」按钮同一套模式。用 filter 而非改 background，
+   避开 .options-page__primary 上 background !important 的优先级。 */
+.options-page button {
+  cursor: pointer;
+  transition:
+    filter 120ms ease,
+    opacity 120ms ease,
+    transform 80ms ease;
+}
+
+.options-page button:hover:enabled {
+  filter: brightness(0.94);
+}
+
+.options-page button:active:enabled {
+  transform: translateY(1px);
+}
+
+.options-page button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
 .options-page__header-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
@@ -116,10 +140,21 @@ body {
   }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .options-page button {
+    transition: none;
+  }
+}
+
 @media (prefers-color-scheme: dark) {
   .options-page__primary {
     background: #8ab4ff !important;
     color: #07152f !important;
+  }
+
+  /* 深色下 hover 改为提亮，压暗几乎不可见。 */
+  .options-page button:hover:enabled {
+    filter: brightness(1.2);
   }
 
   .options-page__inline-error {

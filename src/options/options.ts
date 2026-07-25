@@ -101,7 +101,13 @@ function connectionMessage(result: ProfileTestResult): string {
     case "HOST_PERMISSION_DENIED":
       return "未获得模型地址访问权限，请允许后重试。";
     case "AUTH_FAILED":
-      return "鉴权失败，请检查 API Key。";
+      // 403 多为服务端来源（Origin）拦截而非凭据问题：扩展请求自带
+      // chrome-extension:// Origin，本地 Ollama 默认不放行，误导去查 Key 会白忙。
+      return result.status === 403
+        ? "服务器拒绝了请求（HTTP 403）。若使用本地 Ollama，请设置环境变量 " +
+            'OLLAMA_ORIGINS="chrome-extension://*" 并重启 Ollama 后重试；' +
+            "其他服务请检查其来源白名单或 API Key。"
+        : "鉴权失败，请检查 API Key。";
     case "MODEL_NOT_FOUND":
       return `未找到指定模型，请检查 Model 名称。${providerDetail()}`;
     case "INVALID_MODEL_OUTPUT":
@@ -404,6 +410,7 @@ export async function createOptionsPage(
       const profileId = savedSelect.value;
       if (profileId === "") return;
       activateButton.disabled = true;
+      activateButton.textContent = "启用中…";
       try {
         await dependencies.setActiveProfile(profileId);
         activeProfileId = profileId;
@@ -411,6 +418,8 @@ export async function createOptionsPage(
         result.textContent = "已切换启用配置，随后的解析请求将使用它。";
       } catch {
         result.textContent = "切换启用配置失败，请刷新页面后重试。";
+      } finally {
+        // 成功后为「已启用」禁用态，失败恢复「设为启用」可点。
         refreshActivateButton();
       }
     })();
@@ -418,6 +427,9 @@ export async function createOptionsPage(
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     void (async () => {
+      // 异步期间按钮禁用 + 进行态文案：点没点一目了然，也防重复提交。
+      saveButton.disabled = true;
+      saveButton.textContent = "保存中…";
       try {
         const profile = await buildProfile();
         if (profile === undefined) return;
@@ -436,11 +448,16 @@ export async function createOptionsPage(
         await loadProfiles(profile.id);
       } catch {
         result.textContent = "配置无效，请检查地址、必填项和超时时间。";
+      } finally {
+        saveButton.disabled = false;
+        saveButton.textContent = "保存配置";
       }
     })();
   });
   testButton.addEventListener("click", () => {
     void (async () => {
+      testButton.disabled = true;
+      testButton.textContent = "测试中…";
       try {
         const profile = await buildProfile();
         if (profile === undefined) return;
@@ -451,6 +468,8 @@ export async function createOptionsPage(
           });
           return;
         }
+        // 本地模型首次加载可能要数秒，先给出进行态说明。
+        result.textContent = "正在测试连接…";
         await dependencies.saveProfile(profile);
         idInput.value = profile.id;
         apiKeyInput.value = "";
@@ -459,6 +478,9 @@ export async function createOptionsPage(
         await loadProfiles(profile.id);
       } catch {
         result.textContent = "配置无效，请检查地址、必填项和超时时间。";
+      } finally {
+        testButton.disabled = false;
+        testButton.textContent = "测试连接";
       }
     })();
   });

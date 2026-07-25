@@ -174,6 +174,89 @@ describe("Options page", () => {
     }
   });
 
+  it("403 鉴权失败提示 OLLAMA_ORIGINS 放行来源，而不是误导去查 API Key", async () => {
+    const subject = dependencies({
+      testProfile: vi.fn(() =>
+        Promise.resolve({
+          success: false,
+          error: "AUTH_FAILED" as const,
+          status: 403,
+        }),
+      ),
+    });
+    await createOptionsPage(root(), subject);
+    fillRequiredProfile();
+    document.querySelector<HTMLButtonElement>("[data-action='test-profile']")!.click();
+
+    await vi.waitFor(() => {
+      const text = document.querySelector("[data-connection-result]")?.textContent ?? "";
+      expect(text).toContain("403");
+      expect(text).toContain("OLLAMA_ORIGINS");
+    });
+  });
+
+  it("测试连接期间按钮禁用并显示进行态，完成后恢复", async () => {
+    let resolveTest!: (value: { success: true; jsonSchemaSupport: "supported" }) => void;
+    const subject = dependencies({
+      testProfile: vi.fn(
+        () =>
+          new Promise<{ success: true; jsonSchemaSupport: "supported" }>((resolve) => {
+            resolveTest = resolve;
+          }),
+      ),
+    });
+    await createOptionsPage(root(), subject);
+    fillRequiredProfile();
+    const button = document.querySelector<HTMLButtonElement>("[data-action='test-profile']")!;
+    button.click();
+
+    await vi.waitFor(() => {
+      expect(button.disabled).toBe(true);
+      expect(button.textContent).toBe("测试中…");
+      expect(document.querySelector("[data-connection-result]")?.textContent).toContain(
+        "正在测试连接",
+      );
+    });
+
+    resolveTest({ success: true, jsonSchemaSupport: "supported" });
+    await vi.waitFor(() => {
+      expect(button.disabled).toBe(false);
+      expect(button.textContent).toBe("测试连接");
+      expect(document.querySelector("[data-connection-result]")?.textContent).toContain("连接成功");
+    });
+  });
+
+  it("保存配置期间提交按钮禁用并显示进行态，完成后恢复", async () => {
+    let resolveSave!: () => void;
+    const subject = dependencies({
+      saveProfile: vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveSave = resolve;
+          }),
+      ),
+    });
+    await createOptionsPage(root(), subject);
+    fillRequiredProfile();
+    const button = document.querySelector<HTMLButtonElement>("button[type='submit']")!;
+    document.querySelector("form")!.dispatchEvent(new Event("submit", { cancelable: true }));
+
+    await vi.waitFor(() => {
+      expect(button.disabled).toBe(true);
+      expect(button.textContent).toBe("保存中…");
+    });
+
+    await vi.waitFor(() => expect(subject.saveProfile).toHaveBeenCalled());
+    resolveSave();
+    await vi.waitFor(() => {
+      expect(button.disabled).toBe(false);
+      expect(button.textContent).toBe("保存配置");
+      expect(document.querySelector("[data-connection-result]")?.textContent).toContain(
+        "配置已保存",
+      );
+    });
+  });
+
   it("shows the provider status and detail when the failure carries them", async () => {
     const subject = dependencies({
       testProfile: vi.fn(() =>
@@ -309,6 +392,65 @@ describe("Options page", () => {
     );
     expect(activate.textContent).toBe("已启用");
     expect(activate.disabled).toBe(true);
+  });
+
+  it("切换启用期间按钮显示进行态文案", async () => {
+    let resolveActivate!: () => void;
+    const subject = dependencies({
+      listProfiles: vi.fn(() =>
+        Promise.resolve([
+          {
+            id: "p-2",
+            name: "Local",
+            baseUrl: "http://localhost:11434/v1",
+            apiKey: "secret",
+            model: "qwen",
+            headers: {},
+            timeoutMs: 45_000,
+            jsonSchemaSupport: "unknown" as const,
+          },
+        ]),
+      ),
+      getProfile: vi.fn(() =>
+        Promise.resolve({
+          id: "p-2",
+          name: "Local",
+          baseUrl: "http://localhost:11434/v1",
+          apiKey: "secret",
+          model: "qwen",
+          headers: {},
+          timeoutMs: 45_000,
+          jsonSchemaSupport: "unknown" as const,
+        }),
+      ),
+      getActiveProfileId: vi.fn(() => Promise.resolve(undefined as string | undefined)),
+      setActiveProfile: vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveActivate = resolve;
+          }),
+      ),
+    });
+    await createOptionsPage(root(), subject);
+
+    const select = document.querySelector<HTMLSelectElement>("#options-saved-profile")!;
+    select.value = "p-2";
+    select.dispatchEvent(new Event("change"));
+    const activate = document.querySelector<HTMLButtonElement>("[data-action='activate-profile']")!;
+    await vi.waitFor(() => expect(activate.disabled).toBe(false));
+
+    activate.click();
+    await vi.waitFor(() => {
+      expect(activate.disabled).toBe(true);
+      expect(activate.textContent).toBe("启用中…");
+    });
+
+    resolveActivate();
+    await vi.waitFor(() =>
+      expect(document.querySelector("[data-connection-result]")?.textContent).toContain(
+        "已切换启用配置",
+      ),
+    );
   });
 
   it("keeps the activate button usable when switching the profile fails", async () => {
