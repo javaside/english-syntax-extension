@@ -8,6 +8,7 @@ import type {
 } from "../shared/protocol";
 import type { ModelProfile } from "./config-repository";
 import type { AnalysisService } from "./analysis-service";
+import { ModelRequestError } from "./openai-compatible-adapter";
 import { registerServiceWorker, type ServiceWorkerDependencies } from "./service-worker";
 
 function event<T extends (...args: never[]) => unknown>() {
@@ -681,10 +682,180 @@ describe("service worker orchestration", () => {
       pageRequest({ type: "ANALYZE_CORE", sentences: [sentence] }),
     );
 
+    // 暂停后不再整批报错：返回缓存命中（此处为空）+ 批级 AUTH_FAILED error。
     expect(profileB.type).toBe("CORE_RESULT");
-    expect(profileA).toMatchObject({ type: "ERROR", error: { code: "AUTH_FAILED" } });
+    expect(profileA).toMatchObject({
+      type: "CORE_RESULT",
+      analyses: [],
+      error: { code: "AUTH_FAILED" },
+    });
     expect(analyzeCore).toHaveBeenCalledTimes(2);
     expect(JSON.stringify(profileA)).not.toContain("SECRET-A");
+  });
+
+  it("批内出现鉴权失败时仍返回已取得的分析（缓存命中不丢）并附批级 error", async () => {
+    const analyzeCore = vi.fn(
+      ({ sentences, profile }: Parameters<AnalysisService["analyzeCore"]>[0]) =>
+        Promise.resolve({
+          result: [
+            {
+              schemaVersion: 1 as const,
+              sentenceId: sentences[0]!.sentenceId,
+              components: [
+                { startToken: 0, endToken: 0, role: GrammarRole.SUBJECT, translation: "学习者" },
+              ],
+              modelProfileId: profile.id,
+            },
+          ],
+          failures: [
+            {
+              sentenceId: "sentence-miss",
+              error: new ModelRequestError("AUTH_FAILED", "HTTP 403", false, { status: 403 }),
+            },
+          ],
+          cacheHit: true,
+        }),
+    );
+    const subject = chromeMock();
+    registerServiceWorker(dependencies({ analyzeCore }), subject.api);
+
+    const response = await dispatch(
+      subject.events.runtime.onMessage.listeners[0]!,
+      pageRequest({ type: "ANALYZE_CORE", sentences: [sentence] }),
+    );
+
+    expect(response).toMatchObject({
+      type: "CORE_RESULT",
+      analyses: [{ sentenceId: "sentence-1" }],
+      error: { code: "AUTH_FAILED" },
+    });
+  });
+
+  it("暂停期间 ANALYZE_CORE 仍查缓存返回命中，不再无脑整批鉴权失败", async () => {
+    const cachedAnalysis = {
+      schemaVersion: 1 as const,
+      sentenceId: sentence.sentenceId,
+      components: [
+        { startToken: 0, endToken: 0, role: GrammarRole.SUBJECT, translation: "学习者" },
+      ],
+      modelProfileId: "cached",
+    };
+    const analyzeCore = vi.fn(() =>
+      Promise.reject(Object.assign(new Error("auth"), { code: "AUTH_FAILED", retryable: false })),
+    );
+    const lookupCore = vi.fn<AnalysisService["lookupCore"]>(() =>
+      Promise.resolve([cachedAnalysis]),
+    );
+    const subject = chromeMock();
+    registerServiceWorker(dependencies({ analyzeCore, lookupCore }), subject.api);
+    const listener = subject.events.runtime.onMessage.listeners[0]!;
+
+    const first = await dispatch(
+      listener,
+      pageRequest({ type: "ANALYZE_CORE", sentences: [sentence] }),
+    );
+    const second = await dispatch(
+      listener,
+      pageRequest({ type: "ANALYZE_CORE", sentences: [sentence] }),
+    );
+
+    // 首批失败也回退缓存；暂停后的后续批次不再调用模型，但依旧带回缓存命中。
+    expect(first).toMatchObject({
+      type: "CORE_RESULT",
+      analyses: [{ sentenceId: "sentence-1" }],
+      error: { code: "AUTH_FAILED" },
+    });
+    expect(second).toMatchObject({
+      type: "CORE_RESULT",
+      analyses: [{ sentenceId: "sentence-1" }],
+      error: { code: "AUTH_FAILED" },
+    });
+    expect(analyzeCore).toHaveBeenCalledTimes(1);
+  });
+
+  it("暂停期间 ANALYZE_DETAIL 命中缓存返回详解，未命中才报鉴权失败", async () => {
+    const detailAnalysis = {
+      sentenceId: sentence.sentenceId,
+      focus: { startToken: 0, endToken: 0 },
+      structures: [],
+      grammarPoints: [],
+      explanation: "整体讲解",
+      modelProfileId: "cached",
+    };
+    const analyzeCore = vi.fn(() =>
+      Promise.reject(Object.assign(new Error("auth"), { code: "AUTH_FAILED", retryable: false })),
+    );
+    const lookupDetail = vi.fn<AnalysisService["lookupDetail"]>(() =>
+      Promise.resolve(detailAnalysis),
+    );
+    const subject = chromeMock();
+    registerServiceWorker(dependencies({ analyzeCore, lookupDetail }), subject.api);
+    const listener = subject.events.runtime.onMessage.listeners[0]!;
+    await dispatch(listener, pageRequest({ type: "ANALYZE_CORE", sentences: [sentence] }));
+
+    const hit = await dispatch(
+      listener,
+      pageRequest({
+        type: "ANALYZE_DETAIL",
+        sentence,
+        core: {
+          schemaVersion: 1,
+          sentenceId: sentence.sentenceId,
+          components: [],
+          modelProfileId: "cached",
+        },
+        focus: { startToken: 0, endToken: 0 },
+      }),
+    );
+    lookupDetail.mockResolvedValueOnce(undefined);
+    const miss = await dispatch(
+      listener,
+      pageRequest({
+        type: "ANALYZE_DETAIL",
+        sentence,
+        core: {
+          schemaVersion: 1,
+          sentenceId: sentence.sentenceId,
+          components: [],
+          modelProfileId: "cached",
+        },
+        focus: { startToken: 0, endToken: 0 },
+      }),
+    );
+
+    expect(hit).toMatchObject({ type: "DETAIL_RESULT", analysis: { explanation: "整体讲解" } });
+    expect(miss).toMatchObject({ type: "ERROR", error: { code: "AUTH_FAILED" } });
+  });
+
+  it("TEST_PROFILE 绕过暂停真实探测，成功后解除暂停恢复解析", async () => {
+    const analyzeCore = vi
+      .fn<AnalysisService["analyzeCore"]>()
+      .mockRejectedValueOnce(
+        Object.assign(new Error("auth"), { code: "AUTH_FAILED", retryable: false }),
+      )
+      .mockResolvedValue({ result: [], failures: [], cacheHit: false });
+    const deps = dependencies({ analyzeCore });
+    const subject = chromeMock();
+    registerServiceWorker(deps, subject.api);
+    const listener = subject.events.runtime.onMessage.listeners[0]!;
+
+    await dispatch(listener, pageRequest({ type: "ANALYZE_CORE", sentences: [sentence] }));
+    const test = await dispatch(listener, {
+      version: 1,
+      requestId: "test-profile-a",
+      type: "TEST_PROFILE",
+      profileId: "profile-a",
+    });
+    const afterTest = await dispatch(
+      listener,
+      pageRequest({ type: "ANALYZE_CORE", sentences: [sentence] }),
+    );
+
+    // 测试连接是显式的用户自检动作：必须真实探测（不被暂停门拦截），成功即解除暂停。
+    expect(deps.profileProbe).toHaveBeenCalledOnce();
+    expect(test).toMatchObject({ type: "PROFILE_TEST_RESULT", success: true });
+    expect(afterTest.type).toBe("CORE_RESULT");
+    expect(analyzeCore).toHaveBeenCalledTimes(2);
   });
 
   it("ANALYZE_CORE returns cache hits with cacheOnly instead of CONFIG_MISSING", async () => {

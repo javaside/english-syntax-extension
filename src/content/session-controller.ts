@@ -125,9 +125,15 @@ function normalizedLength(text: string): number {
 }
 
 function responseErrorMessage(response: ResponseMessage): string {
-  return response.type === "ERROR"
-    ? `${response.error.code}：${response.error.message}`
-    : MISSING_RESULT_MESSAGE;
+  // CORE_RESULT 的批级 error：部分命中时未命中句沿用该错误说明（如鉴权失败），
+  // 而不是笼统的"结果缺失"。
+  const error =
+    response.type === "ERROR"
+      ? response.error
+      : response.type === "CORE_RESULT"
+        ? response.error
+        : undefined;
+  return error === undefined ? MISSING_RESULT_MESSAGE : `${error.code}：${error.message}`;
 }
 
 export class SessionController {

@@ -86,7 +86,13 @@ export interface CacheStats {
 export type ResponseMessage =
   | (MessageBase & { type: "ACK"; acknowledgedType: RequestMessage["type"] })
   | (MessageBase & { type: "SESSION_STATUS"; status: SessionStatus })
-  | (MessageBase & { type: "CORE_RESULT"; analyses: CoreAnalysis[]; cacheOnly?: true })
+  // error：批级失败（如鉴权失败）时仍携带已取得的缓存命中；未命中句由 content 按该错误标失败。
+  | (MessageBase & {
+      type: "CORE_RESULT";
+      analyses: CoreAnalysis[];
+      cacheOnly?: true;
+      error?: ExtensionError;
+    })
   | (MessageBase & { type: "DETAIL_RESULT"; analysis: DetailAnalysis })
   | (MessageBase & { type: "SENTENCE_DETAILS_RESULT"; succeeded: number; failed: number })
   | (MessageBase & { type: "CACHE_STATS"; stats: CacheStats })

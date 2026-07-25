@@ -324,6 +324,32 @@ describe("SessionController", () => {
     expect(subject.replacements[0]!.shows).toBe(0);
   });
 
+  it("带批级 error 的部分结果：命中句正常渲染，未命中句用该错误信息标失败", async () => {
+    const transport = new FakeTransport((message) =>
+      Promise.resolve({
+        version: 1,
+        requestId: message.requestId,
+        type: "CORE_RESULT",
+        analyses: message.type === "ANALYZE_CORE" ? [core(message.sentences[0]!.sentenceId)] : [],
+        error: {
+          code: "AUTH_FAILED",
+          message: "Model profile authentication failed; update its credentials to resume",
+          retryable: false,
+        },
+      }),
+    );
+    const subject = harness("Readers learn. Writers practice daily.", transport);
+
+    await subject.controller.start();
+    subject.viewport.emit();
+    await vi.waitFor(() => expect(subject.controller.status.failed).toBe(1));
+
+    const block = subject.learningBlocks[0]!;
+    expect(block.cores).toHaveLength(1);
+    expect(block.failures[0]).toMatchObject({ sentenceId: "sentence-2" });
+    expect(block.failures[0]!.message).toContain("AUTH_FAILED");
+  });
+
   it("renders hits, keeps misses as plain skipped text, and reports skipped in status", async () => {
     const transport = new FakeTransport((message) =>
       Promise.resolve({

@@ -165,7 +165,11 @@ export function isRuntimeResponse(value: unknown, requestId: string): value is R
     case "SESSION_STATUS":
       return isSessionStatus(value.status);
     case "CORE_RESULT":
-      return Array.isArray(value.analyses) && value.analyses.every(isCoreAnalysis);
+      return (
+        Array.isArray(value.analyses) &&
+        value.analyses.every(isCoreAnalysis) &&
+        (value.error === undefined || isExtensionError(value.error))
+      );
     case "DETAIL_RESULT":
       return isDetailAnalysis(value.analysis);
     case "SENTENCE_DETAILS_RESULT":

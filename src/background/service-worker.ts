@@ -226,6 +226,10 @@ export function registerServiceWorker(
     pausedProfiles.set(profile.id, profileCredentialFingerprint(profile));
   };
 
+  const resumeProfile = (profile: ModelProfile): void => {
+    pausedProfiles.delete(profile.id);
+  };
+
   const isProfilePaused = (profile: ModelProfile): boolean => {
     const pausedFingerprint = pausedProfiles.get(profile.id);
     if (pausedFingerprint === undefined) return false;
@@ -322,7 +326,18 @@ export function registerServiceWorker(
               cacheOnly: true,
             };
           }
-          if (isProfilePaused(profile)) return errorResponse(request.requestId, "AUTH_FAILED");
+          // 鉴权失败/暂停期间不整批报错：缓存命中照常返回（缓存键与模型无关），
+          // 只有未命中句由 content 按批级 error 标失败——换/修模型前译文不消失。
+          const cacheWithAuthError = async (): Promise<ResponseMessage> => ({
+            version: MESSAGE_VERSION,
+            requestId: request.requestId,
+            type: "CORE_RESULT",
+            analyses: (await dependencies.analysisService.lookupCore(request.sentences)).map(
+              (analysis) => sanitizeCore(analysis, profile),
+            ),
+            error: errorResponse(request.requestId, "AUTH_FAILED").error,
+          });
+          if (isProfilePaused(profile)) return cacheWithAuthError();
           try {
             const outcome = await dependencies.analysisService.analyzeCore(
               {
@@ -338,7 +353,13 @@ export function registerServiceWorker(
             );
             if (authenticationFailure !== undefined) {
               pauseProfile(profile);
-              return errorResponse(request.requestId, "AUTH_FAILED");
+              return {
+                version: MESSAGE_VERSION,
+                requestId: request.requestId,
+                type: "CORE_RESULT",
+                analyses: outcome.result.map((analysis) => sanitizeCore(analysis, profile)),
+                error: errorResponse(request.requestId, "AUTH_FAILED").error,
+              };
             }
             return {
               version: MESSAGE_VERSION,
@@ -348,7 +369,10 @@ export function registerServiceWorker(
             };
           } catch (error) {
             const code = errorCode(error);
-            if (code === "AUTH_FAILED") pauseProfile(profile);
+            if (code === "AUTH_FAILED") {
+              pauseProfile(profile);
+              return cacheWithAuthError();
+            }
             return errorResponse(request.requestId, code);
           }
         }
@@ -368,7 +392,21 @@ export function registerServiceWorker(
                   analysis,
                 };
           }
-          if (isProfilePaused(profile)) return errorResponse(request.requestId, "AUTH_FAILED");
+          if (isProfilePaused(profile)) {
+            // 暂停期间详解也先查缓存：命中直接返回，未命中才报鉴权失败。
+            const cached = await dependencies.analysisService.lookupDetail({
+              sentence: request.sentence,
+              focus: request.focus,
+            });
+            return cached === undefined
+              ? errorResponse(request.requestId, "AUTH_FAILED")
+              : {
+                  version: MESSAGE_VERSION,
+                  requestId: request.requestId,
+                  type: "DETAIL_RESULT",
+                  analysis: sanitizeDetail(cached, profile),
+                };
+          }
           try {
             const outcome = await dependencies.analysisService.analyzeDetail(
               {
@@ -570,22 +608,15 @@ export function registerServiceWorker(
               error: errorResponse(request.requestId, "CONFIG_MISSING").error,
             };
           }
-          if (isProfilePaused(profile)) {
-            return {
-              version: MESSAGE_VERSION,
-              requestId: request.requestId,
-              type: "PROFILE_TEST_RESULT",
-              profileId: request.profileId,
-              success: false,
-              error: errorResponse(request.requestId, "AUTH_FAILED").error,
-            };
-          }
+          // 测试连接是显式的用户自检动作：不被暂停门拦截，真实探测；
+          // 成功即解除暂停，用户修好服务端后无需重载扩展即可恢复解析。
           const startedAt = Date.now();
           try {
             const jsonSchemaSupport = await dependencies.profileProbe(
               profile,
               new AbortController().signal,
             );
+            resumeProfile(profile);
             return {
               version: MESSAGE_VERSION,
               requestId: request.requestId,
