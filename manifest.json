@@ -8,5 +8,11 @@
   "optional_host_permissions": ["https://*/*", "http://localhost/*", "http://127.0.0.1/*"],
   "background": { "service_worker": "src/background/service-worker.ts", "type": "module" },
   "action": { "default_popup": "src/popup/popup.html", "default_title": "英语句法伴读" },
+  "commands": {
+    "parse-hovered-block": {
+      "suggested_key": { "default": "Alt+T" },
+      "description": "解析鼠标悬停的段落"
+    }
+  },
   "options_ui": { "page": "src/options/options.html", "open_in_tab": true }
 }

@@ -14,4 +14,13 @@ describe("manifest", () => {
       "http://127.0.0.1/*",
     ]);
   });
+
+  it("registers the hovered-block keyboard command", () => {
+    expect(manifest.commands).toEqual({
+      "parse-hovered-block": {
+        suggested_key: { default: "Alt+T" },
+        description: "解析鼠标悬停的段落",
+      },
+    });
+  });
 });
