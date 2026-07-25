@@ -33,6 +33,7 @@ function chromeMock() {
   const onClicked = event<(tab: chrome.tabs.Tab) => void>();
   const onContextClicked =
     event<(info: chrome.contextMenus.OnClickData, tab?: chrome.tabs.Tab) => void>();
+  const onCommand = event<(command: string, tab?: chrome.tabs.Tab) => void>();
   const onRemoved = event<(tabId: number) => void>();
   const onUpdated =
     event<(tabId: number, changeInfo: chrome.tabs.OnUpdatedInfo, tab: chrome.tabs.Tab) => void>();
@@ -49,6 +50,7 @@ function chromeMock() {
       removeAll: vi.fn(() => Promise.resolve()),
       create: vi.fn(),
     },
+    commands: { onCommand },
     scripting: { executeScript: vi.fn(() => Promise.resolve([])) },
     tabs: {
       onRemoved,
@@ -625,6 +627,49 @@ describe("service worker orchestration", () => {
 
     expect(response).toMatchObject({ type: "ERROR", error: { code: "UNSUPPORTED_PAGE" } });
     expect(subject.events.scripting.executeScript).not.toHaveBeenCalled();
+  });
+
+  it("快捷键在冷页面上注入并下发 PARSE_HOVERED_BLOCK", async () => {
+    const subject = chromeMock();
+    registerServiceWorker(dependencies(), subject.api);
+
+    subject.events.commands.onCommand.listeners[0]!("parse-hovered-block", {
+      id: 7,
+    } as chrome.tabs.Tab);
+    await vi.waitFor(() => expect(subject.events.tabs.sendMessage).toHaveBeenCalledOnce());
+
+    expect(subject.events.scripting.executeScript).toHaveBeenCalledOnce();
+    expect(subject.events.tabs.sendMessage).toHaveBeenCalledWith(
+      7,
+      expect.objectContaining({ type: "PARSE_HOVERED_BLOCK", tabId: 7 }),
+    );
+  });
+
+  it("快捷键忽略未知命令名与无 tab 的事件", async () => {
+    const subject = chromeMock();
+    registerServiceWorker(dependencies(), subject.api);
+
+    subject.events.commands.onCommand.listeners[0]!("other-command", { id: 7 } as chrome.tabs.Tab);
+    subject.events.commands.onCommand.listeners[0]!("parse-hovered-block", undefined);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(subject.events.scripting.executeScript).not.toHaveBeenCalled();
+    expect(subject.events.tabs.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("快捷键在不可注入页面上静默失败", async () => {
+    const subject = chromeMock();
+    subject.events.scripting.executeScript.mockRejectedValueOnce(
+      new Error("Cannot access a chrome:// URL"),
+    );
+    registerServiceWorker(dependencies(), subject.api);
+
+    subject.events.commands.onCommand.listeners[0]!("parse-hovered-block", {
+      id: 7,
+    } as chrome.tabs.Tab);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(subject.events.tabs.sendMessage).not.toHaveBeenCalled();
   });
 
   it("cancels only the recorded document on tab close and navigation", async () => {

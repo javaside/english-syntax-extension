@@ -21,6 +21,7 @@ const SELECTION_MENU_ID = "syntax-parse-selection";
 const CONTEXT_BLOCK_MENU_ID = "syntax-parse-context-block";
 const CONTENT_SCRIPT_FILE = "content-script.js";
 const CONTEXT_INSTRUCTION = "请先启动学习模式，或选中文字后解析";
+const HOVERED_BLOCK_COMMAND = "parse-hovered-block";
 
 interface ConfigPort {
   getProfile(profileId: string): Promise<ModelProfile | undefined>;
@@ -720,6 +721,24 @@ export function registerServiceWorker(
         ...(prefetchDetail ? { prefetchDetail: true } : {}),
       });
     })();
+  });
+
+  chromeApi.commands?.onCommand.addListener((command, tab) => {
+    if (command !== HOVERED_BLOCK_COMMAND) return;
+    const tabId = tab?.id;
+    if (tabId === undefined) return;
+    void (async () => {
+      const documentId = activeTabs.get(tabId)?.documentId ?? generatedDocumentId(tabId);
+      await inject(tabId);
+      const profile = await dependencies.configRepository.getActiveProfile();
+      activeTabs.set(tabId, {
+        documentId,
+        status: emptyStatus("running", profile?.id),
+      });
+      await sendPageCommand(tabId, documentId, { type: "PARSE_HOVERED_BLOCK" });
+    })().catch(() => {
+      // chrome:// 等不可注入页面：与其他入口一致，静默忽略。
+    });
   });
 
   chromeApi.contextMenus?.onClicked.addListener((info, tab) => {
