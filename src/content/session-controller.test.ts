@@ -1444,6 +1444,68 @@ describe("ContentScriptRouter", () => {
     expect(start).toHaveBeenCalledTimes(2);
   });
 
+  it("消息通道中断时 send 返回可重试的 NETWORK_ERROR 响应而不是未捕获拒绝", async () => {
+    const port = { disconnect: vi.fn(), onDisconnect: { addListener: vi.fn() } };
+    const runtime = {
+      connect: vi.fn(() => port),
+      sendMessage: vi.fn(() =>
+        Promise.reject(
+          new Error(
+            "A listener indicated an asynchronous response by returning true, " +
+              "but the message channel closed before a response was received",
+          ),
+        ),
+      ),
+    };
+    const transport = new ChromeRuntimeTransport(3, "document-1", runtime);
+
+    const response = await transport.send({
+      version: 1,
+      requestId: "request-1",
+      type: "GET_SESSION_STATUS",
+      tabId: 3,
+      documentId: "document-1",
+    });
+
+    expect(response).toMatchObject({
+      type: "ERROR",
+      requestId: "request-1",
+      error: { code: "NETWORK_ERROR", retryable: true },
+    });
+  });
+
+  it("控制器处理中抛异常时 route 回错误响应，保证监听器必然回包", async () => {
+    const router = new ContentScriptRouter({
+      controllerFactory: () => ({
+        documentId: "document-1",
+        status: { state: "running" as const, discovered: 0, queued: 0, ready: 0, failed: 0 },
+        start: vi.fn(() => Promise.reject(new Error("session start failed"))),
+        pause: vi.fn(),
+        resume: vi.fn(),
+        stop: vi.fn(),
+        parseSelection: vi.fn(() => Promise.resolve(undefined)),
+        parseContextBlock: vi.fn(() => Promise.resolve(undefined)),
+        reanalyzeVisible: vi.fn(),
+        switchProfile: vi.fn(),
+      }),
+      transportFactory: () => new FakeTransport(),
+    });
+
+    const response = await router.route({
+      version: 1,
+      requestId: "start-1",
+      type: "START_SESSION",
+      tabId: 3,
+      documentId: "document-1",
+    });
+
+    expect(response).toMatchObject({
+      type: "ERROR",
+      requestId: "start-1",
+      error: { code: "NETWORK_ERROR", retryable: true },
+    });
+  });
+
   it("isSessionStatus accepts detail counters and START_SESSION forwards the flag", async () => {
     expect(
       isRuntimeResponse(

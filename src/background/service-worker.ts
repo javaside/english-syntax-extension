@@ -734,7 +734,9 @@ export function registerServiceWorker(
         return errorResponse(requestIdOf(value), "INVALID_MODEL_OUTPUT");
       }
       return route(value, sender);
-    })().then(sendResponse);
+      // 返回 true 后必须回包，否则发送方会报 "message channel closed"；
+      // route 内部已兜底，这里再兜一层防御意外拒绝。
+    })().then(sendResponse, () => sendResponse(errorResponse(requestIdOf(value), "NETWORK_ERROR")));
     return true;
   });
 

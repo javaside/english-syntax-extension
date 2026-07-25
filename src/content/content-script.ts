@@ -43,6 +43,14 @@ function errorResponse(requestId: string, error: ExtensionError): ResponseMessag
   return { version: MESSAGE_VERSION, requestId, type: "ERROR", error };
 }
 
+function channelError(requestId = "channel-error"): ResponseMessage {
+  return errorResponse(requestId, {
+    code: "NETWORK_ERROR",
+    message: "Extension message channel interrupted",
+    retryable: true,
+  });
+}
+
 function statusResponse(requestId: string, status: SessionStatus): ResponseMessage {
   return { version: MESSAGE_VERSION, requestId, type: "SESSION_STATUS", status };
 }
@@ -231,7 +239,15 @@ export class ChromeRuntimeTransport implements RuntimeTransport {
   }
 
   async send(message: RequestMessage): Promise<ResponseMessage> {
-    const response = await this.runtime.sendMessage(message);
+    let response: unknown;
+    try {
+      response = await this.runtime.sendMessage(message);
+    } catch {
+      // Service Worker 被回收或消息通道未回包即关闭（"listener indicated an
+      // asynchronous response…"）：转成可重试错误走既有失败/重试路径，
+      // 而不是让拒绝沿调用链冒成页面里的未捕获异常。
+      return channelError(message.requestId);
+    }
     if (!isRuntimeResponse(response, message.requestId)) {
       return invalidMessage(message.requestId);
     }
@@ -299,36 +315,42 @@ export class ContentScriptRouter {
     ) {
       return invalidMessage(request.requestId);
     }
-    const controller = this.controller(request.tabId, request.documentId);
-    switch (request.type) {
-      case "START_SESSION":
-        await controller.start({ prefetchDetail: request.prefetchDetail === true });
-        return statusResponse(request.requestId, controller.status);
-      case "PAUSE_SESSION":
-        controller.pause();
-        return statusResponse(request.requestId, controller.status);
-      case "STOP_SESSION":
-        controller.stop();
-        this.controllers.delete(request.documentId);
-        return statusResponse(request.requestId, controller.status);
-      case "GET_SESSION_STATUS":
-        return statusResponse(request.requestId, controller.status);
-      case "PARSE_SELECTION": {
-        const error = await controller.parseSelection(request.selectionText);
-        return error === undefined ? ack(request) : errorResponse(request.requestId, error);
+    // 处理中抛异常也必须回包：route 的调用方（onMessage 监听器）已向发送方承诺
+    // 异步响应，悬空会让 SW 侧报 "message channel closed"、页面侧留未捕获拒绝。
+    try {
+      const controller = this.controller(request.tabId, request.documentId);
+      switch (request.type) {
+        case "START_SESSION":
+          await controller.start({ prefetchDetail: request.prefetchDetail === true });
+          return statusResponse(request.requestId, controller.status);
+        case "PAUSE_SESSION":
+          controller.pause();
+          return statusResponse(request.requestId, controller.status);
+        case "STOP_SESSION":
+          controller.stop();
+          this.controllers.delete(request.documentId);
+          return statusResponse(request.requestId, controller.status);
+        case "GET_SESSION_STATUS":
+          return statusResponse(request.requestId, controller.status);
+        case "PARSE_SELECTION": {
+          const error = await controller.parseSelection(request.selectionText);
+          return error === undefined ? ack(request) : errorResponse(request.requestId, error);
+        }
+        case "PARSE_CONTEXT_BLOCK": {
+          const error = await controller.parseContextBlock();
+          return error === undefined ? ack(request) : errorResponse(request.requestId, error);
+        }
+        case "REANALYZE_VISIBLE":
+          controller.reanalyzeVisible();
+          return statusResponse(request.requestId, controller.status);
+        case "SWITCH_PROFILE":
+          controller.switchProfile(request.profileId);
+          return ack(request);
+        default:
+          return invalidMessage();
       }
-      case "PARSE_CONTEXT_BLOCK": {
-        const error = await controller.parseContextBlock();
-        return error === undefined ? ack(request) : errorResponse(request.requestId, error);
-      }
-      case "REANALYZE_VISIBLE":
-        controller.reanalyzeVisible();
-        return statusResponse(request.requestId, controller.status);
-      case "SWITCH_PROFILE":
-        controller.switchProfile(request.profileId);
-        return ack(request);
-      default:
-        return invalidMessage();
+    } catch {
+      return channelError(request.requestId);
     }
   }
 
