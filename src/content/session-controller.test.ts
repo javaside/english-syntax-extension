@@ -271,6 +271,11 @@ function harness(
   return { controller, transport, viewport, learningBlocks, replacements, transitions };
 }
 
+/** 真实 nearestSafeBlock 用模块级 principal root 缓存，harness 换 DOM 后须重算。 */
+function refreshPrincipalRoot(): void {
+  scanDocument(document);
+}
+
 async function startAndEmit(subject: Harness): Promise<void> {
   await subject.controller.start();
   subject.viewport.emit();
@@ -1119,6 +1124,77 @@ describe("SessionController", () => {
 
     expect(transport.reconnects).toBe(1);
     vi.useRealTimers();
+  });
+
+  it("快捷键冷启动：轻量启动只解析悬停段落，不做全页扫描", async () => {
+    const scan = vi.fn(() => {
+      throw new Error("lite start must not scan the document");
+    });
+    const subject = harness("Readers understand complex sentences.", new FakeTransport(), {
+      scan,
+      hoverTarget: () => document.querySelector("p"),
+    });
+    refreshPrincipalRoot();
+
+    const error = await subject.controller.parseHoveredBlock();
+
+    expect(error).toBeUndefined();
+    expect(scan).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(subject.controller.status.ready).toBe(1));
+    expect(subject.controller.status.state).toBe("running");
+    expect(subject.replacements[0]!.shows).toBe(1);
+    // 抛错的 scan 会经后续测试的 DOM 变更漏进 flushMutations，停会话断开观察器。
+    subject.controller.stop();
+  });
+
+  it("轻量会话后完整 start() 补做全页扫描，且只补一次（升级路径）", async () => {
+    const scan = vi.fn(() => [
+      {
+        id: "scanned-block",
+        element: document.querySelector("p")!,
+        text: "Readers understand complex sentences.",
+      },
+    ]);
+    const subject = harness("Readers understand complex sentences.", new FakeTransport(), {
+      scan,
+      hoverTarget: () => document.querySelector("p"),
+    });
+    refreshPrincipalRoot();
+
+    await subject.controller.parseHoveredBlock();
+    expect(scan).not.toHaveBeenCalled();
+
+    await subject.controller.start();
+
+    expect(scan).toHaveBeenCalledOnce();
+    await subject.controller.start();
+    expect(scan).toHaveBeenCalledOnce(); // scanned 标记：完整 start 只扫一次
+  });
+
+  it("悬停处没有安全段落时返回明确错误", async () => {
+    const subject = harness("Readers understand complex sentences.", new FakeTransport(), {
+      hoverTarget: () => null,
+    });
+
+    const error = await subject.controller.parseHoveredBlock();
+
+    expect(error).toMatchObject({
+      code: "UNSAFE_CONTENT_BLOCK",
+      message: "未找到可解析的段落，请将鼠标悬停在正文段落上",
+    });
+  });
+
+  it("同一段落重复触发快捷键幂等：不重复注册句子", async () => {
+    const subject = harness("Readers understand complex sentences.", new FakeTransport(), {
+      hoverTarget: () => document.querySelector("p"),
+    });
+    refreshPrincipalRoot();
+
+    await subject.controller.parseHoveredBlock();
+    await vi.waitFor(() => expect(subject.controller.status.ready).toBe(1));
+    await subject.controller.parseHoveredBlock();
+
+    expect(subject.controller.status.discovered).toBe(1);
   });
 });
 

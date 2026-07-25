@@ -102,11 +102,18 @@ export interface SessionControllerOptions {
   onTransition?: (sentenceId: string, phase: SentencePhase) => void;
   onStatus?: (status: SessionStatus) => void;
   requestFeedback?: (sentenceId: string) => string | null | Promise<string | null>;
+  /** 测试注入：返回当前鼠标悬停的最深元素；默认查询 CSS :hover 链。 */
+  hoverTarget?: () => Element | null;
 }
 
 const CONTEXT_ERROR: ExtensionError = {
   code: "UNSAFE_CONTENT_BLOCK",
   message: "请先启动学习模式，或选中文字后解析",
+  retryable: false,
+};
+const HOVER_ERROR: ExtensionError = {
+  code: "UNSAFE_CONTENT_BLOCK",
+  message: "未找到可解析的段落，请将鼠标悬停在正文段落上",
   retryable: false,
 };
 const TOO_LONG_MESSAGE = "SENTENCE_TOO_LONG：句子超过 2,000 个规范化字符";
@@ -166,9 +173,17 @@ export class SessionController {
   private mutationTimer?: ReturnType<typeof setTimeout>;
   private removeDisconnectListener?: () => void;
   private selectedProfileId?: string;
+  private scanned = false;
+  private readonly hoverTarget: () => Element | null;
 
   constructor(private readonly options: SessionControllerOptions) {
     this.document = options.document ?? document;
+    this.hoverTarget =
+      options.hoverTarget ??
+      (() => {
+        const chain = this.document.querySelectorAll(":hover");
+        return chain.length > 0 ? (chain[chain.length - 1] ?? null) : null;
+      });
     this.scan = options.scan ?? scanDocument;
     this.sentenceIdFactory = options.createSentenceId ?? createSentenceId;
     this.now = options.now ?? performance.now.bind(performance);
@@ -207,10 +222,22 @@ export class SessionController {
     };
   }
 
-  async start(options?: { prefetchDetail?: boolean }): Promise<void> {
-    if (this.state === "running") return;
+  async start(options?: { prefetchDetail?: boolean; scan?: boolean }): Promise<void> {
+    const wantScan = options?.scan !== false;
+    if (this.state === "running") {
+      // 轻量会话（快捷键冷启动）后用户点图标：补做全页扫描升级为完整会话。
+      if (wantScan) {
+        await this.performScan();
+        this.emitStatus();
+      }
+      return;
+    }
     if (this.state === "paused") {
       this.resume();
+      if (wantScan) {
+        await this.performScan();
+        this.emitStatus();
+      }
       return;
     }
     this.state = "running";
@@ -228,10 +255,16 @@ export class SessionController {
     this.removeDisconnectListener = this.options.transport.onDisconnect?.(
       this.handleTransportDisconnect,
     );
+    if (wantScan) await this.performScan();
+    this.emitStatus();
+  }
+
+  private async performScan(): Promise<void> {
+    if (this.scanned) return;
+    this.scanned = true;
     const candidates = this.scan(this.document);
     await this.registerCandidates(candidates);
     this.viewport.observe(candidates);
-    this.emitStatus();
   }
 
   pause(): void {
@@ -254,6 +287,7 @@ export class SessionController {
   stop(): void {
     if (this.state === "stopped") return;
     this.state = "stopped";
+    this.scanned = false;
     this.operationVersion += 1;
     this.options.transport.cancelDocument(this.documentId);
     this.prefetcher = undefined;
@@ -303,6 +337,16 @@ export class SessionController {
     if (this.state === "stopped" || this.contextTarget === null) return CONTEXT_ERROR;
     const candidate = nearestSafeBlock(this.contextTarget);
     if (candidate === null) return CONTEXT_ERROR;
+    if (!this.blocks.has(candidate.id)) await this.registerCandidates([candidate]);
+    this.queueVisibleBlock(candidate.id, true);
+    return undefined;
+  }
+
+  async parseHoveredBlock(): Promise<ExtensionError | undefined> {
+    // 快捷键可作为页面冷启动入口：轻量启动，不做全页扫描。
+    if (this.state === "stopped") await this.start({ scan: false });
+    const candidate = nearestSafeBlock(this.hoverTarget());
+    if (candidate === null) return HOVER_ERROR;
     if (!this.blocks.has(candidate.id)) await this.registerCandidates([candidate]);
     this.queueVisibleBlock(candidate.id, true);
     return undefined;
