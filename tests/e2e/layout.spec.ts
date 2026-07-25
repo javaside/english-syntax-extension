@@ -127,4 +127,24 @@ test("紧凑布局：短句共行、无孤行标点、译文不撑卡、详解�
   });
   expect(englishTops.length).toBeGreaterThanOrEqual(4);
   expect(new Set(englishTops).size).toBe(1);
+
+  // (f) 长译文铺开：宽卡（英文很宽）里带 translation-wide 的译文铺满卡宽，
+  // 不再以 16em 窄列居中折行；卡宽仍由英文决定，不被译文撑大。
+  // 类的应用阈值由单测覆盖，这里注入类只验证 CSS 几何。
+  const wideSpread = await page.evaluate(() => {
+    const host = [...document.querySelectorAll("[data-syntax-learning-block]")][0]!;
+    const card = host.shadowRoot!.querySelector(".component")!;
+    const english = card.querySelector(".english")!;
+    const translation = card.querySelector(".translation")!;
+    english.textContent = "to address the challenge of incorporating relevant data into prompts";
+    translation.textContent = "为了解决将相关数据纳入提示以获取准确AI模型响应的挑战";
+    translation.classList.add("translation-wide");
+    return {
+      cardWidth: Math.round(card.getBoundingClientRect().width),
+      translationWidth: Math.round(translation.getBoundingClientRect().width),
+    };
+  });
+  // 旧 CSS（16em 封顶）下译文宽 ≤206px，铺开后应与卡同宽且远超 16em。
+  expect(wideSpread.cardWidth).toBeGreaterThan(300);
+  expect(wideSpread.translationWidth).toBeGreaterThanOrEqual(wideSpread.cardWidth - 6);
 });

@@ -204,6 +204,63 @@ describe("SyntaxLearningBlock", () => {
     expect(sentenceElement.querySelectorAll(":scope > .punctuation")).toHaveLength(1);
   });
 
+  it("超过 16 字的译文加 translation-wide 类铺满卡宽，短译文不加", () => {
+    const element = block();
+    document.body.append(element.host);
+    const wide = "这是一段超过十六个汉字长度阈值的中文译文示例";
+
+    element.renderCore(sentence, tokens, {
+      ...analysis,
+      components: [
+        { ...analysis.components[0]!, translation: wide },
+        analysis.components[1]!,
+        analysis.components[2]!,
+      ],
+    });
+
+    const root = element.host.shadowRoot!;
+    const translations = [...root.querySelectorAll<HTMLElement>(".translation")];
+    expect(translations.map((translation) => translation.className)).toEqual([
+      "translation translation-wide",
+      "translation",
+      "translation",
+    ]);
+  });
+
+  it("详解标注译文按同一阈值加 translation-wide 类", () => {
+    const element = block();
+    document.body.append(element.host);
+    element.renderCore(sentence, tokens, analysis);
+    element.setDetailLoading("sentence-1", { startToken: 0, endToken: 0 });
+
+    element.renderDetail({
+      sentenceId: "sentence-1",
+      focus: { startToken: 0, endToken: 0 },
+      structures: [
+        {
+          startToken: 0,
+          endToken: 1,
+          role: "主语",
+          explanation: "长译文",
+          translation: "这是一段超过十六个汉字长度阈值的中文译文示例",
+        },
+        { startToken: 2, endToken: 2, role: "宾语", explanation: "短译文", translation: "书籍" },
+      ],
+      grammarPoints: [],
+      explanation: "整体讲解",
+      modelProfileId: "profile-1",
+    });
+
+    const root = element.host.shadowRoot!;
+    const annotationTranslations = [
+      ...root.querySelectorAll<HTMLElement>(".annotation-translation"),
+    ];
+    expect(annotationTranslations.map((translation) => translation.className)).toEqual([
+      "annotation-translation translation-wide",
+      "annotation-translation",
+    ]);
+  });
+
   it("keeps script-like model strings as inert text", () => {
     const element = block();
     document.body.append(element.host);

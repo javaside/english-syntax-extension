@@ -120,6 +120,16 @@ const STYLES = `
   max-inline-size: 16em;
 }
 
+/* 超过 16 字的译文：不参与卡片内涵宽度（inline-size: 0），展示时铺满卡宽、
+   下限 16em——宽卡里译文不再以 16em 窄列折行。语义等价于 max(100%, 16em)，
+   但 Chrome 在内涵尺寸阶段无法解析该表达式里的百分比，只能渲染期按长度分流；
+   短译文保持上方 16em 封顶（对短文本是无操作），避免把窄卡强撑到 16em。 */
+.translation-wide {
+  inline-size: 0;
+  min-inline-size: max(100%, 16em);
+  max-inline-size: none;
+}
+
 .punctuation {
   white-space: normal;
   border-bottom: 0;
@@ -234,6 +244,17 @@ function createElement<K extends keyof HTMLElementTagNameMap>(
   }
   if (text !== undefined) {
     element.textContent = text;
+  }
+  return element;
+}
+
+// 16em 封顶按译文字号约等于 16 个汉字；超过则改用铺开模式（见 .translation-wide）。
+const WIDE_TRANSLATION_MIN_CHARS = 17;
+
+function translationElement(className: string, text: string): HTMLSpanElement {
+  const element = createElement("span", className, text);
+  if ([...text].length >= WIDE_TRANSLATION_MIN_CHARS) {
+    element.classList.add("translation-wide");
   }
   return element;
 }
@@ -438,7 +459,7 @@ export class SyntaxLearningBlock {
         }
       }
 
-      const translation = createElement("span", "translation", component.translation);
+      const translation = translationElement("translation", component.translation);
       componentElement.append(role, english, translation);
       componentElement.addEventListener("click", () => {
         // A second click on the component whose explanation is already open
@@ -541,7 +562,7 @@ export class SyntaxLearningBlock {
         );
         // 第三行译文与正文同构；旧缓存/模型缺省时退回两行标注。
         if (structure.translation !== undefined && structure.translation.trim().length > 0) {
-          annotation.append(createElement("span", "annotation-translation", structure.translation));
+          annotation.append(translationElement("annotation-translation", structure.translation));
         }
         annotations.append(annotation);
       }
