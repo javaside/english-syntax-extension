@@ -1581,6 +1581,7 @@ describe("ContentScriptRouter", () => {
       stop: vi.fn(),
       parseSelection: vi.fn(() => Promise.resolve(undefined)),
       parseContextBlock: vi.fn(() => Promise.resolve(undefined)),
+      parseHoveredBlock: vi.fn(() => Promise.resolve(undefined)),
       reanalyzeVisible: vi.fn(),
       switchProfile: vi.fn(),
     };
@@ -1649,6 +1650,7 @@ describe("ContentScriptRouter", () => {
         stop: vi.fn(),
         parseSelection: vi.fn(() => Promise.resolve(undefined)),
         parseContextBlock: vi.fn(() => Promise.resolve(undefined)),
+        parseHoveredBlock: vi.fn(() => Promise.resolve(undefined)),
         reanalyzeVisible: vi.fn(),
         switchProfile: vi.fn(),
       }),
@@ -1705,6 +1707,7 @@ describe("ContentScriptRouter", () => {
         stop: vi.fn(),
         parseSelection: vi.fn(() => Promise.resolve(undefined)),
         parseContextBlock: vi.fn(() => Promise.resolve(undefined)),
+        parseHoveredBlock: vi.fn(() => Promise.resolve(undefined)),
         reanalyzeVisible: vi.fn(),
         switchProfile: vi.fn(),
       }),
@@ -1736,6 +1739,7 @@ describe("ContentScriptRouter", () => {
         stop: vi.fn(),
         parseSelection: vi.fn(() => Promise.resolve(undefined)),
         parseContextBlock: vi.fn(() => Promise.resolve(undefined)),
+        parseHoveredBlock: vi.fn(() => Promise.resolve(undefined)),
         reanalyzeVisible,
         switchProfile: vi.fn(),
       }),
@@ -1752,5 +1756,74 @@ describe("ContentScriptRouter", () => {
 
     expect(reanalyzeVisible).toHaveBeenCalledOnce();
     expect(response).toMatchObject({ type: "SESSION_STATUS" });
+  });
+
+  it("PARSE_HOVERED_BLOCK 路由到控制器并回 ACK", async () => {
+    const parseHoveredBlock = vi.fn(() => Promise.resolve(undefined));
+    const router = new ContentScriptRouter({
+      controllerFactory: () => ({
+        documentId: "document-1",
+        status: { state: "running" as const, discovered: 0, queued: 0, ready: 0, failed: 0 },
+        start: vi.fn(() => Promise.resolve()),
+        pause: vi.fn(),
+        resume: vi.fn(),
+        stop: vi.fn(),
+        parseSelection: vi.fn(() => Promise.resolve(undefined)),
+        parseContextBlock: vi.fn(() => Promise.resolve(undefined)),
+        parseHoveredBlock,
+        reanalyzeVisible: vi.fn(),
+        switchProfile: vi.fn(),
+      }),
+      transportFactory: () => new FakeTransport(),
+    });
+
+    const response = await router.route({
+      version: 1,
+      requestId: "hover-1",
+      type: "PARSE_HOVERED_BLOCK",
+      tabId: 3,
+      documentId: "document-1",
+    });
+
+    expect(parseHoveredBlock).toHaveBeenCalledOnce();
+    expect(response).toMatchObject({ type: "ACK", acknowledgedType: "PARSE_HOVERED_BLOCK" });
+  });
+
+  it("PARSE_HOVERED_BLOCK 控制器报错时回 ERROR 响应", async () => {
+    const router = new ContentScriptRouter({
+      controllerFactory: () => ({
+        documentId: "document-1",
+        status: { state: "running" as const, discovered: 0, queued: 0, ready: 0, failed: 0 },
+        start: vi.fn(() => Promise.resolve()),
+        pause: vi.fn(),
+        resume: vi.fn(),
+        stop: vi.fn(),
+        parseSelection: vi.fn(() => Promise.resolve(undefined)),
+        parseContextBlock: vi.fn(() => Promise.resolve(undefined)),
+        parseHoveredBlock: vi.fn(() =>
+          Promise.resolve({
+            code: "UNSAFE_CONTENT_BLOCK" as const,
+            message: "未找到可解析的段落，请将鼠标悬停在正文段落上",
+            retryable: false,
+          }),
+        ),
+        reanalyzeVisible: vi.fn(),
+        switchProfile: vi.fn(),
+      }),
+      transportFactory: () => new FakeTransport(),
+    });
+
+    const response = await router.route({
+      version: 1,
+      requestId: "hover-2",
+      type: "PARSE_HOVERED_BLOCK",
+      tabId: 3,
+      documentId: "document-1",
+    });
+
+    expect(response).toMatchObject({
+      type: "ERROR",
+      error: { code: "UNSAFE_CONTENT_BLOCK" },
+    });
   });
 });

@@ -16,6 +16,7 @@ interface RoutedController {
   stop(): void;
   parseSelection(selectionText: string): Promise<ExtensionError | undefined>;
   parseContextBlock(): Promise<ExtensionError | undefined>;
+  parseHoveredBlock(): Promise<ExtensionError | undefined>;
   reanalyzeVisible(): void;
   switchProfile(profileId: string): void;
 }
@@ -344,6 +345,10 @@ export class ContentScriptRouter {
           const error = await controller.parseContextBlock();
           return error === undefined ? ack(request) : errorResponse(request.requestId, error);
         }
+        case "PARSE_HOVERED_BLOCK": {
+          const error = await controller.parseHoveredBlock();
+          return error === undefined ? ack(request) : errorResponse(request.requestId, error);
+        }
         case "REANALYZE_VISIBLE":
           controller.reanalyzeVisible();
           return statusResponse(request.requestId, controller.status);
@@ -398,7 +403,19 @@ function installContentScript(): void {
     },
   });
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-    void router.route(message).then(sendResponse);
+    void router.route(message).then((response) => {
+      // 快捷键没有右键菜单那样的"已触发"反馈，且 SW 会丢弃页面命令的响应，
+      // 未命中段落只能在页面里就地提示。
+      if (
+        typeof message === "object" &&
+        message !== null &&
+        (message as { type?: unknown }).type === "PARSE_HOVERED_BLOCK" &&
+        response.type === "ERROR"
+      ) {
+        pill.notice(response.error.message);
+      }
+      sendResponse(response);
+    });
     return true;
   });
   document.documentElement.dataset.syntaxLearningExtension = "ready";

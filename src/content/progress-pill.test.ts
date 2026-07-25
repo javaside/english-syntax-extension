@@ -129,4 +129,14 @@ describe("SyntaxProgressPill", () => {
     pill.update(status({ state: "running", discovered: 2, ready: 2 }));
     expect(label()).toBe("✓ 解析完成");
   });
+
+  it("notice 短暂展示提示文本后淡出", () => {
+    pill.notice("未找到可解析的段落，请将鼠标悬停在正文段落上");
+
+    expect(pill.host.isConnected).toBe(true);
+    expect(label()).toBe("未找到可解析的段落，请将鼠标悬停在正文段落上");
+    expect(spinnerVisible()).toBe(false);
+    vi.advanceTimersByTime(2600);
+    expect(pill.host.isConnected).toBe(false);
+  });
 });

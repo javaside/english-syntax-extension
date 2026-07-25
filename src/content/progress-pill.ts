@@ -112,6 +112,13 @@ export class SyntaxProgressPill {
     this.#render(`句法解析中 ${done}/${status.discovered}`, true);
   }
 
+  /** 与会话状态无关的一次性提示（如快捷键未命中段落），短暂展示后淡出。 */
+  notice(text: string): void {
+    this.#cancelFade();
+    this.#render(text, false);
+    this.#fadeTimer = setTimeout(() => this.remove(), FADE_DELAY_MS);
+  }
+
   remove(): void {
     this.#cancelFade();
     this.host.remove();
