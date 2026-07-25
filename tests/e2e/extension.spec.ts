@@ -889,3 +889,27 @@ test("enabling detail prefetch caches every component and a click needs no model
 
   await harness.dispatchFromUi(uiMessage("STOP_SESSION", { tabId, documentId }));
 });
+
+// Playwright cannot deliver a real `chrome.commands` accelerator, so this covers
+// everything after the command fires: a real `:hover` chain plus the same
+// PARSE_HOVERED_BLOCK inject-and-forward path the onCommand listener uses.
+// article.html is unusable here — its first paragraph sits in <nav>, outside the
+// principal root, and it hides paragraphs the visible-count assertion would miss.
+test("悬停段落经 PARSE_HOVERED_BLOCK 冷启动解析，其余段落保持原文", async ({ harness }) => {
+  await seedLocalProfile(harness);
+  const page = await openArticle(harness, "dynamic-article.html");
+  const tabId = await harness.tabIdFor(`${harness.pagesOrigin}/dynamic-article.html`);
+  const paragraphCount = await page.locator("p").count();
+  expect(paragraphCount).toBeGreaterThan(1);
+
+  await page.locator("#intro").hover();
+  const response = await harness.dispatchFromUi(
+    uiMessage("PARSE_HOVERED_BLOCK", { tabId, documentId: `e2e-doc-${++requestCounter}` }),
+  );
+
+  expect(response, JSON.stringify(response)).toMatchObject({ type: "ACK" });
+  await expect(learningBlocks(page)).toHaveCount(1, { timeout: 20_000 });
+  await expect(page.locator("#intro")).toBeHidden();
+  // 轻量启动不做全页扫描：其余段落原文可见。
+  await expect(page.locator("p:visible")).toHaveCount(paragraphCount - 1);
+});
