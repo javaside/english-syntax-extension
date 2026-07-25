@@ -13,8 +13,10 @@
 `STYLES` 中拆开 `.sentence, .detail-annotations` 共享的 `display: flex` 规则：
 
 - `.detail-annotations` 保持 `display: flex`；
-- `.sentence` 改为 `display: inline-flex`，并加 `vertical-align: bottom`（与文字基线流一致）、`margin-inline-end: 0.75em`（句间水平距）、`margin-block-end: 0.55em`（行间距，替代原块级堆叠的自然分隔）；
+- `.sentence` 改为 `display: inline-flex`，并加 `vertical-align: baseline`（句间按基线对齐）、`margin-inline-end: 0.75em`（句间水平距）、`margin-block-end: 0.55em`（行间距，替代原块级堆叠的自然分隔）；
 - 新增 `.sentence:has(.detail) { display: flex; }`——打开成分详解面板的句子临时回到块级独占整行，保证 `.detail`（`inline-size: 100%`）以栏宽展示；关闭详解后自动恢复共行。Chrome ≥ 120 支持 `:has()`。
+
+**卡片对齐（2026-07-25 修订）**：共享块的 `align-items` 由 `end` 改为 `baseline`。译文封顶后卡片高度不再相等（译文折两行的卡更高），`end`（底对齐）会把高卡的英文行顶上去，同一行英文高低不平；`baseline` 取每张卡首行（角色标签）的基线，角色行等高，因此卡内、跨卡、跨句的英文行必然齐平（Chrome 的 inline-grid 按钮基线导出自首个网格行内容，已实测验证）。`.sentence` 的 `vertical-align` 同步由 `bottom` 改 `baseline` 使跨句共享同一基线。句首独立标点无三行结构，不参与基线组，用 `.sentence > .punctuation { align-self: end }` 沉到行底。
 
 失败句（`.sentence-failure`）与跳过句（`.sentence-skipped`）保持块级不变。
 

@@ -108,4 +108,23 @@ test("紧凑布局：短句共行、无孤行标点、译文不撑卡、详解�
   await expect(shortHost.locator(".detail")).toHaveCount(0);
   const restoredWidth = await measureFirstSentenceWidth();
   expect(restoredWidth).toBeLessThanOrEqual(collapsedWidth + 8);
+
+  // (e) 基线对齐：给第 4 块第一张卡注入两行长译文制造高度差后，
+  // 同一视觉行里的英文行（含跨句）top 仍然齐平——不能因高卡把英文行顶上去。
+  // 加宽会把第三句挤到下一行（合法换行），因此只断言仍共行的前两句。
+  const englishTops = await page.evaluate(() => {
+    const host = [...document.querySelectorAll("[data-syntax-learning-block]")][3]!;
+    const root = host.shadowRoot!;
+    root.querySelector(".translation")!.textContent =
+      "这是一段足够长以至于必然折成两行的中文译文示例用来制造卡片高度差";
+    return [...root.querySelectorAll(".sentence")]
+      .slice(0, 2)
+      .flatMap((sentence) =>
+        [...sentence.querySelectorAll(".english")].map((english) =>
+          Math.round(english.getBoundingClientRect().top),
+        ),
+      );
+  });
+  expect(englishTops.length).toBeGreaterThanOrEqual(4);
+  expect(new Set(englishTops).size).toBe(1);
 });

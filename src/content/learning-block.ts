@@ -40,7 +40,9 @@ const STYLES = `
 .detail-annotations {
   display: flex;
   flex-wrap: wrap;
-  align-items: end;
+  /* 卡片按首行（角色标签）基线对齐：角色行等高，因此英文行必然齐平。
+     不能用 end——译文折行的高卡会把英文行顶上去（同行高低不平）。 */
+  align-items: baseline;
   column-gap: 0.5em;
   row-gap: 0.55em;
   max-inline-size: 100%;
@@ -49,9 +51,14 @@ const STYLES = `
 
 .sentence {
   display: inline-flex;
-  vertical-align: bottom;
+  vertical-align: baseline;
   margin-inline-end: 0.75em;
   margin-block-end: 0.55em;
+}
+
+/* 句首独立标点没有三行结构，不参与基线组，沉到行底与译文层持平。 */
+.sentence > .punctuation {
+  align-self: end;
 }
 
 /* 打开详解面板的句子独占整行，保证面板以栏宽展示；关闭后自动恢复共行。 */
