@@ -10,3 +10,4 @@ test-results/
 .DS_Store
 .worktrees/
 release/
+RELEASE_NOTES.md

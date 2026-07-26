@@ -38,10 +38,14 @@ jobs:
       - name: 打包扩展
         run: npm run package
 
+      # 只取本版本那一节并补上安装说明；整个 CHANGELOG 当正文会把历史版本一起贴出去
+      - name: 生成 Release 说明
+        run: node scripts/release-notes.mjs "${GITHUB_REF_NAME#v}" RELEASE_NOTES.md
+
       - name: 创建 Release
         uses: softprops/action-gh-release@v2
         with:
           files: release/*.zip
-          body_path: CHANGELOG.md
+          body_path: RELEASE_NOTES.md
           draft: true
           fail_on_unmatched_files: true
