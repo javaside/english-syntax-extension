@@ -78,6 +78,8 @@ export interface ModelProfileSeed {
   headers?: Record<string, string>;
   timeoutMs?: number;
   jsonSchemaSupport?: "unknown" | "supported" | "unsupported";
+  /** 思考模型必须置位，否则单句推理会超时。 */
+  disableReasoning?: true;
 }
 
 export interface ExtensionHarness {
@@ -154,6 +156,9 @@ export const test = base.extend<{ harness: ExtensionHarness }, WorkerScope>({
               headers: profile.headers ?? {},
               timeoutMs: profile.timeoutMs ?? 30_000,
               jsonSchemaSupport: profile.jsonSchemaSupport ?? "supported",
+              // 只在置位时写入:这里是逐字段映射，漏掉新字段会被静默丢弃，
+              // 表现为「配了却不生效」，很难查。
+              ...(profile.disableReasoning === true ? { disableReasoning: true } : {}),
             }));
             await chrome.storage.local.set({
               "profiles.v1": stored,

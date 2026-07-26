@@ -157,5 +157,6 @@ english-syntax-extension
 
 - 提问题或提建议：[Issues](https://github.com/javaside/english-syntax-extension/issues)
 - 想动手改：先看 [CONTRIBUTING.md](CONTRIBUTING.md)，尤其是「lint 基线是恰好 1 个错误」和协议三层校验那几条
+- 隐私说明：[PRIVACY.md](PRIVACY.md)——不收集任何数据，开发者收不到你的任何信息
 - 安全问题：请走 [私密报告](https://github.com/javaside/english-syntax-extension/security/advisories/new)，不要开公开 issue，详见 [SECURITY.md](SECURITY.md)
 - 参与本项目即表示你同意遵守 [行为准则](CODE_OF_CONDUCT.md)

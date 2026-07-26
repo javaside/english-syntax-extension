@@ -11,3 +11,4 @@ test-results/
 .worktrees/
 release/
 RELEASE_NOTES.md
+store-assets/

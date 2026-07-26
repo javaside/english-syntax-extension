@@ -19,6 +19,14 @@ export default tseslint.config(
     },
   },
   {
+    // page.evaluate 的回调在浏览器里执行:Image / document 是那个上下文的全局对象。
+    // 只对这个文件放行，避免把浏览器全局撒给其余 Node 脚本而放过真正的笔误。
+    files: ["scripts/generate-icons.mjs"],
+    languageOptions: {
+      globals: { Image: "readonly", document: "readonly", Buffer: "readonly" },
+    },
+  },
+  {
     // 构建脚本是纯 ESM 工具代码，不在 tsconfig 的 include 里:开着类型感知规则会直接
     // 报 "not found by the project service"。仍然吃 recommended 规则，只是不做类型检查。
     files: ["**/*.js", "**/*.mjs"],
