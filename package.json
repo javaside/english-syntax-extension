@@ -15,6 +15,7 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "lint": "eslint .",
+    "lint:baseline": "node scripts/check-lint-baseline.mjs",
     "format:check": "prettier --check ."
   },
   "devDependencies": {
