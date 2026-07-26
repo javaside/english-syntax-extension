@@ -61,12 +61,8 @@ const STYLES = `
   align-self: end;
 }
 
-/* 打开详解面板的句子独占整行，保证面板以栏宽展示；关闭后自动恢复共行。 */
-.sentence:has(.detail) {
-  display: flex;
-  margin-inline-end: 0;
-}
-
+/* 面板是句子的兄弟节点而非子节点（见 setDetailLoading）：句子无需变块级，
+   共行的邻句不会因为点开详解而被挤走。 */
 .component {
   appearance: none;
   display: inline-grid;
@@ -264,10 +260,6 @@ function translationElement(className: string, text: string): HTMLSpanElement {
     element.classList.add("translation-wide");
   }
   return element;
-}
-
-function sameFocus(left: TokenRange, right: TokenRange): boolean {
-  return left.startToken === right.startToken && left.endToken === right.endToken;
 }
 
 function eventDetail(sentenceId: string, focus: TokenRange): SyntaxFocusEventDetail {
@@ -511,35 +503,28 @@ export class SyntaxLearningBlock {
     // Find the clicked component element by matching token range.
     // For sentences that failed core analysis, no components exist in the DOM,
     // so we fall back to appending the detail panel to the sentence container.
-    const component = sentence.querySelector(
-      `.component[data-start-token="${focus.startToken}"][data-end-token="${focus.endToken}"]`,
-    );
-
     const detail = createElement("div", "detail detail-loading");
+    detail.dataset.sentenceId = sentenceId;
     detail.dataset.startToken = String(focus.startToken);
     detail.dataset.endToken = String(focus.endToken);
     detail.setAttribute("aria-live", "polite");
     detail.setAttribute("aria-busy", "true");
     detail.textContent = "正在加载详细解析…";
 
-    if (component !== null) {
-      // 面板独占一行，插在点击成分正后方会把同一行后续成分挤到面板下面；
-      // 因此插到点击成分所在“视觉行”的行尾：跳过与点击成分矩形垂直重叠
-      // （同一行）的后续兄弟节点。行判定依赖真实布局，零尺寸环境（单测）
-      // 自然退化为紧跟点击成分。
-      const clickedBottom = component.getBoundingClientRect().bottom;
-      let anchor: Element = component;
-      for (let next = anchor.nextElementSibling; next !== null; next = next.nextElementSibling) {
-        if (next.getBoundingClientRect().top >= clickedBottom) {
-          break;
-        }
-        anchor = next;
-      }
-      anchor.after(detail);
-    } else {
-      // Fallback: append to sentence container (for failed sentences or edge cases).
-      sentence.append(detail);
+    // 面板放在句子**外面**（与句子同级），而不是作为句子的 flex 子项。
+    // 放在里面时，句子必须变成块级才能让面板拿到栏宽，于是原本与它共行的短句
+    // 会被挤到下一行——点开详解把上方的排版整个搅动一遍。
+    //
+    // 插入点取「点击句所在视觉行的最后一句」之后：面板落在整行下方，行内一句
+    // 都不移动。行判定依赖真实布局，零尺寸环境（单测）自然退化为紧跟该句。
+    const sentenceBottom = sentence.getBoundingClientRect().bottom;
+    let anchor: Element = sentence;
+    for (let next = anchor.nextElementSibling; next !== null; next = next.nextElementSibling) {
+      if (!next.classList.contains("sentence")) break;
+      if (next.getBoundingClientRect().top >= sentenceBottom) break;
+      anchor = next;
     }
+    anchor.after(detail);
   }
 
   closeDetails(): void {
@@ -753,16 +738,12 @@ export class SyntaxLearningBlock {
   }
 
   #findDetail(sentenceId: string, focus: TokenRange): HTMLElement | null {
-    const sentence = this.#sentence(sentenceId);
-    if (sentence === null) {
-      return null;
-    }
-    for (const candidate of sentence.querySelectorAll<HTMLElement>(".detail")) {
-      const candidateFocus = {
-        startToken: Number(candidate.dataset.startToken),
-        endToken: Number(candidate.dataset.endToken),
-      };
-      if (sameFocus(candidateFocus, focus)) {
+    for (const candidate of this.#sentences.querySelectorAll<HTMLElement>(".detail")) {
+      if (
+        candidate.dataset.sentenceId === sentenceId &&
+        Number(candidate.dataset.startToken) === focus.startToken &&
+        Number(candidate.dataset.endToken) === focus.endToken
+      ) {
         return candidate;
       }
     }
@@ -787,6 +768,11 @@ export class SyntaxLearningBlock {
   #placeSentenceSection(sentenceId: string, section: HTMLElement): void {
     const existing = this.#sentence(sentenceId);
     if (existing !== null) {
+      // 面板不再是句子的子节点，replaceWith 不会顺带清掉它:留着会变成一张
+      // 指向旧成分区间的孤儿面板。
+      for (const detail of this.#sentences.querySelectorAll<HTMLElement>(".detail")) {
+        if (detail.dataset.sentenceId === sentenceId) detail.remove();
+      }
       existing.replaceWith(section);
       return;
     }

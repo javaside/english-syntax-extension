@@ -67,6 +67,8 @@ export interface SessionStatus {
   failed: number;
   /** 纯缓存会话中未命中而保持原文的句数。 */
   skipped?: number;
+  /** 无可用模型配置:本次只查缓存，没有任何模型请求。影响进度提示的措辞。 */
+  cacheOnly?: true;
   /** 详解预载:已就绪句子的成分总数(仅预载开启的会话出现)。 */
   detailTotal?: number;
   /** 详解预载:已确认入缓存的成分数(含预载前已命中缓存的)。 */

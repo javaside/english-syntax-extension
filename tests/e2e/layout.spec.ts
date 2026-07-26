@@ -18,7 +18,7 @@ async function startSession(harness: ExtensionHarness, path: string): Promise<Pa
   return page;
 }
 
-test("紧凑布局：短句共行、无孤行标点、译文不撑卡、详解独占整行", async ({ harness }) => {
+test("紧凑布局：短句共行、无孤行标点、译文不撑卡、详解以栏宽独占整行", async ({ harness }) => {
   await harness.seedProfiles(
     [
       {
@@ -102,8 +102,21 @@ test("紧凑布局：短句共行、无孤行标点、译文不撑卡、详解�
   const collapsedWidth = await measureFirstSentenceWidth();
   await shortHost.locator(".component").first().click();
   await expect(shortHost.locator(".detail")).toBeVisible();
-  const expandedWidth = await measureFirstSentenceWidth();
-  expect(expandedWidth).toBeGreaterThan(collapsedWidth * 1.5);
+  // 面板以栏宽展示——但靠的是面板自己是块级兄弟节点，不是把句子撑宽。
+  // 旧实现让句子变块级来腾宽度，代价是共行的邻句被挤到下一行。
+  const opened = await page.evaluate(() => {
+    const host = [...document.querySelectorAll("[data-syntax-learning-block]")][3]!;
+    const root = host.shadowRoot!;
+    const width = (selector: string) =>
+      Math.round(root.querySelector(selector)!.getBoundingClientRect().width);
+    return {
+      sentence: width(".sentence"),
+      detail: width(".detail"),
+      column: width(".sentences"),
+    };
+  });
+  expect(opened.detail).toBeGreaterThan(opened.column * 0.9);
+  expect(opened.sentence).toBeLessThanOrEqual(collapsedWidth + 8);
   await shortHost.locator(".component").first().click();
   await expect(shortHost.locator(".detail")).toHaveCount(0);
   const restoredWidth = await measureFirstSentenceWidth();
@@ -147,4 +160,44 @@ test("紧凑布局：短句共行、无孤行标点、译文不撑卡、详解�
   // 旧 CSS（16em 封顶）下译文宽 ≤206px，铺开后应与卡同宽且远超 16em。
   expect(wideSpread.cardWidth).toBeGreaterThan(300);
   expect(wideSpread.translationWidth).toBeGreaterThanOrEqual(wideSpread.cardWidth - 6);
+});
+
+test("打开详解不挤动同行的相邻句子", async ({ harness }) => {
+  await harness.seedProfiles(
+    [{ id: "p", name: "fake", baseUrl: harness.fakeModel.baseUrl, apiKey: "k", model: "m" }],
+    "p",
+  );
+  const page = await harness.context.newPage();
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await page.goto(`${harness.pagesOrigin}/wrap-probe.html`);
+  const tabId = await harness.tabIdFor(`${harness.pagesOrigin}/wrap-probe.html`);
+  await harness.dispatchFromUi({
+    version: 1,
+    requestId: "layout:wrap",
+    type: "START_SESSION",
+    tabId,
+    documentId: "layout-wrap",
+  });
+
+  const componentTops = () =>
+    page.evaluate(() => {
+      const root = document.querySelector("[data-syntax-learning-block]")?.shadowRoot;
+      const tops = [...(root?.querySelectorAll(".component") ?? [])].map((c) =>
+        Math.round(c.getBoundingClientRect().top),
+      );
+      return [...new Set(tops)].sort((a, b) => a - b);
+    });
+
+  await expect(page.locator("[data-syntax-learning-block] .component").first()).toBeVisible();
+  await page.waitForTimeout(200);
+  const before = await componentTops();
+  // 这段被切成两句且共行:前置条件不成立的话这条用例就测不到东西
+  expect(before).toHaveLength(1);
+
+  await page.locator("[data-syntax-learning-block] .component").first().click();
+  await expect(page.locator(".detail")).toHaveCount(1);
+  await page.waitForTimeout(200);
+
+  // 点开详解只应在下方插入面板，不该让同行的另一句掉到下一行
+  expect(await componentTops()).toEqual(before);
 });

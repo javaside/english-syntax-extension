@@ -139,4 +139,56 @@ describe("SyntaxProgressPill", () => {
     vi.advanceTimersByTime(2600);
     expect(pill.host.isConnected).toBe(false);
   });
+
+  it("纯缓存会话说「查询缓存」而不是「句法解析」", () => {
+    const pill = new SyntaxProgressPill(document);
+
+    pill.update({
+      state: "running",
+      discovered: 6,
+      queued: 3,
+      ready: 1,
+      failed: 0,
+      skipped: 2,
+      cacheOnly: true,
+    });
+
+    expect(pill.host.shadowRoot!.textContent).toContain("查询缓存中");
+    expect(pill.host.shadowRoot!.textContent).not.toContain("句法解析");
+  });
+
+  // 漏掉 skipped 时，纯缓存模式下计数会一直停在 0——看起来像卡死了。
+  it("进度计数把 skipped 算作已完成", () => {
+    const pill = new SyntaxProgressPill(document);
+
+    pill.update({
+      state: "running",
+      discovered: 6,
+      queued: 1,
+      ready: 1,
+      failed: 1,
+      skipped: 3,
+      cacheOnly: true,
+    });
+
+    expect(pill.host.shadowRoot!.textContent).toContain("5/6");
+  });
+
+  it("纯缓存会话完成时报命中数，不说「解析完成」", () => {
+    const pill = new SyntaxProgressPill(document);
+
+    pill.update({
+      state: "running",
+      discovered: 4,
+      queued: 0,
+      ready: 1,
+      failed: 0,
+      skipped: 3,
+      cacheOnly: true,
+    });
+
+    const text = pill.host.shadowRoot!.textContent ?? "";
+    expect(text).toContain("缓存命中 1/4");
+    expect(text).not.toContain("解析完成");
+  });
 });

@@ -82,7 +82,10 @@ export class SyntaxProgressPill {
       return;
     }
     this.#cancelFade();
-    const done = status.ready + status.failed;
+    // 必须计入 skipped:纯缓存模式下未命中句都是 skipped，漏掉它计数会一直不动。
+    const done = status.ready + status.failed + (status.skipped ?? 0);
+    // 没有模型配置时这一趟只查缓存，说"解析中"是误导。
+    const verb = status.cacheOnly === true ? "查询缓存" : "句法解析";
     if (status.state === "paused") {
       this.#render(`⏸ 已暂停 ${done}/${status.discovered}`, false);
       return;
@@ -95,21 +98,23 @@ export class SyntaxProgressPill {
       }
       const detailFailed = status.detailFailed ?? 0;
       this.#render(
-        status.failed > 0
-          ? `✓ 完成，${status.failed} 句失败`
-          : detailFailed > 0
-            ? `✓ 解析完成（${detailFailed} 个详解失败）`
-            : "✓ 解析完成",
+        status.cacheOnly === true
+          ? `✓ 缓存命中 ${status.ready}/${status.discovered}`
+          : status.failed > 0
+            ? `✓ 完成，${status.failed} 句失败`
+            : detailFailed > 0
+              ? `✓ 解析完成（${detailFailed} 个详解失败）`
+              : "✓ 解析完成",
         false,
       );
       this.#fadeTimer = setTimeout(() => this.remove(), FADE_DELAY_MS);
       return;
     }
     if (status.discovered === 0) {
-      this.#render("句法解析中…", true);
+      this.#render(`${verb}中…`, true);
       return;
     }
-    this.#render(`句法解析中 ${done}/${status.discovered}`, true);
+    this.#render(`${verb}中 ${done}/${status.discovered}`, true);
   }
 
   /** 与会话状态无关的一次性提示（如快捷键未命中段落），短暂展示后淡出。 */

@@ -204,7 +204,7 @@ test("clicking a component lazily loads its detail once and re-clicking toggles 
   expect(harness.fakeModel.recordedOfKind("detail")).toHaveLength(1);
 });
 
-test("a detail panel opens inside its own sentence, moves on other clicks, and restore leaves no artifacts", async ({
+test("a detail panel anchors under its own sentence, moves on other clicks, and restore leaves no artifacts", async ({
   harness,
 }) => {
   await seedLocalProfile(harness);
@@ -223,20 +223,32 @@ test("a detail panel opens inside its own sentence, moves on other clicks, and r
 
   const placement = await pairBlock.evaluate((host) => {
     const root = host.shadowRoot!;
-    const detail = root.querySelector(".detail")!;
-    const sentences = [...root.querySelectorAll(".sentence")];
+    const detail = root.querySelector<HTMLElement>(".detail")!;
+    const sentences = [...root.querySelectorAll<HTMLElement>(".sentence")];
+    const owner = sentences.find((s) => s.dataset.sentenceId === detail.dataset.sentenceId)!;
+    const ownerRect = owner.getBoundingClientRect();
+    const detailRect = detail.getBoundingClientRect();
+    // 面板之后的句子，必须都来自比宿主句更靠下的视觉行——面板不能跳过同层的句子。
+    const afterPanel = sentences.filter(
+      (s) => detail.compareDocumentPosition(s) & Node.DOCUMENT_POSITION_FOLLOWING,
+    );
     return {
       detailCount: root.querySelectorAll(".detail").length,
-      ownerIsFirstSentence: detail.closest(".sentence") === sentences[0],
-      detailBottom: detail.getBoundingClientRect().bottom,
-      secondSentenceTop: sentences[1]!.getBoundingClientRect().top,
+      ownerIsFirstSentence: owner === sentences[0],
+      insideSentence: detail.closest(".sentence") !== null,
+      belowOwner: detailRect.top >= ownerRect.bottom - 1,
+      laterSentencesAreOnLowerLines: afterPanel.every(
+        (s) => s.getBoundingClientRect().top >= ownerRect.bottom - 1,
+      ),
     };
   });
   expect(placement.detailCount).toBe(1);
   expect(placement.ownerIsFirstSentence).toBe(true);
-  // The explanation sits directly under its own sentence, never below the
-  // sentences that follow it.
-  expect(placement.detailBottom).toBeLessThanOrEqual(placement.secondSentenceTop + 0.5);
+  // 面板是句子的兄弟节点而非子节点:放在句子里会逼句子变成块级，把共行的邻句挤走。
+  expect(placement.insideSentence).toBe(false);
+  // 面板紧贴宿主句下方，且不会跳到来自同一视觉行之后的句子后面。
+  expect(placement.belowOwner).toBe(true);
+  expect(placement.laterSentencesAreOnLowerLines).toBe(true);
 
   // Clicking a component of the second sentence moves the single open panel.
   await pairBlock.locator(".sentence").nth(1).locator(".component").first().click();
@@ -246,13 +258,16 @@ test("a detail panel opens inside its own sentence, moves on other clicks, and r
         const root = host.shadowRoot!;
         const details = [...root.querySelectorAll(".detail")];
         const sentences = [...root.querySelectorAll(".sentence")];
+        const detail = details[0] as HTMLElement | undefined;
         return {
           count: details.length,
-          inSecondSentence: details[0] === undefined ? false : sentences[1]!.contains(details[0]),
+          // 归属由 data-sentence-id 表达:面板是句子的兄弟节点，不再被句子包含。
+          ownsSecondSentence:
+            detail?.dataset.sentenceId === (sentences[1] as HTMLElement).dataset.sentenceId,
         };
       }),
     )
-    .toEqual({ count: 1, inSecondSentence: true });
+    .toEqual({ count: 1, ownsSecondSentence: true });
 
   // Clicking a component in another block closes this block's panel too:
   // only one explanation stays open across the whole page.

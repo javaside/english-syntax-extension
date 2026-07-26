@@ -607,7 +607,7 @@ describe("SyntaxLearningBlock", () => {
     document.removeEventListener("syntax-detail-request", listener);
   });
 
-  it("keeps only the newest detail panel open and anchors it inside its own sentence", () => {
+  it("keeps only the newest detail panel open and anchors it to its own sentence", () => {
     const element = block();
     document.body.append(element.host);
     element.setExpectedSentenceIds(["sentence-1", "sentence-2"]);
@@ -622,8 +622,11 @@ describe("SyntaxLearningBlock", () => {
     const details = root.querySelectorAll<HTMLElement>(".detail");
     expect(details).toHaveLength(1);
     expect(details[0]!.dataset.startToken).toBe("1");
-    expect(details[0]!.closest("[data-sentence-id]")).toBe(
-      root.querySelector("[data-sentence-id='sentence-2']"),
+    // 面板是句子的兄弟节点而非子节点，归属改由 data-sentence-id 表达；
+    // 位置上紧随所属句子（该句所在视觉行的末尾）。
+    expect(details[0]!.dataset.sentenceId).toBe("sentence-2");
+    expect(root.querySelector("[data-sentence-id='sentence-2']")!.nextElementSibling).toBe(
+      details[0],
     );
   });
 
@@ -1036,5 +1039,21 @@ describe("SyntaxLearningBlock", () => {
         ["annotation-english", "books"],
       ],
     ]);
+  });
+
+  it("把详解面板放在句子外面，避免句子被迫变成块级而挤动同行邻句", () => {
+    const element = block();
+    document.body.append(element.host);
+    element.renderCore(sentence, tokens, analysis);
+
+    element.setDetailLoading("sentence-1", { startToken: 0, endToken: 0 });
+
+    const root = element.host.shadowRoot!;
+    const section = root.querySelector('[data-sentence-id="sentence-1"]')!;
+    const detail = root.querySelector(".detail")!;
+    expect(section.contains(detail)).toBe(false);
+    expect(detail.parentElement).toBe(section.parentElement);
+    // 仍然要能按句子与区间找回来（renderDetail 与再次点击关闭都依赖这个）
+    expect(detail.getAttribute("data-sentence-id")).toBe("sentence-1");
   });
 });

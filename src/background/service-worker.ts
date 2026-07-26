@@ -177,6 +177,7 @@ function isStatus(value: unknown): value is SessionStatus {
     ) &&
     (status.skipped === undefined ||
       (Number.isSafeInteger(status.skipped) && status.skipped >= 0)) &&
+    (status.cacheOnly === undefined || status.cacheOnly === true) &&
     (status.detailTotal === undefined ||
       (Number.isSafeInteger(status.detailTotal) && status.detailTotal >= 0)) &&
     (status.detailReady === undefined ||

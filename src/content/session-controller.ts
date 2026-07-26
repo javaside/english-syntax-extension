@@ -186,6 +186,7 @@ export class SessionController {
   private removeStreamListener?: () => void;
   private selectedProfileId?: string;
   private scanned = false;
+  private cacheOnly = false;
   private readonly hoverTarget: () => Element | null;
 
   constructor(private readonly options: SessionControllerOptions) {
@@ -220,6 +221,7 @@ export class SessionController {
       ready: records.filter(({ phase }) => phase === "ready").length,
       failed: records.filter(({ phase }) => phase === "failed").length,
       skipped: records.filter(({ phase }) => phase === "skipped").length,
+      ...(this.cacheOnly ? { cacheOnly: true as const } : {}),
       ...(this.selectedProfileId === undefined ? {} : { profileId: this.selectedProfileId }),
       ...(this.prefetcher === undefined
         ? {}
@@ -309,6 +311,7 @@ export class SessionController {
     if (this.state === "stopped") return;
     this.state = "stopped";
     this.scanned = false;
+    this.cacheOnly = false;
     this.operationVersion += 1;
     this.options.transport.cancelDocument(this.documentId);
     this.prefetcher = undefined;
@@ -611,6 +614,7 @@ export class SessionController {
     for (const sentence of outgoing) this.transition(sentence, "validating");
     const analyses = response.type === "CORE_RESULT" ? response.analyses : [];
     const cacheOnly = response.type === "CORE_RESULT" && response.cacheOnly === true;
+    if (cacheOnly) this.cacheOnly = true;
     for (const sentence of outgoing) {
       const analysis = analyses.find(({ sentenceId }) => sentenceId === sentence.input.sentenceId);
       if (analysis === undefined) {

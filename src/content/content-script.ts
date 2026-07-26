@@ -138,6 +138,7 @@ function isSessionStatus(value: unknown): value is SessionStatus {
     isSafeInteger(value.queued) &&
     isSafeInteger(value.ready) &&
     isSafeInteger(value.failed) &&
+    (value.cacheOnly === undefined || value.cacheOnly === true) &&
     (value.detailTotal === undefined || isSafeInteger(value.detailTotal)) &&
     (value.detailReady === undefined || isSafeInteger(value.detailReady)) &&
     (value.detailFailed === undefined || isSafeInteger(value.detailFailed)) &&
