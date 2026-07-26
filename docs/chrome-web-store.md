@@ -10,7 +10,7 @@
 
 ## 上传物
 
-`release/english-syntax-extension-v1.0.1.zip`（188 KB，19 个文件，已排除 source map）。
+`release/english-syntax-extension-v1.0.2.zip`（188 KB，19 个文件，已排除 source map）。
 
 用 `npm run package` 生成。zip 里必须是**扩展根目录直接展开**，不能多套一层文件夹——当前打包脚本已保证这点，并会校验 `manifest.json` 与 `content-script.js` 在包内。
 
