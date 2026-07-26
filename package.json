@@ -2,6 +2,25 @@
   "name": "english-syntax-extension",
   "version": "1.0.0",
   "private": true,
+  "description": "Chrome MV3 扩展：把网页英文段落替换为逐句句法拆解卡片，由任意 OpenAI 兼容模型驱动。",
+  "license": "MIT",
+  "author": "Xinghua Zhou",
+  "homepage": "https://github.com/javaside/english-syntax-extension#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/javaside/english-syntax-extension.git"
+  },
+  "bugs": {
+    "url": "https://github.com/javaside/english-syntax-extension/issues"
+  },
+  "keywords": [
+    "chrome-extension",
+    "manifest-v3",
+    "english",
+    "syntax",
+    "llm",
+    "ollama"
+  ],
   "type": "module",
   "engines": {
     "node": ">=22.20.0"

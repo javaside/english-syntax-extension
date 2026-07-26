@@ -1,0 +1,81 @@
+name: 问题报告
+description: 扩展没有按预期工作
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **先看这里可能省你一小时**：如果症状是「整页一条译文都没有」，而你用的是本地思考模型
+        （Qwen3、DeepSeek-R1 等），请先到选项页勾选「关闭模型思考」。这类模型默认会为
+        单句生成上万字符推理，必然超时。
+
+  - type: input
+    id: version
+    attributes:
+      label: 扩展版本
+      description: 见 chrome://extensions 或 manifest 的 version
+      placeholder: "1.0.0"
+    validations:
+      required: true
+
+  - type: input
+    id: chrome
+    attributes:
+      label: Chrome 版本
+      placeholder: "chrome://version 第一行"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: endpoint
+    attributes:
+      label: 模型端点类型
+      options:
+        - 本地 Ollama
+        - DeepSeek
+        - OpenAI
+        - 其他 OpenAI 兼容服务
+        - 无（纯缓存模式）
+    validations:
+      required: true
+
+  - type: input
+    id: model
+    attributes:
+      label: 模型名
+      placeholder: "qwen3.5:9b / deepseek-chat / ..."
+
+  - type: textarea
+    id: error
+    attributes:
+      label: 卡片上显示的错误码
+      description: |
+        解析失败的卡片会显示形如 `REQUEST_TIMEOUT：...` 的红色文字。
+        **这一条是最有效的定位信息**，能直接指出是哪一层出的问题，请务必贴上。
+      render: text
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 尽量给出一个公开可访问的页面地址
+      placeholder: |
+        1. 打开 ...
+        2. 点击扩展图标
+        3. 观察到 ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望的结果
+
+  - type: textarea
+    id: console
+    attributes:
+      label: 控制台日志（可选）
+      description: |
+        Service Worker 日志见 chrome://extensions →「检查视图 service worker」。
+        **贴之前请确认里面没有你的 API Key。**
+      render: shell

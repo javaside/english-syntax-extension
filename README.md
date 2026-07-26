@@ -1,5 +1,11 @@
 # English Syntax Learning —— Chrome 英语句法学习扩展
 
+[![CI](https://github.com/javaside/english-syntax-extension/actions/workflows/ci.yml/badge.svg)](https://github.com/javaside/english-syntax-extension/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/javaside/english-syntax-extension)](https://github.com/javaside/english-syntax-extension/releases/latest)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+**[⬇️ 下载最新版](https://github.com/javaside/english-syntax-extension/releases/latest)** · [更新日志](CHANGELOG.md) · [参与贡献](CONTRIBUTING.md)
+
 一个 Manifest V3 Chrome 扩展：把网页中的英文段落替换为**逐句句法拆解卡片**（成分角色 / 英文原文 / 成分中文释义三行对照），点击任意成分再懒加载该成分的详细语法解析。分析由你自己配置的 OpenAI 兼容模型完成（DeepSeek、本地 Ollama、任何兼容 `/chat/completions` 的服务）。
 
 ## 环境要求
@@ -146,3 +152,10 @@ english-syntax-extension
 ## 许可证
 
 [MIT](LICENSE)
+
+## 参与与反馈
+
+- 提问题或提建议：[Issues](https://github.com/javaside/english-syntax-extension/issues)
+- 想动手改：先看 [CONTRIBUTING.md](CONTRIBUTING.md)，尤其是「lint 基线是恰好 1 个错误」和协议三层校验那几条
+- 安全问题：请走 [私密报告](https://github.com/javaside/english-syntax-extension/security/advisories/new)，不要开公开 issue，详见 [SECURITY.md](SECURITY.md)
+- 参与本项目即表示你同意遵守 [行为准则](CODE_OF_CONDUCT.md)

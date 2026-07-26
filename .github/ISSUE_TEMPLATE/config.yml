@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 安全漏洞
+    url: https://github.com/javaside/english-syntax-extension/security/advisories/new
+    about: 请勿用公开 issue 报告安全问题，走私密报告渠道。
+  - name: 使用与配置问题
+    url: https://github.com/javaside/english-syntax-extension/blob/main/README.md#故障排查
+    about: 先看 README 的故障排查小节，多数配置问题在那里有答案。
