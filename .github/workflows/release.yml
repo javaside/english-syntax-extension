@@ -1,0 +1,47 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+# 只需要写 Release，不给多余权限
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # tag 与 manifest 版本对不上就别发——发出去再改比现在失败贵得多
+      - name: 校验 tag 与 manifest 版本一致
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          MANIFEST=$(node -p "require('./manifest.json').version")
+          PKG=$(node -p "require('./package.json').version")
+          echo "tag=$TAG manifest=$MANIFEST package=$PKG"
+          if [ "$TAG" != "$MANIFEST" ] || [ "$TAG" != "$PKG" ]; then
+            echo "版本不一致，终止发布"
+            exit 1
+          fi
+
+      - run: npm test
+
+      - name: 打包扩展
+        run: npm run package
+
+      - name: 创建 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*.zip
+          body_path: CHANGELOG.md
+          draft: true
+          fail_on_unmatched_files: true

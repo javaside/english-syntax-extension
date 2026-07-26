@@ -8,7 +8,17 @@
 - npm ≥ 10
 - Chrome / Chromium ≥ 120（Manifest V3、`storage.setAccessLevel`）
 
-## 安装与构建
+## 安装
+
+普通使用推荐直接下载打包好的版本，不需要 Node 环境：
+
+1. 到 [Releases](https://github.com/javaside/english-syntax-extension/releases) 下载最新的 `english-syntax-extension-vX.Y.Z.zip`；
+2. 解压到一个**不会被删掉**的目录（Chrome 每次启动都会从这个目录读取）；
+3. 按下面「加载到 Chrome」的步骤选择该目录。
+
+各版本的变化见 [CHANGELOG.md](CHANGELOG.md)。
+
+## 从源码构建
 
 ```bash
 git clone https://github.com/javaside/english-syntax-extension.git
@@ -21,8 +31,10 @@ npm run build   # 类型检查 + 产出 dist/
 
 1. 打开 `chrome://extensions`；
 2. 右上角开启「开发者模式」；
-3. 点「加载已解压的扩展程序」，选择本项目的 `dist/` 目录；
+3. 点「加载已解压的扩展程序」，选择解压出的目录（从源码构建则选 `dist/`）；
 4. 工具栏出现扩展图标即加载成功。
+
+> Chrome 会周期性提示「禁用开发者模式扩展」，选择保留即可——本扩展只通过 GitHub Release 分发，未上架应用商店。
 
 ## 配置模型（选项页）
 
