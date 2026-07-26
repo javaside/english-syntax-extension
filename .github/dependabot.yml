@@ -5,6 +5,14 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    ignore:
+      # TypeScript 7 已发布，但 typescript-eslint 至今(8.65.0)的 peer 仍是
+      # >=4.8.4 <6.1.0，两者无法共存——带上 TS 大版本的分组 PR 会在 npm ci 阶段
+      # 直接失败，每周红一次 CI。
+      # 解除条件:typescript-eslint 放宽 peer 到支持 TS 7 之后，删掉这条即可。
+      # 不影响 6.x 的小版本与补丁更新。
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
     groups:
       # 开发依赖一起升，免得每周开一堆只改 lock 的 PR
       dev-dependencies:
