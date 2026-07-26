@@ -52,6 +52,8 @@ export interface OptionsDependencies {
   importCacheFile: (text: string) => Promise<ImportReport>;
   getPrefetchDetail: () => Promise<boolean>;
   setPrefetchDetail: (enabled: boolean) => Promise<void>;
+  getStreamRendering: () => Promise<boolean>;
+  setStreamRendering: (enabled: boolean) => Promise<void>;
 }
 
 function element<K extends keyof HTMLElementTagNameMap>(
@@ -173,6 +175,16 @@ export async function createOptionsPage(
   apiKeyInput.placeholder = API_KEY_REQUIRED_HINT;
   const modelInput = input("options-model");
   modelInput.required = true;
+  const reasoningLabel = element("label", "options-page__label");
+  const reasoningInput = element("input");
+  reasoningInput.type = "checkbox";
+  reasoningInput.dataset.disableReasoning = "";
+  reasoningLabel.append(reasoningInput, document.createTextNode(" 关闭模型思考"));
+  const reasoningHint = element(
+    "p",
+    "options-page__hint",
+    '思考模型（Qwen3 等）会为一句话生成上万字符推理，实测单句 246 秒、必然超时；勾选后请求带 reasoning_effort: "none"，同一句降到 7 秒。OpenAI 官方 API 不接受该取值，只在本地或兼容端点上勾选。',
+  );
   const timeoutInput = input("options-timeout", "number");
   timeoutInput.required = true;
   timeoutInput.min = "5";
@@ -209,6 +221,8 @@ export async function createOptionsPage(
     field("API Key", apiKeyInput),
     field("Model", modelInput),
     field("请求超时（秒）", timeoutInput),
+    reasoningLabel,
+    reasoningHint,
     headersFieldset,
     actions,
     result,
@@ -244,6 +258,16 @@ export async function createOptionsPage(
     "options-page__hint",
     "开启后每句解析完成即自动生成全部成分详解并入缓存（可随导出分享）；token 消耗数倍于仅核心解析。下次点击「开始学习」生效。",
   );
+  const streamLabel = element("label", "options-page__label");
+  const streamInput = element("input");
+  streamInput.type = "checkbox";
+  streamInput.dataset.streamRendering = "";
+  streamLabel.append(streamInput, document.createTextNode(" 流式渲染"));
+  const streamHint = element(
+    "p",
+    "options-page__hint",
+    "开启后段落边生成边显示，成分逐个出现，不必等整段解析完。少数 OpenAI 兼容端点不接受流式请求（尤其与 JSON Schema 同用），扩展会自动改回整段返回；若显示异常可在此关闭。",
+  );
   const clearButton = element("button", "options-page__danger", "清空缓存");
   clearButton.type = "button";
   clearButton.dataset.action = "clear-cache";
@@ -268,6 +292,8 @@ export async function createOptionsPage(
     cacheHint,
     prefetchLabel,
     prefetchHint,
+    streamLabel,
+    streamHint,
     clearButton,
     exportButton,
     importButton,
@@ -332,6 +358,8 @@ export async function createOptionsPage(
       headers,
       timeoutMs: Number(timeoutInput.value) * 1000,
       jsonSchemaSupport: existing?.jsonSchemaSupport ?? "unknown",
+      ...(existing?.streamSupport === undefined ? {} : { streamSupport: existing.streamSupport }),
+      ...(reasoningInput.checked ? { disableReasoning: true as const } : {}),
     };
   };
 
@@ -389,6 +417,7 @@ export async function createOptionsPage(
       baseUrlInput.value = "";
       modelInput.value = "";
       timeoutInput.value = "45";
+      reasoningInput.checked = false;
       return;
     }
     const profile = await dependencies.getProfile(profileId);
@@ -397,6 +426,7 @@ export async function createOptionsPage(
     baseUrlInput.value = profile.baseUrl;
     modelInput.value = profile.model;
     timeoutInput.value = String(profile.timeoutMs / 1000);
+    reasoningInput.checked = profile.disableReasoning === true;
     for (const [name, value] of Object.entries(profile.headers)) addHeaderRow(name, value);
   };
 
@@ -488,6 +518,9 @@ export async function createOptionsPage(
     void dependencies.setCacheLimitMb(Number(cacheLimit.value));
     clearStatus.textContent = "缓存上限已保存，将在后台缓存下次打开时生效。";
   });
+  streamInput.addEventListener("change", () => {
+    void dependencies.setStreamRendering(streamInput.checked);
+  });
   prefetchInput.addEventListener("change", () => {
     void dependencies.setPrefetchDetail(prefetchInput.checked);
   });
@@ -561,6 +594,7 @@ export async function createOptionsPage(
   cacheStats.textContent = `${stats.entries} 条，估算占用 ${cacheSize(stats.estimatedBytes)}`;
   cacheLimit.value = String(limit);
   prefetchInput.checked = await dependencies.getPrefetchDetail();
+  streamInput.checked = await dependencies.getStreamRendering();
 }
 
 function runtimeDependencies(): OptionsDependencies {
@@ -632,6 +666,8 @@ function runtimeDependencies(): OptionsDependencies {
     importCacheFile: async (text) => importCacheFile(await openCache(), text),
     getPrefetchDetail: () => repository.getPrefetchDetail(),
     setPrefetchDetail: (enabled) => repository.setPrefetchDetail(enabled),
+    getStreamRendering: () => repository.getStreamRendering(),
+    setStreamRendering: (enabled) => repository.setStreamRendering(enabled),
   };
 }
 

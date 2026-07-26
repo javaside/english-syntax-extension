@@ -12,6 +12,34 @@ function serialize(value: unknown): string {
 }
 
 /**
+ * The model addresses Tokens by ID alone, so `start`, `end`, and
+ * `leadingWhitespace` are dead weight: pretty-printing the full Token record
+ * inflated a prompt to roughly 35x its source text (a three-letter word cost
+ * 145 characters), which paid for itself in latency on every single call.
+ * Keep the ID, the text, and the punctuation flag the coverage rule leans on —
+ * emitted without indentation, and only when the flag is actually set.
+ */
+function modelSentence(sentence: SentenceInput): Record<string, unknown> {
+  return {
+    sentenceId: sentence.sentenceId,
+    text: sentence.text,
+    tokens: sentence.tokens.map((token) => ({
+      id: token.id,
+      text: token.text,
+      ...(token.punctuation ? { punctuation: true } : {}),
+    })),
+  };
+}
+
+export function serializeSentences(sentences: readonly SentenceInput[]): string {
+  return JSON.stringify(sentences.map(modelSentence));
+}
+
+export function serializeSentence(sentence: SentenceInput): string {
+  return JSON.stringify(modelSentence(sentence));
+}
+
+/**
  * Compatibility mode sends no response_format, so the exact output envelope
  * must be spelled out in the prompt itself. A schema-free model otherwise
  * guesses the shape (e.g. a top-level array) and fails validation.
@@ -45,6 +73,7 @@ export function buildCorePrompt(sentences: readonly SentenceInput[]): string {
     "Analyze the numbered English sentences below into core grammatical components.",
     `The role field is a closed ${roles.length}-role enum: ${roles.join(", ")}.`,
     "Every component uses a closed Token interval [startToken, endToken]; both endpoints are inclusive Token IDs from the supplied sentence.",
+    'Each supplied Token is {"id","text"}; a Token is punctuation only when it carries "punctuation": true.',
     "Coverage rule: every non-punctuation Token must be covered exactly once. Components must be ordered, non-overlapping, and may include punctuation but may not contain punctuation only.",
     "Compound-sentence rule: when two or more clauses that could each stand alone as a sentence are joined by a coordinating conjunction (for, and, nor, but, or, yet, so) or a semicolon, tag each clause as one whole COORDINATE_CLAUSE whose translation is the complete Chinese translation of that clause, and tag the coordinating conjunction as its own separate CONJUNCTION component (in a comma-plus-conjunction pair, tag only the conjunction itself as CONJUNCTION).",
     "Complex-sentence rule: keep tagging a subordinate clause as one whole component with one of the five clause roles (SUBJECT_CLAUSE, OBJECT_CLAUSE, PREDICATIVE_CLAUSE, ATTRIBUTIVE_CLAUSE, ADVERBIAL_CLAUSE); never split its internal structure.",
@@ -53,7 +82,7 @@ export function buildCorePrompt(sentences: readonly SentenceInput[]): string {
     "Keep every sentenceId and every supplied Token unchanged. Return JSON only, with no Markdown or explanatory prose.",
     CORE_OUTPUT_SHAPE,
     "Numbered sentence requests:",
-    serialize(sentences),
+    serializeSentences(sentences),
   ].join("\n\n");
 }
 
@@ -68,7 +97,7 @@ export function buildRepairPrompt(
     "Return the repaired JSON only, without a Markdown fence or prose.",
     CORE_OUTPUT_SHAPE,
     "Original sentence IDs and Tokens:",
-    serialize(sentences),
+    serializeSentences(sentences),
     "Validation errors:",
     serialize(errors),
     "Invalid JSON:",
@@ -87,7 +116,7 @@ export function buildDetailPrompt(
     "Return JSON only, with no Markdown or explanatory prose.",
     DETAIL_OUTPUT_SHAPE,
     "Selected sentence:",
-    serialize(sentence),
+    serializeSentence(sentence),
     "Verified core result:",
     serialize(verifiedCore),
     "Focus range:",
@@ -106,7 +135,7 @@ export function buildSentenceDetailsPrompt(
     "Return JSON only, with no Markdown or explanatory prose.",
     SENTENCE_DETAILS_OUTPUT_SHAPE,
     "Selected sentence:",
-    serialize(sentence),
+    serializeSentence(sentence),
     "Verified core result:",
     serialize(verifiedCore),
     "Requested focus ranges:",

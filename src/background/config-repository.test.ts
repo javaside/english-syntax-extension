@@ -219,4 +219,62 @@ describe("service worker security initialization", () => {
     await expect(requestHostPermission(profile)).resolves.toBe(true);
     expect(request).toHaveBeenCalledWith({ origins: ["https://api.deepseek.com/*"] });
   });
+
+  it("round-trips a persisted streamSupport marker", async () => {
+    const storage = storageMock();
+    const repository = new ConfigRepository(storage.area);
+
+    await repository.saveProfile({ ...profile, streamSupport: "unsupported" });
+
+    await expect(repository.getProfile(profile.id)).resolves.toMatchObject({
+      streamSupport: "unsupported",
+    });
+  });
+
+  it("treats a missing streamSupport as streaming being worth trying", async () => {
+    const storage = storageMock();
+    const repository = new ConfigRepository(storage.area);
+
+    await repository.saveProfile(profile);
+
+    const stored = await repository.getProfile(profile.id);
+    expect(stored?.streamSupport).toBeUndefined();
+  });
+
+  it("rejects a streamSupport value it does not understand", async () => {
+    const repository = new ConfigRepository(storageMock().area);
+
+    await expect(
+      repository.saveProfile({
+        ...profile,
+        streamSupport: "supported" as never,
+      }),
+    ).rejects.toThrow(/streamSupport/u);
+  });
+
+  it("defaults stream rendering to on and only false turns it off", async () => {
+    const storage = storageMock();
+    const repository = new ConfigRepository(storage.area);
+
+    await expect(repository.getStreamRendering()).resolves.toBe(true);
+
+    await repository.setStreamRendering(false);
+    await expect(repository.getStreamRendering()).resolves.toBe(false);
+
+    await repository.setStreamRendering(true);
+    await expect(repository.getStreamRendering()).resolves.toBe(true);
+  });
+
+  it("round-trips the disable-reasoning flag and rejects other values", async () => {
+    const repository = new ConfigRepository(storageMock().area);
+
+    await repository.saveProfile({ ...profile, disableReasoning: true });
+    await expect(repository.getProfile(profile.id)).resolves.toMatchObject({
+      disableReasoning: true,
+    });
+
+    await expect(
+      repository.saveProfile({ ...profile, disableReasoning: false as never }),
+    ).rejects.toThrow(/disableReasoning/u);
+  });
 });

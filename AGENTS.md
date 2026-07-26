@@ -16,9 +16,17 @@ npm test && npx playwright test && npm run lint && npm run format:check && npm r
 - **协议三层校验必须同步**:新增 `ResponseMessage` 成员时,`src/shared/protocol.ts` 类型、SW 侧校验/路由、content 侧 `isRuntimeResponse` 的 switch case 三处缺一不可。content 层漏 case 会把 SW 的成功响应静默替换成 ERROR(缓存写对但计数全错,曾在真机验收才暴露)。
 - **E2E/验收断言用探针,不用墙钟**:判"是否真调了模型"用 fetch 计数/请求记录;判"预载成功"断言 `detailReady === detailTotal && detailFailed === 0`,不能只断言"结束了"。
 - **content script 读不到 chrome.storage**(TRUSTED_CONTEXTS):设置必须由 SW 在 START_SESSION 页面命令上快照下发。
+- **流式分片走端口推送,不是 sendMessage 响应**:`CORE_STREAM` 由 SW 经 `syntax-learning:<documentId>` 端口 `postMessage`,content 侧用 `isCoreStreamPush` 独立把关(`isRuntimeResponse` 的 switch 对它不适用),但"类型 / SW 侧构造 / content 侧守卫"三处同步的要求照旧。
+- **分片是未校验的模型输出**:`validateCoreBatch` 的整句覆盖率只能等完整响应,所以分片仅用于渲染——不写缓存、不改句子相位(保持 `requesting`,不计入 `ready`)。SW 侧过滤只放行 role 在枚举内、区间在 token 界内且与已发成分有序不重叠的成分,并且**必须经 `sanitizeCore` 同款脱敏**。
+- **流式用静默超时**:每收到一片就重置 `profile.timeoutMs`,总时长不设限(长响应本来就会超过单次超时)。读循环自己盯 abort 信号,不依赖 fetch 把中止传播进 body 流。
+- **思考模型必须显式关思考**:Qwen3 一类模型会为单句生成上万字符推理(实测 246 秒),远超 `timeoutMs` 的 120 秒上限,表现为整页无译文而非变慢。`ModelProfile.disableReasoning` 置位后请求带 `reasoning_effort: "none"`(同句降到 7 秒)。Ollama 只认这个开关,`think: false` 与 `chat_template_kwargs.enable_thinking` 都被兼容层忽略;**绝不能默认下发**——OpenAI 官方 API 不接受 `"none"`。
+- `ModelProfile.streamSupport` 只持久化否定态(`"unsupported"`),与 `jsonSchemaSupport` 的降级套路对称;`undefined` 表示值得尝试流式。选项页「流式渲染」开关默认开,是 provider 异常时的退路。
 - 详解缓存键 = 规范化句文本 + schema 版本 + focus 区间(与 profile/模型无关),预载与点击路径共用同一键——改任一侧的键构造必须两侧同步并用对方路径读回验证。
-- 假模型服务器按 prompt 首行前缀识别请求类型(`tests/support/fake-openai-server.ts` 的 `detectKind`),改 prompt 首行措辞会破坏 E2E。
-- 调度优先级:`user-retry(0) > detail-click(1) > visible-core(2) > prefetch-core(3) > prefetch-detail(4)`。
+- 假模型服务器按 prompt 首行前缀识别请求类型(`tests/support/fake-openai-server.ts` 的 `detectKind`),改 prompt 首行措辞会破坏 E2E。**任何"模型内容"都必须经 `writeContent` 出去**:直接 `response.end(completion(...))` 会让流式请求收到 JSON 体,客户端判定不支持流式后回落重发,依赖 fetch 计数的用例随之错乱。
+- **prompt 里的句子一律走 `serializeSentences` / `serializeSentence`**:模型只按 Token ID 定位,`start`/`end`/`leadingWhitespace` 是死重量(曾把 prompt 撑到原文的 35 倍)。新增带句子的 prompt 别再自己 `JSON.stringify(sentence, null, 2)`。
+- 调度优先级:`user-retry(0) > detail-click(1) > visible-core(2) > prefetch-core(3) > prefetch-detail(4)`。**1 请求 = 1 槽位**(`RunTask`,没有批处理、没有 `batchKey`),所以 `concurrency` 就是真实在飞的模型请求数;`backgroundConcurrency`(默认 `concurrency - 1`)给交互请求留活口,因为在跑的请求不会被抢占。同优先级内 `jumpQueue` 先出队,专供修复 pass——**不得跨优先级抬高**,否则 prefetch 的修复会插到可见段落前面。
+- 一次 core 请求最多 `MAX_SENTENCES_PER_REQUEST`(6)句,`analyzeCore` 负责切块;这个常量与调度器的 `maxSentencesPerRequest` 必须一致,超出会被直接拒成 `SENTENCE_TOO_LONG`,整段拿不到译文。
+- `ANALYZE_CORE` 的 `offscreen` 由 content 依视口判定并置位,SW 据此降为 `prefetch-core`;**用户显式发起的解析(选中/悬停/右键/重新解析)一律不置位**。
 
 ## 真机验收
 

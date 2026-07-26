@@ -9,6 +9,18 @@ export interface ModelProfile {
   headers: Record<string, string>;
   timeoutMs: number;
   jsonSchemaSupport: "unknown" | "supported" | "unsupported";
+  /**
+   * 只持久化否定态:某些 OpenAI 兼容端点不接受 stream(尤其与 response_format 同用),
+   * 探到一次就记下来别再试。undefined = 值得尝试流式。
+   */
+  streamSupport?: "unsupported";
+  /**
+   * 思考模型(Qwen3 等)会为一句话生成上万字符推理:实测单句 246 秒,远超本扩展
+   * 120 秒的超时上限,于是每句都超时、整页无译文。置位后请求体带
+   * `reasoning_effort: "none"`,同一句降到 7 秒。
+   * 只持久化肯定态,且**必须由用户显式勾选**——OpenAI 官方 API 不接受 "none"。
+   */
+  disableReasoning?: true;
 }
 
 export type PublicModelProfile = Omit<ModelProfile, "apiKey" | "headers">;
@@ -22,6 +34,7 @@ const PROFILES_KEY = "profiles.v1";
 const ACTIVE_PROFILE_ID_KEY = "activeProfileId.v1";
 const CACHE_LIMIT_MB_KEY = "cacheLimitMb.v1";
 const PREFETCH_DETAIL_KEY = "prefetchDetail.v1";
+const STREAM_RENDERING_KEY = "streamRendering.v1";
 const DEFAULT_CACHE_LIMIT_MB = 50;
 const CACHE_LIMIT_CHOICES_MB = new Set([10, 50, 100, 200]);
 const FORBIDDEN_HEADERS = new Set([
@@ -59,6 +72,12 @@ function validateProfile(profile: ModelProfile): ModelProfile {
   }
   if (!JSON_SCHEMA_SUPPORT.has(profile.jsonSchemaSupport)) {
     throw new Error("Model profile jsonSchemaSupport is invalid");
+  }
+  if (profile.streamSupport !== undefined && profile.streamSupport !== "unsupported") {
+    throw new Error("Model profile streamSupport is invalid");
+  }
+  if (profile.disableReasoning !== undefined && profile.disableReasoning !== true) {
+    throw new Error("Model profile disableReasoning is invalid");
   }
   if (
     typeof profile.headers !== "object" ||
@@ -166,5 +185,14 @@ export class ConfigRepository {
 
   async setPrefetchDetail(enabled: boolean): Promise<void> {
     await this.storage.set({ [PREFETCH_DETAIL_KEY]: enabled === true });
+  }
+
+  /** 「流式渲染」开关;默认开,只有显式存过 false 才关(provider 异常时的退路)。 */
+  async getStreamRendering(): Promise<boolean> {
+    return (await this.storage.get(STREAM_RENDERING_KEY))[STREAM_RENDERING_KEY] !== false;
+  }
+
+  async setStreamRendering(enabled: boolean): Promise<void> {
+    await this.storage.set({ [STREAM_RENDERING_KEY]: enabled === true });
   }
 }

@@ -25,7 +25,13 @@ export type RequestMessage =
   | (PageRequestBase & { type: "STOP_SESSION" })
   | (PageRequestBase & { type: "GET_SESSION_STATUS" })
   | (PageRequestBase & { type: "REANALYZE_VISIBLE" })
-  | (PageRequestBase & { type: "ANALYZE_CORE"; sentences: SentenceInput[]; bypassCache?: true })
+  | (PageRequestBase & {
+      type: "ANALYZE_CORE";
+      sentences: SentenceInput[];
+      bypassCache?: true;
+      /** 视口观察器带 100% rootMargin，会放出屏外一屏的段落：置位让 SW 降为 prefetch-core。 */
+      offscreen?: true;
+    })
   | (PageRequestBase & {
       type: "ANALYZE_DETAIL";
       sentence: SentenceInput;
@@ -82,6 +88,32 @@ export interface CacheStats {
   entries: number;
   estimatedBytes: number;
   limitBytes: number;
+}
+
+/**
+ * SW → content 的单向推送，走 content 已建立的 syntax-learning 端口而不是
+ * sendMessage 响应通道。承载的是**未经整句校验**的暂定成分:覆盖率只能在完整响应
+ * 到齐后校验，所以这只用于渲染，不写缓存、不改句子相位。
+ */
+export interface CoreStreamPush {
+  version: typeof MESSAGE_VERSION;
+  type: "CORE_STREAM";
+  documentId: string;
+  sentenceId: string;
+  components: CoreComponent[];
+}
+
+export function isCoreStreamPush(value: unknown): value is CoreStreamPush {
+  return (
+    isRecord(value) &&
+    hasOnlyKeys(value, ["version", "type", "documentId", "sentenceId", "components"]) &&
+    value.version === MESSAGE_VERSION &&
+    value.type === "CORE_STREAM" &&
+    isNonBlankString(value.documentId) &&
+    isNonBlankString(value.sentenceId) &&
+    Array.isArray(value.components) &&
+    value.components.every(isCoreComponent)
+  );
 }
 
 export type ResponseMessage =
@@ -224,9 +256,10 @@ export function isRequestMessage(value: unknown): value is RequestMessage {
       );
     case "ANALYZE_CORE":
       return (
-        hasOnlyKeys(value, [...pageOnlyKeys, "sentences", "bypassCache"]) &&
+        hasOnlyKeys(value, [...pageOnlyKeys, "sentences", "bypassCache", "offscreen"]) &&
         hasPageContext(value) &&
         (value.bypassCache === undefined || value.bypassCache === true) &&
+        (value.offscreen === undefined || value.offscreen === true) &&
         Array.isArray(value.sentences) &&
         value.sentences.every(isSentenceInput)
       );

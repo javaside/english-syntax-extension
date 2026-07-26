@@ -6,6 +6,7 @@ import { ModelRequestError } from "./openai-compatible-adapter";
 import type { ModelProfile } from "./config-repository";
 import {
   CachedAnalysisService,
+  MAX_SENTENCES_PER_REQUEST,
   type AnalysisCachePort,
   type AnalysisModelWork,
   type AnalysisScheduledRequest,
@@ -701,5 +702,303 @@ describe("analyzeSentenceDetails", () => {
 
     expect(outcome).toEqual({ succeeded: 1, failed: 1 });
     expect(scheduler.schedule.mock.calls.length).toBe(baseline + 2);
+  });
+});
+
+describe("service-built prompts reuse the compact sentence payload", () => {
+  const focus = { startToken: 1, endToken: 2 };
+
+  it("keeps token offsets out of the correction prompt", async () => {
+    const { adapter, service } = harness([{ sentences: [rawCore(sentenceOne)] }]);
+
+    await service.reanalyzeWithFeedback(
+      {
+        profile,
+        documentId: "document-1",
+        sentence: sentenceOne,
+        core: coreAnalysis(sentenceOne),
+        pageUrl: "https://reader.example/article",
+        sentenceInstanceId: "instance-1",
+        feedback: "Treat read as the predicate.",
+      },
+      new AbortController().signal,
+    );
+
+    const messages = adapter.completeJson.mock.calls[0]![1] as AnalysisModelWork["messages"];
+    expect(messages[0]!.content).not.toContain("leadingWhitespace");
+    expect(messages[0]!.content).toContain('{"id":0,"text":"Learners"}');
+  });
+
+  it("keeps token offsets out of the detail repair prompt", async () => {
+    const invalid = { ...rawDetail(focus), explanation: "" };
+    const { adapter, service } = harness([invalid, rawDetail(focus)]);
+
+    await service.analyzeDetail(
+      {
+        profile,
+        documentId: "document-1",
+        sentence: sentenceOne,
+        core: coreAnalysis(sentenceOne),
+        focus,
+      },
+      new AbortController().signal,
+    );
+
+    const messages = adapter.completeJson.mock.calls[1]![1] as AnalysisModelWork["messages"];
+    expect(messages[0]!.content).not.toContain("leadingWhitespace");
+    expect(messages[0]!.content).toContain('{"id":0,"text":"Learners"}');
+  });
+
+  it("keeps token offsets out of the sentence-details repair prompt", async () => {
+    const { adapter, service } = harness([{ details: [] }, { details: [] }]);
+
+    await service.analyzeSentenceDetails(
+      {
+        profile,
+        documentId: "document-1",
+        sentence: sentenceOne,
+        core: coreAnalysis(sentenceOne),
+      },
+      new AbortController().signal,
+    );
+
+    const messages = adapter.completeJson.mock.calls[1]![1] as AnalysisModelWork["messages"];
+    expect(messages[0]!.content).not.toContain("leadingWhitespace");
+    expect(messages[0]!.content).toContain('{"id":0,"text":"Learners"}');
+  });
+});
+
+describe("repair requests jump their own priority queue", () => {
+  it("marks the core repair as queue-jumping and leaves the first pass unmarked", async () => {
+    const { scheduler, service } = harness([
+      { sentences: [{ ...rawCore(sentenceOne), components: [] }] },
+      { sentences: [rawCore(sentenceOne)] },
+    ]);
+
+    await service.analyzeCore(coreInput(), new AbortController().signal);
+
+    const [first, repair] = scheduler.schedule.mock.calls.map(([request]) => request);
+    expect(first!.jumpQueue).toBeUndefined();
+    expect(repair!.jumpQueue).toBe(true);
+    // 优先级不得被抬高，否则 prefetch 的修复会插到可见段落之前。
+    expect(repair!.priority).toBe(first!.priority);
+  });
+
+  it("marks the sentence-details repair as queue-jumping without changing its priority", async () => {
+    const { scheduler, service } = harness([{ details: [] }, { details: [] }]);
+
+    await service.analyzeSentenceDetails(
+      {
+        profile,
+        documentId: "document-1",
+        sentence: sentenceOne,
+        core: coreAnalysis(sentenceOne),
+      },
+      new AbortController().signal,
+    );
+
+    const [first, repair] = scheduler.schedule.mock.calls.map(([request]) => request);
+    expect(first!.jumpQueue).toBeUndefined();
+    expect(repair!.jumpQueue).toBe(true);
+    expect(repair!.priority).toBe("prefetch-detail");
+  });
+});
+
+describe("blocks larger than one request", () => {
+  function numbered(index: number): SentenceInput {
+    const text = `Sentence ${index} reads.`;
+    return {
+      sentenceId: `sentence-${index}`,
+      text,
+      tokens: [
+        { id: 0, text: `Sentence`, start: 0, end: 8, leadingWhitespace: "", punctuation: false },
+        {
+          id: 1,
+          text: String(index),
+          start: 9,
+          end: 10,
+          leadingWhitespace: " ",
+          punctuation: false,
+        },
+        { id: 2, text: "reads", start: 11, end: 16, leadingWhitespace: " ", punctuation: false },
+        { id: 3, text: ".", start: 16, end: 17, leadingWhitespace: "", punctuation: true },
+      ],
+    };
+  }
+
+  function rawFor(sentence: SentenceInput) {
+    return {
+      sentenceId: sentence.sentenceId,
+      components: [
+        { startToken: 0, endToken: 1, role: "SUBJECT", translation: "主语" },
+        { startToken: 2, endToken: 3, role: "PREDICATE", translation: "谓语" },
+      ],
+    };
+  }
+
+  // 旧行为:整块 7 句作为一个请求，sentenceCount 7 撞上真实调度器的 6 句上限被拒成
+  // SENTENCE_TOO_LONG，整段没有译文。这里断言的是分块不变量本身——测试用的假调度器
+  // 不带上限，只断言"没失败"是测不出这个 bug 的。
+  it("never schedules more sentences per request than the scheduler accepts", async () => {
+    const sentences = Array.from({ length: 7 }, (_, index) => numbered(index + 1));
+    const { adapter, scheduler, service } = harness([
+      { sentences: sentences.slice(0, 6).map(rawFor) },
+      { sentences: sentences.slice(6).map(rawFor) },
+    ]);
+
+    const outcome = await service.analyzeCore(coreInput(sentences), new AbortController().signal);
+
+    const counts = scheduler.schedule.mock.calls.map(([request]) => request.sentenceCount);
+    expect(counts).toEqual([6, 1]);
+    expect(Math.max(...counts)).toBeLessThanOrEqual(MAX_SENTENCES_PER_REQUEST);
+    expect(outcome.failures).toEqual([]);
+    expect(outcome.result.map(({ sentenceId }) => sentenceId)).toEqual(
+      sentences.map(({ sentenceId }) => sentenceId),
+    );
+    expect(adapter.completeJson).toHaveBeenCalledTimes(2);
+  });
+
+  it("repairs only the chunk that failed validation", async () => {
+    const sentences = Array.from({ length: 7 }, (_, index) => numbered(index + 1));
+    const { adapter, service } = harness([
+      // 第一块首句成分为空 → 该块需要修复；第二块一次过。
+      {
+        sentences: [
+          { ...rawFor(sentences[0]!), components: [] },
+          ...sentences.slice(1, 6).map(rawFor),
+        ],
+      },
+      { sentences: sentences.slice(6).map(rawFor) },
+      { sentences: [rawFor(sentences[0]!)] },
+    ]);
+
+    const outcome = await service.analyzeCore(coreInput(sentences), new AbortController().signal);
+
+    expect(outcome.failures).toEqual([]);
+    expect(outcome.result).toHaveLength(7);
+    // 两块首轮 + 仅第一块的修复 = 3 次，而不是两块都修复的 4 次。
+    expect(adapter.completeJson).toHaveBeenCalledTimes(3);
+  });
+
+  // 分块引入的新风险:一块失败不能连坐把兄弟块已拿到的译文丢掉。
+  it("keeps a successful chunk when a sibling chunk fails", async () => {
+    const sentences = Array.from({ length: 7 }, (_, index) => numbered(index + 1));
+    const { service } = harness([
+      new ModelRequestError("AUTH_FAILED", "bad key", false),
+      { sentences: sentences.slice(6).map(rawFor) },
+    ]);
+
+    const outcome = await service.analyzeCore(coreInput(sentences), new AbortController().signal);
+
+    expect(outcome.result.map(({ sentenceId }) => sentenceId)).toEqual(["sentence-7"]);
+    expect(outcome.failures.map(({ sentenceId }) => sentenceId)).toEqual(
+      sentences.slice(0, 6).map(({ sentenceId }) => sentenceId),
+    );
+    // SW 靠 failures 里的 AUTH_FAILED 暂停 profile，这个码不能在转换中丢掉。
+    expect(outcome.failures.every(({ error }) => error.code === "AUTH_FAILED")).toBe(true);
+  });
+
+  it("still rejects when every chunk fails so the profile pause path is unchanged", async () => {
+    const { service } = harness([new ModelRequestError("AUTH_FAILED", "bad key", false)]);
+
+    await expect(
+      service.analyzeCore(coreInput([sentenceOne]), new AbortController().signal),
+    ).rejects.toMatchObject({ code: "AUTH_FAILED" });
+  });
+});
+
+describe("provisional components while a core request streams", () => {
+  function streamingHarness(
+    emit: (
+      onComponent: (streamed: { sentenceId: string; component: Record<string, unknown> }) => void,
+    ) => void,
+    final: unknown,
+  ) {
+    const cache = new MemoryCache();
+    const completeJson = vi.fn(() => Promise.resolve(final));
+    const completeJsonStreaming = vi.fn(
+      (
+        _profile: ModelProfile,
+        _messages: unknown,
+        _schema: unknown,
+        _signal: AbortSignal,
+        onComponent: (streamed: { sentenceId: string; component: Record<string, unknown> }) => void,
+      ) => {
+        emit(onComponent);
+        return Promise.resolve(final);
+      },
+    );
+    const service = new CachedAnalysisService({
+      cache,
+      adapter: { completeJson, completeJsonStreaming },
+      scheduler: new DedupeScheduler(),
+      now: () => 42,
+    });
+    const streamed: Array<[string, number]> = [];
+    return {
+      service,
+      completeJsonStreaming,
+      streamed,
+      sink: (sentenceId: string, components: readonly { startToken: number }[]) =>
+        streamed.push([sentenceId, components.length]),
+    };
+  }
+
+  const valid = { startToken: 0, endToken: 0, role: "SUBJECT", translation: "主语" };
+  const second = { startToken: 1, endToken: 2, role: "PREDICATE", translation: "谓语" };
+
+  it("accumulates accepted components and reports the growing list", async () => {
+    const subject = streamingHarness(
+      (onComponent) => {
+        onComponent({ sentenceId: sentenceOne.sentenceId, component: valid });
+        onComponent({ sentenceId: sentenceOne.sentenceId, component: second });
+      },
+      { sentences: [rawCore(sentenceOne)] },
+    );
+
+    await subject.service.analyzeCore(
+      { ...coreInput(), onStreamedComponent: subject.sink },
+      new AbortController().signal,
+    );
+
+    expect(subject.completeJsonStreaming).toHaveBeenCalledTimes(1);
+    expect(subject.streamed).toEqual([
+      [sentenceOne.sentenceId, 1],
+      [sentenceOne.sentenceId, 2],
+    ]);
+  });
+
+  it("drops components the renderer would reject instead of forwarding raw model output", async () => {
+    const subject = streamingHarness(
+      (onComponent) => {
+        const id = sentenceOne.sentenceId;
+        onComponent({ sentenceId: id, component: { ...valid, role: "NOT_A_ROLE" } });
+        onComponent({ sentenceId: id, component: { ...valid, endToken: 99 } });
+        onComponent({ sentenceId: id, component: valid });
+        // 与已接受成分重叠：渲染层要求有序不重叠。
+        onComponent({ sentenceId: id, component: { ...second, startToken: 0 } });
+        onComponent({ sentenceId: id, component: second });
+      },
+      { sentences: [rawCore(sentenceOne)] },
+    );
+
+    await subject.service.analyzeCore(
+      { ...coreInput(), onStreamedComponent: subject.sink },
+      new AbortController().signal,
+    );
+
+    // 只有第 3、5 个成分合格，且是累积上报。
+    expect(subject.streamed).toEqual([
+      [sentenceOne.sentenceId, 1],
+      [sentenceOne.sentenceId, 2],
+    ]);
+  });
+
+  it("stays on the buffered path when no sink is supplied", async () => {
+    const subject = streamingHarness(() => undefined, { sentences: [rawCore(sentenceOne)] });
+
+    await subject.service.analyzeCore(coreInput(), new AbortController().signal);
+
+    expect(subject.completeJsonStreaming).not.toHaveBeenCalled();
   });
 });

@@ -1,8 +1,13 @@
 import type { ExtensionError } from "../shared/errors";
 import { ERROR_CODES } from "../shared/errors";
 import { GrammarRole } from "../shared/grammar";
-import { isRequestMessage } from "../shared/protocol";
-import type { RequestMessage, ResponseMessage, SessionStatus } from "../shared/protocol";
+import { isCoreStreamPush, isRequestMessage } from "../shared/protocol";
+import type {
+  CoreStreamPush,
+  RequestMessage,
+  ResponseMessage,
+  SessionStatus,
+} from "../shared/protocol";
 import { MESSAGE_VERSION } from "../shared/versions";
 import { SyntaxProgressPill } from "./progress-pill";
 import { SessionController } from "./session-controller";
@@ -201,6 +206,7 @@ export function isRuntimeResponse(value: unknown, requestId: string): value is R
 
 interface RuntimeWatchdogPort {
   onDisconnect: { addListener(listener: () => void): void };
+  onMessage: { addListener(listener: (message: unknown) => void): void };
   disconnect(): void;
 }
 
@@ -215,6 +221,9 @@ function chromeRuntimeApi(): ContentRuntimeApi {
       const port = chrome.runtime.connect(connectInfo);
       return {
         disconnect: () => port.disconnect(),
+        onMessage: {
+          addListener: (listener) => port.onMessage.addListener(listener),
+        },
         onDisconnect: {
           addListener: (listener) =>
             port.onDisconnect.addListener(() => {
@@ -233,6 +242,7 @@ function chromeRuntimeApi(): ContentRuntimeApi {
 export class ChromeRuntimeTransport implements RuntimeTransport {
   private requestCounter = 0;
   private readonly disconnectHandlers = new Set<() => void>();
+  private readonly streamHandlers = new Set<(push: CoreStreamPush) => void>();
   private watchdog?: RuntimeWatchdogPort;
 
   constructor(
@@ -275,6 +285,15 @@ export class ChromeRuntimeTransport implements RuntimeTransport {
     return () => this.disconnectHandlers.delete(handler);
   }
 
+  /**
+   * 流式分片走的是端口推送，不是 sendMessage 的响应，所以 isRuntimeResponse 那套
+   * switch 不适用——这里用 isCoreStreamPush 单独把关。
+   */
+  onStream(handler: (push: CoreStreamPush) => void): () => void {
+    this.streamHandlers.add(handler);
+    return () => this.streamHandlers.delete(handler);
+  }
+
   reconnect(): void {
     this.connectWatchdog();
   }
@@ -283,12 +302,17 @@ export class ChromeRuntimeTransport implements RuntimeTransport {
     const watchdog = this.watchdog;
     this.watchdog = undefined;
     this.disconnectHandlers.clear();
+    this.streamHandlers.clear();
     watchdog?.disconnect();
   }
 
   private connectWatchdog(): void {
     const watchdog = this.runtime.connect({ name: `syntax-learning:${this.documentId}` });
     this.watchdog = watchdog;
+    watchdog.onMessage.addListener((message) => {
+      if (!isCoreStreamPush(message) || message.documentId !== this.documentId) return;
+      for (const handler of this.streamHandlers) handler(message);
+    });
     watchdog.onDisconnect.addListener(() => {
       if (this.watchdog !== watchdog) return;
       this.watchdog = undefined;

@@ -7,9 +7,14 @@ import type {
   SessionStatus,
 } from "../shared/protocol";
 import type { ModelProfile } from "./config-repository";
-import type { AnalysisService } from "./analysis-service";
+import type { AnalysisModelWork, AnalysisService } from "./analysis-service";
 import { ModelRequestError } from "./openai-compatible-adapter";
-import { registerServiceWorker, type ServiceWorkerDependencies } from "./service-worker";
+import {
+  createModelRequestScheduler,
+  createProfileCapabilityWriters,
+  registerServiceWorker,
+  type ServiceWorkerDependencies,
+} from "./service-worker";
 
 function event<T extends (...args: never[]) => unknown>() {
   const listeners: T[] = [];
@@ -134,6 +139,7 @@ function dependencies(
         return Promise.resolve();
       }),
       getPrefetchDetail: vi.fn(() => Promise.resolve(prefetchDetail)),
+      getStreamRendering: vi.fn(() => Promise.resolve(true)),
     },
     analysisService,
     scheduler: { cancelDocument: vi.fn() },
@@ -1244,5 +1250,188 @@ describe("detail prefetch", () => {
         error: { code: "INVALID_MODEL_OUTPUT" },
       });
     }
+  });
+});
+
+describe("model request scheduler wiring", () => {
+  function modelWork(): AnalysisModelWork {
+    return {
+      profile: profiles[0]!,
+      messages: [{ role: "user", content: "prompt" }],
+      schema: { name: "core_analysis", schema: {} },
+      requestedAt: 0,
+      run: () => Promise.resolve({}),
+    };
+  }
+
+  it("keeps four model requests in flight instead of the scheduler default of two", async () => {
+    const releases: Array<() => void> = [];
+    const runTask = vi.fn(async () => {
+      await new Promise<void>((resolve) => releases.push(resolve));
+      return {};
+    });
+    const drain = (): void => {
+      while (releases.length > 0) releases.shift()!();
+    };
+    const scheduler = createModelRequestScheduler(runTask);
+
+    const pending = Array.from({ length: 5 }, (_, index) =>
+      scheduler.schedule({
+        cacheKey: `key-${index}`,
+        documentId: "document-1",
+        priority: "visible-core",
+        sentenceCount: 1,
+        input: modelWork(),
+      }),
+    );
+
+    await vi.waitFor(() => expect(runTask).toHaveBeenCalledTimes(4));
+    expect(runTask).toHaveBeenCalledTimes(4);
+
+    drain();
+    await vi.waitFor(() => expect(runTask).toHaveBeenCalledTimes(5));
+    drain();
+    await expect(Promise.all(pending)).resolves.toHaveLength(5);
+  });
+});
+
+describe("core request priority", () => {
+  it("routes offscreen blocks to prefetch-core and visible blocks to visible-core", async () => {
+    const analyzeCore = vi.fn<AnalysisService["analyzeCore"]>(() =>
+      Promise.resolve({ result: [], failures: [], cacheHit: false }),
+    );
+    const subject = chromeMock();
+    registerServiceWorker(dependencies({ analyzeCore }), subject.api);
+    const listener = subject.events.runtime.onMessage.listeners[0]!;
+
+    await dispatch(listener, pageRequest({ type: "ANALYZE_CORE", sentences: [sentence] }));
+    await dispatch(
+      listener,
+      pageRequest({ type: "ANALYZE_CORE", sentences: [sentence], offscreen: true }),
+    );
+
+    expect(analyzeCore.mock.calls[0]![0].priority).toBe("visible-core");
+    expect(analyzeCore.mock.calls[1]![0].priority).toBe("prefetch-core");
+  });
+});
+
+describe("provisional core stream push", () => {
+  it("posts filtered, redacted components to the document's port while analysis streams", async () => {
+    const analyzeCore = vi.fn<AnalysisService["analyzeCore"]>((input) => {
+      input.onStreamedComponent?.(sentence.sentenceId, [
+        {
+          startToken: 0,
+          endToken: 0,
+          role: GrammarRole.SUBJECT,
+          translation: "密钥 SECRET-A 与 HEADER-A 混入",
+        },
+      ]);
+      return Promise.resolve({ result: [], failures: [], cacheHit: false });
+    });
+    const subject = chromeMock();
+    registerServiceWorker(dependencies({ analyzeCore }), subject.api);
+
+    const onDisconnect = event<() => void>();
+    const postMessage = vi.fn();
+    subject.events.runtime.onConnect.listeners[0]!({
+      name: "syntax-learning:document-1",
+      sender: { tab: { id: 7 } as chrome.tabs.Tab },
+      onDisconnect,
+      postMessage,
+    } as unknown as chrome.runtime.Port);
+
+    await dispatch(
+      subject.events.runtime.onMessage.listeners[0]!,
+      pageRequest({ type: "ANALYZE_CORE", sentences: [sentence] }),
+    );
+
+    expect(postMessage).toHaveBeenCalledTimes(1);
+    const push = postMessage.mock.calls[0]![0] as {
+      type: string;
+      sentenceId: string;
+      components: Array<{ translation: string }>;
+    };
+    expect(push.type).toBe("CORE_STREAM");
+    expect(push.sentenceId).toBe(sentence.sentenceId);
+    // 分片绝不能绕过脱敏。
+    expect(push.components[0]!.translation).toBe("密钥 [redacted] 与 [redacted] 混入");
+  });
+
+  it("stops streaming to a document whose port has disconnected", async () => {
+    const analyzeCore = vi.fn<AnalysisService["analyzeCore"]>((input) => {
+      input.onStreamedComponent?.(sentence.sentenceId, []);
+      return Promise.resolve({ result: [], failures: [], cacheHit: false });
+    });
+    const subject = chromeMock();
+    registerServiceWorker(dependencies({ analyzeCore }), subject.api);
+
+    const onDisconnect = event<() => void>();
+    const postMessage = vi.fn();
+    subject.events.runtime.onConnect.listeners[0]!({
+      name: "syntax-learning:document-1",
+      sender: { tab: { id: 7 } as chrome.tabs.Tab },
+      onDisconnect,
+      postMessage,
+    } as unknown as chrome.runtime.Port);
+    onDisconnect.listeners[0]!();
+
+    await dispatch(
+      subject.events.runtime.onMessage.listeners[0]!,
+      pageRequest({ type: "ANALYZE_CORE", sentences: [sentence] }),
+    );
+
+    expect(postMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe("profile capability writers", () => {
+  function repositoryStub() {
+    const stored: ModelProfile = { ...profiles[0]! };
+    return {
+      stored,
+      port: {
+        getProfile: vi.fn((id: string) =>
+          Promise.resolve(id === stored.id ? { ...stored } : undefined),
+        ),
+        saveProfile: vi.fn((profile: ModelProfile) => {
+          Object.assign(stored, profile);
+          return Promise.resolve();
+        }),
+      },
+    };
+  }
+
+  it("persists a discovered json-schema downgrade", async () => {
+    const repository = repositoryStub();
+
+    await createProfileCapabilityWriters(repository.port).persistJsonSchemaSupport(
+      repository.stored.id,
+      "unsupported",
+    );
+
+    expect(repository.stored.jsonSchemaSupport).toBe("unsupported");
+  });
+
+  // 漏接这个的后果:端点每拒绝一次流式就白费一趟 400，且永远不会被记住。
+  it("persists a discovered streaming downgrade", async () => {
+    const repository = repositoryStub();
+
+    await createProfileCapabilityWriters(repository.port).persistStreamSupport(
+      repository.stored.id,
+      "unsupported",
+    );
+
+    expect(repository.stored.streamSupport).toBe("unsupported");
+  });
+
+  it("ignores a capability write for a profile that no longer exists", async () => {
+    const repository = repositoryStub();
+
+    await createProfileCapabilityWriters(repository.port).persistStreamSupport(
+      "deleted-profile",
+      "unsupported",
+    );
+
+    expect(repository.port.saveProfile).not.toHaveBeenCalled();
   });
 });

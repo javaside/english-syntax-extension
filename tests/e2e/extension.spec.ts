@@ -913,3 +913,41 @@ test("悬停段落经 PARSE_HOVERED_BLOCK 冷启动解析，其余段落保持�
   // 轻量启动不做全页扫描：其余段落原文可见。
   await expect(page.locator("p:visible")).toHaveCount(paragraphCount - 1);
 });
+
+test("段落在流式响应收尾前就显示已生成的成分", async ({ harness }) => {
+  await seedLocalProfile(harness);
+  // 挂住 [DONE]:请求仍在飞，页面必须已经有成分。用探针而非墙钟判断中间态。
+  const release = harness.fakeModel.holdStreamBeforeEnd();
+
+  const { page } = await startSession(harness, "article.html");
+
+  await expect(learningBlocks(page).first().locator(".component .role").first()).toBeVisible();
+  const beforeEnd = await learningBlocks(page).first().locator(".component").count();
+  expect(beforeEnd).toBeGreaterThan(0);
+
+  const coreRequest = harness.fakeModel.recordedOfKind("core").at(-1);
+  expect(coreRequest?.streamed).toBe(true);
+
+  const blocksDuringPreview = await learningBlocks(page).count();
+  release();
+
+  // 收尾后成分不减，且预览没有额外造出一块——预览与最终结果必须是同一个宿主。
+  await expect
+    .poll(() => learningBlocks(page).first().locator(".component").count())
+    .toBeGreaterThanOrEqual(beforeEnd);
+  await expect(learningBlocks(page)).toHaveCount(blocksDuringPreview);
+});
+
+test("端点拒绝流式时自动改走整段返回并照常渲染", async ({ harness }) => {
+  await seedLocalProfile(harness);
+  harness.fakeModel.setStreamMode("reject");
+
+  const { page } = await startSession(harness, "article.html");
+
+  await expect(learningBlocks(page).first().locator(".component .role").first()).toBeVisible();
+
+  const core = harness.fakeModel.recordedOfKind("core");
+  // 先试流式被拒，再以整段返回成功;失败那次不算 core 请求以外的副作用。
+  expect(core.some(({ streamed }) => streamed)).toBe(true);
+  expect(core.some(({ streamed }) => !streamed)).toBe(true);
+});

@@ -405,6 +405,11 @@ export class SyntaxLearningBlock {
     this.#tokensBySentence = new Map();
   }
 
+  /** 流式预览用:只要有一句已经画出来，就值得先放到页面上。 */
+  hasRenderedSentence(): boolean {
+    return this.#resolvedSentenceIds.size > 0;
+  }
+
   isReadyToReplace(): boolean {
     return (
       this.#expectedSentenceIds.size > 0 &&

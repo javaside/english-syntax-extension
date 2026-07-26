@@ -18,6 +18,12 @@ export interface SentenceFailure {
   message: string;
 }
 
+function assertLearningBlock(block: SyntaxLearningBlock): void {
+  if (!(block instanceof SyntaxLearningBlock)) {
+    throw new TypeError("BlockReplacement requires a SyntaxLearningBlock");
+  }
+}
+
 function createHideStyle(document: Document, hiddenClass: string): HTMLStyleElement {
   const style = document.createElement("style");
   style.setAttribute(STYLE_ATTRIBUTE, hiddenClass);
@@ -45,10 +51,29 @@ export class BlockReplacement {
   }
 
   show(original: HTMLElement, block: SyntaxLearningBlock): void {
-    if (!(block instanceof SyntaxLearningBlock)) {
-      throw new TypeError("BlockReplacement requires a SyntaxLearningBlock");
+    assertLearningBlock(block);
+    this.#display(original, block, block.isReadyToReplace());
+  }
+
+  /**
+   * Puts a partially rendered block on the page while the rest of it is still
+   * streaming. The readiness gate exists so a half-analyzed paragraph never
+   * replaces the original silently; a preview is an explicit, temporary
+   * exception, so it only needs one rendered sentence.
+   */
+  showPreview(original: HTMLElement, block: SyntaxLearningBlock): void {
+    assertLearningBlock(block);
+    this.#display(original, block, block.hasRenderedSentence());
+  }
+
+  #display(original: HTMLElement, block: SyntaxLearningBlock, allowed: boolean): void {
+    if (!allowed) {
+      return;
     }
-    if (!block.isReadyToReplace()) {
+    // Already displaying this exact pairing: the block re-renders its own
+    // sentences in place, so tearing it down and re-inserting would only make
+    // the preview flicker when the verified result lands.
+    if (this.#original === original && this.#block === block.host) {
       return;
     }
     this.restore();

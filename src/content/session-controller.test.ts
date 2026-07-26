@@ -3,7 +3,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GrammarRole } from "../shared/grammar";
 import type { CoreAnalysis, DetailAnalysis, Token, TokenRange } from "../shared/grammar";
-import type { RequestMessage, ResponseMessage, SessionStatus } from "../shared/protocol";
+import type {
+  CoreStreamPush,
+  RequestMessage,
+  ResponseMessage,
+  SessionStatus,
+} from "../shared/protocol";
 import { isSessionComplete } from "../shared/protocol";
 import type { CandidateBlock } from "./document-scanner";
 import { scanDocument } from "./document-scanner";
@@ -75,6 +80,7 @@ class FakeLearningBlock implements ControllerBlock {
 }
 
 class FakeReplacement implements ControllerReplacement {
+  previews = 0;
   shows = 0;
   partialShows = 0;
   restores = 0;
@@ -105,6 +111,15 @@ class FakeReplacement implements ControllerReplacement {
   currentElement(): Element {
     return this.displayed;
   }
+
+  get active(): boolean {
+    return this.shows + this.partialShows + this.previews > this.restores;
+  }
+
+  showPreview(original: HTMLElement): void {
+    this.previews += 1;
+    this.originals.push(original);
+  }
 }
 
 class FakeViewport implements ViewportPort {
@@ -112,6 +127,7 @@ class FakeViewport implements ViewportPort {
   invalidated: string[] = [];
   disconnected = false;
   checked: Element[] = [];
+  visible = true;
 
   constructor(private readonly callback: (candidate: CandidateBlock) => void) {}
 
@@ -133,7 +149,7 @@ class FakeViewport implements ViewportPort {
 
   isVisible(element: Element): boolean {
     this.checked.push(element);
-    return true;
+    return this.visible;
   }
 
   emit(index = 0): void {
@@ -149,6 +165,7 @@ class FakeTransport implements RuntimeTransport {
   reconnectHandler?: () => void | Promise<void>;
   handler: (message: RequestMessage) => Promise<ResponseMessage>;
   private disconnectHandler?: () => void;
+  private streamHandler?: (push: CoreStreamPush) => void;
 
   constructor(handler?: (message: RequestMessage) => Promise<ResponseMessage>) {
     this.handler =
@@ -179,6 +196,17 @@ class FakeTransport implements RuntimeTransport {
     return () => {
       this.disconnectHandler = undefined;
     };
+  }
+
+  onStream(handler: (push: CoreStreamPush) => void): () => void {
+    this.streamHandler = handler;
+    return () => {
+      this.streamHandler = undefined;
+    };
+  }
+
+  emitStream(push: CoreStreamPush): void {
+    this.streamHandler?.(push);
   }
 
   reconnect(): void | Promise<void> {
@@ -1541,6 +1569,7 @@ describe("ContentScriptRouter", () => {
     const disconnectListeners: Array<() => void> = [];
     const port = {
       disconnect: vi.fn(),
+      onMessage: { addListener: vi.fn() },
       onDisconnect: {
         addListener: (listener: () => void) => disconnectListeners.push(listener),
       },
@@ -1610,7 +1639,11 @@ describe("ContentScriptRouter", () => {
   });
 
   it("消息通道中断时 send 返回可重试的 NETWORK_ERROR 响应而不是未捕获拒绝", async () => {
-    const port = { disconnect: vi.fn(), onDisconnect: { addListener: vi.fn() } };
+    const port = {
+      disconnect: vi.fn(),
+      onMessage: { addListener: vi.fn() },
+      onDisconnect: { addListener: vi.fn() },
+    };
     const runtime = {
       connect: vi.fn(() => port),
       sendMessage: vi.fn(() =>
@@ -1825,5 +1858,158 @@ describe("ContentScriptRouter", () => {
       type: "ERROR",
       error: { code: "UNSAFE_CONTENT_BLOCK" },
     });
+  });
+});
+
+describe("SessionController offscreen marking", () => {
+  beforeEach(() => {
+    document.body.replaceChildren();
+    vi.restoreAllMocks();
+  });
+
+  it("marks a block queued while outside the viewport as offscreen", async () => {
+    const subject = harness();
+    await subject.controller.start();
+    subject.viewport.visible = false;
+
+    subject.viewport.emit();
+    await vi.waitFor(() => expect(subject.controller.status.ready).toBe(1));
+
+    const analyze = subject.transport.sent.find(({ type }) => type === "ANALYZE_CORE")!;
+    expect(analyze).toMatchObject({ offscreen: true });
+  });
+
+  it("leaves a visible block unmarked so it keeps visible-core priority", async () => {
+    const subject = harness();
+
+    await startAndEmit(subject);
+
+    const analyze = subject.transport.sent.find(({ type }) => type === "ANALYZE_CORE")!;
+    expect("offscreen" in analyze).toBe(false);
+  });
+
+  it("never demotes a user-initiated parse even when the block reads as offscreen", async () => {
+    const subject = harness();
+    await subject.controller.start();
+    subject.viewport.visible = false;
+    refreshPrincipalRoot();
+
+    await subject.controller.parseSelection("Learners read.");
+    await vi.waitFor(() =>
+      expect(subject.transport.sent.some(({ type }) => type === "ANALYZE_CORE")).toBe(true),
+    );
+
+    const analyze = subject.transport.sent.find(({ type }) => type === "ANALYZE_CORE")!;
+    expect("offscreen" in analyze).toBe(false);
+  });
+});
+
+describe("SessionController provisional streaming", () => {
+  beforeEach(() => {
+    document.body.replaceChildren();
+    vi.restoreAllMocks();
+  });
+
+  const provisional = [
+    { startToken: 0, endToken: 0, role: GrammarRole.SUBJECT, translation: "主语" },
+  ];
+
+  /** 悬住 ANALYZE_CORE，让流式分片先于完整响应到达。 */
+  function pendingHarness() {
+    let release!: (response: ResponseMessage) => void;
+    const transport = new FakeTransport((message) =>
+      message.type === "ANALYZE_CORE"
+        ? new Promise<ResponseMessage>((resolve) => (release = resolve))
+        : Promise.resolve({
+            version: 1,
+            requestId: message.requestId,
+            type: "ACK",
+            acknowledgedType: message.type,
+          } as ResponseMessage),
+    );
+    return { subject: harness(undefined, transport), transport, release: () => release };
+  }
+
+  it("renders provisional components and shows the block before the response lands", async () => {
+    const { subject, transport } = pendingHarness();
+    await subject.controller.start();
+    subject.viewport.emit();
+    await vi.waitFor(() =>
+      expect(subject.transport.sent.some(({ type }) => type === "ANALYZE_CORE")).toBe(true),
+    );
+
+    transport.emitStream({
+      version: 1,
+      type: "CORE_STREAM",
+      documentId: subject.controller.documentId,
+      sentenceId: "sentence-1",
+      components: provisional,
+    });
+
+    expect(subject.learningBlocks[0]!.cores).toHaveLength(1);
+    expect(subject.learningBlocks[0]!.cores[0]!.components).toEqual(provisional);
+    expect(subject.replacements[0]!.previews).toBe(1);
+  });
+
+  it("does not count a provisional sentence as ready", async () => {
+    const { subject, transport } = pendingHarness();
+    await subject.controller.start();
+    subject.viewport.emit();
+    await vi.waitFor(() =>
+      expect(subject.transport.sent.some(({ type }) => type === "ANALYZE_CORE")).toBe(true),
+    );
+
+    transport.emitStream({
+      version: 1,
+      type: "CORE_STREAM",
+      documentId: subject.controller.documentId,
+      sentenceId: "sentence-1",
+      components: provisional,
+    });
+
+    expect(subject.controller.status.ready).toBe(0);
+    expect(isSessionComplete(subject.controller.status)).toBe(false);
+  });
+
+  it("shows the block once, not on every chunk", async () => {
+    const { subject, transport } = pendingHarness();
+    await subject.controller.start();
+    subject.viewport.emit();
+    await vi.waitFor(() =>
+      expect(subject.transport.sent.some(({ type }) => type === "ANALYZE_CORE")).toBe(true),
+    );
+
+    for (let count = 0; count < 3; count += 1) {
+      transport.emitStream({
+        version: 1,
+        type: "CORE_STREAM",
+        documentId: subject.controller.documentId,
+        sentenceId: "sentence-1",
+        components: provisional,
+      });
+    }
+
+    expect(subject.replacements[0]!.previews).toBe(1);
+    expect(subject.learningBlocks[0]!.cores).toHaveLength(3);
+  });
+
+  it("ignores a push addressed to a different document", async () => {
+    const { subject, transport } = pendingHarness();
+    await subject.controller.start();
+    subject.viewport.emit();
+    await vi.waitFor(() =>
+      expect(subject.transport.sent.some(({ type }) => type === "ANALYZE_CORE")).toBe(true),
+    );
+
+    transport.emitStream({
+      version: 1,
+      type: "CORE_STREAM",
+      documentId: "someone-elses-document",
+      sentenceId: "sentence-1",
+      components: provisional,
+    });
+
+    expect(subject.learningBlocks[0]!.cores).toHaveLength(0);
+    expect(subject.replacements[0]!.previews).toBe(0);
   });
 });

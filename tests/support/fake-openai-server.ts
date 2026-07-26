@@ -41,17 +41,21 @@ export interface RecordedRequest {
   /** True when an Authorization header was present; its value is never kept. */
   authorizationPresent: boolean;
   usedResponseFormat: boolean;
+  /** True when the client asked for a streamed response. */
+  streamed: boolean;
   sentenceTexts: string[];
   promptText: string;
 }
 
+/**
+ * Mirrors the compact Token shape the prompts actually send: character offsets
+ * and the whitespace prefix are not transmitted, and `punctuation` appears only
+ * when it is true.
+ */
 interface PromptToken {
   id: number;
   text: string;
-  start: number;
-  end: number;
-  leadingWhitespace: string;
-  punctuation: boolean;
+  punctuation?: true;
 }
 
 interface PromptSentence {
@@ -140,7 +144,7 @@ function isPromptToken(value: unknown): value is PromptToken {
   return (
     typeof token.id === "number" &&
     typeof token.text === "string" &&
-    typeof token.punctuation === "boolean"
+    (token.punctuation === undefined || token.punctuation === true)
   );
 }
 
@@ -282,6 +286,10 @@ function sentenceDetailsTargets(promptText: string): {
 export class FakeOpenAiServer {
   private readonly server: Server;
   private readonly scriptQueues = new Map<string, ScriptedOutcome[]>();
+  /** "chunked" 逐片回流;"reject" 用 400 拒掉流式以覆盖降级路径。 */
+  private streamMode: "chunked" | "reject" = "chunked";
+  /** 置位后流会停在 [DONE] 之前，供 E2E 断言中间态。 */
+  private streamGate?: { promise: Promise<void>; release: () => void };
   private readonly requests: RecordedRequest[] = [];
   private port = 0;
 
@@ -324,6 +332,21 @@ export class FakeOpenAiServer {
     this.requests.length = 0;
   }
 
+  setStreamMode(mode: "chunked" | "reject"): void {
+    this.streamMode = mode;
+  }
+
+  /** 挂住流式响应的收尾;返回放行函数。 */
+  holdStreamBeforeEnd(): () => void {
+    let release!: () => void;
+    const promise = new Promise<void>((resolve) => (release = resolve));
+    this.streamGate = { promise, release };
+    return () => {
+      this.streamGate = undefined;
+      release();
+    };
+  }
+
   async stop(): Promise<void> {
     await new Promise<void>((resolve, reject) => {
       this.server.close((error) => (error ? reject(error) : resolve()));
@@ -331,16 +354,23 @@ export class FakeOpenAiServer {
   }
 
   private async handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
-    let payload: { model: string; usedResponseFormat: boolean; promptText: string };
+    let payload: {
+      model: string;
+      usedResponseFormat: boolean;
+      stream: boolean;
+      promptText: string;
+    };
     try {
       const raw = JSON.parse(await readBody(request)) as {
         model?: unknown;
         response_format?: unknown;
+        stream?: unknown;
         messages?: Array<{ content?: unknown }>;
       };
       payload = {
         model: typeof raw.model === "string" ? raw.model : "",
         usedResponseFormat: raw.response_format !== undefined,
+        stream: raw.stream === true,
         promptText: Array.isArray(raw.messages)
           ? raw.messages
               .map((message) => (typeof message.content === "string" ? message.content : ""))
@@ -361,23 +391,39 @@ export class FakeOpenAiServer {
       url: request.url ?? "",
       authorizationPresent: typeof request.headers.authorization === "string",
       usedResponseFormat: payload.usedResponseFormat,
+      streamed: payload.stream,
       sentenceTexts: sentences.map((sentence) => sentence.text),
       promptText: payload.promptText,
     });
 
     const queue = this.scriptQueues.get(payload.model);
     const outcome: ScriptedOutcome = queue?.length ? queue.shift()! : { kind: "auto" };
-    this.reply(response, outcome, kind, sentences, payload.usedResponseFormat, payload.promptText);
+    void this.reply(
+      response,
+      outcome,
+      kind,
+      sentences,
+      payload.usedResponseFormat,
+      payload.promptText,
+      payload.stream,
+    );
   }
 
-  private reply(
+  private async reply(
     response: ServerResponse,
     outcome: ScriptedOutcome,
     kind: RequestKind,
     sentences: PromptSentence[],
     usedResponseFormat: boolean,
     promptText: string,
-  ): void {
+    streaming = false,
+  ): Promise<void> {
+    // 被要求关掉流式的端点:用 400 拒绝，扩展应记住并改走整段返回。
+    if (streaming && this.streamMode === "reject") {
+      response.writeHead(400, { "content-type": "application/json" });
+      response.end(jsonBody({ error: "stream is not supported by this model" }));
+      return;
+    }
     switch (outcome.kind) {
       case "timeout":
         // Intentionally never respond; the extension aborts on its own timeout.
@@ -395,48 +441,68 @@ export class FakeOpenAiServer {
           response.end(jsonBody({ error: "response_format is not supported by this model" }));
           return;
         }
-        this.reply(response, { kind: "auto" }, kind, sentences, usedResponseFormat, promptText);
+        await this.reply(
+          response,
+          { kind: "auto" },
+          kind,
+          sentences,
+          usedResponseFormat,
+          promptText,
+          streaming,
+        );
         return;
       case "invalid-json":
-        response.writeHead(200, { "content-type": "application/json" });
-        response.end(completion("this is not json"));
+        await this.writeContent(response, "this is not json", streaming);
         return;
       case "coverage-gap":
-        this.respondCore(response, sentences, () => coverageGapComponents());
+        await this.respondCore(response, sentences, () => coverageGapComponents(), streaming);
         return;
       case "partial":
         // First sentence valid, later sentences invalid: exercises the
         // partial-batch repair and isolation paths.
-        this.respondCore(response, sentences, (sentence, index) =>
-          index === 0 ? autoComponents(sentence) : coverageGapComponents(),
+        await this.respondCore(
+          response,
+          sentences,
+          (sentence, index) => (index === 0 ? autoComponents(sentence) : coverageGapComponents()),
+          streaming,
         );
         return;
       case "xss":
-        this.respondCore(response, sentences, (sentence) =>
-          autoComponents(sentence).map((component) => ({
-            ...component,
-            translation: outcome.payload,
-          })),
+        await this.respondCore(
+          response,
+          sentences,
+          (sentence) =>
+            autoComponents(sentence).map((component) => ({
+              ...component,
+              translation: outcome.payload,
+            })),
+          streaming,
         );
         return;
       case "compound":
-        this.respondCore(response, sentences, (sentence) => compoundComponents(sentence));
+        await this.respondCore(
+          response,
+          sentences,
+          (sentence) => compoundComponents(sentence),
+          streaming,
+        );
         return;
       case "compound-detail":
         this.respondCompoundDetail(response, sentences);
         return;
       case "auto":
-        this.respondAuto(response, kind, sentences, promptText);
+        await this.respondAuto(response, kind, sentences, promptText, streaming);
         return;
     }
   }
 
-  private respondAuto(
+  private async respondAuto(
     response: ServerResponse,
     kind: RequestKind,
     sentences: PromptSentence[],
     promptText: string,
-  ): void {
+    streaming = false,
+  ): Promise<void> {
     switch (kind) {
       case "probe":
         response.writeHead(200, { "content-type": "application/json" });
@@ -456,27 +522,73 @@ export class FakeOpenAiServer {
       }
       case "correction":
       case "correction-repair":
-        this.respondCore(response, sentences, (sentence) => autoComponents(sentence, "（已纠正）"));
+        await this.respondCore(
+          response,
+          sentences,
+          (sentence) => autoComponents(sentence, "（已纠正）"),
+          streaming,
+        );
         return;
       default:
-        this.respondCore(response, sentences, (sentence) => autoComponents(sentence));
+        await this.respondCore(
+          response,
+          sentences,
+          (sentence) => autoComponents(sentence),
+          streaming,
+        );
         return;
     }
   }
 
-  private respondCore(
+  /** 任何"模型内容"都必须经这里出去，否则流式请求会拿到 JSON 体而误判不支持流式。 */
+  private async writeContent(
+    response: ServerResponse,
+    content: string,
+    streaming: boolean,
+  ): Promise<void> {
+    if (!streaming) {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(completion(content));
+      return;
+    }
+    await this.streamContent(response, content);
+  }
+
+  private async respondCore(
     response: ServerResponse,
     sentences: PromptSentence[],
     components: (sentence: PromptSentence, index: number) => GeneratedComponent[],
-  ): void {
+    streaming = false,
+  ): Promise<void> {
     const body = {
       sentences: sentences.map((sentence, index) => ({
         sentenceId: sentence.sentenceId,
         components: components(sentence, index),
       })),
     };
-    response.writeHead(200, { "content-type": "application/json" });
-    response.end(completion(jsonBody(body)));
+    await this.writeContent(response, jsonBody(body), streaming);
+  }
+
+  /**
+   * 把内容切片按 SSE 逐个下发。切片边界刻意落在成分之间，让客户端的增量解析器
+   * 真的要跨片配平括号。
+   */
+  private async streamContent(response: ServerResponse, content: string): Promise<void> {
+    response.writeHead(200, {
+      "content-type": "text/event-stream",
+      "cache-control": "no-cache",
+      connection: "keep-alive",
+    });
+    const pieces = Math.min(8, Math.max(2, Math.ceil(content.length / 40)));
+    const size = Math.ceil(content.length / pieces);
+    for (let index = 0; index < content.length; index += size) {
+      response.write(
+        `data: ${jsonBody({ choices: [{ delta: { content: content.slice(index, index + size) } }] })}\n\n`,
+      );
+    }
+    await this.streamGate?.promise;
+    response.write("data: [DONE]\n\n");
+    response.end();
   }
 
   private respondDetail(response: ServerResponse, sentences: PromptSentence[]): void {

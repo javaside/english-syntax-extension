@@ -3,19 +3,21 @@ import type { CoreAnalysis, DetailAnalysis } from "../shared/grammar";
 import { assertNever, isRequestMessage } from "../shared/protocol";
 import type {
   CacheStats,
+  CoreStreamPush,
   RequestMessage,
   ResponseMessage,
   SessionStatus,
 } from "../shared/protocol";
 import { MESSAGE_VERSION } from "../shared/versions";
 import { AnalysisCache } from "./analysis-cache";
-import { CachedAnalysisService } from "./analysis-service";
-import type { AnalysisModelWork, AnalysisService } from "./analysis-service";
+import { CachedAnalysisService, MAX_SENTENCES_PER_REQUEST } from "./analysis-service";
+import type { AnalysisModelWork, AnalysisService, StreamedComponentSink } from "./analysis-service";
 import { hostPermissionPattern } from "./base-url";
 import { ConfigRepository } from "./config-repository";
 import type { ModelProfile } from "./config-repository";
 import { ModelRequestError, OpenAiCompatibleAdapter } from "./openai-compatible-adapter";
 import { RequestScheduler } from "./request-scheduler";
+import type { RunTask } from "./request-scheduler";
 
 const SELECTION_MENU_ID = "syntax-parse-selection";
 const CONTEXT_BLOCK_MENU_ID = "syntax-parse-context-block";
@@ -28,6 +30,7 @@ interface ConfigPort {
   getActiveProfile(): Promise<ModelProfile | undefined>;
   setActiveProfile(profileId: string): Promise<void>;
   getPrefetchDetail(): Promise<boolean>;
+  getStreamRendering(): Promise<boolean>;
 }
 
 interface SchedulerPort {
@@ -213,6 +216,8 @@ export function registerServiceWorker(
 ): void {
   const activeTabs = new Map<number, ActiveDocument>();
   const pausedProfiles = new Map<string, string>();
+  /** content 侧那条 syntax-learning 端口:流式分片的唯一推送通道。 */
+  const documentPorts = new Map<string, chrome.runtime.Port>();
   let commandCounter = 0;
 
   const profileCredentialFingerprint = (profile: ModelProfile): string =>
@@ -317,6 +322,31 @@ export function registerServiceWorker(
       switch (request.type) {
         case "ANALYZE_CORE": {
           const profile = await profileFor(request.tabId);
+          const streamSink =
+            (documentId: string, activeProfile: ModelProfile): StreamedComponentSink =>
+            (sentenceId, components) => {
+              const port = documentPorts.get(documentId);
+              if (port === undefined) return;
+              const push: CoreStreamPush = {
+                version: MESSAGE_VERSION,
+                type: "CORE_STREAM",
+                documentId,
+                sentenceId,
+                // 分片同样是模型输出，脱敏不能因为"只是预览"就跳过。
+                components: components.map((component) => ({
+                  startToken: component.startToken,
+                  endToken: component.endToken,
+                  role: component.role,
+                  translation: redactProfileSecrets(component.translation, activeProfile),
+                })),
+              };
+              try {
+                port.postMessage(push);
+              } catch {
+                // 页面已走:丢掉这条端口，别把后续分片继续往死通道里塞。
+                documentPorts.delete(documentId);
+              }
+            };
           if (profile === undefined) {
             // 纯缓存查看:只回命中,未命中句子由 content 侧保持原文;无 key 可脱敏,直接返回。
             const analyses = await dependencies.analysisService.lookupCore(request.sentences);
@@ -340,13 +370,20 @@ export function registerServiceWorker(
             error: errorResponse(request.requestId, "AUTH_FAILED").error,
           });
           if (isProfilePaused(profile)) return cacheWithAuthError();
+          const streaming =
+            documentPorts.has(request.documentId) &&
+            (await dependencies.configRepository.getStreamRendering());
           try {
             const outcome = await dependencies.analysisService.analyzeCore(
               {
                 profile,
                 documentId: request.documentId,
                 sentences: request.sentences,
+                priority: request.offscreen === true ? "prefetch-core" : "visible-core",
                 ...(request.bypassCache === true ? { bypassCache: true } : {}),
+                ...(streaming
+                  ? { onStreamedComponent: streamSink(request.documentId, profile) }
+                  : {}),
               },
               new AbortController().signal,
             );
@@ -813,7 +850,10 @@ export function registerServiceWorker(
       documentId,
       status: existing?.status ?? emptyStatus("stopped"),
     });
+    documentPorts.set(documentId, port);
     port.onDisconnect.addListener(() => {
+      // 先摘端口再走会话清理:后者带 documentId 守卫，会漏掉已换代的陈旧端口。
+      if (documentPorts.get(documentId) === port) documentPorts.delete(documentId);
       // 读一次 lastError,避免页面进 bfcache 关闭端口时控制台打
       // "Unchecked runtime.lastError"。
       void chromeApi.runtime.lastError;
@@ -835,6 +875,50 @@ export async function requestHostPermission(
   return chrome.permissions.request({ origins: [hostPermissionPattern(profile.baseUrl)] });
 }
 
+/**
+ * 调度器库默认只允许 2 个批次在飞，这把整个扩展卡在了 2 条并发上：视口观察器的
+ * rootMargin 是 100%，一次会放出上下各一屏的全部段落，队尾要干等好几轮完整的模型
+ * 往返。调度器已改为 1 请求 = 1 槽位，所以这就是真实在飞的模型请求数上限。
+ */
+export const MODEL_REQUEST_CONCURRENCY = 4;
+
+export function createModelRequestScheduler(
+  runTask: RunTask<AnalysisModelWork, unknown>,
+): RequestScheduler<AnalysisModelWork, unknown> {
+  return new RequestScheduler<AnalysisModelWork, unknown>({
+    runTask,
+    concurrency: MODEL_REQUEST_CONCURRENCY,
+    maxSentencesPerRequest: MAX_SENTENCES_PER_REQUEST,
+  });
+}
+
+interface ProfileCapabilityPort {
+  getProfile(profileId: string): Promise<ModelProfile | undefined>;
+  saveProfile(profile: ModelProfile): Promise<void>;
+}
+
+/**
+ * 把探到的端点能力写回 profile。两者都必须接线:漏掉任一个，扩展就会在每次请求上
+ * 重复交同一笔学费(被拒的 response_format 或 stream 各要白费一趟 4xx)。
+ */
+export function createProfileCapabilityWriters(configRepository: ProfileCapabilityPort): {
+  persistJsonSchemaSupport: (
+    profileId: string,
+    jsonSchemaSupport: ModelProfile["jsonSchemaSupport"],
+  ) => Promise<void>;
+  persistStreamSupport: (profileId: string, streamSupport: "unsupported") => Promise<void>;
+} {
+  const update = async (profileId: string, patch: Partial<ModelProfile>): Promise<void> => {
+    const profile = await configRepository.getProfile(profileId);
+    if (profile !== undefined) await configRepository.saveProfile({ ...profile, ...patch });
+  };
+  return {
+    persistJsonSchemaSupport: (profileId, jsonSchemaSupport) =>
+      update(profileId, { jsonSchemaSupport }),
+    persistStreamSupport: (profileId, streamSupport) => update(profileId, { streamSupport }),
+  };
+}
+
 async function createDefaultRuntime(): Promise<
   Pick<ServiceWorkerDependencies, "analysisService" | "scheduler" | "cache" | "profileProbe">
 > {
@@ -842,16 +926,8 @@ async function createDefaultRuntime(): Promise<
   const cache = await AnalysisCache.open({
     limitBytes: await configRepository.getCacheLimitBytes(),
   });
-  const adapter = new OpenAiCompatibleAdapter({
-    persistJsonSchemaSupport: async (profileId, jsonSchemaSupport) => {
-      const profile = await configRepository.getProfile(profileId);
-      if (profile !== undefined)
-        await configRepository.saveProfile({ ...profile, jsonSchemaSupport });
-    },
-  });
-  const scheduler = new RequestScheduler<AnalysisModelWork, unknown>({
-    fetchTask: (requests, signal) => Promise.all(requests.map(({ input }) => input.run(signal))),
-  });
+  const adapter = new OpenAiCompatibleAdapter(createProfileCapabilityWriters(configRepository));
+  const scheduler = createModelRequestScheduler((request, signal) => request.input.run(signal));
   return {
     cache,
     scheduler,

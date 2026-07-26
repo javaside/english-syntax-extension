@@ -1,6 +1,8 @@
 import type { ExtensionError, ExtensionErrorCode } from "../shared/errors";
 import { chatCompletionsUrl } from "./base-url";
 import type { ModelProfile } from "./config-repository";
+import { CoreStreamParser, type StreamedComponent } from "./core-stream-parser";
+import { SSE_DONE, SseDecoder } from "./sse";
 
 export interface JsonSchemaSpec {
   name: string;
@@ -31,10 +33,37 @@ export interface OpenAiCompatibleAdapterOptions {
     profileId: string,
     support: ModelProfile["jsonSchemaSupport"],
   ) => Promise<void>;
+  persistStreamSupport?: (profileId: string, support: "unsupported") => Promise<void>;
 }
+
+/** Reports each component the stream completed, before the sentence is verified. */
+export type StreamedComponentHandler = (streamed: StreamedComponent) => void;
 
 interface ChatCompletionEnvelope {
   choices?: Array<{ message?: { content?: unknown } }>;
+}
+
+interface ChatCompletionChunk {
+  choices?: Array<{ delta?: { content?: unknown } }>;
+}
+
+function deltaContent(payload: string): string | undefined {
+  try {
+    const chunk = JSON.parse(payload) as ChatCompletionChunk;
+    const content = chunk.choices?.[0]?.delta?.content;
+    return typeof content === "string" && content.length > 0 ? content : undefined;
+  } catch {
+    // A malformed keep-alive frame must not kill an otherwise healthy stream.
+    return undefined;
+  }
+}
+
+/**
+ * 只在 profile 显式要求时出现:OpenAI 官方 API 只接受 low/medium/high,收到
+ * "none" 会直接 400,所以这个字段绝不能无条件下发。
+ */
+function reasoningOverride(profile: ModelProfile): Record<string, unknown> {
+  return profile.disableReasoning === true ? { reasoning_effort: "none" } : {};
 }
 
 function responseFormat(schema: JsonSchemaSpec): Record<string, unknown> {
@@ -46,6 +75,11 @@ function responseFormat(schema: JsonSchemaSpec): Record<string, unknown> {
       schema: schema.schema,
     },
   };
+}
+
+function abortReason(signal: AbortSignal): Error {
+  const reason: unknown = signal.reason;
+  return reason instanceof Error ? reason : new DOMException("Stream aborted", "AbortError");
 }
 
 function retryAfterMilliseconds(value: string | null): number | undefined {
@@ -97,10 +131,175 @@ export class OpenAiCompatibleAdapter {
   private readonly persistJsonSchemaSupport: NonNullable<
     OpenAiCompatibleAdapterOptions["persistJsonSchemaSupport"]
   >;
+  private readonly persistStreamSupport: NonNullable<
+    OpenAiCompatibleAdapterOptions["persistStreamSupport"]
+  >;
 
   constructor(options: OpenAiCompatibleAdapterOptions = {}) {
     this.fetchImplementation = options.fetch ?? globalThis.fetch.bind(globalThis);
     this.persistJsonSchemaSupport = options.persistJsonSchemaSupport ?? (() => Promise.resolve());
+    this.persistStreamSupport = options.persistStreamSupport ?? (() => Promise.resolve());
+  }
+
+  /**
+   * Same contract as {@link completeJson} — the resolved value is the complete,
+   * still-unvalidated envelope — but reports each component as soon as the
+   * stream closes it, so a paragraph can render before the model finishes.
+   *
+   * Streaming is best-effort: an endpoint that rejects `stream` (some reject it
+   * only in combination with `response_format`) is marked unsupported once and
+   * never retried, and the call finishes as an ordinary buffered request.
+   */
+  async completeJsonStreaming(
+    profile: ModelProfile,
+    messages: readonly ChatMessage[],
+    schema: JsonSchemaSpec,
+    signal: AbortSignal,
+    onComponent: StreamedComponentHandler,
+  ): Promise<unknown> {
+    if (profile.streamSupport === "unsupported") {
+      return this.completeJson(profile, messages, schema, signal);
+    }
+    let useSchema = profile.jsonSchemaSupport !== "unsupported";
+    for (;;) {
+      try {
+        return await this.streamRequest(profile, messages, schema, signal, useSchema, onComponent);
+      } catch (error) {
+        if (signal.aborted) throw error;
+        if (error instanceof UnsupportedResponseFormatError && useSchema) {
+          await this.persistJsonSchemaSupport(profile.id, "unsupported");
+          useSchema = false;
+          continue;
+        }
+        if (error instanceof UnsupportedStreamError) {
+          await this.persistStreamSupport(profile.id, "unsupported");
+          // schema 能力沿用上面刚探到的结果，别再白探一次。
+          return this.request(profile, messages, schema, signal, useSchema);
+        }
+        throw error;
+      }
+    }
+  }
+
+  private async streamRequest(
+    profile: ModelProfile,
+    messages: readonly ChatMessage[],
+    schema: JsonSchemaSpec,
+    callerSignal: AbortSignal,
+    useSchema: boolean,
+    onComponent: StreamedComponentHandler,
+  ): Promise<unknown> {
+    const controller = new AbortController();
+    let abortCause: "caller" | "timeout" | undefined;
+    const onCallerAbort = () => {
+      abortCause ??= "caller";
+      controller.abort(callerSignal.reason);
+    };
+    callerSignal.addEventListener("abort", onCallerAbort, { once: true });
+    if (callerSignal.aborted) onCallerAbort();
+
+    // 流式下总时长没有意义:一段长响应本来就会超过单次请求的超时值。改成静默超时——
+    // 每收到一片就重置，只有真的卡住才判超时。
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const armTimeout = (): void => {
+      if (timer !== undefined) clearTimeout(timer);
+      timer = setTimeout(() => {
+        abortCause ??= "timeout";
+        controller.abort(new DOMException("Request timed out", "TimeoutError"));
+      }, profile.timeoutMs);
+    };
+    armTimeout();
+
+    try {
+      const body: Record<string, unknown> = {
+        model: profile.model,
+        messages,
+        temperature: 0,
+        stream: true,
+        ...reasoningOverride(profile),
+      };
+      if (useSchema) body.response_format = responseFormat(schema);
+      const headers = new Headers(profile.headers);
+      headers.set("Content-Type", "application/json");
+      headers.set("Authorization", `Bearer ${profile.apiKey}`);
+      const response = await this.fetchImplementation(chatCompletionsUrl(profile.baseUrl), {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        const validationRejection = response.status === 400 || response.status === 422;
+        if (useSchema && validationRejection && /response[_ ]?format|json[_ ]?schema/i.test(text)) {
+          throw new UnsupportedResponseFormatError();
+        }
+        if (validationRejection && /stream/i.test(text)) throw new UnsupportedStreamError();
+        throw mapHttpError(response.status, response.headers.get("Retry-After"), text);
+      }
+      if (response.body === null) throw new UnsupportedStreamError();
+
+      const reader = response.body.getReader();
+      const utf8 = new TextDecoder();
+      const events = new SseDecoder();
+      const parser = new CoreStreamParser();
+      // 不能只靠 fetch 把 abort 传播进 body 流:读循环自己盯着信号，卡死的流才会
+      // 真的被超时掐断。
+      const aborted = new Promise<never>((_resolve, reject) => {
+        const onAbort = () => reject(abortReason(controller.signal));
+        if (controller.signal.aborted) onAbort();
+        else controller.signal.addEventListener("abort", onAbort, { once: true });
+      });
+      aborted.catch(() => undefined);
+      let content = "";
+      let finished = false;
+      while (!finished) {
+        const { done, value } = await Promise.race([reader.read(), aborted]);
+        if (done) break;
+        armTimeout();
+        for (const payload of events.push(utf8.decode(value, { stream: true }))) {
+          if (payload === SSE_DONE) {
+            finished = true;
+            break;
+          }
+          const delta = deltaContent(payload);
+          if (delta === undefined) continue;
+          content += delta;
+          for (const streamed of parser.push(delta)) onComponent(streamed);
+        }
+      }
+
+      // 连一个内容分片都没有:这个端点的流式没法用，回落非流式而不是报解析失败。
+      if (content.length === 0) throw new UnsupportedStreamError();
+      try {
+        return JSON.parse(stripSingleJsonFence(content)) as unknown;
+      } catch {
+        throw invalidOutput("Model stream content is not valid JSON");
+      }
+    } catch (error) {
+      if (
+        error instanceof ModelRequestError ||
+        error instanceof UnsupportedResponseFormatError ||
+        error instanceof UnsupportedStreamError
+      ) {
+        throw error;
+      }
+      if (abortCause === "timeout") {
+        throw new ModelRequestError("REQUEST_TIMEOUT", "Model request timed out", true);
+      }
+      if (abortCause === "caller") {
+        throw new ModelRequestError("REQUEST_CANCELLED", "Model request was cancelled", false);
+      }
+      throw new ModelRequestError(
+        "NETWORK_ERROR",
+        error instanceof Error ? error.message : "Model network request failed",
+        true,
+      );
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+      callerSignal.removeEventListener("abort", onCallerAbort);
+    }
   }
 
   async completeJson(
@@ -190,6 +389,7 @@ export class OpenAiCompatibleAdapter {
         messages,
         temperature: 0,
         stream: false,
+        ...reasoningOverride(profile),
       };
       if (useSchema) body.response_format = responseFormat(schema);
       const headers = new Headers(profile.headers);
@@ -256,3 +456,5 @@ export class OpenAiCompatibleAdapter {
 }
 
 class UnsupportedResponseFormatError extends Error {}
+
+class UnsupportedStreamError extends Error {}

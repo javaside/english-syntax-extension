@@ -1,5 +1,6 @@
+import type { ExtensionError } from "../shared/errors";
 import { GrammarRole } from "../shared/grammar";
-import type { CoreAnalysis, DetailAnalysis, TokenRange } from "../shared/grammar";
+import type { CoreAnalysis, CoreComponent, DetailAnalysis, TokenRange } from "../shared/grammar";
 import type { SentenceInput } from "../shared/protocol";
 import { CORE_SCHEMA_VERSION } from "../shared/versions";
 import { validateCoreBatch, validateDetail } from "../language/analysis-validator";
@@ -14,7 +15,9 @@ import {
   buildRepairPrompt,
   buildSentenceDetailsPrompt,
   CORE_OUTPUT_SHAPE,
+  serializeSentence,
 } from "./prompts";
+import type { StreamedComponent } from "./core-stream-parser";
 import type { ScheduledRequest, SchedulerPriority } from "./request-scheduler";
 
 export interface AnalysisCachePort {
@@ -33,7 +36,20 @@ export interface AnalysisAdapter {
     schema: JsonSchemaSpec,
     signal: AbortSignal,
   ): Promise<unknown>;
+  completeJsonStreaming?(
+    profile: ModelProfile,
+    messages: readonly ChatMessage[],
+    schema: JsonSchemaSpec,
+    signal: AbortSignal,
+    onComponent: (streamed: StreamedComponent) => void,
+  ): Promise<unknown>;
 }
+
+/** 累积上报某句已接受的暂定成分;每次给的都是完整列表，渲染端整句重画即可。 */
+export type StreamedComponentSink = (
+  sentenceId: string,
+  components: readonly CoreComponent[],
+) => void;
 
 export interface AnalysisModelWork {
   profile: ModelProfile;
@@ -60,6 +76,8 @@ export interface CoreBatchInput extends AnalysisInputBase {
   priority?: Extract<SchedulerPriority, "visible-core" | "prefetch-core">;
   /** 「重新解析」置位:跳过读缓存,结果照常覆盖写回。 */
   bypassCache?: boolean;
+  /** 给出即走流式:边生成边上报暂定成分。缺省保持原来的整块缓冲路径。 */
+  onStreamedComponent?: StreamedComponentSink;
 }
 
 export interface DetailInput extends AnalysisInputBase {
@@ -135,6 +153,12 @@ export interface CachedAnalysisServiceOptions {
 
 /** 纯缓存模式没有真实 profile,命中值统一改写为该占位 id。 */
 const CACHE_ONLY_PROFILE_ID = "cached";
+
+/**
+ * 一次 core 请求最多带几句。必须与调度器的 maxSentencesPerRequest 一致——超出会被
+ * 调度器直接拒成 SENTENCE_TOO_LONG,整块段落拿不到译文。
+ */
+export const MAX_SENTENCES_PER_REQUEST = 6;
 
 interface InvalidCoreSentence {
   sentence: SentenceInput;
@@ -234,6 +258,46 @@ const SENTENCE_DETAILS_SCHEMA: JsonSchemaSpec = {
   },
 };
 
+const GRAMMAR_ROLES: ReadonlySet<string> = new Set(Object.values(GrammarRole));
+
+/**
+ * 流式分片是未校验的模型输出:role 可能不在枚举里、区间可能越界或与前一个成分重叠。
+ * 渲染层要求成分有序、不重叠、在 token 界内，违反会直接抛错，所以这里逐个把关，
+ * 只放行能安全画出来的。整句覆盖率仍然只能等完整响应到齐后校验。
+ */
+class ProvisionalComponents {
+  readonly #accepted: CoreComponent[] = [];
+  #lastEnd = -1;
+
+  constructor(private readonly tokenCount: number) {}
+
+  /** 接受则返回累积列表，否则返回 undefined。 */
+  accept(raw: Record<string, unknown>): readonly CoreComponent[] | undefined {
+    const { startToken, endToken, role, translation } = raw;
+    if (
+      !Number.isSafeInteger(startToken) ||
+      !Number.isSafeInteger(endToken) ||
+      typeof role !== "string" ||
+      !GRAMMAR_ROLES.has(role)
+    ) {
+      return undefined;
+    }
+    const start = startToken as number;
+    const end = endToken as number;
+    if (start < 0 || end < start || end >= this.tokenCount || start <= this.#lastEnd) {
+      return undefined;
+    }
+    this.#lastEnd = end;
+    this.#accepted.push({
+      startToken: start,
+      endToken: end,
+      role: role as GrammarRole,
+      translation: typeof translation === "string" ? translation : "",
+    });
+    return [...this.#accepted];
+  }
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -244,6 +308,29 @@ function normalizedSentenceText(sentence: SentenceInput): string {
 
 function cancellationError(): ModelRequestError {
   return new ModelRequestError("REQUEST_CANCELLED", "Analysis request was cancelled", false);
+}
+
+/**
+ * 分块后一块失败不得连坐:兄弟块已拿到的译文要保住,失败块转成 failures。
+ * SW 靠 failures 里的 AUTH_FAILED 暂停 profile,所以错误码必须原样带过去。
+ */
+function asModelRequestError(error: unknown): ModelRequestError {
+  if (error instanceof ModelRequestError) return error;
+  if (typeof error === "object" && error !== null) {
+    const shape = error as Partial<ExtensionError>;
+    if (typeof shape.code === "string") {
+      return new ModelRequestError(
+        shape.code,
+        shape.message ?? "Model request failed",
+        shape.retryable === true,
+      );
+    }
+  }
+  return new ModelRequestError(
+    "NETWORK_ERROR",
+    error instanceof Error ? error.message : "Model request failed",
+    true,
+  );
 }
 
 function invalidOutput(errors: readonly ValidationError[]): ModelRequestError {
@@ -329,7 +416,7 @@ function correctionPrompt(input: CorrectionInput): string {
     "Reanalyze the supplied sentence using the reader's correction feedback.",
     "Keep the sentence ID and Tokens unchanged. Return core-analysis JSON only.",
     CORE_OUTPUT_SHAPE,
-    `Sentence and Tokens:\n${JSON.stringify(input.sentence, null, 2)}`,
+    `Sentence and Tokens:\n${serializeSentence(input.sentence)}`,
     `Previously verified core analysis:\n${JSON.stringify(input.core, null, 2)}`,
     `Reader feedback:\n${input.feedback}`,
   ].join("\n\n");
@@ -357,7 +444,7 @@ function detailRepairPrompt(
   return [
     "Repair only the structure of the invalid detail-analysis JSON.",
     "Keep the sentence ID, Tokens, verified core analysis, and focus unchanged. Return JSON only.",
-    `Sentence and Tokens:\n${JSON.stringify(input.sentence, null, 2)}`,
+    `Sentence and Tokens:\n${serializeSentence(input.sentence)}`,
     `Verified core analysis:\n${JSON.stringify(input.core, null, 2)}`,
     `Focus:\n${JSON.stringify(input.focus, null, 2)}`,
     `Validation errors:\n${JSON.stringify(errors, null, 2)}`,
@@ -374,7 +461,7 @@ function sentenceDetailsRepairPrompt(
   return [
     "Repair only the structure of the invalid sentence-details JSON so every requested focus has one valid entry.",
     "Keep the sentence ID, Tokens, verified core analysis, and focus ranges unchanged. Return JSON only.",
-    `Sentence and Tokens:\n${JSON.stringify(input.sentence, null, 2)}`,
+    `Sentence and Tokens:\n${serializeSentence(input.sentence)}`,
     `Verified core analysis:\n${JSON.stringify(input.core, null, 2)}`,
     `Validation errors:\n${JSON.stringify(errors, null, 2)}`,
     `Invalid JSON:\n${JSON.stringify(invalidJson, null, 2)}`,
@@ -420,19 +507,74 @@ export class CachedAnalysisService implements AnalysisService {
       };
     }
 
+    const chunks: Array<typeof missing> = [];
+    for (let index = 0; index < missing.length; index += MAX_SENTENCES_PER_REQUEST) {
+      chunks.push(missing.slice(index, index + MAX_SENTENCES_PER_REQUEST));
+    }
+    const settled = await Promise.allSettled(
+      chunks.map((chunk) => this.analyzeCoreChunk(input, chunk, signal)),
+    );
+    // 每块都失败时按原样抛出首个原因:单块(绝大多数)场景与分块前的行为完全一致。
+    const firstRejection = settled.find((outcome) => outcome.status === "rejected");
+    if (
+      firstRejection?.status === "rejected" &&
+      !settled.some(({ status }) => status === "fulfilled")
+    ) {
+      throw firstRejection.reason;
+    }
+
+    const failuresById = new Map<string, AnalysisFailure>();
+    settled.forEach((outcome, index) => {
+      if (outcome.status === "fulfilled") {
+        outcome.value.valid.forEach((analysis) => resultsById.set(analysis.sentenceId, analysis));
+        for (const { sentence, errors } of outcome.value.invalid) {
+          failuresById.set(sentence.sentenceId, {
+            sentenceId: sentence.sentenceId,
+            error: invalidOutput(errors),
+          });
+        }
+        return;
+      }
+      const error = asModelRequestError(outcome.reason);
+      for (const { sentence } of chunks[index]!) {
+        failuresById.set(sentence.sentenceId, { sentenceId: sentence.sentenceId, error });
+      }
+    });
+    return {
+      result: input.sentences.flatMap(({ sentenceId }) => {
+        const result = resultsById.get(sentenceId);
+        return result === undefined ? [] : [result];
+      }),
+      failures: input.sentences.flatMap(({ sentenceId }) => {
+        const failure = failuresById.get(sentenceId);
+        return failure === undefined ? [] : [failure];
+      }),
+      cacheHit: false,
+    };
+  }
+
+  /** 一块的首轮 + 至多一次修复;块之间互不影响,各自并行经调度器。 */
+  private async analyzeCoreChunk(
+    input: CoreBatchInput,
+    chunk: readonly { sentence: SentenceInput; key: string }[],
+    signal: AbortSignal,
+  ): Promise<{ valid: CoreAnalysis[]; invalid: InvalidCoreSentence[] }> {
+    const priority = input.priority ?? "visible-core";
+    const chunkKey = chunk.map(({ key }) => key).join(":");
     const firstRaw = await this.requestModel(
       input.profile,
       input.documentId,
-      input.priority ?? "visible-core",
-      missing.map(({ key }) => key).join(":"),
-      missing.length,
-      [{ role: "user", content: buildCorePrompt(missing.map(({ sentence }) => sentence)) }],
+      priority,
+      chunkKey,
+      chunk.length,
+      [{ role: "user", content: buildCorePrompt(chunk.map(({ sentence }) => sentence)) }],
       CORE_SCHEMA,
-      "core",
       signal,
+      false,
+      this.streamHandler(input, chunk),
     );
-    const firstPass = await this.validateAndCacheCore(input.profile, missing, firstRaw);
-    firstPass.valid.forEach((analysis) => resultsById.set(analysis.sentenceId, analysis));
+    const firstPass = await this.validateAndCacheCore(input.profile, chunk, firstRaw);
+    const valid = [...firstPass.valid];
 
     let remaining = firstPass.invalid;
     if (remaining.length > 0) {
@@ -440,8 +582,8 @@ export class CachedAnalysisService implements AnalysisService {
       const repairRaw = await this.requestModel(
         input.profile,
         input.documentId,
-        input.priority ?? "visible-core",
-        `${missing.map(({ key }) => key).join(":")}:repair`,
+        priority,
+        `${chunkKey}:repair`,
         remaining.length,
         [
           {
@@ -454,35 +596,39 @@ export class CachedAnalysisService implements AnalysisService {
           },
         ],
         CORE_SCHEMA,
-        "core-repair",
         signal,
+        true,
       );
-      const keysById = new Map(missing.map(({ sentence, key }) => [sentence.sentenceId, key]));
+      const keysById = new Map(chunk.map(({ sentence, key }) => [sentence.sentenceId, key]));
       const repairEntries = remaining.map(({ sentence }) => ({
         sentence,
         key: keysById.get(sentence.sentenceId)!,
       }));
       const repaired = await this.validateAndCacheCore(input.profile, repairEntries, repairRaw);
-      repaired.valid.forEach((analysis) => resultsById.set(analysis.sentenceId, analysis));
+      valid.push(...repaired.valid);
       remaining = repaired.invalid;
     }
+    return { valid, invalid: remaining };
+  }
 
-    const failuresById = new Map(
-      remaining.map(({ sentence, errors }) => [
+  /** 无 sink 或适配器不支持流式时返回 undefined，requestModel 便退回缓冲路径。 */
+  private streamHandler(
+    input: CoreBatchInput,
+    chunk: readonly { sentence: SentenceInput; key: string }[],
+  ): ((streamed: StreamedComponent) => void) | undefined {
+    const sink = input.onStreamedComponent;
+    if (sink === undefined || this.options.adapter.completeJsonStreaming === undefined) {
+      return undefined;
+    }
+    const provisional = new Map<string, ProvisionalComponents>(
+      chunk.map(({ sentence }) => [
         sentence.sentenceId,
-        { sentenceId: sentence.sentenceId, error: invalidOutput(errors) },
+        new ProvisionalComponents(sentence.tokens.length),
       ]),
     );
-    return {
-      result: input.sentences.flatMap(({ sentenceId }) => {
-        const result = resultsById.get(sentenceId);
-        return result === undefined ? [] : [result];
-      }),
-      failures: input.sentences.flatMap(({ sentenceId }) => {
-        const failure = failuresById.get(sentenceId);
-        return failure === undefined ? [] : [failure];
-      }),
-      cacheHit: false,
+    return ({ sentenceId, component }) => {
+      const accepted = provisional.get(sentenceId)?.accept(component);
+      if (accepted !== undefined) sink(sentenceId, accepted);
     };
   }
 
@@ -506,7 +652,6 @@ export class CachedAnalysisService implements AnalysisService {
       1,
       [{ role: "user", content: buildDetailPrompt(input.sentence, input.core, input.focus) }],
       DETAIL_SCHEMA,
-      "detail",
       signal,
     );
     let validation = validateDetail(raw, input.sentence, input.focus, input.profile.id);
@@ -519,8 +664,8 @@ export class CachedAnalysisService implements AnalysisService {
         1,
         [{ role: "user", content: detailRepairPrompt(input, validation.errors, raw) }],
         DETAIL_SCHEMA,
-        "detail-repair",
         signal,
+        true,
       );
       validation = validateDetail(repairRaw, input.sentence, input.focus, input.profile.id);
     }
@@ -595,7 +740,6 @@ export class CachedAnalysisService implements AnalysisService {
         },
       ],
       SENTENCE_DETAILS_SCHEMA,
-      "sentence-details",
       signal,
     );
     const firstPass = await this.validateAndCacheDetails(input, missing, raw);
@@ -620,8 +764,8 @@ export class CachedAnalysisService implements AnalysisService {
           },
         ],
         SENTENCE_DETAILS_SCHEMA,
-        "sentence-details-repair",
         signal,
+        true,
       );
       const secondPass = await this.validateAndCacheDetails(input, missing, repairRaw);
       succeeded += secondPass.valid;
@@ -688,7 +832,6 @@ export class CachedAnalysisService implements AnalysisService {
       1,
       [{ role: "user", content: correctionPrompt(input) }],
       CORE_SCHEMA,
-      "correction",
       signal,
     );
     let validation = validateCoreBatch(raw, [input.sentence], input.profile.id);
@@ -706,8 +849,8 @@ export class CachedAnalysisService implements AnalysisService {
           },
         ],
         CORE_SCHEMA,
-        "correction-repair",
         signal,
+        true,
       );
       validation = validateCoreBatch(repairRaw, [input.sentence], input.profile.id);
     }
@@ -749,8 +892,9 @@ export class CachedAnalysisService implements AnalysisService {
     sentenceCount: number,
     messages: readonly ChatMessage[],
     schema: JsonSchemaSpec,
-    batchKey: string,
     signal: AbortSignal,
+    jumpQueue = false,
+    onComponent?: (streamed: StreamedComponent) => void,
   ): Promise<unknown> {
     if (signal.aborted) throw cancellationError();
     const work: AnalysisModelWork = {
@@ -759,7 +903,15 @@ export class CachedAnalysisService implements AnalysisService {
       schema,
       requestedAt: this.now(),
       run: (schedulerSignal) =>
-        this.options.adapter.completeJson(profile, messages, schema, schedulerSignal),
+        onComponent === undefined
+          ? this.options.adapter.completeJson(profile, messages, schema, schedulerSignal)
+          : this.options.adapter.completeJsonStreaming!(
+              profile,
+              messages,
+              schema,
+              schedulerSignal,
+              onComponent,
+            ),
     };
     const onAbort = () => this.options.scheduler.cancelDocument(documentId);
     signal.addEventListener("abort", onAbort, { once: true });
@@ -770,7 +922,7 @@ export class CachedAnalysisService implements AnalysisService {
         priority,
         sentenceCount,
         input: work,
-        batchKey: `${batchKey}:${profile.id}`,
+        ...(jumpQueue ? { jumpQueue: true as const } : {}),
       });
     } finally {
       signal.removeEventListener("abort", onAbort);

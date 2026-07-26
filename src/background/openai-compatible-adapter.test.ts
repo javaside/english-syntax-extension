@@ -463,3 +463,235 @@ describe("syntax prompts", () => {
     expect(prompt).toMatch(/concise Chinese translation of exactly its own English text/i);
   });
 });
+
+const streamEnvelope = JSON.stringify({
+  sentences: [
+    {
+      sentenceId: "s1",
+      components: [
+        { startToken: 0, endToken: 1, role: "SUBJECT", translation: "\u4e3b\u8bed" },
+        { startToken: 2, endToken: 3, role: "PREDICATE", translation: "\u8c13\u8bed" },
+      ],
+    },
+    {
+      sentenceId: "s2",
+      components: [{ startToken: 0, endToken: 2, role: "OBJECT", translation: "\u5bbe\u8bed" }],
+    },
+  ],
+});
+
+function deltaEvent(content: string): string {
+  return `data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`;
+}
+
+/** Splits the envelope into n pieces so the parser has to survive chunk seams. */
+function envelopeEvents(text: string, pieces = 5): string[] {
+  const size = Math.ceil(text.length / pieces);
+  const events: string[] = [];
+  for (let index = 0; index < text.length; index += size) {
+    events.push(deltaEvent(text.slice(index, index + size)));
+  }
+  return [...events, "data: [DONE]\n\n"];
+}
+
+function sseResponse(events: readonly string[], gapMs = 0): Response {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      for (const event of events) {
+        if (gapMs > 0) await new Promise((resolve) => setTimeout(resolve, gapMs));
+        controller.enqueue(encoder.encode(event));
+      }
+      controller.close();
+    },
+  });
+  return new Response(stream, {
+    status: 200,
+    headers: { "Content-Type": "text/event-stream" },
+  });
+}
+
+describe("streaming core completions", () => {
+  it("reports components while the response streams and returns the finished envelope", async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(sseResponse(envelopeEvents(streamEnvelope)));
+    const adapter = new OpenAiCompatibleAdapter({ fetch });
+    const seen: Array<[string, unknown]> = [];
+
+    const result = await adapter.completeJsonStreaming(
+      profile,
+      messages,
+      schema,
+      new AbortController().signal,
+      ({ sentenceId, component }) => seen.push([sentenceId, component.role]),
+    );
+
+    expect(seen).toEqual([
+      ["s1", "SUBJECT"],
+      ["s1", "PREDICATE"],
+      ["s2", "OBJECT"],
+    ]);
+    expect(result).toEqual(JSON.parse(streamEnvelope));
+    expect(requestBody(fetch, 0)).toMatchObject({ stream: true });
+  });
+
+  it("falls back to one non-streaming request when the endpoint rejects stream", async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValueOnce(response("stream is not supported by this model", { status: 400 }))
+      .mockResolvedValueOnce(completion(streamEnvelope));
+    const persistStreamSupport = vi.fn().mockResolvedValue(undefined);
+    const adapter = new OpenAiCompatibleAdapter({ fetch, persistStreamSupport });
+
+    const result = await adapter.completeJsonStreaming(
+      profile,
+      messages,
+      schema,
+      new AbortController().signal,
+      () => undefined,
+    );
+
+    expect(result).toEqual(JSON.parse(streamEnvelope));
+    expect(persistStreamSupport).toHaveBeenCalledWith(profile.id, "unsupported");
+    expect(requestBody(fetch, 1)).toMatchObject({ stream: false });
+  });
+
+  it("does not attempt streaming for a profile already marked unsupported", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(completion(streamEnvelope));
+    const adapter = new OpenAiCompatibleAdapter({ fetch });
+
+    await adapter.completeJsonStreaming(
+      { ...profile, streamSupport: "unsupported" },
+      messages,
+      schema,
+      new AbortController().signal,
+      () => undefined,
+    );
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(requestBody(fetch, 0)).toMatchObject({ stream: false });
+  });
+
+  it("treats a stream that never produced content as unsupported and retries without it", async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValueOnce(
+        sseResponse(['data: {"choices":[{"delta":{}}]}\n\n', "data: [DONE]\n\n"]),
+      )
+      .mockResolvedValueOnce(completion(streamEnvelope));
+    const persistStreamSupport = vi.fn().mockResolvedValue(undefined);
+    const adapter = new OpenAiCompatibleAdapter({ fetch, persistStreamSupport });
+
+    const result = await adapter.completeJsonStreaming(
+      profile,
+      messages,
+      schema,
+      new AbortController().signal,
+      () => undefined,
+    );
+
+    expect(result).toEqual(JSON.parse(streamEnvelope));
+    expect(persistStreamSupport).toHaveBeenCalledWith(profile.id, "unsupported");
+  });
+
+  it("keeps the schema downgrade working while streaming", async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValueOnce(
+        response("response_format: unknown variant `json_schema`", { status: 400 }),
+      )
+      .mockResolvedValueOnce(sseResponse(envelopeEvents(streamEnvelope)));
+    const persistJsonSchemaSupport = vi.fn().mockResolvedValue(undefined);
+    const adapter = new OpenAiCompatibleAdapter({ fetch, persistJsonSchemaSupport });
+
+    const result = await adapter.completeJsonStreaming(
+      profile,
+      messages,
+      schema,
+      new AbortController().signal,
+      () => undefined,
+    );
+
+    expect(result).toEqual(JSON.parse(streamEnvelope));
+    expect(persistJsonSchemaSupport).toHaveBeenCalledWith(profile.id, "unsupported");
+    // 降级后仍然是流式请求，不该连流式一起放弃。
+    expect(requestBody(fetch, 1)).toMatchObject({ stream: true });
+    expect(requestBody(fetch, 1)).not.toHaveProperty("response_format");
+  });
+
+  it("measures the timeout against stream inactivity, not total duration", async () => {
+    const events = envelopeEvents(streamEnvelope, 4);
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(sseResponse(events, 40));
+    const adapter = new OpenAiCompatibleAdapter({ fetch });
+
+    // 5 个事件 × 40ms 间隔 ≈ 200ms 总时长，远超 120ms 的超时值；只要每片都刷新
+    // 计时器就不该超时。
+    const result = await adapter.completeJsonStreaming(
+      { ...profile, timeoutMs: 120 },
+      messages,
+      schema,
+      new AbortController().signal,
+      () => undefined,
+    );
+
+    expect(result).toEqual(JSON.parse(streamEnvelope));
+  });
+
+  it("times out a stream that stalls longer than the profile timeout", async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(sseResponse([deltaEvent('{"sentences":['), deltaEvent("]}")], 200));
+    const adapter = new OpenAiCompatibleAdapter({ fetch });
+
+    await expect(
+      adapter.completeJsonStreaming(
+        { ...profile, timeoutMs: 60 },
+        messages,
+        schema,
+        new AbortController().signal,
+        () => undefined,
+      ),
+    ).rejects.toMatchObject({ code: "REQUEST_TIMEOUT" });
+  });
+});
+
+describe("disabling model reasoning", () => {
+  const thinking = { ...profile, disableReasoning: true as const };
+
+  it("asks a thinking model to skip reasoning on a buffered request", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(completion('{"ok":1}'));
+    const adapter = new OpenAiCompatibleAdapter({ fetch });
+
+    await adapter.completeJson(thinking, messages, schema, new AbortController().signal);
+
+    expect(requestBody(fetch, 0)).toMatchObject({ reasoning_effort: "none" });
+  });
+
+  it("carries the same instruction on a streamed request", async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(sseResponse(envelopeEvents(streamEnvelope)));
+    const adapter = new OpenAiCompatibleAdapter({ fetch });
+
+    await adapter.completeJsonStreaming(
+      thinking,
+      messages,
+      schema,
+      new AbortController().signal,
+      () => undefined,
+    );
+
+    expect(requestBody(fetch, 0)).toMatchObject({ stream: true, reasoning_effort: "none" });
+  });
+
+  // OpenAI 官方 API 不接受 "none"，所以这个字段绝不能默认出现。
+  it("omits the field entirely unless the profile opts in", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(completion('{"ok":1}'));
+    const adapter = new OpenAiCompatibleAdapter({ fetch });
+
+    await adapter.completeJson(profile, messages, schema, new AbortController().signal);
+
+    expect(requestBody(fetch, 0)).not.toHaveProperty("reasoning_effort");
+  });
+});

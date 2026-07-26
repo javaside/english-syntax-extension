@@ -1,12 +1,19 @@
 import type { ExtensionError } from "../shared/errors";
-import type { CoreAnalysis, DetailAnalysis, Token, TokenRange } from "../shared/grammar";
 import type {
+  CoreAnalysis,
+  CoreComponent,
+  DetailAnalysis,
+  Token,
+  TokenRange,
+} from "../shared/grammar";
+import type {
+  CoreStreamPush,
   RequestMessage,
   ResponseMessage,
   SentenceInput,
   SessionStatus,
 } from "../shared/protocol";
-import { MESSAGE_VERSION } from "../shared/versions";
+import { CORE_SCHEMA_VERSION, MESSAGE_VERSION } from "../shared/versions";
 import { createSentenceId, segmentBlock, tokenize } from "../language/segmenter";
 import { BlockReplacement } from "./block-replacement";
 import type { SentenceFailure } from "./block-replacement";
@@ -44,6 +51,9 @@ export interface ControllerBlock {
 
 export interface ControllerReplacement {
   show(original: HTMLElement, block: ControllerBlock): void;
+  /** 流式预览:跳过"全句齐备"闸门，先把已有的成分放到页面上。 */
+  showPreview(original: HTMLElement, block: ControllerBlock): void;
+  readonly active: boolean;
   showPartialFailure(
     original: HTMLElement,
     block: ControllerBlock,
@@ -64,6 +74,7 @@ export interface RuntimeTransport {
   send(message: RequestMessage): Promise<ResponseMessage>;
   cancelDocument(documentId: string): void;
   onDisconnect?(handler: () => void): () => void;
+  onStream?(handler: (push: CoreStreamPush) => void): () => void;
   reconnect?(): void | Promise<void>;
   dispose?(): void;
 }
@@ -172,6 +183,7 @@ export class SessionController {
   private mutationObserver?: MutationObserver;
   private mutationTimer?: ReturnType<typeof setTimeout>;
   private removeDisconnectListener?: () => void;
+  private removeStreamListener?: () => void;
   private selectedProfileId?: string;
   private scanned = false;
   private readonly hoverTarget: () => Element | null;
@@ -252,6 +264,7 @@ export class SessionController {
     this.removeDisconnectListener = this.options.transport.onDisconnect?.(
       this.handleTransportDisconnect,
     );
+    this.removeStreamListener = this.options.transport.onStream?.(this.handleStreamPush);
     if (wantScan) await this.performScan();
     this.emitStatus();
   }
@@ -306,6 +319,8 @@ export class SessionController {
     this.mutationTimer = undefined;
     this.removeDisconnectListener?.();
     this.removeDisconnectListener = undefined;
+    this.removeStreamListener?.();
+    this.removeStreamListener = undefined;
     this.options.transport.dispose?.();
     this.document.removeEventListener("contextmenu", this.recordContextTarget, true);
     this.document.removeEventListener("syntax-detail-request", this.handleDetailEvent);
@@ -546,10 +561,10 @@ export class SessionController {
     ) {
       return;
     }
-    void this.analyzeBlock(block);
+    void this.analyzeBlock(block, force);
   }
 
-  private async analyzeBlock(block: BlockRecord): Promise<void> {
+  private async analyzeBlock(block: BlockRecord, userInitiated = false): Promise<void> {
     const bypassCache = block.bypassCacheOnce === true;
     block.bypassCacheOnce = undefined;
     const version = ++this.operationVersion;
@@ -577,10 +592,17 @@ export class SessionController {
       return;
     }
     for (const sentence of outgoing) this.transition(sentence, "requesting");
+    // 屏外预取块与用户正在读的段落曾同为 visible-core，只按 FIFO 排；从页面中部启动时
+    // 上一屏会插在眼前这段之前。显式发起的解析(选中/悬停/右键/重新解析)一律不降级——
+    // 选区锚点这类元素可能压根不在视口里。
+    const offscreen =
+      !userInitiated &&
+      !this.viewport.isVisible(block.replacement.currentElement(block.candidate.element));
     const request = this.pageRequest({
       type: "ANALYZE_CORE",
       sentences: outgoing.map(({ input }) => input),
       ...(bypassCache ? { bypassCache: true as const } : {}),
+      ...(offscreen ? { offscreen: true as const } : {}),
     });
     const response = await this.send(request, version);
     if (response === undefined || block.operationVersion !== version || this.isStopped()) {
@@ -876,6 +898,42 @@ export class SessionController {
     for (const blockId of this.unfinishedBlockIds()) {
       if (this.state === "paused") this.pausedBlocks.add(blockId);
       else if (this.state === "running") this.queueVisibleBlock(blockId);
+    }
+  }
+
+  private readonly handleStreamPush = (push: CoreStreamPush): void => {
+    if (push.documentId !== this.documentId) return;
+    this.applyStreamedCore(push.sentenceId, push.components);
+  };
+
+  /**
+   * 未经整句校验的暂定成分:只用于让段落尽早出现在页面上。相位保持 requesting，
+   * 所以它不计入 ready，也不会让会话被判为已完成;完整响应到齐后会用已校验结果再
+   * 渲染一次覆盖掉。
+   */
+  applyStreamedCore(sentenceId: string, components: readonly CoreComponent[]): void {
+    if (this.state !== "running" || components.length === 0) return;
+    const located = this.locateSentence(sentenceId);
+    if (located === undefined || located.sentence.phase !== "requesting") return;
+    const { block, sentence } = located;
+    const provisionalAnalysis: CoreAnalysis = {
+      schemaVersion: CORE_SCHEMA_VERSION,
+      sentenceId,
+      components: [...components],
+      modelProfileId: this.selectedProfileId ?? "streaming",
+    };
+    try {
+      block.learningBlock.renderCore(
+        sentence.input.text,
+        sentence.input.tokens,
+        provisionalAnalysis,
+      );
+    } catch {
+      // 渲染层拒绝这批暂定成分:放弃预览，等完整结果，不要把异常冒到端口回调里。
+      return;
+    }
+    if (!block.replacement.active) {
+      block.replacement.showPreview(block.candidate.element, block.learningBlock);
     }
   }
 

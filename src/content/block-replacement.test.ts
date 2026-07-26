@@ -292,4 +292,44 @@ describe("BlockReplacement", () => {
     expect(getComputedStyle(second).display).toBe(secondDisplay);
     expect(document.querySelector("style[data-syntax-learning-hide]")).toBeNull();
   });
+
+  it("previews a block whose sentences have not all resolved yet", () => {
+    const original = document.querySelector("p")!;
+    const block = learningBlock(["sentence-1", "sentence-2"]);
+    renderReady(block, "sentence-1");
+    const replacement = new BlockReplacement(() => "preview");
+
+    expect(block.isReadyToReplace()).toBe(false);
+    replacement.showPreview(original, block);
+
+    expect(replacement.active).toBe(true);
+    expect(block.host.isConnected).toBe(true);
+  });
+
+  it("refuses to preview a block with nothing rendered at all", () => {
+    const original = document.querySelector("p")!;
+    const block = learningBlock(["sentence-1"]);
+    const replacement = new BlockReplacement(() => "empty");
+
+    replacement.showPreview(original, block);
+
+    expect(replacement.active).toBe(false);
+  });
+
+  // 完整结果落地时 finishBlock 会再调 show;若照旧先 restore 再插入，预览会闪一下。
+  it("leaves an already displayed block in place instead of tearing it down", () => {
+    const original = document.querySelector("p")!;
+    const block = learningBlock(["sentence-1"]);
+    renderReady(block);
+    const replacement = new BlockReplacement(() => "stable");
+    replacement.showPreview(original, block);
+    const host = block.host;
+
+    replacement.show(original, block);
+
+    expect(block.host).toBe(host);
+    expect(host.isConnected).toBe(true);
+    expect(replacement.active).toBe(true);
+    expect(document.head.querySelectorAll("style[data-syntax-learning-hide]")).toHaveLength(1);
+  });
 });

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { GrammarRole } from "./grammar";
-import { isRequestMessage, isSessionComplete, type SessionStatus } from "./protocol";
+import {
+  isCoreStreamPush,
+  isRequestMessage,
+  isSessionComplete,
+  type SessionStatus,
+} from "./protocol";
 
 const page = {
   version: 1,
@@ -114,6 +119,13 @@ describe("request protocol guard", () => {
 
   it("rejects a hovered-block request with surplus keys", () => {
     expect(isRequestMessage({ ...page, type: "PARSE_HOVERED_BLOCK", target: "body" })).toBe(false);
+  });
+
+  it("accepts ANALYZE_CORE with offscreen: true and rejects other values", () => {
+    const validAnalyzeCore = { ...page, type: "ANALYZE_CORE", sentences: [sentence] };
+    expect(isRequestMessage({ ...validAnalyzeCore, offscreen: true })).toBe(true);
+    expect(isRequestMessage({ ...validAnalyzeCore, offscreen: false })).toBe(false);
+    expect(isRequestMessage({ ...validAnalyzeCore, offscreen: "yes" })).toBe(false);
   });
 
   it("accepts ANALYZE_CORE with bypassCache: true and rejects other values", () => {
@@ -267,5 +279,47 @@ describe("prefetch protocol", () => {
       detailFailed: 0,
     } as const;
     expect(isSessionComplete(status)).toBe(true);
+  });
+});
+
+describe("isCoreStreamPush", () => {
+  const push = {
+    version: 1,
+    type: "CORE_STREAM",
+    documentId: "document-1",
+    sentenceId: "sentence-1",
+    components: [{ startToken: 0, endToken: 1, role: "SUBJECT", translation: "主语" }],
+  };
+
+  it("accepts a well-formed provisional push", () => {
+    expect(isCoreStreamPush(push)).toBe(true);
+  });
+
+  it("rejects a version it does not speak", () => {
+    expect(isCoreStreamPush({ ...push, version: 2 })).toBe(false);
+  });
+
+  it("rejects a push without page correlation", () => {
+    expect(isCoreStreamPush({ ...push, documentId: "" })).toBe(false);
+    expect(isCoreStreamPush({ ...push, sentenceId: "" })).toBe(false);
+  });
+
+  it("rejects components the renderer could not draw", () => {
+    expect(isCoreStreamPush({ ...push, components: [{ startToken: 1, endToken: 0 }] })).toBe(false);
+    expect(
+      isCoreStreamPush({
+        ...push,
+        components: [{ startToken: 0, endToken: 1, role: "NOPE", translation: "x" }],
+      }),
+    ).toBe(false);
+  });
+
+  it("accepts an empty component list", () => {
+    expect(isCoreStreamPush({ ...push, components: [] })).toBe(true);
+  });
+
+  it("rejects anything that is not this message", () => {
+    expect(isCoreStreamPush({ ...push, type: "CORE_RESULT" })).toBe(false);
+    expect(isCoreStreamPush(null)).toBe(false);
   });
 });
