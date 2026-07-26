@@ -201,3 +201,58 @@ test("打开详解不挤动同行的相邻句子", async ({ harness }) => {
   // 点开详解只应在下方插入面板，不该让同行的另一句掉到下一行
   expect(await componentTops()).toEqual(before);
 });
+
+test("长句折行时，详解面板出现在被点成分那一行的下方", async ({ harness }) => {
+  await harness.seedProfiles(
+    [{ id: "p", name: "fake", baseUrl: harness.fakeModel.baseUrl, apiKey: "k", model: "m" }],
+    "p",
+  );
+  const page = await harness.context.newPage();
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await page.goto(`${harness.pagesOrigin}/multiline-probe.html`);
+  const tabId = await harness.tabIdFor(`${harness.pagesOrigin}/multiline-probe.html`);
+  await harness.dispatchFromUi({
+    version: 1,
+    requestId: "layout:multiline",
+    type: "START_SESSION",
+    tabId,
+    documentId: "layout-multiline",
+  });
+
+  await expect(page.locator("[data-syntax-learning-block] .component").first()).toBeVisible();
+  await page.waitForTimeout(200);
+
+  const lines = await page.evaluate(() => {
+    const root = document.querySelector("[data-syntax-learning-block]")!.shadowRoot!;
+    const tops = [...root.querySelectorAll(".component")].map((c) =>
+      Math.round(c.getBoundingClientRect().top),
+    );
+    return [...new Set(tops)].sort((a, b) => a - b);
+  });
+  // 前置条件:这句确实折了行，否则这条用例测不到东西
+  expect(lines.length).toBeGreaterThanOrEqual(2);
+
+  await page.locator("[data-syntax-learning-block] .component").first().click();
+  await expect(page.locator(".detail")).toHaveCount(1);
+  await page.waitForTimeout(200);
+
+  const placement = await page.evaluate(() => {
+    const root = document.querySelector("[data-syntax-learning-block]")!.shadowRoot!;
+    const detail = root.querySelector(".detail")!.getBoundingClientRect();
+    const comps = [...root.querySelectorAll(".component")].map((c) => c.getBoundingClientRect());
+    const firstLineTop = Math.min(...comps.map((r) => r.top));
+    const firstLine = comps.filter((r) => Math.abs(r.top - firstLineTop) < 4);
+    const below = comps.filter((r) => r.top > detail.bottom - 1);
+    return {
+      detailTop: Math.round(detail.top),
+      firstLineBottom: Math.round(Math.max(...firstLine.map((r) => r.bottom))),
+      componentsBelowPanel: below.length,
+      totalComponents: comps.length,
+    };
+  });
+
+  // 面板紧跟在第一行下方
+  expect(placement.detailTop).toBeGreaterThanOrEqual(placement.firstLineBottom - 2);
+  // 且后面几行的成分仍在面板之下——面板没有被推到整句末尾
+  expect(placement.componentsBelowPanel).toBeGreaterThan(0);
+});

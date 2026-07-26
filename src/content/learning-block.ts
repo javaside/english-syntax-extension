@@ -61,8 +61,14 @@ const STYLES = `
   align-self: end;
 }
 
-/* 面板是句子的兄弟节点而非子节点（见 setDetailLoading）：句子无需变块级，
-   共行的邻句不会因为点开详解而被挤走。 */
+/* 面板多数时候是句子的兄弟节点（见 setDetailLoading），句子无需变块级，共行的
+   邻句不会被挤走。只有长句折行、面板插进句内时才需要块级来让面板拿到栏宽——
+   那种句子本来就已占满栏宽，变块级没有视觉代价。 */
+.sentence:has(.detail) {
+  display: flex;
+  margin-inline-end: 0;
+}
+
 .component {
   appearance: none;
   display: inline-grid;
@@ -511,12 +517,40 @@ export class SyntaxLearningBlock {
     detail.setAttribute("aria-busy", "true");
     detail.textContent = "正在加载详细解析…";
 
-    // 面板放在句子**外面**（与句子同级），而不是作为句子的 flex 子项。
-    // 放在里面时，句子必须变成块级才能让面板拿到栏宽，于是原本与它共行的短句
-    // 会被挤到下一行——点开详解把上方的排版整个搅动一遍。
+    // 面板落在**被点成分所在视觉行**的正下方。两种插法，取决于那一行是不是
+    // 整句的最后一行：
     //
-    // 插入点取「点击句所在视觉行的最后一句」之后：面板落在整行下方，行内一句
-    // 都不移动。行判定依赖真实布局，零尺寸环境（单测）自然退化为紧跟该句。
+    //  * 不是最后一行（长句折行）：插在句内、该行最后一个成分之后。这种句子
+    //    已经占满栏宽、不可能与别的句子共行，所以让它变块级（见 CSS 的
+    //    :has(.detail)）没有任何视觉代价。
+    //  * 是最后一行：插到句子外面、该视觉行最后一句之后。短句常与邻句共行，
+    //    放句内会逼句子变块级，把邻居挤到下一行。
+    //
+    // 行判定依赖真实布局，零尺寸环境（单测）退化为插在句子之后。
+    const component = sentence.querySelector<HTMLElement>(
+      `.component[data-start-token="${focus.startToken}"][data-end-token="${focus.endToken}"]`,
+    );
+    const clickedRect = component?.getBoundingClientRect();
+    // 显式判断有没有真实布局:happy-dom 等零尺寸环境里所有矩形都是 0，靠数值
+    // 比较会误判成"下面还有成分"而选错分支。
+    const hasLayout = clickedRect !== undefined && clickedRect.height > 0;
+    const hasComponentBelow =
+      hasLayout &&
+      [...sentence.querySelectorAll<HTMLElement>(".component")].some(
+        (other) => other.getBoundingClientRect().top >= clickedRect.bottom,
+      );
+
+    if (component !== null && hasComponentBelow) {
+      const clickedBottom = clickedRect.bottom;
+      let anchor: Element = component;
+      for (let next = anchor.nextElementSibling; next !== null; next = next.nextElementSibling) {
+        if (next.getBoundingClientRect().top >= clickedBottom) break;
+        anchor = next;
+      }
+      anchor.after(detail);
+      return;
+    }
+
     const sentenceBottom = sentence.getBoundingClientRect().bottom;
     let anchor: Element = sentence;
     for (let next = anchor.nextElementSibling; next !== null; next = next.nextElementSibling) {
