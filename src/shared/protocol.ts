@@ -13,6 +13,12 @@ interface PageRequestBase extends MessageBase {
   documentId: string;
 }
 
+/**
+ * 一条 ANALYZE_CORE 最多带几句。三处共用同一个数字:content 侧按它攒批、
+ * 后台按它切块、调度器按它做单请求上限。任一侧自己写一个常量都会漂移。
+ */
+export const MAX_SENTENCES_PER_REQUEST = 6;
+
 export interface SentenceInput {
   sentenceId: string;
   text: string;

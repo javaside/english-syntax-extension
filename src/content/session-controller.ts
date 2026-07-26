@@ -6,6 +6,7 @@ import type {
   Token,
   TokenRange,
 } from "../shared/grammar";
+import { MAX_SENTENCES_PER_REQUEST } from "../shared/protocol";
 import type {
   CoreStreamPush,
   RequestMessage,
@@ -115,6 +116,8 @@ export interface SessionControllerOptions {
   requestFeedback?: (sentenceId: string) => string | null | Promise<string | null>;
   /** 测试注入：返回当前鼠标悬停的最深元素；默认查询 CSS :hover 链。 */
   hoverTarget?: () => Element | null;
+  /** 攒批窗口:视口一次放出的多个段落在这段时间内合并成一条请求。 */
+  batchWindowMs?: number;
 }
 
 const CONTEXT_ERROR: ExtensionError = {
@@ -187,6 +190,21 @@ export class SessionController {
   private selectedProfileId?: string;
   private scanned = false;
   private cacheOnly = false;
+  private readonly batchWindowMs: number;
+  /**
+   * 待发的可见块，按「是否屏外 × 是否跳过缓存」分桶:前者决定调度优先级，后者是
+   * 请求级标记，混进同一条请求会波及别的块。
+   */
+  private readonly pendingBatches = new Map<
+    string,
+    {
+      blocks: BlockRecord[];
+      sentences: number;
+      offscreen: boolean;
+      bypassCache: boolean;
+      timer: ReturnType<typeof setTimeout>;
+    }
+  >();
   private readonly hoverTarget: () => Element | null;
 
   constructor(private readonly options: SessionControllerOptions) {
@@ -198,6 +216,7 @@ export class SessionController {
         return chain.length > 0 ? (chain[chain.length - 1] ?? null) : null;
       });
     this.scan = options.scan ?? scanDocument;
+    this.batchWindowMs = options.batchWindowMs ?? 120;
     this.sentenceIdFactory = options.createSentenceId ?? createSentenceId;
     this.now = options.now ?? performance.now.bind(performance);
     this.yieldNow = options.yieldNow ?? defaultYield;
@@ -334,6 +353,9 @@ export class SessionController {
     );
     for (const timer of this.reconnectTimers) this.cancelTimeout(timer);
     this.reconnectTimers.clear();
+    // 挂起的合批窗口必须取消，否则会话停掉之后还会冒出一条请求。
+    for (const pending of this.pendingBatches.values()) this.cancelTimeout(pending.timer);
+    this.pendingBatches.clear();
     for (const block of this.blocks.values()) block.replacement.restore();
     for (const anchor of this.ephemeralSelectionAnchors) anchor.remove();
     this.ephemeralSelectionAnchors.clear();
@@ -394,7 +416,8 @@ export class SessionController {
       const block = this.blocks.get(blockId);
       if (block !== undefined) block.bypassCacheOnce = true;
       this.invalidateBlock(blockId);
-      this.queueVisibleBlock(blockId, true);
+      // 整屏批量操作:绕过暂停门，但合批发送——逐块单发会把请求数放大到块数。
+      this.queueVisibleBlock(blockId, true, false);
     }
   }
 
@@ -550,7 +573,12 @@ export class SessionController {
     }
   }
 
-  private queueVisibleBlock(blockId: string, force = false): void {
+  /**
+   * @param force     绕过暂停门（用户显式发起或「重新解析」）
+   * @param immediate 跳过合批窗口。单块的用户动作（选中/悬停/右键）要立即发；
+   *                  「重新解析」虽然也是用户发起，但它是整屏批量操作，合批更快。
+   */
+  private queueVisibleBlock(blockId: string, force = false, immediate = force): void {
     const block = this.blocks.get(blockId);
     if (block === undefined || this.state === "stopped") return;
     if (this.state === "paused" && !force) {
@@ -564,92 +592,167 @@ export class SessionController {
     ) {
       return;
     }
-    void this.analyzeBlock(block, force);
-  }
-
-  private async analyzeBlock(block: BlockRecord, userInitiated = false): Promise<void> {
-    const bypassCache = block.bypassCacheOnce === true;
-    block.bypassCacheOnce = undefined;
-    const version = ++this.operationVersion;
-    block.operationVersion = version;
-    const failures: SentenceFailure[] = [];
-    const outgoing: SentenceRecord[] = [];
-    for (const sentence of block.sentences) {
-      this.transition(sentence, "cache-check");
-      if (normalizedLength(sentence.input.text) > 2_000) {
-        this.transition(sentence, "validating");
-        const failure = {
-          sentenceId: sentence.input.sentenceId,
-          sentence: sentence.input.text,
-          message: TOO_LONG_MESSAGE,
-        };
-        failures.push(failure);
-        this.transition(sentence, "failed");
-      } else {
-        this.transition(sentence, "queued");
-        outgoing.push(sentence);
-      }
-    }
-    if (outgoing.length === 0) {
-      this.finishBlock(block, failures);
+    // 「重新解析」与用户显式发起的解析不进窗口:前者带的 bypassCache 是请求级
+    // 标记，混进合批会波及别的块；后者用户正在等，不该为省 token 让他多等。
+    if (immediate) {
+      void this.analyzeBlocks([block], true);
       return;
     }
-    for (const sentence of outgoing) this.transition(sentence, "requesting");
+    this.enqueueForBatch(block);
+  }
+
+  /**
+   * 视口的 rootMargin 是 100%，一次会放出十几个段落，而一个段落常常只有 1-2 句。
+   * 逐段发的话，2,210 字符的固定指令要在每条请求里重付一遍——单句请求里它占 82%。
+   * 攒到上限或窗口到期再发，请求数和总 prefill 都能大幅下降。
+   */
+  private enqueueForBatch(block: BlockRecord): void {
+    const offscreen = !this.viewport.isVisible(
+      block.replacement.currentElement(block.candidate.element),
+    );
+    const bypassCache = block.bypassCacheOnce === true;
+    const key = `${String(offscreen)}:${String(bypassCache)}`;
+    const sentences = block.sentences.length;
+    const pending = this.pendingBatches.get(key);
+    if (pending === undefined) {
+      // 先入表再起定时器:反过来的话，同步触发的定时器会在条目写入前就跑
+      // flushBatch，找不到东西直接返回，这一批就永远发不出去了。
+      const entry = {
+        blocks: [block],
+        sentences,
+        offscreen,
+        bypassCache,
+        timer: 0 as unknown as ReturnType<typeof setTimeout>,
+      };
+      this.pendingBatches.set(key, entry);
+      entry.timer = this.scheduleTimeout(() => this.flushBatch(key), this.batchWindowMs);
+    } else {
+      pending.blocks.push(block);
+      pending.sentences += sentences;
+    }
+    const current = this.pendingBatches.get(key);
+    if (current !== undefined && current.sentences >= MAX_SENTENCES_PER_REQUEST) {
+      this.flushBatch(key);
+    }
+  }
+
+  private flushBatch(key: string): void {
+    const pending = this.pendingBatches.get(key);
+    if (pending === undefined) return;
+    this.pendingBatches.delete(key);
+    this.cancelTimeout(pending.timer);
+    void this.analyzeBlocks(pending.blocks, false);
+  }
+
+  /**
+   * 一条 ANALYZE_CORE 覆盖一批块。响应回来后按块分发并各自 finishBlock——
+   * 每个块保有自己的 operationVersion 守卫，期间被失效的块会被跳过。
+   */
+  private async analyzeBlocks(
+    blocks: readonly BlockRecord[],
+    userInitiated: boolean,
+  ): Promise<void> {
+    const bypassCache = blocks.some((block) => block.bypassCacheOnce === true);
+    for (const block of blocks) block.bypassCacheOnce = undefined;
+    const version = ++this.operationVersion;
+    for (const block of blocks) block.operationVersion = version;
+
+    // 每块各自的失败清单:超长句在发请求前就判失败，不占用配额。
+    const failuresByBlock = new Map<BlockRecord, SentenceFailure[]>(
+      blocks.map((block) => [block, []]),
+    );
+    const outgoingByBlock = new Map<BlockRecord, SentenceRecord[]>();
+    for (const block of blocks) {
+      const outgoing: SentenceRecord[] = [];
+      for (const sentence of block.sentences) {
+        this.transition(sentence, "cache-check");
+        if (normalizedLength(sentence.input.text) > 2_000) {
+          this.transition(sentence, "validating");
+          failuresByBlock.get(block)!.push({
+            sentenceId: sentence.input.sentenceId,
+            sentence: sentence.input.text,
+            message: TOO_LONG_MESSAGE,
+          });
+          this.transition(sentence, "failed");
+        } else {
+          this.transition(sentence, "queued");
+          outgoing.push(sentence);
+        }
+      }
+      outgoingByBlock.set(block, outgoing);
+    }
+
+    const allOutgoing = blocks.flatMap((block) => outgoingByBlock.get(block)!);
+    if (allOutgoing.length === 0) {
+      for (const block of blocks) this.finishBlock(block, failuresByBlock.get(block)!);
+      return;
+    }
+    for (const sentence of allOutgoing) this.transition(sentence, "requesting");
+
     // 屏外预取块与用户正在读的段落曾同为 visible-core，只按 FIFO 排；从页面中部启动时
     // 上一屏会插在眼前这段之前。显式发起的解析(选中/悬停/右键/重新解析)一律不降级——
-    // 选区锚点这类元素可能压根不在视口里。
+    // 选区锚点这类元素可能压根不在视口里。合批时整批同属一个 offscreen 分桶。
     const offscreen =
       !userInitiated &&
-      !this.viewport.isVisible(block.replacement.currentElement(block.candidate.element));
+      blocks.every(
+        (block) =>
+          !this.viewport.isVisible(block.replacement.currentElement(block.candidate.element)),
+      );
     const request = this.pageRequest({
       type: "ANALYZE_CORE",
-      sentences: outgoing.map(({ input }) => input),
+      sentences: allOutgoing.map(({ input }) => input),
       ...(bypassCache ? { bypassCache: true as const } : {}),
       ...(offscreen ? { offscreen: true as const } : {}),
     });
     const response = await this.send(request, version);
-    if (response === undefined || block.operationVersion !== version || this.isStopped()) {
-      return;
-    }
-    for (const sentence of outgoing) this.transition(sentence, "validating");
+    if (response === undefined || this.isStopped()) return;
+
     const analyses = response.type === "CORE_RESULT" ? response.analyses : [];
     const cacheOnly = response.type === "CORE_RESULT" && response.cacheOnly === true;
     if (cacheOnly) this.cacheOnly = true;
-    for (const sentence of outgoing) {
-      const analysis = analyses.find(({ sentenceId }) => sentenceId === sentence.input.sentenceId);
-      if (analysis === undefined) {
-        if (cacheOnly) {
-          // 纯缓存会话未命中不算失败：不标红、不给重试。部分命中时未命中句以纯原文
-          // 参与替换；整块全未命中则由 finishBlock 的守卫保持页面原始 DOM。
-          block.learningBlock.renderSkipped(sentence.input.sentenceId, sentence.input.text);
-          this.transition(sentence, "skipped");
+
+    for (const block of blocks) {
+      // 逐块校验版本:合批期间某个块被失效(如内容变动)时只跳过它，不连累同批。
+      if (block.operationVersion !== version) continue;
+      const outgoing = outgoingByBlock.get(block)!;
+      const failures = failuresByBlock.get(block)!;
+      for (const sentence of outgoing) this.transition(sentence, "validating");
+      for (const sentence of outgoing) {
+        const analysis = analyses.find(
+          ({ sentenceId }) => sentenceId === sentence.input.sentenceId,
+        );
+        if (analysis === undefined) {
+          if (cacheOnly) {
+            // 纯缓存会话未命中不算失败：不标红、不给重试。部分命中时未命中句以纯原文
+            // 参与替换；整块全未命中则由 finishBlock 的守卫保持页面原始 DOM。
+            block.learningBlock.renderSkipped(sentence.input.sentenceId, sentence.input.text);
+            this.transition(sentence, "skipped");
+            continue;
+          }
+          failures.push({
+            sentenceId: sentence.input.sentenceId,
+            sentence: sentence.input.text,
+            message: responseErrorMessage(response),
+          });
+          this.transition(sentence, "failed");
           continue;
         }
-        const failure = {
-          sentenceId: sentence.input.sentenceId,
-          sentence: sentence.input.text,
-          message: responseErrorMessage(response),
-        };
-        failures.push(failure);
-        this.transition(sentence, "failed");
-        continue;
+        try {
+          block.learningBlock.renderCore(sentence.input.text, sentence.input.tokens, analysis);
+          sentence.core = analysis;
+          this.transition(sentence, "ready");
+          this.prefetcher?.enqueue(sentence.input, analysis);
+        } catch {
+          failures.push({
+            sentenceId: sentence.input.sentenceId,
+            sentence: sentence.input.text,
+            message: MISSING_RESULT_MESSAGE,
+          });
+          this.transition(sentence, "failed");
+        }
       }
-      try {
-        block.learningBlock.renderCore(sentence.input.text, sentence.input.tokens, analysis);
-        sentence.core = analysis;
-        this.transition(sentence, "ready");
-        this.prefetcher?.enqueue(sentence.input, analysis);
-      } catch {
-        const failure = {
-          sentenceId: sentence.input.sentenceId,
-          sentence: sentence.input.text,
-          message: MISSING_RESULT_MESSAGE,
-        };
-        failures.push(failure);
-        this.transition(sentence, "failed");
-      }
+      this.finishBlock(block, failures);
     }
-    this.finishBlock(block, failures);
   }
 
   private finishBlock(block: BlockRecord, failures: readonly SentenceFailure[]): void {

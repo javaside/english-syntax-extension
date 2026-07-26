@@ -1,6 +1,6 @@
 import type { ExtensionError, ExtensionErrorCode } from "../shared/errors";
 import type { CoreAnalysis, DetailAnalysis } from "../shared/grammar";
-import { assertNever, isRequestMessage } from "../shared/protocol";
+import { assertNever, isRequestMessage, MAX_SENTENCES_PER_REQUEST } from "../shared/protocol";
 import type {
   CacheStats,
   CoreStreamPush,
@@ -10,7 +10,7 @@ import type {
 } from "../shared/protocol";
 import { MESSAGE_VERSION } from "../shared/versions";
 import { AnalysisCache } from "./analysis-cache";
-import { CachedAnalysisService, MAX_SENTENCES_PER_REQUEST } from "./analysis-service";
+import { CachedAnalysisService } from "./analysis-service";
 import type { AnalysisModelWork, AnalysisService, StreamedComponentSink } from "./analysis-service";
 import { hostPermissionPattern } from "./base-url";
 import { ConfigRepository } from "./config-repository";

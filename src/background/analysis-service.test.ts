@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { GrammarRole } from "../shared/grammar";
 import type { CoreAnalysis, TokenRange } from "../shared/grammar";
+import { MAX_SENTENCES_PER_REQUEST } from "../shared/protocol";
 import type { SentenceInput } from "../shared/protocol";
 import { ModelRequestError } from "./openai-compatible-adapter";
 import type { ModelProfile } from "./config-repository";
 import {
   CachedAnalysisService,
-  MAX_SENTENCES_PER_REQUEST,
   type AnalysisCachePort,
   type AnalysisModelWork,
   type AnalysisScheduledRequest,

@@ -1103,7 +1103,9 @@ describe("SessionController", () => {
       .mockResolvedValueOnce(undefined);
     transport.reconnectHandler = reconnect;
     const delays: number[] = [];
+    const batchWindowMs = 7;
     const subject = harness(undefined, transport, {
+      batchWindowMs,
       setTimeout: (callback, delay) => {
         delays.push(delay);
         callback();
@@ -1117,7 +1119,8 @@ describe("SessionController", () => {
     transport.disconnect();
     await vi.waitFor(() => expect(reconnect).toHaveBeenCalledTimes(4));
 
-    expect(delays).toEqual([250, 500, 1_000]);
+    // 合批窗口也走注入的 setTimeout（前后各一次），这里只关心重连退避序列。
+    expect(delays.filter((delay) => delay !== batchWindowMs)).toEqual([250, 500, 1_000]);
   });
 
   it("does not resubmit disconnected work while paused", async () => {
@@ -2011,5 +2014,116 @@ describe("SessionController provisional streaming", () => {
 
     expect(subject.learningBlocks[0]!.cores).toHaveLength(0);
     expect(subject.replacements[0]!.previews).toBe(0);
+  });
+});
+
+describe("SessionController 跨段落合并请求", () => {
+  beforeEach(() => {
+    document.body.replaceChildren();
+    vi.restoreAllMocks();
+  });
+
+  /** 造 n 个各含一句的候选块，模拟视口一次放出多段。 */
+  function multiBlockHarness(count: number, overrides: Partial<SessionControllerOptions> = {}) {
+    document.body.innerHTML = `<main>${Array.from(
+      { length: count },
+      (_, i) => `<p id="p${i}">Sentence number ${i} reads clearly.</p>`,
+    ).join("")}</main>`;
+    const candidates = [...document.querySelectorAll("p")].map((element, i) => ({
+      id: `block-${i}`,
+      element,
+      text: element.textContent ?? "",
+    }));
+    const transport = new FakeTransport();
+    let viewport!: FakeViewport;
+    const controller = new SessionController({
+      tabId: 9,
+      document,
+      transport,
+      scan: () => candidates,
+      createSentenceId: ({ blockId, order }) => Promise.resolve(`${blockId}-s${order}`),
+      viewportFactory: (cb) => (viewport = new FakeViewport(cb)),
+      learningBlockFactory: () => new FakeLearningBlock(),
+      replacementFactory: () => new FakeReplacement(),
+      batchWindowMs: 5,
+      ...overrides,
+    });
+    return {
+      controller,
+      transport,
+      get viewport() {
+        return viewport;
+      },
+      candidates,
+    };
+  }
+
+  const coreRequests = (t: FakeTransport) => t.sent.filter(({ type }) => type === "ANALYZE_CORE");
+
+  it("同时进入视口的多个段落合并成一个请求", async () => {
+    const h = multiBlockHarness(3);
+    await h.controller.start();
+
+    for (let i = 0; i < 3; i += 1) h.viewport.emit(i);
+    await vi.waitFor(() => expect(coreRequests(h.transport).length).toBeGreaterThan(0));
+    await vi.waitFor(() => expect(h.controller.status.ready).toBe(3));
+
+    const reqs = coreRequests(h.transport);
+    expect(reqs).toHaveLength(1);
+    expect((reqs[0] as { sentences: unknown[] }).sentences).toHaveLength(3);
+  });
+
+  it("攒够上限立即发出，不等窗口耗尽", async () => {
+    // 窗口设得很长:只有"达到上限即发"才可能在合理时间内出现请求
+    const h = multiBlockHarness(6, { batchWindowMs: 60_000 });
+    await h.controller.start();
+
+    for (let i = 0; i < 6; i += 1) h.viewport.emit(i);
+
+    await vi.waitFor(() => expect(coreRequests(h.transport).length).toBe(1), { timeout: 2000 });
+    expect((coreRequests(h.transport)[0] as { sentences: unknown[] }).sentences).toHaveLength(6);
+  });
+
+  it("用户显式发起的解析立即单独发出，不进合批窗口", async () => {
+    const h = multiBlockHarness(3, {
+      batchWindowMs: 60_000,
+      hoverTarget: () => document.querySelector("#p1"),
+    });
+    await h.controller.start();
+    refreshPrincipalRoot();
+
+    h.viewport.emit(0); // 进入合批窗口挂起
+    await h.controller.parseHoveredBlock();
+    await new Promise((r) => setTimeout(r, 20));
+
+    // 悬停那次必须已经发出，而不是被挂起的窗口拖住
+    expect(coreRequests(h.transport).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("重新解析(bypassCache)不与普通块合批", async () => {
+    const h = multiBlockHarness(2, { batchWindowMs: 5 });
+    await h.controller.start();
+    h.viewport.emit(0);
+    h.viewport.emit(1);
+    await vi.waitFor(() => expect(coreRequests(h.transport).length).toBe(1));
+    h.transport.sent.length = 0;
+
+    h.controller.reanalyzeVisible();
+    await vi.waitFor(() => expect(coreRequests(h.transport).length).toBeGreaterThan(0));
+
+    // 每个 bypassCache 的块都带着自己的标记单独发，不会被合并成一条无标记请求
+    for (const r of coreRequests(h.transport)) {
+      expect((r as { bypassCache?: true }).bypassCache).toBe(true);
+    }
+  });
+
+  it("合并的响应按块分发，每块各自完成替换", async () => {
+    const h = multiBlockHarness(3);
+    await h.controller.start();
+    for (let i = 0; i < 3; i += 1) h.viewport.emit(i);
+
+    await vi.waitFor(() => expect(h.controller.status.ready).toBe(3));
+    expect(coreRequests(h.transport)).toHaveLength(1);
+    expect(h.controller.status.failed).toBe(0);
   });
 });

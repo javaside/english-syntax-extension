@@ -1,6 +1,7 @@
 import type { ExtensionError } from "../shared/errors";
 import { GrammarRole } from "../shared/grammar";
 import type { CoreAnalysis, CoreComponent, DetailAnalysis, TokenRange } from "../shared/grammar";
+import { MAX_SENTENCES_PER_REQUEST } from "../shared/protocol";
 import type { SentenceInput } from "../shared/protocol";
 import { CORE_SCHEMA_VERSION } from "../shared/versions";
 import { validateCoreBatch, validateDetail } from "../language/analysis-validator";
@@ -153,12 +154,6 @@ export interface CachedAnalysisServiceOptions {
 
 /** 纯缓存模式没有真实 profile,命中值统一改写为该占位 id。 */
 const CACHE_ONLY_PROFILE_ID = "cached";
-
-/**
- * 一次 core 请求最多带几句。必须与调度器的 maxSentencesPerRequest 一致——超出会被
- * 调度器直接拒成 SENTENCE_TOO_LONG,整块段落拿不到译文。
- */
-export const MAX_SENTENCES_PER_REQUEST = 6;
 
 interface InvalidCoreSentence {
   sentence: SentenceInput;
