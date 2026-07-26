@@ -1,6 +1,6 @@
 {
   "name": "english-syntax-extension",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "Chrome MV3 扩展：把网页英文段落替换为逐句句法拆解卡片，由任意 OpenAI 兼容模型驱动。",
   "license": "MIT",
