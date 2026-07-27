@@ -80,6 +80,7 @@ english-syntax-extension/
 ### Task 1: Manifest V3 工程骨架与构建门禁
 
 **Files:**
+
 - Create: `english-syntax-extension/package.json`
 - Create: `english-syntax-extension/manifest.json`
 - Create: `english-syntax-extension/vite.config.ts`
@@ -99,6 +100,7 @@ english-syntax-extension/
 - Generate: `english-syntax-extension/package-lock.json`
 
 **Interfaces:**
+
 - Produces: 可构建的 MV3 包；固定入口 `service-worker.ts`、`content-script.ts`、`popup.html`、`options.html`。
 
 - [ ] **Step 1: 写 Manifest 失败测试**
@@ -285,11 +287,7 @@ Create `manifest.json`:
   "minimum_chrome_version": "120",
   "description": "按句子成分对齐英文结构与中文翻译。",
   "permissions": ["activeTab", "scripting", "storage", "contextMenus"],
-  "optional_host_permissions": [
-    "https://*/*",
-    "http://localhost/*",
-    "http://127.0.0.1/*"
-  ],
+  "optional_host_permissions": ["https://*/*", "http://localhost/*", "http://127.0.0.1/*"],
   "background": { "service_worker": "src/background/service-worker.ts", "type": "module" },
   "action": { "default_popup": "src/popup/popup.html", "default_title": "英语句法伴读" },
   "options_ui": { "page": "src/options/options.html", "open_in_tab": true }
@@ -338,6 +336,7 @@ git commit -m "build(extension): scaffold Manifest V3 project"
 ### Task 2: 共享领域类型、版本与消息协议
 
 **Files:**
+
 - Create: `english-syntax-extension/src/shared/versions.ts`
 - Create: `english-syntax-extension/src/shared/grammar.ts`
 - Create: `english-syntax-extension/src/shared/errors.ts`
@@ -346,6 +345,7 @@ git commit -m "build(extension): scaffold Manifest V3 project"
 - Create: `english-syntax-extension/src/shared/protocol.test.ts`
 
 **Interfaces:**
+
 - Produces: `GrammarRole`, `Token`, `CoreAnalysis`, `DetailAnalysis`, `ExtensionError`, `RequestMessage`, `ResponseMessage`, `assertNever`.
 
 - [ ] **Step 1: 写角色与协议失败测试**
@@ -431,10 +431,12 @@ git commit -m "feat(extension): define grammar and message contracts"
 ### Task 3: 确定性分句、分词与稳定句子 ID
 
 **Files:**
+
 - Create: `english-syntax-extension/src/language/segmenter.ts`
 - Create: `english-syntax-extension/src/language/segmenter.test.ts`
 
 **Interfaces:**
+
 - Consumes: `Token`.
 - Produces: `segmentBlock(text): SegmentedSentence[]`, `tokenize(sentence): Token[]`, `createSentenceId(input): Promise<string>`.
 
@@ -449,7 +451,10 @@ expect(segmentBlock("Dr. Smith arrived. He sat down.").map((s) => s.text)).toEqu
 ]);
 
 expect(tokenize("Learners don't stop.").map((t) => [t.text, t.punctuation])).toEqual([
-  ["Learners", false], ["don't", false], ["stop", false], [".", true],
+  ["Learners", false],
+  ["don't", false],
+  ["stop", false],
+  [".", true],
 ]);
 
 expect(rebuildTokens(tokenize("Hello,  world!"))).toBe("Hello,  world!");
@@ -487,10 +492,12 @@ git commit -m "feat(extension): add deterministic sentence tokenization"
 ### Task 4: 核心与详细分析校验器
 
 **Files:**
+
 - Create: `english-syntax-extension/src/language/analysis-validator.ts`
 - Create: `english-syntax-extension/src/language/analysis-validator.test.ts`
 
 **Interfaces:**
+
 - Consumes: untrusted JSON, requested `Token[]`, requested sentence IDs.
 - Produces: `ValidationResult<CoreAnalysis[]>` and `ValidationResult<DetailAnalysis>`; invalid data never crosses this boundary.
 
@@ -531,6 +538,7 @@ git commit -m "feat(extension): validate model syntax output"
 ### Task 5: 模型配置、可信存储与动态 Host 权限
 
 **Files:**
+
 - Create: `english-syntax-extension/src/background/base-url.ts`
 - Create: `english-syntax-extension/src/background/base-url.test.ts`
 - Create: `english-syntax-extension/src/background/config-repository.ts`
@@ -538,6 +546,7 @@ git commit -m "feat(extension): validate model syntax output"
 - Modify: `english-syntax-extension/src/background/service-worker.ts`
 
 **Interfaces:**
+
 - Produces: `ModelProfile`, `normalizeBaseUrl`, `chatCompletionsUrl`, `hostPermissionPattern`, `ConfigRepository`.
 
 - [ ] **Step 1: 写 URL 与存储失败测试**
@@ -545,12 +554,13 @@ git commit -m "feat(extension): validate model syntax output"
 Required URL cases:
 
 ```ts
-expect(normalizeBaseUrl("https://api.deepseek.com/v1/"))
-  .toBe("https://api.deepseek.com/v1");
-expect(chatCompletionsUrl("https://api.deepseek.com/v1"))
-  .toBe("https://api.deepseek.com/v1/chat/completions");
-expect(chatCompletionsUrl("http://localhost:11434/v1/chat/completions"))
-  .toBe("http://localhost:11434/v1/chat/completions");
+expect(normalizeBaseUrl("https://api.deepseek.com/v1/")).toBe("https://api.deepseek.com/v1");
+expect(chatCompletionsUrl("https://api.deepseek.com/v1")).toBe(
+  "https://api.deepseek.com/v1/chat/completions",
+);
+expect(chatCompletionsUrl("http://localhost:11434/v1/chat/completions")).toBe(
+  "http://localhost:11434/v1/chat/completions",
+);
 expect(() => normalizeBaseUrl("http://api.example.com/v1")).toThrow("HTTPS");
 expect(() => normalizeBaseUrl("https://user:pass@example.com/v1")).toThrow("credentials");
 ```
@@ -597,10 +607,12 @@ git commit -m "feat(extension): secure model profile storage"
 ### Task 6: IndexedDB 分析缓存、缓存键与 LRU
 
 **Files:**
+
 - Create: `english-syntax-extension/src/background/analysis-cache.ts`
 - Create: `english-syntax-extension/src/background/analysis-cache.test.ts`
 
 **Interfaces:**
+
 - Produces: `AnalysisCache.open`, `getCore`, `putCore`, `getDetail`, `putDetail`, `stats`, `clear`, `clearByProfile`, `enforceLimit`, `createCoreCacheKey`, `createCorrectionCacheKey`.
 
 - [ ] **Step 1: 写失败测试**
@@ -644,6 +656,7 @@ git commit -m "feat(extension): add bounded analysis cache"
 ### Task 7: OpenAI-compatible 适配器、提示词与重试调度
 
 **Files:**
+
 - Create: `english-syntax-extension/src/background/prompts.ts`
 - Create: `english-syntax-extension/src/background/openai-compatible-adapter.ts`
 - Create: `english-syntax-extension/src/background/openai-compatible-adapter.test.ts`
@@ -651,6 +664,7 @@ git commit -m "feat(extension): add bounded analysis cache"
 - Create: `english-syntax-extension/src/background/request-scheduler.test.ts`
 
 **Interfaces:**
+
 - Consumes: `ModelProfile`, numbered sentence requests, `AbortSignal`.
 - Produces: raw core/detail JSON; `RequestScheduler.schedule`, `pause`, `resume`, `cancelDocument`.
 
@@ -702,6 +716,7 @@ git commit -m "feat(extension): call and schedule compatible LLMs"
 ### Task 8: 安全正文识别与视口增量观察
 
 **Files:**
+
 - Create: `english-syntax-extension/src/content/document-scanner.ts`
 - Create: `english-syntax-extension/src/content/document-scanner.test.ts`
 - Create: `english-syntax-extension/src/content/viewport-observer.ts`
@@ -710,6 +725,7 @@ git commit -m "feat(extension): call and schedule compatible LLMs"
 - Create: `english-syntax-extension/tests/fixtures/pages/interactive.html`
 
 **Interfaces:**
+
 - Produces: `scanDocument(root): CandidateBlock[]`, `nearestSafeBlock(target)`, `ViewportObserver`.
 
 - [ ] **Step 1: 写 DOM 失败测试**
@@ -747,12 +763,14 @@ git commit -m "feat(extension): discover safe visible article text"
 ### Task 9: Shadow DOM 三层学习块与原文可逆替换
 
 **Files:**
+
 - Create: `english-syntax-extension/src/content/learning-block.ts`
 - Create: `english-syntax-extension/src/content/learning-block.test.ts`
 - Create: `english-syntax-extension/src/content/block-replacement.ts`
 - Create: `english-syntax-extension/src/content/block-replacement.test.ts`
 
 **Interfaces:**
+
 - Produces: `<syntax-learning-block>`, `BlockReplacement.show`, `showPartialFailure`, `restore`.
 
 - [ ] **Step 1: 写渲染失败测试**
@@ -799,10 +817,12 @@ git commit -m "feat(extension): render reversible syntax learning blocks"
 ### Task 10: 后台分析服务：缓存、模型、校验与一次修复
 
 **Files:**
+
 - Create: `english-syntax-extension/src/background/analysis-service.ts`
 - Create: `english-syntax-extension/src/background/analysis-service.test.ts`
 
 **Interfaces:**
+
 - Consumes: validated profile, tokenized sentences, detail focus, optional correction text.
 - Produces: `analyzeCore`, `analyzeDetail`, `reanalyzeWithFeedback` with `{ result, cacheHit }`.
 
@@ -851,11 +871,13 @@ git commit -m "feat(extension): orchestrate validated syntax analysis"
 ### Task 11: 页面会话状态机、增量解析与详细/纠错交互
 
 **Files:**
+
 - Create: `english-syntax-extension/src/content/session-controller.ts`
 - Create: `english-syntax-extension/src/content/session-controller.test.ts`
 - Modify: `english-syntax-extension/src/content/content-script.ts`
 
 **Interfaces:**
+
 - Consumes: scanner, segmenter, viewport observer, runtime transport, renderer.
 - Produces: `SessionController.start`, `pause`, `resume`, `stop`, `parseSelection`, `parseContextBlock`, `status`.
 
@@ -895,10 +917,12 @@ git commit -m "feat(extension): manage incremental page analysis sessions"
 ### Task 12: Service Worker 消息入口、Context Menu 与会话隔离
 
 **Files:**
+
 - Modify: `english-syntax-extension/src/background/service-worker.ts`
 - Create: `english-syntax-extension/src/background/service-worker.test.ts`
 
 **Interfaces:**
+
 - Consumes: shared messages, ConfigRepository, AnalysisService, RequestScheduler.
 - Produces: tab/document-scoped responses and context menu commands.
 
@@ -939,6 +963,7 @@ git commit -m "feat(extension): wire secure background orchestration"
 ### Task 13: Options 与 Popup 产品界面
 
 **Files:**
+
 - Modify: `english-syntax-extension/src/options/options.html`
 - Modify: `english-syntax-extension/src/options/options.ts`
 - Create: `english-syntax-extension/src/options/options.css`
@@ -949,6 +974,7 @@ git commit -m "feat(extension): wire secure background orchestration"
 - Create: `english-syntax-extension/src/popup/popup.test.ts`
 
 **Interfaces:**
+
 - Consumes: public profiles, profile save/test commands, cache stats, session status.
 - Produces: accessible model configuration and current-tab controls.
 
@@ -983,6 +1009,7 @@ git commit -m "feat(extension): add model settings and session controls"
 ### Task 14: Chromium E2E、教学样本、安全回归与文档
 
 **Files:**
+
 - Create: `english-syntax-extension/playwright.config.ts`
 - Create: `english-syntax-extension/tests/e2e/fixtures.ts`
 - Create: `english-syntax-extension/tests/e2e/extension.spec.ts`
@@ -993,6 +1020,7 @@ git commit -m "feat(extension): add model settings and session controls"
 - Modify: `README.md`
 
 **Interfaces:**
+
 - Produces: 可重复的真实扩展验收、模拟模型服务器和安装/隐私说明。
 
 - [x] **Step 1: 创建本地 OpenAI 模拟服务**
