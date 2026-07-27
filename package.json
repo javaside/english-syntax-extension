@@ -29,6 +29,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build && vite build --config vite.content.config.ts",
     "package": "npm run build && node scripts/package-extension.mjs",
+    "release": "node scripts/release.mjs",
     "icons": "node scripts/generate-icons.mjs",
     "screenshots": "STORE_SHOTS=1 playwright test screenshots",
     "test": "vitest run",
