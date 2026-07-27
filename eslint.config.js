@@ -21,7 +21,7 @@ export default tseslint.config(
   {
     // page.evaluate 的回调在浏览器里执行:Image / document 是那个上下文的全局对象。
     // 只对这个文件放行，避免把浏览器全局撒给其余 Node 脚本而放过真正的笔误。
-    files: ["scripts/generate-icons.mjs"],
+    files: ["scripts/generate-icons.mjs", "scripts/generate-promo.mjs"],
     languageOptions: {
       globals: { Image: "readonly", document: "readonly", Buffer: "readonly" },
     },

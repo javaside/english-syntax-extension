@@ -31,6 +31,7 @@
     "package": "npm run build && node scripts/package-extension.mjs",
     "release": "node scripts/release.mjs",
     "icons": "node scripts/generate-icons.mjs",
+    "promo": "node scripts/generate-promo.mjs",
     "screenshots": "STORE_SHOTS=1 playwright test screenshots",
     "test": "vitest run",
     "test:watch": "vitest",
