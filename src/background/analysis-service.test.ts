@@ -1095,3 +1095,62 @@ describe("详解流式:边生成边上报结构", () => {
     expect(h.completeDetailStreaming).not.toHaveBeenCalled();
   });
 });
+
+describe("本地修掉纯标点成分，省掉一次修复往返", () => {
+  // 实测触发的真实失败:模型把逗号单独切成一个成分。覆盖率规则允许标点不被覆盖，
+  // 所以丢掉它就合法了——为此多跑一次模型（本地实测 6-23 秒）不值当。
+  it("丢掉纯标点成分后首轮即通过，不再发修复请求", async () => {
+    const punctuationOnly = {
+      sentenceId: sentenceOne.sentenceId,
+      components: [
+        { startToken: 0, endToken: 0, role: "SUBJECT", translation: "主语" },
+        { startToken: 1, endToken: 1, role: "PREDICATE", translation: "谓语" },
+        { startToken: 2, endToken: 2, role: "ADVERBIAL", translation: "。" },
+      ],
+    };
+    const { adapter, service } = harness([{ sentences: [punctuationOnly] }]);
+
+    const outcome = await service.analyzeCore(coreInput(), new AbortController().signal);
+
+    expect(outcome.failures).toEqual([]);
+    expect(outcome.result).toHaveLength(1);
+    expect(outcome.result[0]!.components).toHaveLength(2);
+    // 关键:只发了一次请求，没有触发修复 pass
+    expect(adapter.completeJson).toHaveBeenCalledTimes(1);
+  });
+
+  it("不动含实词的成分，即使它带着标点", async () => {
+    const withTrailingPunctuation = {
+      sentenceId: sentenceOne.sentenceId,
+      components: [
+        { startToken: 0, endToken: 0, role: "SUBJECT", translation: "主语" },
+        { startToken: 1, endToken: 2, role: "PREDICATE", translation: "谓语" },
+      ],
+    };
+    const { adapter, service } = harness([{ sentences: [withTrailingPunctuation] }]);
+
+    const outcome = await service.analyzeCore(coreInput(), new AbortController().signal);
+
+    expect(outcome.result[0]!.components).toHaveLength(2);
+    expect(adapter.completeJson).toHaveBeenCalledTimes(1);
+  });
+
+  it("丢掉后仍不合格的照常走修复", async () => {
+    const stillBroken = {
+      sentenceId: sentenceOne.sentenceId,
+      // 丢掉纯标点成分后，实词 token 1 没有被任何成分覆盖
+      components: [
+        { startToken: 0, endToken: 0, role: "SUBJECT", translation: "主语" },
+        { startToken: 2, endToken: 2, role: "ADVERBIAL", translation: "。" },
+      ],
+    };
+    const { adapter, service } = harness([
+      { sentences: [stillBroken] },
+      { sentences: [rawCore(sentenceOne)] },
+    ]);
+
+    await service.analyzeCore(coreInput(), new AbortController().signal);
+
+    expect(adapter.completeJson).toHaveBeenCalledTimes(2);
+  });
+});

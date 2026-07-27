@@ -398,6 +398,30 @@ function rawSentences(raw: unknown): readonly unknown[] {
   return isRecord(raw) && Array.isArray(raw.sentences) ? raw.sentences : [];
 }
 
+/**
+ * 模型偶发把纯标点（多是逗号或句号）单独切成一个成分。这是覆盖率规则明令禁止的，
+ * 但也是**本地就能判定并修掉**的:规则只要求非标点 token 被覆盖恰好一次，标点可以
+ * 不被覆盖，所以丢掉这种成分即合法，渲染层的未覆盖标点处理本来就会把它画回原位。
+ *
+ * 不这么做的话，实测每碰上一次就要多跑一整轮模型（本地 6–23 秒）。
+ */
+function dropPunctuationOnlyComponents(raw: unknown, sentence: SentenceInput): unknown {
+  if (!isRecord(raw) || !Array.isArray(raw.components)) return raw;
+  const isPunctuation = (id: number): boolean =>
+    sentence.tokens.find((token) => token.id === id)?.punctuation === true;
+  const kept = raw.components.filter((component) => {
+    if (!isRecord(component)) return true;
+    const { startToken, endToken } = component;
+    if (!Number.isSafeInteger(startToken) || !Number.isSafeInteger(endToken)) return true;
+    for (let id = startToken as number; id <= (endToken as number); id += 1) {
+      if (!isPunctuation(id)) return true;
+    }
+    // 区间内全是标点:丢掉。
+    return false;
+  });
+  return kept.length === raw.components.length ? raw : { ...raw, components: kept };
+}
+
 function matchingRawSentences(raw: unknown, sentenceId: string): unknown[] {
   return rawSentences(raw).filter(
     (candidate) => isRecord(candidate) && candidate.sentenceId === sentenceId,
@@ -939,7 +963,11 @@ export class CachedAnalysisService implements AnalysisService {
     const invalid: InvalidCoreSentence[] = [];
     for (const { sentence, key } of entries) {
       const validation = validateCoreBatch(
-        { sentences: matchingRawSentences(raw, sentence.sentenceId) },
+        {
+          sentences: matchingRawSentences(raw, sentence.sentenceId).map((candidate) =>
+            dropPunctuationOnlyComponents(candidate, sentence),
+          ),
+        },
         [sentence],
         profile.id,
       );
