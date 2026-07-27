@@ -4,6 +4,7 @@ import { assertNever, isRequestMessage, MAX_SENTENCES_PER_REQUEST } from "../sha
 import type {
   CacheStats,
   CoreStreamPush,
+  DetailStreamPush,
   RequestMessage,
   ResponseMessage,
   SessionStatus,
@@ -11,7 +12,12 @@ import type {
 import { MESSAGE_VERSION } from "../shared/versions";
 import { AnalysisCache } from "./analysis-cache";
 import { CachedAnalysisService } from "./analysis-service";
-import type { AnalysisModelWork, AnalysisService, StreamedComponentSink } from "./analysis-service";
+import type {
+  AnalysisModelWork,
+  AnalysisService,
+  StreamedComponentSink,
+  StreamedStructureSink,
+} from "./analysis-service";
 import { hostPermissionPattern } from "./base-url";
 import { ConfigRepository } from "./config-repository";
 import type { ModelProfile } from "./config-repository";
@@ -447,6 +453,35 @@ export function registerServiceWorker(
                   analysis: sanitizeDetail(cached, profile),
                 };
           }
+          const detailSink: StreamedStructureSink = (sentenceId, focus, structures) => {
+            const port = documentPorts.get(request.documentId);
+            if (port === undefined) return;
+            const push: DetailStreamPush = {
+              version: MESSAGE_VERSION,
+              type: "DETAIL_STREAM",
+              documentId: request.documentId,
+              sentenceId,
+              focus: { startToken: focus.startToken, endToken: focus.endToken },
+              // 分片同样要脱敏:模型响应里若混入凭据，预览阶段一样不能漏出去。
+              structures: structures.map((structure) => ({
+                startToken: structure.startToken,
+                endToken: structure.endToken,
+                role: redactProfileSecrets(structure.role, profile),
+                explanation: redactProfileSecrets(structure.explanation, profile),
+                ...(structure.translation === undefined
+                  ? {}
+                  : { translation: redactProfileSecrets(structure.translation, profile) }),
+              })),
+            };
+            try {
+              port.postMessage(push);
+            } catch {
+              documentPorts.delete(request.documentId);
+            }
+          };
+          const detailStreaming =
+            documentPorts.has(request.documentId) &&
+            (await dependencies.configRepository.getStreamRendering());
           try {
             const outcome = await dependencies.analysisService.analyzeDetail(
               {
@@ -455,6 +490,7 @@ export function registerServiceWorker(
                 sentence: request.sentence,
                 core: request.core,
                 focus: request.focus,
+                ...(detailStreaming ? { onStreamedStructure: detailSink } : {}),
               },
               new AbortController().signal,
             );

@@ -5,6 +5,7 @@ import { GrammarRole } from "../shared/grammar";
 import type { CoreAnalysis, DetailAnalysis, Token, TokenRange } from "../shared/grammar";
 import type {
   CoreStreamPush,
+  DetailStreamPush,
   RequestMessage,
   ResponseMessage,
   SessionStatus,
@@ -60,6 +61,16 @@ class FakeLearningBlock implements ControllerBlock {
 
   closeDetails(): void {
     this.closedDetails += 1;
+  }
+
+  streamedStructures: Array<{ sentenceId: string; count: number }> = [];
+
+  renderDetailStructures(
+    sentenceId: string,
+    _focus: TokenRange,
+    structures: readonly unknown[],
+  ): void {
+    this.streamedStructures.push({ sentenceId, count: structures.length });
   }
 
   renderDetail(analysis: DetailAnalysis): void {
@@ -165,7 +176,7 @@ class FakeTransport implements RuntimeTransport {
   reconnectHandler?: () => void | Promise<void>;
   handler: (message: RequestMessage) => Promise<ResponseMessage>;
   private disconnectHandler?: () => void;
-  private streamHandler?: (push: CoreStreamPush) => void;
+  private streamHandler?: (push: CoreStreamPush | DetailStreamPush) => void;
 
   constructor(handler?: (message: RequestMessage) => Promise<ResponseMessage>) {
     this.handler =
@@ -198,14 +209,14 @@ class FakeTransport implements RuntimeTransport {
     };
   }
 
-  onStream(handler: (push: CoreStreamPush) => void): () => void {
+  onStream(handler: (push: CoreStreamPush | DetailStreamPush) => void): () => void {
     this.streamHandler = handler;
     return () => {
       this.streamHandler = undefined;
     };
   }
 
-  emitStream(push: CoreStreamPush): void {
+  emitStream(push: CoreStreamPush | DetailStreamPush): void {
     this.streamHandler?.(push);
   }
 
@@ -2125,5 +2136,63 @@ describe("SessionController 跨段落合并请求", () => {
     await vi.waitFor(() => expect(h.controller.status.ready).toBe(3));
     expect(coreRequests(h.transport)).toHaveLength(1);
     expect(h.controller.status.failed).toBe(0);
+  });
+});
+
+describe("SessionController 详解流式", () => {
+  beforeEach(() => {
+    document.body.replaceChildren();
+    vi.restoreAllMocks();
+  });
+
+  const focus = { startToken: 0, endToken: 0 };
+  const structures = [{ startToken: 0, endToken: 0, role: "主语", explanation: "承担主语" }];
+
+  function push(subject: Harness): DetailStreamPush {
+    return {
+      version: 1,
+      type: "DETAIL_STREAM",
+      documentId: subject.controller.documentId,
+      sentenceId: "sentence-1",
+      focus,
+      structures,
+    };
+  }
+
+  it("把已到的结构画进已打开的面板", async () => {
+    const transport = new FakeTransport((message) =>
+      message.type === "ANALYZE_DETAIL"
+        ? new Promise<ResponseMessage>(() => undefined) // 详解请求悬住
+        : Promise.resolve({
+            version: 1,
+            requestId: message.requestId,
+            type: "CORE_RESULT",
+            analyses:
+              message.type === "ANALYZE_CORE"
+                ? message.sentences.map((s) => core(s.sentenceId))
+                : [],
+          } as ResponseMessage),
+    );
+    const subject = harness(undefined, transport);
+    await startAndEmit(subject);
+    void subject.controller.requestDetail({ sentenceId: "sentence-1", focus });
+    await vi.waitFor(() =>
+      expect(subject.transport.sent.some(({ type }) => type === "ANALYZE_DETAIL")).toBe(true),
+    );
+
+    transport.emitStream(push(subject));
+
+    expect(subject.learningBlocks[0]!.streamedStructures).toEqual([
+      { sentenceId: "sentence-1", count: 1 },
+    ]);
+  });
+
+  it("面板已关闭时丢弃迟到的分片", async () => {
+    const subject = harness();
+    await startAndEmit(subject);
+    // 没有打开过任何面板 → detailVersions 为空
+    subject.transport.emitStream(push(subject));
+
+    expect(subject.learningBlocks[0]!.streamedStructures).toEqual([]);
   });
 });

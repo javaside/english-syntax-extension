@@ -1002,3 +1002,96 @@ describe("provisional components while a core request streams", () => {
     expect(subject.completeJsonStreaming).not.toHaveBeenCalled();
   });
 });
+
+describe("详解流式:边生成边上报结构", () => {
+  function streamingDetailHarness(
+    emit: (onStructure: (s: Record<string, unknown>) => void) => void,
+    final: unknown,
+  ) {
+    const cache = new MemoryCache();
+    const completeJson = vi.fn(() => Promise.resolve(final));
+    const completeDetailStreaming = vi.fn(
+      (
+        _p: ModelProfile,
+        _m: unknown,
+        _s: unknown,
+        _sig: AbortSignal,
+        onStructure: (s: Record<string, unknown>) => void,
+      ) => {
+        emit(onStructure);
+        return Promise.resolve(final);
+      },
+    );
+    const streamed: number[] = [];
+    return {
+      completeDetailStreaming,
+      streamed,
+      service: new CachedAnalysisService({
+        cache,
+        adapter: { completeJson, completeDetailStreaming },
+        scheduler: new DedupeScheduler(),
+        now: () => 42,
+      }),
+      sink: (_id: string, _f: TokenRange, structures: readonly unknown[]) =>
+        streamed.push(structures.length),
+    };
+  }
+
+  const focus = { startToken: 1, endToken: 2 };
+  const good = { startToken: 1, endToken: 2, role: "谓语", explanation: "承担谓语" };
+
+  it("累积上报已完成的结构", async () => {
+    const h = streamingDetailHarness((on) => {
+      on(good);
+      on({ ...good, startToken: 0, endToken: 0, role: "主语" });
+    }, rawDetail(focus));
+
+    await h.service.analyzeDetail(
+      {
+        profile,
+        documentId: "d",
+        sentence: sentenceOne,
+        core: coreAnalysis(sentenceOne),
+        focus,
+        onStreamedStructure: h.sink,
+      },
+      new AbortController().signal,
+    );
+
+    expect(h.completeDetailStreaming).toHaveBeenCalledTimes(1);
+    expect(h.streamed).toEqual([1, 2]);
+  });
+
+  it("丢掉渲染层画不出来的结构", async () => {
+    const h = streamingDetailHarness((on) => {
+      on({ ...good, endToken: 99 }); // 越界
+      on({ ...good, explanation: "" }); // 空解释
+      on(good); // 合格
+    }, rawDetail(focus));
+
+    await h.service.analyzeDetail(
+      {
+        profile,
+        documentId: "d",
+        sentence: sentenceOne,
+        core: coreAnalysis(sentenceOne),
+        focus,
+        onStreamedStructure: h.sink,
+      },
+      new AbortController().signal,
+    );
+
+    expect(h.streamed).toEqual([1]);
+  });
+
+  it("没有 sink 时保持整段返回路径", async () => {
+    const h = streamingDetailHarness(() => undefined, rawDetail(focus));
+
+    await h.service.analyzeDetail(
+      { profile, documentId: "d", sentence: sentenceOne, core: coreAnalysis(sentenceOne), focus },
+      new AbortController().signal,
+    );
+
+    expect(h.completeDetailStreaming).not.toHaveBeenCalled();
+  });
+});

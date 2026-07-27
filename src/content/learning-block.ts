@@ -1,5 +1,11 @@
 import { GRAMMAR_LABELS, GrammarRole } from "../shared/grammar";
-import type { CoreAnalysis, DetailAnalysis, Token, TokenRange } from "../shared/grammar";
+import type {
+  CoreAnalysis,
+  DetailAnalysis,
+  DetailStructure,
+  Token,
+  TokenRange,
+} from "../shared/grammar";
 
 // Gray #6b7280 is the shared "neutral/functional" bucket (APPOSITIVE,
 // INDEPENDENT_ELEMENT, CONJUNCTION).
@@ -567,6 +573,51 @@ export class SyntaxLearningBlock {
     }
   }
 
+  /**
+   * 流式预览:把已完成的结构画进已打开的面板，替换掉"正在加载"。只渲染标注行，
+   * 语法点与整体说明要等完整响应——它们在信封末尾，流式期间还没到。
+   */
+  renderDetailStructures(
+    sentenceId: string,
+    focus: TokenRange,
+    structures: readonly DetailStructure[],
+  ): void {
+    const detail = this.#findDetail(sentenceId, focus);
+    if (detail === null || structures.length === 0) return;
+    const tokens = this.#tokensBySentence.get(sentenceId) ?? [];
+    detail.className = "detail";
+    detail.removeAttribute("aria-busy");
+    detail.replaceChildren(this.#annotations(structures, tokens));
+  }
+
+  /** 标注行:流式预览与完整渲染共用，两处各写一遍必然漂移。 */
+  #annotations(structures: readonly DetailStructure[], tokens: readonly Token[]): HTMLElement {
+    const annotations = createElement("div", "detail-annotations");
+    for (const [index, structure] of structures.entries()) {
+      const english = annotationEnglish(tokens, structure);
+      // 区间越界/反转或纯标点（还原为空文本）：跳过标注块，下方解释列表仍按同一序号列出该条。
+      if (english === undefined || english === "") {
+        continue;
+      }
+      const annotation = createElement("span", "annotation");
+      annotation.style.setProperty("--syntax-role-color", structureColor(structure.role));
+      annotation.append(
+        createElement("span", "annotation-role", structureLabel(index, structure.role)),
+        createElement("span", "annotation-english", english),
+      );
+      // 第三行译文与正文同构；旧缓存/模型缺省/回显英文时退回两行标注。
+      if (
+        structure.translation !== undefined &&
+        structure.translation.trim().length > 0 &&
+        !isEchoTranslation(structure.translation, english)
+      ) {
+        annotation.append(translationElement("annotation-translation", structure.translation));
+      }
+      annotations.append(annotation);
+    }
+    return annotations;
+  }
+
   renderDetail(detailAnalysis: DetailAnalysis): void {
     const detail = this.#findDetail(detailAnalysis.sentenceId, detailAnalysis.focus);
     // The reader may have toggled the panel closed while the analysis was in
@@ -580,29 +631,7 @@ export class SyntaxLearningBlock {
 
     if (detailAnalysis.structures.length > 0) {
       const tokens = this.#tokensBySentence.get(detailAnalysis.sentenceId) ?? [];
-      const annotations = createElement("div", "detail-annotations");
-      for (const [index, structure] of detailAnalysis.structures.entries()) {
-        const english = annotationEnglish(tokens, structure);
-        // 区间越界/反转或纯标点（还原为空文本）：跳过标注块，下方解释列表仍按同一序号列出该条。
-        if (english === undefined || english === "") {
-          continue;
-        }
-        const annotation = createElement("span", "annotation");
-        annotation.style.setProperty("--syntax-role-color", structureColor(structure.role));
-        annotation.append(
-          createElement("span", "annotation-role", structureLabel(index, structure.role)),
-          createElement("span", "annotation-english", english),
-        );
-        // 第三行译文与正文同构；旧缓存/模型缺省/回显英文时退回两行标注。
-        if (
-          structure.translation !== undefined &&
-          structure.translation.trim().length > 0 &&
-          !isEchoTranslation(structure.translation, english)
-        ) {
-          annotation.append(translationElement("annotation-translation", structure.translation));
-        }
-        annotations.append(annotation);
-      }
+      const annotations = this.#annotations(detailAnalysis.structures, tokens);
       if (annotations.childElementCount > 0) {
         detail.append(annotations);
       }

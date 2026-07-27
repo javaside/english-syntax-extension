@@ -1,6 +1,12 @@
 import type { ExtensionError } from "../shared/errors";
 import { GrammarRole } from "../shared/grammar";
-import type { CoreAnalysis, CoreComponent, DetailAnalysis, TokenRange } from "../shared/grammar";
+import type {
+  CoreAnalysis,
+  CoreComponent,
+  DetailAnalysis,
+  DetailStructure,
+  TokenRange,
+} from "../shared/grammar";
 import { MAX_SENTENCES_PER_REQUEST } from "../shared/protocol";
 import type { SentenceInput } from "../shared/protocol";
 import { CORE_SCHEMA_VERSION } from "../shared/versions";
@@ -44,7 +50,21 @@ export interface AnalysisAdapter {
     signal: AbortSignal,
     onComponent: (streamed: StreamedComponent) => void,
   ): Promise<unknown>;
+  completeDetailStreaming?(
+    profile: ModelProfile,
+    messages: readonly ChatMessage[],
+    schema: JsonSchemaSpec,
+    signal: AbortSignal,
+    onStructure: (structure: Record<string, unknown>) => void,
+  ): Promise<unknown>;
 }
+
+/** 累积上报某次详解已完成的结构;每次给的都是完整列表，渲染端整块重画即可。 */
+export type StreamedStructureSink = (
+  sentenceId: string,
+  focus: TokenRange,
+  structures: readonly DetailStructure[],
+) => void;
 
 /** 累积上报某句已接受的暂定成分;每次给的都是完整列表，渲染端整句重画即可。 */
 export type StreamedComponentSink = (
@@ -85,6 +105,8 @@ export interface DetailInput extends AnalysisInputBase {
   sentence: SentenceInput;
   core: CoreAnalysis;
   focus: TokenRange;
+  /** 给出即走流式:边生成边上报已完成的结构。缺省保持整段缓冲路径。 */
+  onStreamedStructure?: StreamedStructureSink;
 }
 
 export interface DetailLookupInput {
@@ -288,6 +310,41 @@ class ProvisionalComponents {
       endToken: end,
       role: role as GrammarRole,
       translation: typeof translation === "string" ? translation : "",
+    });
+    return [...this.#accepted];
+  }
+}
+
+/**
+ * 流式结构同样是未校验输出。渲染层要求区间在句子 token 界内、解释非空，
+ * 违反会画不出来。整次详解的完整性仍只能等完整响应后由 validateDetail 判定。
+ */
+class ProvisionalStructures {
+  readonly #accepted: DetailStructure[] = [];
+
+  constructor(private readonly tokenCount: number) {}
+
+  accept(raw: Record<string, unknown>): readonly DetailStructure[] | undefined {
+    const { startToken, endToken, role, explanation, translation } = raw;
+    if (
+      !Number.isSafeInteger(startToken) ||
+      !Number.isSafeInteger(endToken) ||
+      typeof role !== "string" ||
+      role.trim().length === 0 ||
+      typeof explanation !== "string" ||
+      explanation.trim().length === 0
+    ) {
+      return undefined;
+    }
+    const start = startToken as number;
+    const end = endToken as number;
+    if (start < 0 || end < start || end >= this.tokenCount) return undefined;
+    this.#accepted.push({
+      startToken: start,
+      endToken: end,
+      role,
+      explanation,
+      ...(typeof translation === "string" && translation.length > 0 ? { translation } : {}),
     });
     return [...this.#accepted];
   }
@@ -606,6 +663,21 @@ export class CachedAnalysisService implements AnalysisService {
     return { valid, invalid: remaining };
   }
 
+  /** 无 sink 或适配器不支持详解流式时返回 undefined，requestModel 便退回缓冲路径。 */
+  private detailStreamHandler(
+    input: DetailInput,
+  ): ((structure: Record<string, unknown>) => void) | undefined {
+    const sink = input.onStreamedStructure;
+    if (sink === undefined || this.options.adapter.completeDetailStreaming === undefined) {
+      return undefined;
+    }
+    const provisional = new ProvisionalStructures(input.sentence.tokens.length);
+    return (structure) => {
+      const accepted = provisional.accept(structure);
+      if (accepted !== undefined) sink(input.sentence.sentenceId, input.focus, accepted);
+    };
+  }
+
   /** 无 sink 或适配器不支持流式时返回 undefined，requestModel 便退回缓冲路径。 */
   private streamHandler(
     input: CoreBatchInput,
@@ -648,6 +720,9 @@ export class CachedAnalysisService implements AnalysisService {
       [{ role: "user", content: buildDetailPrompt(input.sentence, input.core, input.focus) }],
       DETAIL_SCHEMA,
       signal,
+      false,
+      undefined,
+      this.detailStreamHandler(input),
     );
     let validation = validateDetail(raw, input.sentence, input.focus, input.profile.id);
     if (!validation.ok) {
@@ -890,6 +965,7 @@ export class CachedAnalysisService implements AnalysisService {
     signal: AbortSignal,
     jumpQueue = false,
     onComponent?: (streamed: StreamedComponent) => void,
+    onStructure?: (structure: Record<string, unknown>) => void,
   ): Promise<unknown> {
     if (signal.aborted) throw cancellationError();
     const work: AnalysisModelWork = {
@@ -897,16 +973,27 @@ export class CachedAnalysisService implements AnalysisService {
       messages,
       schema,
       requestedAt: this.now(),
-      run: (schedulerSignal) =>
-        onComponent === undefined
-          ? this.options.adapter.completeJson(profile, messages, schema, schedulerSignal)
-          : this.options.adapter.completeJsonStreaming!(
-              profile,
-              messages,
-              schema,
-              schedulerSignal,
-              onComponent,
-            ),
+      run: (schedulerSignal) => {
+        if (onComponent !== undefined) {
+          return this.options.adapter.completeJsonStreaming!(
+            profile,
+            messages,
+            schema,
+            schedulerSignal,
+            onComponent,
+          );
+        }
+        if (onStructure !== undefined) {
+          return this.options.adapter.completeDetailStreaming!(
+            profile,
+            messages,
+            schema,
+            schedulerSignal,
+            onStructure,
+          );
+        }
+        return this.options.adapter.completeJson(profile, messages, schema, schedulerSignal);
+      },
     };
     const onAbort = () => this.options.scheduler.cancelDocument(documentId);
     signal.addEventListener("abort", onAbort, { once: true });

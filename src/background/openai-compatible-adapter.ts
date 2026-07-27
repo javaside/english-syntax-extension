@@ -2,6 +2,7 @@ import type { ExtensionError, ExtensionErrorCode } from "../shared/errors";
 import { chatCompletionsUrl } from "./base-url";
 import type { ModelProfile } from "./config-repository";
 import { CoreStreamParser, type StreamedComponent } from "./core-stream-parser";
+import { DetailStreamParser } from "./detail-stream-parser";
 import { SSE_DONE, SseDecoder } from "./sse";
 
 export interface JsonSchemaSpec {
@@ -38,6 +39,9 @@ export interface OpenAiCompatibleAdapterOptions {
 
 /** Reports each component the stream completed, before the sentence is verified. */
 export type StreamedComponentHandler = (streamed: StreamedComponent) => void;
+
+/** Reports each detail structure the stream completed, before it is verified. */
+export type StreamedStructureHandler = (structure: Record<string, unknown>) => void;
 
 interface ChatCompletionEnvelope {
   choices?: Array<{ message?: { content?: unknown } }>;
@@ -157,13 +161,54 @@ export class OpenAiCompatibleAdapter {
     signal: AbortSignal,
     onComponent: StreamedComponentHandler,
   ): Promise<unknown> {
+    return this.streamWithExtractor(profile, messages, schema, signal, () => {
+      const parser = new CoreStreamParser();
+      return (delta) => {
+        for (const streamed of parser.push(delta)) onComponent(streamed);
+      };
+    });
+  }
+
+  /**
+   * 详解路径的流式版本。实测本地 9B 上单次详解要 10 秒以上，首个结构约 5 秒
+   * 到达——面板不必从头干等到尾。
+   */
+  async completeDetailStreaming(
+    profile: ModelProfile,
+    messages: readonly ChatMessage[],
+    schema: JsonSchemaSpec,
+    signal: AbortSignal,
+    onStructure: StreamedStructureHandler,
+  ): Promise<unknown> {
+    return this.streamWithExtractor(profile, messages, schema, signal, () => {
+      const parser = new DetailStreamParser();
+      return (delta) => {
+        for (const structure of parser.push(delta)) onStructure(structure);
+      };
+    });
+  }
+
+  private async streamWithExtractor(
+    profile: ModelProfile,
+    messages: readonly ChatMessage[],
+    schema: JsonSchemaSpec,
+    signal: AbortSignal,
+    createExtractor: () => (delta: string) => void,
+  ): Promise<unknown> {
     if (profile.streamSupport === "unsupported") {
       return this.completeJson(profile, messages, schema, signal);
     }
     let useSchema = profile.jsonSchemaSupport !== "unsupported";
     for (;;) {
       try {
-        return await this.streamRequest(profile, messages, schema, signal, useSchema, onComponent);
+        return await this.streamRequest(
+          profile,
+          messages,
+          schema,
+          signal,
+          useSchema,
+          createExtractor(),
+        );
       } catch (error) {
         if (signal.aborted) throw error;
         if (error instanceof UnsupportedResponseFormatError && useSchema) {
@@ -187,7 +232,7 @@ export class OpenAiCompatibleAdapter {
     schema: JsonSchemaSpec,
     callerSignal: AbortSignal,
     useSchema: boolean,
-    onComponent: StreamedComponentHandler,
+    consume: (delta: string) => void,
   ): Promise<unknown> {
     const controller = new AbortController();
     let abortCause: "caller" | "timeout" | undefined;
@@ -243,7 +288,6 @@ export class OpenAiCompatibleAdapter {
       const reader = response.body.getReader();
       const utf8 = new TextDecoder();
       const events = new SseDecoder();
-      const parser = new CoreStreamParser();
       // 不能只靠 fetch 把 abort 传播进 body 流:读循环自己盯着信号，卡死的流才会
       // 真的被超时掐断。
       const aborted = new Promise<never>((_resolve, reject) => {
@@ -266,7 +310,7 @@ export class OpenAiCompatibleAdapter {
           const delta = deltaContent(payload);
           if (delta === undefined) continue;
           content += delta;
-          for (const streamed of parser.push(delta)) onComponent(streamed);
+          consume(delta);
         }
       }
 

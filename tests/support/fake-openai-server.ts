@@ -488,7 +488,7 @@ export class FakeOpenAiServer {
         );
         return;
       case "compound-detail":
-        this.respondCompoundDetail(response, sentences);
+        await this.respondCompoundDetail(response, sentences, streaming);
         return;
       case "auto":
         await this.respondAuto(response, kind, sentences, promptText, streaming);
@@ -505,19 +505,20 @@ export class FakeOpenAiServer {
   ): Promise<void> {
     switch (kind) {
       case "probe":
-        response.writeHead(200, { "content-type": "application/json" });
-        response.end(completion('{"ok":true}'));
+        await this.writeContent(response, '{"ok":true}', streaming);
         return;
       case "detail":
       case "detail-repair":
-        this.respondDetail(response, sentences);
+        await this.respondDetail(response, sentences, streaming);
         return;
       case "sentence-details":
       case "sentence-details-repair": {
         const { sentenceId, focuses } = sentenceDetailsTargets(promptText);
-        this.json(response, {
-          details: focuses.map((focus) => this.validDetailFor(sentenceId, focus)),
-        });
+        await this.json(
+          response,
+          { details: focuses.map((focus) => this.validDetailFor(sentenceId, focus)) },
+          streaming,
+        );
         return;
       }
       case "correction":
@@ -591,16 +592,19 @@ export class FakeOpenAiServer {
     response.end();
   }
 
-  private respondDetail(response: ServerResponse, sentences: PromptSentence[]): void {
+  private async respondDetail(
+    response: ServerResponse,
+    sentences: PromptSentence[],
+    streaming = false,
+  ): Promise<void> {
     const sentence = sentences[0];
     const focus = parseFocus(this.requests.at(-1)?.promptText ?? "");
-    this.json(response, this.validDetailFor(sentence?.sentenceId ?? "", focus));
+    await this.json(response, this.validDetailFor(sentence?.sentenceId ?? "", focus), streaming);
   }
 
   /** Answer with a chat completion whose message content is the given JSON value. */
-  private json(response: ServerResponse, value: unknown): void {
-    response.writeHead(200, { "content-type": "application/json" });
-    response.end(completion(jsonBody(value)));
+  private async json(response: ServerResponse, value: unknown, streaming = false): Promise<void> {
+    await this.writeContent(response, jsonBody(value), streaming);
   }
 
   /** A deterministic, validator-compliant single-component detail analysis. */
@@ -626,44 +630,47 @@ export class FakeOpenAiServer {
     };
   }
 
-  private respondCompoundDetail(response: ServerResponse, sentences: PromptSentence[]): void {
+  private async respondCompoundDetail(
+    response: ServerResponse,
+    sentences: PromptSentence[],
+    streaming = false,
+  ): Promise<void> {
     const sentence = sentences[0];
     const { startToken, endToken } = parseFocus(this.requests.at(-1)?.promptText ?? "");
-    response.writeHead(200, { "content-type": "application/json" });
-    response.end(
-      completion(
-        jsonBody({
-          sentenceId: sentence?.sentenceId ?? "",
-          focus: { startToken, endToken },
-          // Token indices assume the compound-article.html fixture sentence
-          // "The sun rose and the birds sang." (tokens 0-7).
-          structures: [
-            {
-              startToken: 0,
-              endToken: 1,
-              role: "主语",
-              explanation: "The sun 是第一分句的主语。",
-              translation: "太阳",
-            },
-            {
-              startToken: 2,
-              endToken: 2,
-              role: "谓语",
-              explanation: "rose 是第一分句的谓语动词。",
-              translation: "升起",
-            },
-            {
-              startToken: 3,
-              endToken: 3,
-              role: "并列连词",
-              explanation: "and 连接前后两个并列分句。",
-              translation: "和",
-            },
-          ],
-          grammarPoints: ["并列句"],
-          explanation: "这是针对所选并列分句的详细语法解析。",
-        }),
-      ),
+    await this.writeContent(
+      response,
+      jsonBody({
+        sentenceId: sentence?.sentenceId ?? "",
+        focus: { startToken, endToken },
+        // Token indices assume the compound-article.html fixture sentence
+        // "The sun rose and the birds sang." (tokens 0-7).
+        structures: [
+          {
+            startToken: 0,
+            endToken: 1,
+            role: "主语",
+            explanation: "The sun 是第一分句的主语。",
+            translation: "太阳",
+          },
+          {
+            startToken: 2,
+            endToken: 2,
+            role: "谓语",
+            explanation: "rose 是第一分句的谓语动词。",
+            translation: "升起",
+          },
+          {
+            startToken: 3,
+            endToken: 3,
+            role: "并列连词",
+            explanation: "and 连接前后两个并列分句。",
+            translation: "和",
+          },
+        ],
+        grammarPoints: ["并列句"],
+        explanation: "这是针对所选并列分句的详细语法解析。",
+      }),
+      streaming,
     );
   }
 }

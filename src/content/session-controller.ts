@@ -2,6 +2,7 @@ import type { ExtensionError } from "../shared/errors";
 import type {
   CoreAnalysis,
   CoreComponent,
+  DetailStructure,
   DetailAnalysis,
   Token,
   TokenRange,
@@ -9,6 +10,7 @@ import type {
 import { MAX_SENTENCES_PER_REQUEST } from "../shared/protocol";
 import type {
   CoreStreamPush,
+  DetailStreamPush,
   RequestMessage,
   ResponseMessage,
   SentenceInput,
@@ -45,6 +47,11 @@ export interface ControllerBlock {
   setDetailLoading(sentenceId: string, focus: TokenRange): void;
   closeDetails(): void;
   renderDetail(analysis: DetailAnalysis): void;
+  renderDetailStructures(
+    sentenceId: string,
+    focus: TokenRange,
+    structures: readonly DetailStructure[],
+  ): void;
   renderError(sentenceId: string, focus: TokenRange, message: string): void;
   resetRetry(sentenceId: string, hint?: string): void;
   isReadyToReplace(): boolean;
@@ -75,7 +82,7 @@ export interface RuntimeTransport {
   send(message: RequestMessage): Promise<ResponseMessage>;
   cancelDocument(documentId: string): void;
   onDisconnect?(handler: () => void): () => void;
-  onStream?(handler: (push: CoreStreamPush) => void): () => void;
+  onStream?(handler: (push: CoreStreamPush | DetailStreamPush) => void): () => void;
   reconnect?(): void | Promise<void>;
   dispose?(): void;
 }
@@ -1008,10 +1015,36 @@ export class SessionController {
     }
   }
 
-  private readonly handleStreamPush = (push: CoreStreamPush): void => {
+  private readonly handleStreamPush = (push: CoreStreamPush | DetailStreamPush): void => {
     if (push.documentId !== this.documentId) return;
-    this.applyStreamedCore(push.sentenceId, push.components);
+    if (push.type === "CORE_STREAM") {
+      this.applyStreamedCore(push.sentenceId, push.components);
+      return;
+    }
+    this.applyStreamedDetail(push.sentenceId, push.focus, push.structures);
   };
+
+  /**
+   * 未校验的详解结构:只把已到的标注画进已打开的面板，替换掉"正在加载"。
+   * 完整响应到齐后由 renderDetail 覆盖，语法点与整体说明届时才有。
+   */
+  applyStreamedDetail(
+    sentenceId: string,
+    focus: TokenRange,
+    structures: readonly DetailStructure[],
+  ): void {
+    if (this.state !== "running" || structures.length === 0) return;
+    const detailKey = `${sentenceId}:${focus.startToken}:${focus.endToken}`;
+    // 面板已被关闭或已被别的点击取代时，迟到的分片不该再画。
+    if (!this.detailVersions.has(detailKey)) return;
+    const located = this.locateSentence(sentenceId);
+    if (located === undefined) return;
+    try {
+      located.block.learningBlock.renderDetailStructures(sentenceId, focus, structures);
+    } catch {
+      // 渲染层拒绝这批暂定结构:放弃预览，等完整结果。
+    }
+  }
 
   /**
    * 未经整句校验的暂定成分:只用于让段落尽早出现在页面上。相位保持 requesting，

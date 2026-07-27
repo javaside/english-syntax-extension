@@ -1,9 +1,10 @@
 import type { ExtensionError } from "../shared/errors";
 import { ERROR_CODES } from "../shared/errors";
 import { GrammarRole } from "../shared/grammar";
-import { isCoreStreamPush, isRequestMessage } from "../shared/protocol";
+import { isCoreStreamPush, isDetailStreamPush, isRequestMessage } from "../shared/protocol";
 import type {
   CoreStreamPush,
+  DetailStreamPush,
   RequestMessage,
   ResponseMessage,
   SessionStatus,
@@ -243,7 +244,7 @@ function chromeRuntimeApi(): ContentRuntimeApi {
 export class ChromeRuntimeTransport implements RuntimeTransport {
   private requestCounter = 0;
   private readonly disconnectHandlers = new Set<() => void>();
-  private readonly streamHandlers = new Set<(push: CoreStreamPush) => void>();
+  private readonly streamHandlers = new Set<(push: CoreStreamPush | DetailStreamPush) => void>();
   private watchdog?: RuntimeWatchdogPort;
 
   constructor(
@@ -290,7 +291,7 @@ export class ChromeRuntimeTransport implements RuntimeTransport {
    * 流式分片走的是端口推送，不是 sendMessage 的响应，所以 isRuntimeResponse 那套
    * switch 不适用——这里用 isCoreStreamPush 单独把关。
    */
-  onStream(handler: (push: CoreStreamPush) => void): () => void {
+  onStream(handler: (push: CoreStreamPush | DetailStreamPush) => void): () => void {
     this.streamHandlers.add(handler);
     return () => this.streamHandlers.delete(handler);
   }
@@ -311,8 +312,13 @@ export class ChromeRuntimeTransport implements RuntimeTransport {
     const watchdog = this.runtime.connect({ name: `syntax-learning:${this.documentId}` });
     this.watchdog = watchdog;
     watchdog.onMessage.addListener((message) => {
-      if (!isCoreStreamPush(message) || message.documentId !== this.documentId) return;
-      for (const handler of this.streamHandlers) handler(message);
+      const push = isCoreStreamPush(message)
+        ? message
+        : isDetailStreamPush(message)
+          ? message
+          : undefined;
+      if (push === undefined || push.documentId !== this.documentId) return;
+      for (const handler of this.streamHandlers) handler(push);
     });
     watchdog.onDisconnect.addListener(() => {
       if (this.watchdog !== watchdog) return;

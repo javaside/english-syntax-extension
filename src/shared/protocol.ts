@@ -1,6 +1,13 @@
 import type { ExtensionError } from "./errors";
 import { GrammarRole } from "./grammar";
-import type { CoreAnalysis, CoreComponent, DetailAnalysis, Token, TokenRange } from "./grammar";
+import type {
+  CoreAnalysis,
+  CoreComponent,
+  DetailAnalysis,
+  DetailStructure,
+  Token,
+  TokenRange,
+} from "./grammar";
 import { CORE_SCHEMA_VERSION, MESSAGE_VERSION } from "./versions";
 
 interface MessageBase {
@@ -121,6 +128,43 @@ export function isCoreStreamPush(value: unknown): value is CoreStreamPush {
     isNonBlankString(value.sentenceId) &&
     Array.isArray(value.components) &&
     value.components.every(isCoreComponent)
+  );
+}
+
+/** 详解面板的流式分片。与 CoreStreamPush 同样是未校验的展示态数据。 */
+export interface DetailStreamPush {
+  version: typeof MESSAGE_VERSION;
+  type: "DETAIL_STREAM";
+  documentId: string;
+  sentenceId: string;
+  focus: TokenRange;
+  structures: DetailStructure[];
+}
+
+function isDetailStructure(value: unknown): value is DetailStructure {
+  return (
+    isRecord(value) &&
+    hasOnlyKeys(value, ["startToken", "endToken", "role", "explanation", "translation"]) &&
+    isNonNegativeSafeInteger(value.startToken) &&
+    isNonNegativeSafeInteger(value.endToken) &&
+    value.startToken <= value.endToken &&
+    isNonBlankString(value.role) &&
+    isNonBlankString(value.explanation) &&
+    (value.translation === undefined || typeof value.translation === "string")
+  );
+}
+
+export function isDetailStreamPush(value: unknown): value is DetailStreamPush {
+  return (
+    isRecord(value) &&
+    hasOnlyKeys(value, ["version", "type", "documentId", "sentenceId", "focus", "structures"]) &&
+    value.version === MESSAGE_VERSION &&
+    value.type === "DETAIL_STREAM" &&
+    isNonBlankString(value.documentId) &&
+    isNonBlankString(value.sentenceId) &&
+    isTokenRange(value.focus) &&
+    Array.isArray(value.structures) &&
+    value.structures.every(isDetailStructure)
   );
 }
 
