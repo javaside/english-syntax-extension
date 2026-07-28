@@ -16,7 +16,7 @@ const ROLE_COLORS: Readonly<Record<GrammarRole, string>> = {
   [GrammarRole.PREDICATIVE]: "#0891b2",
   [GrammarRole.ATTRIBUTE]: "#7c3aed",
   [GrammarRole.ADVERBIAL]: "#d97706",
-  [GrammarRole.COMPLEMENT]: "#0891b2",
+  [GrammarRole.COMPLEMENT]: "#be185d",
   [GrammarRole.APPOSITIVE]: "#6b7280",
   [GrammarRole.SUBJECT_CLAUSE]: "#2563eb",
   [GrammarRole.OBJECT_CLAUSE]: "#059669",
@@ -232,6 +232,18 @@ const STYLES = `
   .component,
   .retry {
     transition: none;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  .detail {
+    border-color: #374151;
+    border-inline-start-color: #0d9488;
+    background: #1f2937;
+  }
+  .grammar-points,
+  .detail-summary {
+    border-block-start-color: #374151;
   }
 }
 `;
