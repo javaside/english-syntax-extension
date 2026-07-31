@@ -245,22 +245,100 @@ describe("nearestSafeBlock on an explicit gesture", () => {
 
     expect(hover("#inline")?.element.id).toBe("host");
   });
+});
 
-  it("keeps automatic scanning off block-rendered inline tags", () => {
-    build(`<main>
-      <span data-as="p" style="display: block">${LONG}</span>
-      <p id="strict">${LONG}</p>
-    </main>`);
+/**
+ * 自动扫描此前只认标签名,而 Mintlify 一类文档站(含 Claude Code 自己的文档)
+ * 整篇正文是 <span data-as="p"> 靠 CSS 渲染成块——真实页面实测覆盖率仅 10%,
+ * 22 个候选里一个正文段落都没有,点「开始学习」后大片正文没有译文。
+ */
+describe("scanDocument 对 CSS 排版的正文", () => {
+  const LONG = "This paragraph carries plenty of ordinary English words for the reader.";
 
-    expect(scanDocument(document).map(({ element }) => element.id)).toEqual(["strict"]);
+  function build(markup: string): void {
+    document.body.replaceChildren();
+    document.body.insertAdjacentHTML("afterbegin", markup);
+  }
+
+  beforeEach(() => {
+    document.body.replaceChildren();
   });
 
-  it("keeps automatic scanning off the loose div blocks", () => {
-    build(`<main>
-      <div id="loose">${LONG}</div>
+  it("收进渲染为块的 span 段落", () => {
+    build(`<main id="content">
+      <span data-as="p" style="display: block">${LONG}</span>
+      <span data-as="p" style="display: block">${LONG} Another sentence here.</span>
       <p id="strict">${LONG}</p>
     </main>`);
 
-    expect(scanDocument(document).map(({ element }) => element.id)).toEqual(["strict"]);
+    const ids = scanDocument(document).map(({ element }) => element.tagName.toLowerCase());
+    expect(ids.filter((tag) => tag === "span")).toHaveLength(2);
+    expect(ids).toContain("p");
+  });
+
+  it("仍然躲开边栏与导航", () => {
+    build(`<main id="content"><span data-as="p" style="display: block">${LONG}</span></main>
+           <nav><span style="display: block">${LONG}</span></nav>
+           <aside><span style="display: block">${LONG}</span></aside>`);
+
+    expect(scanDocument(document)).toHaveLength(1);
+  });
+
+  it("仍然不收整篇正文的外层容器", () => {
+    build(`<main id="content"><div id="wrapper">
+      <span data-as="p" style="display: block">${LONG}</span>
+      <span data-as="p" style="display: block">${LONG}</span>
+    </div></main>`);
+
+    const ids = scanDocument(document).map(({ element }) => element.id);
+    expect(ids).not.toContain("wrapper");
+  });
+});
+
+/**
+ * 放宽自动扫描的候选载体后，克制体现在别处:最短长度、英文占比、排除区、
+ * 正文容器限制。这两条钉住它们没有一起松掉。
+ */
+describe("自动扫描放宽后仍有的克制", () => {
+  const LONG = "This paragraph carries plenty of ordinary English words for the reader.";
+
+  function build(markup: string): void {
+    document.body.replaceChildren();
+    document.body.insertAdjacentHTML("afterbegin", markup);
+  }
+
+  it("短于自动下限的块仍不收", () => {
+    build(`<main id="content">
+      <span style="display: block">Tiny text</span>
+      <span style="display: block">${LONG}</span>
+    </main>`);
+
+    expect(scanDocument(document)).toHaveLength(1);
+  });
+
+  it("非英文为主的块仍不收", () => {
+    build(`<main id="content">
+      <span style="display: block">这是一个完全由中文写成的段落，没有任何英文词汇在其中。</span>
+      <span style="display: block">${LONG}</span>
+    </main>`);
+
+    expect(scanDocument(document)).toHaveLength(1);
+  });
+});
+
+describe("候选不重叠", () => {
+  const LONG = "This paragraph carries plenty of ordinary English words for the reader.";
+
+  it("语义块内部的块级 span 不再被重复收一遍", () => {
+    document.body.replaceChildren();
+    document.body.insertAdjacentHTML(
+      "afterbegin",
+      `<main id="content"><ul><li><span style="display: block">${LONG}</span></li></ul></main>`,
+    );
+
+    // 收 li 一个就够;连内部 span 一起收会让同一段文本解析两次、渲染两次。
+    const found = scanDocument(document);
+    expect(found).toHaveLength(1);
+    expect(found[0]!.element.tagName.toLowerCase()).toBe("li");
   });
 });

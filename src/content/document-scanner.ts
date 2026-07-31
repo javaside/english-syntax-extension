@@ -11,6 +11,8 @@ export interface CandidateBlock {
  */
 const BLOCK_SELECTOR = "h1,h2,h3,h4,h5,h6,p,li,blockquote";
 const LOOSE_BLOCK_SELECTOR = "div,section,dd,td,figcaption";
+/** 自动扫描允许当段落的松散载体。刻意不含 a/button/label 等交互或导航语义。 */
+const LOOSE_CANDIDATE_SELECTOR = "div,section,dd,td,figcaption,span,article,main";
 const SEMANTIC_ROOT_SELECTOR = "article,main,[role='main']";
 const EXCLUSION_SELECTOR =
   "nav,aside,footer,form,pre,code,script,style,noscript,template,svg,canvas,iframe," +
@@ -23,6 +25,27 @@ const MINIMUM_AUTO_TEXT_LENGTH = 20;
 
 const blockIds = new WeakMap<Element, string>();
 let nextBlockId = 1;
+
+/**
+ * 自动扫描的候选枚举。只按标签名找会漏掉整类站点:Mintlify(含 Claude Code 文档)
+ * 的正文是 <span data-as="p"> 靠 CSS 渲染成块,真实页面实测覆盖率仅 10%。所以除
+ * 语义标签外,再收「渲染为块且不含块级子元素」的叶子——躲开边栏靠的是
+ * EXCLUSION_SELECTOR 与正文容器限制,不是标签名。
+ */
+function blockCandidates(root: ParentNode): Element[] {
+  const strict = queryElements(root, BLOCK_SELECTOR);
+  const seen = new Set(strict);
+  const loose = queryElements(root, "*").filter(
+    (element) =>
+      !seen.has(element) &&
+      element.matches(LOOSE_CANDIDATE_SELECTOR) &&
+      isRenderedBlock(element) &&
+      !hasBlockChild(element) &&
+      // 已被语义块覆盖的不再单收:同一段文本收两遍会解析两次、渲染两次。
+      !strict.some((block) => block !== element && block.contains(element)),
+  );
+  return [...strict, ...loose];
+}
 
 function queryElements(root: ParentNode, selector: string): Element[] {
   const matches = Array.from(root.querySelectorAll(selector));
@@ -107,7 +130,9 @@ function getBlockId(element: Element): string {
 }
 
 function candidateText(element: Element, automatic: boolean): string | null {
-  if (!isSafeElement(element, !automatic)) return null;
+  // 松散块判定与 automatic 的其余约束(最短长度、正文容器)解耦:两条路径都按
+  // 渲染盒子认块,自动扫描的克制体现在长度下限与容器限制上。
+  if (!isSafeElement(element, true)) return null;
   const text = normalizedText(element);
   if (
     text.length === 0 ||
@@ -131,7 +156,7 @@ interface ScoredBlock {
 }
 
 function eligibleBlocks(root: ParentNode): ScoredBlock[] {
-  return queryElements(root, BLOCK_SELECTOR).flatMap((element) => {
+  return blockCandidates(root).flatMap((element) => {
     const text = candidateText(element, true);
     return text === null ? [] : [{ element, text }];
   });
@@ -213,7 +238,7 @@ function selectPrincipalRoot(root: ParentNode): Element | null {
 export function scanDocument(root: ParentNode): CandidateBlock[] {
   const principalRoot = selectPrincipalRoot(root);
   if (principalRoot === null) return [];
-  return queryElements(principalRoot, BLOCK_SELECTOR).flatMap((element) => {
+  return blockCandidates(principalRoot).flatMap((element) => {
     const candidate = createCandidate(element, true);
     return candidate === null ? [] : [candidate];
   });
