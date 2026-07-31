@@ -44,10 +44,22 @@ export function serializeSentence(sentence: SentenceInput): string {
  * must be spelled out in the prompt itself. A schema-free model otherwise
  * guesses the shape (e.g. a top-level array) and fails validation.
  */
+/**
+ * 输出 token 数就是延迟的全部来源:实测 TTFT 恒定 ~0.65s 且与输入大小无关,总时
+ * ≈ 0.65s + 输出token/190。默认的缩进 JSON 与 Markdown 围栏里,前导空格、换行和
+ * 重复键名全都要逐 token 生成——一句话 466 字符里真正的信息不到三分之一。
+ * 加这一条指令实测省 40% 输出 token、快 36%,而流式解析器是字符级帧解析、
+ * 不依赖换行,所以紧凑输出对它无影响(core-stream-parser.test.ts 钉住了这点)。
+ */
+const MINIFIED_OUTPUT =
+  "Output minified JSON on a single line: no newlines, no indentation, no spaces after ':' or ','. " +
+  "Do not wrap it in a Markdown code fence.";
+
 export const CORE_OUTPUT_SHAPE = [
   "Output exactly one JSON object of this shape, not a top-level array:",
   '{"sentences": [{"sentenceId": string, "components": [{"startToken": number, "endToken": number, "role": string, "translation": string}]}]}',
   "A component must never contain only punctuation Tokens; attach punctuation to an adjacent component or leave it uncovered.",
+  MINIFIED_OUTPUT,
 ].join("\n");
 
 const DETAIL_OUTPUT_SHAPE = [
@@ -56,6 +68,7 @@ const DETAIL_OUTPUT_SHAPE = [
   "Echo the supplied sentenceId and focus unchanged. Write explanations, grammar points, and every structure's role field in Chinese. Use concise Chinese grammatical terms for roles (主语/谓语/宾语/定语/状语/系动词/引导词/连词 etc.), never English enum values.",
   "The structures array must break down the internal components of the focus range. Never return a single structure that covers the entire focus — split it into meaningful sub-components (subject, predicate, object, clauses, etc.).",
   "Give every structure a concise Chinese translation of exactly its own English text in the translation field (a few words, like a gloss under the phrase); keep the longer analysis in explanation. The translation field must be written in Chinese characters (中文译文) — copying the English words unchanged is invalid.",
+  MINIFIED_OUTPUT,
 ].join("\n");
 
 const SENTENCE_DETAILS_OUTPUT_SHAPE = [
@@ -65,6 +78,7 @@ const SENTENCE_DETAILS_OUTPUT_SHAPE = [
   "Write explanations, grammar points, and every structure's role field in Chinese. Use concise Chinese grammatical terms for roles (主语/谓语/宾语/定语/状语/系动词/引导词/连词 etc.), never English enum values.",
   "Each entry's structures array must break down the internal components of its focus range. Never return a single structure that covers the entire focus — split it into meaningful sub-components (subject, predicate, object, clauses, etc.).",
   "Give every structure a concise Chinese translation of exactly its own English text in the translation field (a few words, like a gloss under the phrase); keep the longer analysis in explanation. The translation field must be written in Chinese characters (中文译文) — copying the English words unchanged is invalid.",
+  MINIFIED_OUTPUT,
 ].join("\n");
 
 export function buildCorePrompt(sentences: readonly SentenceInput[]): string {

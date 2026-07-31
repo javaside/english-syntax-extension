@@ -105,3 +105,18 @@ describe("buildSentenceDetailsPrompt", () => {
     ]);
   });
 });
+
+describe("紧凑输出指令", () => {
+  it("core prompt 要求单行紧凑 JSON 且不带 Markdown 围栏", () => {
+    const prompt = buildCorePrompt([sentence]);
+
+    expect(prompt).toMatch(/minified JSON on a single line/u);
+    expect(prompt).toMatch(/code fence/u);
+  });
+
+  it("指令不在首行——假服务器按首行前缀识别请求类型", () => {
+    const prompt = buildCorePrompt([sentence]);
+
+    expect(prompt.split("\n")[0]).not.toMatch(/minified/u);
+  });
+});

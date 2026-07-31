@@ -91,3 +91,28 @@ describe("CoreStreamParser", () => {
     expect(drain('{"sentences":[{"sentenceId":"s1","components":[')).toEqual([]);
   });
 });
+
+/**
+ * prompt 现在要求模型吐单行紧凑 JSON（实测省 40% 输出 token,而输出 token 就是
+ * 耗时的全部来源）。解析器是字符级帧解析、不依赖换行,这里把这个前提钉住。
+ */
+describe("CoreStreamParser 对紧凑输出", () => {
+  const minified =
+    '{"sentences":[{"sentenceId":"s-1","components":' +
+    '[{"startToken":0,"endToken":2,"role":"SUBJECT","translation":"主语"},' +
+    '{"startToken":3,"endToken":4,"role":"PREDICATE","translation":"谓语"}]}]}';
+
+  it("从单行无空白的 JSON 里提取每个成分", () => {
+    expect(drain(minified)).toEqual([
+      ["s-1", "SUBJECT"],
+      ["s-1", "PREDICATE"],
+    ]);
+  });
+
+  it("逐字符喂入也能提取——分片边界落在任何位置都不丢成分", () => {
+    expect(drain(minified, 1)).toEqual([
+      ["s-1", "SUBJECT"],
+      ["s-1", "PREDICATE"],
+    ]);
+  });
+});
