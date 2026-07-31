@@ -15,6 +15,7 @@ import type { CandidateBlock } from "./document-scanner";
 import { scanDocument } from "./document-scanner";
 import type {
   ControllerBlock,
+  ControllerMarker,
   ControllerReplacement,
   RuntimeTransport,
   SentencePhase,
@@ -130,6 +131,21 @@ class FakeReplacement implements ControllerReplacement {
   showPreview(original: HTMLElement): void {
     this.previews += 1;
     this.originals.push(original);
+  }
+}
+
+class FakeMarker implements ControllerMarker {
+  marked: HTMLElement | null = null;
+  readonly history: (HTMLElement | null)[] = [];
+
+  mark(element: HTMLElement): void {
+    this.marked = element;
+    this.history.push(element);
+  }
+
+  clear(): void {
+    this.marked = null;
+    this.history.push(null);
   }
 }
 
@@ -271,6 +287,7 @@ interface Harness {
   viewport: FakeViewport;
   learningBlocks: FakeLearningBlock[];
   replacements: FakeReplacement[];
+  markers: FakeMarker[];
   transitions: SentencePhase[];
 }
 
@@ -284,6 +301,7 @@ function harness(
   const candidate = { id: "block-1", element, text };
   const learningBlocks: FakeLearningBlock[] = [];
   const replacements: FakeReplacement[] = [];
+  const markers: FakeMarker[] = [];
   const transitions: SentencePhase[] = [];
   let viewport!: FakeViewport;
   const options: SessionControllerOptions = {
@@ -303,11 +321,16 @@ function harness(
       replacements.push(replacement);
       return replacement;
     },
+    markerFactory: () => {
+      const marker = new FakeMarker();
+      markers.push(marker);
+      return marker;
+    },
     onTransition: (_id, phase) => transitions.push(phase),
     ...overrides,
   };
   const controller = new SessionController(options);
-  return { controller, transport, viewport, learningBlocks, replacements, transitions };
+  return { controller, transport, viewport, learningBlocks, replacements, markers, transitions };
 }
 
 /** 真实 nearestSafeBlock 用模块级 principal root 缓存，harness 换 DOM 后须重算。 */
@@ -2194,5 +2217,32 @@ describe("SessionController 详解流式", () => {
     subject.transport.emitStream(push(subject));
 
     expect(subject.learningBlocks[0]!.streamedStructures).toEqual([]);
+  });
+});
+
+describe("段落解析中标记", () => {
+  beforeEach(() => {
+    document.body.replaceChildren();
+  });
+
+  it("解析期间打过标，ready 之后撤掉", async () => {
+    const subject = harness();
+
+    await startAndEmit(subject);
+
+    // 期间至少打过一次标，收尾时必须是撤掉的状态。
+    expect(subject.markers[0]?.history.some((entry) => entry !== null)).toBe(true);
+    expect(subject.markers[0]?.marked).toBeNull();
+  });
+
+  it("请求还在飞的时候标记是亮的", async () => {
+    const pending = new FakeTransport(() => new Promise<ResponseMessage>(() => {}));
+    const subject = harness("Readers understand complex sentences.", pending);
+
+    await subject.controller.start();
+    subject.viewport.emit();
+    await vi.waitFor(() => expect(subject.markers[0]?.marked).not.toBeNull());
+
+    expect(subject.markers[0]?.marked).not.toBeNull();
   });
 });

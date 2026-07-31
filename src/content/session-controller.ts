@@ -18,6 +18,7 @@ import type {
 } from "../shared/protocol";
 import { CORE_SCHEMA_VERSION, MESSAGE_VERSION } from "../shared/versions";
 import { createSentenceId, segmentBlock, tokenize } from "../language/segmenter";
+import { BlockActivityMarker } from "./block-activity-marker";
 import { BlockReplacement } from "./block-replacement";
 import type { SentenceFailure } from "./block-replacement";
 import { nearestSafeBlock, scanDocument } from "./document-scanner";
@@ -71,6 +72,11 @@ export interface ControllerReplacement {
   currentElement(original: HTMLElement): Element;
 }
 
+export interface ControllerMarker {
+  mark(element: HTMLElement): void;
+  clear(): void;
+}
+
 export interface ViewportPort {
   observe(blocks: readonly CandidateBlock[]): void;
   invalidate(blockId: string): void;
@@ -91,6 +97,7 @@ interface SentenceRecord {
   input: SentenceInput;
   phase: SentencePhase;
   core?: CoreAnalysis;
+  blockId: string;
 }
 
 interface BlockRecord {
@@ -98,6 +105,7 @@ interface BlockRecord {
   sentences: SentenceRecord[];
   learningBlock: ControllerBlock;
   replacement: ControllerReplacement;
+  marker: ControllerMarker;
   operationVersion: number;
   /** 「重新解析」一次性标记:下次 analyzeBlock 携带 bypassCache 后即清除。 */
   bypassCacheOnce?: boolean;
@@ -113,6 +121,7 @@ export interface SessionControllerOptions {
   viewportFactory?: (callback: (candidate: CandidateBlock) => void) => ViewportPort;
   learningBlockFactory?: () => ControllerBlock;
   replacementFactory?: () => ControllerReplacement;
+  markerFactory?: () => ControllerMarker;
   now?: () => number;
   yieldNow?: () => Promise<void>;
   randomUUID?: () => string;
@@ -555,6 +564,7 @@ export class SessionController {
         const sentence: SentenceRecord = {
           input: { sentenceId, text: part.text, tokens: tokenize(part.text) },
           phase: "discovered",
+          blockId: candidate.id,
         };
         sentences.push(sentence);
         this.sentences.set(sentenceId, sentence);
@@ -570,11 +580,13 @@ export class SessionController {
       )();
       learningBlock.setExpectedSentenceIds(sentences.map(({ input }) => input.sentenceId));
       const replacement = (this.options.replacementFactory ?? (() => new BlockReplacement()))();
+      const marker = (this.options.markerFactory ?? (() => new BlockActivityMarker()))();
       this.blocks.set(candidate.id, {
         candidate: { ...candidate, element: candidate.element },
         sentences,
         learningBlock,
         replacement,
+        marker,
         operationVersion: this.operationVersion,
       });
     }
@@ -778,8 +790,24 @@ export class SessionController {
     this.emitStatus();
   }
 
+  /**
+   * 块级「进行中」状态:块内任一句在 requesting 就打标。挂载点取当前呈现元素,
+   * 流式换成卡片之后标记自动跟过去。
+   */
+  private refreshBlockActivity(blockId: string): void {
+    const block = this.blocks.get(blockId);
+    if (block === undefined) return;
+    if (!block.sentences.some(({ phase }) => phase === "requesting")) {
+      block.marker.clear();
+      return;
+    }
+    const target = block.replacement.currentElement(block.candidate.element);
+    if (isHTMLElement(target)) block.marker.mark(target);
+  }
+
   private transition(sentence: SentenceRecord, phase: SentencePhase): void {
     sentence.phase = phase;
+    this.refreshBlockActivity(sentence.blockId);
     this.options.onTransition?.(sentence.input.sentenceId, phase);
     this.emitStatus();
   }
