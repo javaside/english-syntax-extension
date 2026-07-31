@@ -619,36 +619,4 @@ describe("detail prefetch toggle", () => {
 
     expect(setStreamRendering).toHaveBeenCalledWith(true);
   });
-
-  it("saves the disable-reasoning choice and restores it when the profile reloads", async () => {
-    const saveProfile = vi.fn(() => Promise.resolve());
-    const stored = {
-      id: "p-think",
-      name: "Ollama",
-      baseUrl: "http://localhost:11434/v1",
-      apiKey: "k",
-      model: "qwen3.5:9b",
-      headers: {},
-      timeoutMs: 45_000,
-      jsonSchemaSupport: "unknown" as const,
-      disableReasoning: true as const,
-    };
-    await createOptionsPage(
-      root(),
-      dependencies({
-        saveProfile,
-        listProfiles: vi.fn(() => Promise.resolve([stored])),
-        getProfile: vi.fn(() => Promise.resolve(stored)),
-      }),
-    );
-
-    const select = document.querySelector<HTMLSelectElement>("#options-saved-profile")!;
-    select.value = "p-think";
-    select.dispatchEvent(new Event("change"));
-    await vi.waitFor(() =>
-      expect(document.querySelector<HTMLInputElement>("[data-disable-reasoning]")?.checked).toBe(
-        true,
-      ),
-    );
-  });
 });

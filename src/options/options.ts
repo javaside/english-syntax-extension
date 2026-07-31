@@ -175,15 +175,10 @@ export async function createOptionsPage(
   apiKeyInput.placeholder = API_KEY_REQUIRED_HINT;
   const modelInput = input("options-model");
   modelInput.required = true;
-  const reasoningLabel = element("label", "options-page__label");
-  const reasoningInput = element("input");
-  reasoningInput.type = "checkbox";
-  reasoningInput.dataset.disableReasoning = "";
-  reasoningLabel.append(reasoningInput, document.createTextNode(" 关闭模型思考"));
   const reasoningHint = element(
     "p",
     "options-page__hint",
-    '思考模型（Qwen3 等）会为一句话生成上万字符推理，实测单句 246 秒、必然超时；勾选后请求带 reasoning_effort: "none"，同一句降到 7 秒。OpenAI 官方 API 不接受该取值，只在本地或兼容端点上勾选。',
+    '扩展默认要求模型不做思考（请求带 reasoning_effort: "none"）：思考模型会为一句话生成上万 token 推理，实测单句 153 秒、超过超时上限，表现为整页无译文。端点不接受该参数时会自动去掉并重发，无需手动设置。',
   );
   const timeoutInput = input("options-timeout", "number");
   timeoutInput.required = true;
@@ -221,7 +216,6 @@ export async function createOptionsPage(
     field("API Key", apiKeyInput),
     field("Model", modelInput),
     field("请求超时（秒）", timeoutInput),
-    reasoningLabel,
     reasoningHint,
     headersFieldset,
     actions,
@@ -359,7 +353,6 @@ export async function createOptionsPage(
       timeoutMs: Number(timeoutInput.value) * 1000,
       jsonSchemaSupport: existing?.jsonSchemaSupport ?? "unknown",
       ...(existing?.streamSupport === undefined ? {} : { streamSupport: existing.streamSupport }),
-      ...(reasoningInput.checked ? { disableReasoning: true as const } : {}),
     };
   };
 
@@ -417,7 +410,6 @@ export async function createOptionsPage(
       baseUrlInput.value = "";
       modelInput.value = "";
       timeoutInput.value = "45";
-      reasoningInput.checked = false;
       return;
     }
     const profile = await dependencies.getProfile(profileId);
@@ -426,7 +418,6 @@ export async function createOptionsPage(
     baseUrlInput.value = profile.baseUrl;
     modelInput.value = profile.model;
     timeoutInput.value = String(profile.timeoutMs / 1000);
-    reasoningInput.checked = profile.disableReasoning === true;
     for (const [name, value] of Object.entries(profile.headers)) addHeaderRow(name, value);
   };
 
