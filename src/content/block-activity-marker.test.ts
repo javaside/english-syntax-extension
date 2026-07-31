@@ -22,24 +22,24 @@ describe("BlockActivityMarker", () => {
     const marker = new BlockActivityMarker();
 
     marker.mark(element);
-    expect(element.className).not.toBe("article-copy");
-    expect(element.className).toContain("article-copy");
+    expect(element.hasAttribute(BlockActivityMarker.activeAttribute)).toBe(true);
     expect(document.head.querySelector("style")).not.toBeNull();
 
     marker.clear();
+    expect(element.hasAttribute(BlockActivityMarker.activeAttribute)).toBe(false);
     expect(element.className).toBe("article-copy");
     expect(element.getAttribute("style")).toBe("color: purple");
     expect(document.head.querySelector("style")).toBeNull();
   });
 
-  it("leaves no empty class attribute when the element never had one", () => {
+  it("leaves the element free of extra attributes after clear", () => {
     const element = paragraph();
     const marker = new BlockActivityMarker();
 
     marker.mark(element);
     marker.clear();
 
-    expect(element.hasAttribute("class")).toBe(false);
+    expect(element.getAttributeNames()).toEqual([]);
   });
 
   it("is idempotent for the same target", () => {
@@ -47,10 +47,10 @@ describe("BlockActivityMarker", () => {
     const marker = new BlockActivityMarker();
 
     marker.mark(element);
-    const applied = element.className;
+    const applied = element.getAttribute(BlockActivityMarker.activeAttribute);
     marker.mark(element);
 
-    expect(element.className).toBe(applied);
+    expect(element.getAttribute(BlockActivityMarker.activeAttribute)).toBe(applied);
     expect(document.head.querySelectorAll("style")).toHaveLength(1);
   });
 
@@ -62,14 +62,14 @@ describe("BlockActivityMarker", () => {
     marker.mark(first);
     marker.mark(second);
 
-    expect(first.hasAttribute("class")).toBe(false);
-    expect(second.className).not.toBe("");
+    expect(first.hasAttribute(BlockActivityMarker.activeAttribute)).toBe(false);
+    expect(second.hasAttribute(BlockActivityMarker.activeAttribute)).toBe(true);
     expect(document.head.querySelectorAll("style")).toHaveLength(1);
   });
 
-  it("picks a fresh suffix when the page already uses the candidate class", () => {
+  it("picks a fresh token when the page already uses the candidate one", () => {
     const squatter = document.createElement("div");
-    squatter.className = `${BlockActivityMarker.activeClass}-1`;
+    squatter.setAttribute(BlockActivityMarker.activeAttribute, "1");
     document.body.append(squatter);
     const element = paragraph();
     let attempts = 0;
@@ -80,7 +80,7 @@ describe("BlockActivityMarker", () => {
 
     marker.mark(element);
 
-    expect(element.className).toBe(`${BlockActivityMarker.activeClass}-2`);
+    expect(element.getAttribute(BlockActivityMarker.activeAttribute)).toBe("2");
   });
 
   it("ignores a detached element", () => {
@@ -89,8 +89,21 @@ describe("BlockActivityMarker", () => {
 
     marker.mark(detached);
 
-    expect(detached.hasAttribute("class")).toBe(false);
+    expect(detached.hasAttribute(BlockActivityMarker.activeAttribute)).toBe(false);
     expect(document.head.querySelector("style")).toBeNull();
+  });
+
+  // BlockReplacement 靠「原文本来有没有 class 属性」决定还原时删不删空 class。
+  // 标记若碰 class,就会让它误判并在页面上留下 class=""。
+  it("never touches the class attribute", () => {
+    const element = paragraph();
+    const marker = new BlockActivityMarker();
+
+    marker.mark(element);
+    expect(element.hasAttribute("class")).toBe(false);
+
+    marker.clear();
+    expect(element.hasAttribute("class")).toBe(false);
   });
 
   it("clear is safe when nothing was marked", () => {

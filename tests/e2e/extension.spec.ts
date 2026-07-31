@@ -929,6 +929,24 @@ test("悬停段落经 PARSE_HOVERED_BLOCK 冷启动解析，其余段落保持�
   await expect(page.locator("p:visible")).toHaveCount(paragraphCount - 1);
 });
 
+// 解析中的段落要能被认出来:标记在飞行期间存在,结束后不残留。
+test("解析中的段落带进度标记，完成后不残留", async ({ harness }) => {
+  await seedLocalProfile(harness);
+  const release = harness.fakeModel.holdStreamBeforeEnd();
+  const page = await openArticle(harness, "hover-blocks.html");
+  const tabId = await harness.tabIdFor(`${harness.pagesOrigin}/hover-blocks.html`);
+  const marked = page.locator("[data-syntax-learning-active]");
+
+  await page.locator("#plain").hover();
+  await harness.dispatchFromUi(
+    uiMessage("PARSE_HOVERED_BLOCK", { tabId, documentId: `e2e-doc-${++requestCounter}` }),
+  );
+
+  await expect(marked).toHaveCount(1, { timeout: 20_000 });
+  release();
+  await expect(marked).toHaveCount(0, { timeout: 20_000 });
+});
+
 // 回归:曾经把「用户显式手势」套用自动扫描的取舍,导致鼠标明明停在段落上却报
 // 「未找到可解析的段落」。div 排版的段落与段内夹插图是真实站点最常见的两种。
 test("快捷键解析 div 排版的段落与段内夹插图的段落", async ({ harness }) => {
