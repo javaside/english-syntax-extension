@@ -231,6 +231,8 @@ describe("session completion", () => {
     ["every sentence is ready", { discovered: 4, ready: 4 }],
     ["ready and failed cover the discovery", { discovered: 4, ready: 3, failed: 1 }],
     ["cache-only skips cover the remainder", { discovered: 3, ready: 2, skipped: 1 }],
+    // 屏外句子尚未触发:当前无工作在跑，就该允许恢复网页。
+    ["offscreen sentences have not been triggered yet", { discovered: 40, ready: 6 }],
   ])("is complete when %s", (_description, overrides) => {
     expect(isSessionComplete(status(overrides))).toBe(true);
   });
@@ -238,8 +240,10 @@ describe("session completion", () => {
   it.each([
     ["nothing was discovered", {}],
     ["sentences are still queued", { discovered: 4, queued: 1, ready: 3 }],
-    ["results have not covered the discovery", { discovered: 4, ready: 2, failed: 1 }],
-    ["skips leave part of the discovery uncovered", { discovered: 4, ready: 2, skipped: 1 }],
+    // 「结果没覆盖全部 discovered」本身不再意味着未完成:屏外句子要滚动到可见
+    // 才入队，长页面永远覆盖不满。真正的未完成由在飞工作表达。
+    ["requests are still in flight", { discovered: 4, ready: 2, failed: 1, inFlight: 1 }],
+    ["a skip still leaves work running", { discovered: 4, ready: 2, skipped: 1, inFlight: 1 }],
   ])("is incomplete when %s", (_description, overrides) => {
     expect(isSessionComplete(status(overrides))).toBe(false);
   });
@@ -321,5 +325,32 @@ describe("isCoreStreamPush", () => {
   it("rejects anything that is not this message", () => {
     expect(isCoreStreamPush({ ...push, type: "CORE_RESULT" })).toBe(false);
     expect(isCoreStreamPush(null)).toBe(false);
+  });
+});
+
+/**
+ * discovered 含屏外尚未触发的句子(它们要滚动到可见才解析)。原判定要求所有
+ * discovered 都达终态,于是长页面永远"未完成":主按钮一直停在「解析中…」,
+ * 不会变成「恢复网页原文」。自动扫描覆盖率提高后，这个缺陷变得随处可见。
+ *
+ * 正确语义是「当前没有在飞的工作」——屏外还没轮到的不算阻塞。
+ */
+describe("isSessionComplete 与屏外未触发的句子", () => {
+  const base = { state: "running" as const, discovered: 100, queued: 0, ready: 12, failed: 0 };
+
+  it("屏内跑完即算完成，屏外未触发的不阻塞", () => {
+    expect(isSessionComplete({ ...base, inFlight: 0 })).toBe(true);
+  });
+
+  it("仍有请求在飞时不算完成", () => {
+    expect(isSessionComplete({ ...base, inFlight: 2 })).toBe(false);
+  });
+
+  it("还在排队时不算完成", () => {
+    expect(isSessionComplete({ ...base, queued: 3, inFlight: 0 })).toBe(false);
+  });
+
+  it("一句都还没出结果时不算完成", () => {
+    expect(isSessionComplete({ ...base, ready: 0, inFlight: 0 })).toBe(false);
   });
 });

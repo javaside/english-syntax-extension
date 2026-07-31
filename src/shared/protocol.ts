@@ -83,6 +83,8 @@ export interface SessionStatus {
   /** 无可用模型配置:本次只查缓存，没有任何模型请求。影响进度提示的措辞。 */
   cacheOnly?: true;
   /** 详解预载:已就绪句子的成分总数(仅预载开启的会话出现)。 */
+  /** 在飞的句子数(requesting + validating)。判定「当前是否还有工作」用。 */
+  inFlight?: number;
   detailTotal?: number;
   /** 详解预载:已确认入缓存的成分数(含预载前已命中缓存的)。 */
   detailReady?: number;
@@ -91,11 +93,18 @@ export interface SessionStatus {
   profileId?: string;
 }
 
+/**
+ * 「当前没有在飞的工作」,而不是「所有发现的句子都出了结果」。
+ *
+ * discovered 含屏外尚未触发的句子——它们要滚动到可见才入队。按旧口径要求全部
+ * 达终态,长页面就永远停在「解析中…」,主按钮不会变成「恢复网页原文」。
+ * queued 单独不够:requesting / validating 不在任何计数里,所以要有 inFlight。
+ */
 export function isSessionComplete(status: SessionStatus): boolean {
   return (
-    status.discovered > 0 &&
     status.queued === 0 &&
-    status.ready + status.failed + (status.skipped ?? 0) >= status.discovered
+    (status.inFlight ?? 0) === 0 &&
+    status.ready + status.failed + (status.skipped ?? 0) > 0
   );
 }
 

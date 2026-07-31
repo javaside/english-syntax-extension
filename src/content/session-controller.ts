@@ -256,6 +256,8 @@ export class SessionController {
       ready: records.filter(({ phase }) => phase === "ready").length,
       failed: records.filter(({ phase }) => phase === "failed").length,
       skipped: records.filter(({ phase }) => phase === "skipped").length,
+      inFlight: records.filter(({ phase }) => phase === "requesting" || phase === "validating")
+        .length,
       ...(this.cacheOnly ? { cacheOnly: true as const } : {}),
       ...(this.selectedProfileId === undefined ? {} : { profileId: this.selectedProfileId }),
       ...(this.prefetcher === undefined

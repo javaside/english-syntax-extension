@@ -303,7 +303,10 @@ describe("cache-only mode (no profile configured)", () => {
       root(),
       noProfile({
         getStatus: vi.fn(() =>
-          Promise.resolve(status({ state: "running", discovered: 5, ready: 2, skipped: 1 })),
+          // 带 inFlight 才表示「还在跑」——否则当前无工作，主按钮该给恢复入口。
+          Promise.resolve(
+            status({ state: "running", discovered: 5, ready: 2, skipped: 1, inFlight: 1 }),
+          ),
         ),
       }),
     );
