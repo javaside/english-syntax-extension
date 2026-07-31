@@ -101,6 +101,49 @@ export function nextChangelogHeading(changelog, version, date) {
   return `${changelog.slice(0, firstHeading + 1)}${heading}${changelog.slice(firstHeading + 1)}`;
 }
 
+/**
+ * CHANGELOG 首行就声明「版本号遵循语义化版本」,而 semver 要求向后兼容的新功能
+ * 升 MINOR。1.0.6 那次带着新功能只升了 patch,靠人记规矩没记住——所以改成发版时
+ * 按本版说明里有没有「新增」一节自动判定。
+ *
+ * @param changelog CHANGELOG 全文
+ * @param next      本次要发的版本
+ * @param from      当前版本
+ */
+export function assertSemverBump(changelog, next, from) {
+  const escaped = next.replace(/\./gu, "\\.");
+  const pattern = new RegExp(`^## ${escaped} —.*?$([\\s\\S]*?)(?=^## |$(?![\\s\\S]))`, "mu");
+  const section = pattern.test(changelog) ? changelog.match(pattern) : null;
+  if (section === null) {
+    throw new Error(`CHANGELOG 里没有 ${next} 这一节,发布说明先写好再发`);
+  }
+  const hasFeature = /^### 新增$/mu.test(section[1]);
+  const [major, minor] = next.split(".").map(Number);
+  const [fromMajor, fromMinor] = from.split(".").map(Number);
+  const bumpedMajor = major > fromMajor;
+  const bumpedMinor = major === fromMajor && minor > fromMinor;
+  if (hasFeature && !bumpedMajor && !bumpedMinor) {
+    throw new Error(
+      `${next} 的说明里有「新增」一节,按语义化版本该升 MINOR(${fromMajor}.${fromMinor + 1}.0),` +
+        `而不是 ${next}。只发修复时才用 patch。`,
+    );
+  }
+}
+
+/**
+ * 商店上传手册里写着要传哪个 zip。1.0.6 那次发完才发现它还指着 1.0.5 的包——
+ * 照着手册操作就会把上一版传进商店,所以这里也设一道闸。
+ */
+export function assertStoreDocVersion(doc, next) {
+  const mentioned = doc.match(/english-syntax-extension-v(\d+\.\d+\.\d+)\.zip/u);
+  if (mentioned === null || mentioned[1] !== next) {
+    throw new Error(
+      `docs/chrome-web-store.md 的上传物还写着 ${mentioned?.[1] ?? "(未标注)"},` +
+        `本次要发 ${next}。先更新它,免得照着手册传错版本。`,
+    );
+  }
+}
+
 /** 发版步骤。顺序本身就是不变量，由测试钉住。 */
 export function releaseSteps(version) {
   return [
@@ -129,6 +172,7 @@ function main() {
   const files = Object.fromEntries(
     VERSION_FILES.map((name) => [name, readFileSync(join(root, name), "utf8")]),
   );
+  const from = JSON.parse(files["package.json"]).version;
   const bumped = bumpVersionFiles(files, version);
 
   const steps = releaseSteps(version);
@@ -154,7 +198,18 @@ function main() {
     cwd: root,
     stdio: "ignore",
   });
-  console.log(`已改版本到 ${version}；若 CHANGELOG 是「_待补充_」请先补写再继续。`);
+
+  // 「准备就绪再交给人确认」的三道闸。以前这里只打印一句提醒就继续往下跑,
+  // 于是「_待补充_」的说明、错版本的商店手册、不合 semver 的版本号都能发出去。
+  const changelog = readFileSync(changelogPath, "utf8");
+  if (changelog.includes(`## ${version} —`) && /_待补充_/u.test(changelog)) {
+    throw new Error(
+      `CHANGELOG 里 ${version} 一节还是「_待补充_」。发布说明该由人写,写好后重跑本命令。`,
+    );
+  }
+  assertSemverBump(changelog, version, from);
+  assertStoreDocVersion(readFileSync(join(root, "docs/chrome-web-store.md"), "utf8"), version);
+  console.log(`已改版本到 ${version}，说明与商店手册均已就位。`);
 
   for (const step of steps) {
     const [bin, argv] = step.command;
@@ -166,7 +221,20 @@ function main() {
     console.log(`\n=== ${step.name} ===`);
     execFileSync(bin, argv, { cwd: root, stdio: "inherit" });
   }
-  console.log(`\n完成。Release 流水线会建草稿，确认后手动发布。`);
+  console.log(
+    [
+      ``,
+      `=== 已就绪，等你确认 ===`,
+      `本地与远端都已就位:版本 ${version}、tag v${version}、包 release/english-syntax-extension-v${version}.zip。`,
+      `CI(.github/workflows/release.yml)会建一个 **草稿** Release——草稿是刻意的,正式发布由你按下。`,
+      ``,
+      `剩下两步只能由人做:`,
+      `  1. 正式发布 GitHub Release:gh release edit v${version} --draft=false`,
+      `     (先核对说明与附件:gh release view v${version})`,
+      `  2. 上传 Chrome 网上应用店:按 docs/chrome-web-store.md 传 release/english-syntax-extension-v${version}.zip`,
+      `     仓库里没有商店凭据,这一步不会被自动化。`,
+    ].join("\n"),
+  );
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) main();

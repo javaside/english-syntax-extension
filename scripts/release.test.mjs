@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   assertReleasableTree,
+  assertSemverBump,
+  assertStoreDocVersion,
   bumpVersionFiles,
   nextChangelogHeading,
   parseVersion,
@@ -122,5 +124,42 @@ describe("assertReleasableTree", () => {
 
   it("未跟踪文件同样拒绝——它们最容易被 add -A 顺手带走", () => {
     expect(() => assertReleasableTree("?? notes.md")).toThrow(/notes\.md/u);
+  });
+});
+
+describe("assertSemverBump", () => {
+  const feature = (v) => `## ${v} — 2026-07-31\n\n### 新增\n\n- 某个新功能\n`;
+  const fixOnly = "## 1.0.6 — 2026-07-31\n\n### 修复\n\n- 某个修复\n";
+
+  it("本版有「新增」却只升 patch 时拒绝——仓库声明遵循 semver", () => {
+    expect(() => assertSemverBump(feature("1.0.6"), "1.0.6", "1.0.5")).toThrow(/新增/u);
+  });
+
+  it("本版有「新增」且升了 minor 时放行", () => {
+    expect(() => assertSemverBump(feature("1.1.0"), "1.1.0", "1.0.5")).not.toThrow();
+  });
+
+  it("本版只有修复时，patch 放行", () => {
+    expect(() => assertSemverBump(fixOnly, "1.0.6", "1.0.5")).not.toThrow();
+  });
+
+  it("升 major 时一律放行——破坏性变更由人判断", () => {
+    expect(() => assertSemverBump(feature("2.0.0"), "2.0.0", "1.0.5")).not.toThrow();
+  });
+
+  it("CHANGELOG 里找不到本版一节时拒绝——发布说明该先写好", () => {
+    expect(() => assertSemverBump(fixOnly, "9.9.9", "1.0.5")).toThrow(/CHANGELOG/u);
+  });
+});
+
+describe("assertStoreDocVersion", () => {
+  it("商店文档里的包版本与本次不一致时拒绝", () => {
+    const doc = "`release/english-syntax-extension-v1.0.5.zip`（190 KB，19 个文件）。";
+    expect(() => assertStoreDocVersion(doc, "1.0.6")).toThrow(/chrome-web-store/u);
+  });
+
+  it("一致时放行", () => {
+    const doc = "`release/english-syntax-extension-v1.0.6.zip`（192 KB，19 个文件）。";
+    expect(() => assertStoreDocVersion(doc, "1.0.6")).not.toThrow();
   });
 });
