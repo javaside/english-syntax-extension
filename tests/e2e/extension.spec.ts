@@ -929,6 +929,28 @@ test("悬停段落经 PARSE_HOVERED_BLOCK 冷启动解析，其余段落保持�
   await expect(page.locator("p:visible")).toHaveCount(paragraphCount - 1);
 });
 
+// 回归:曾经把「用户显式手势」套用自动扫描的取舍,导致鼠标明明停在段落上却报
+// 「未找到可解析的段落」。div 排版的段落与段内夹插图是真实站点最常见的两种。
+test("快捷键解析 div 排版的段落与段内夹插图的段落", async ({ harness }) => {
+  await seedLocalProfile(harness);
+  const page = await openArticle(harness, "hover-blocks.html");
+  const tabId = await harness.tabIdFor(`${harness.pagesOrigin}/hover-blocks.html`);
+
+  // 两次按键共用一个 documentId:换 documentId 会取消上一份文档的在飞请求。
+  const documentId = `e2e-doc-${++requestCounter}`;
+
+  for (const [index, selector] of ["#div-paragraph", "#illustrated"].entries()) {
+    await page.locator(selector).hover();
+    const response = await harness.dispatchFromUi(
+      uiMessage("PARSE_HOVERED_BLOCK", { tabId, documentId }),
+    );
+
+    expect(response, `${selector}: ${JSON.stringify(response)}`).toMatchObject({ type: "ACK" });
+    await expect(learningBlocks(page)).toHaveCount(index + 1, { timeout: 20_000 });
+    await expect(page.locator(selector)).toBeHidden();
+  }
+});
+
 test("段落在流式响应收尾前就显示已生成的成分", async ({ harness }) => {
   await seedLocalProfile(harness);
   // 挂住 [DONE]:请求仍在飞，页面必须已经有成分。用探针而非墙钟判断中间态。

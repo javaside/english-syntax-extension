@@ -4,21 +4,24 @@ export interface CandidateBlock {
   text: string;
 }
 
-export interface NearestSafeBlockOptions {
-  selection?: boolean;
-}
-
+/**
+ * 自动扫描只认语义段落标签,免得把边栏、面包屑、按钮标签当正文。
+ * 显式手势(选中/悬停/右键)额外接受这些「松散块」——现代站点大量用 div /
+ * section 排版正文,只认 <p> 会让用户指着段落却被告知找不到段落。
+ */
 const BLOCK_SELECTOR = "h1,h2,h3,h4,h5,h6,p,li,blockquote";
+const LOOSE_BLOCK_SELECTOR = "div,section,dd,td,figcaption";
 const SEMANTIC_ROOT_SELECTOR = "article,main,[role='main']";
 const EXCLUSION_SELECTOR =
   "nav,aside,footer,form,pre,code,script,style,noscript,template,svg,canvas,iframe," +
   "[contenteditable],[hidden],[aria-hidden='true']";
+// 图片不在此列:卡片替换只是把原节点 display:none,退出时原样恢复,所以段落里
+// 夹一张插图并不妨碍可逆渲染,而按钮/输入控件会连同交互状态一起被藏掉。
 const UNSAFE_DESCENDANT_SELECTOR =
-  "button,input,textarea,select,video,audio,canvas,iframe,[contenteditable],img,picture";
+  "button,input,textarea,select,video,audio,canvas,iframe,[contenteditable]";
 const MINIMUM_AUTO_TEXT_LENGTH = 20;
 
 const blockIds = new WeakMap<Element, string>();
-const principalRoots = new WeakMap<Document, Element>();
 let nextBlockId = 1;
 
 function queryElements(root: ParentNode, selector: string): Element[] {
@@ -60,9 +63,35 @@ function isEnglishDominant(text: string): boolean {
   return englishWordCount / Math.max(1, letterWords.length) >= 0.6;
 }
 
-function isSafeElement(element: Element): boolean {
+/**
+ * 标签名不足以判断「是不是一段」:Mintlify 一类文档站(含 Claude Code 文档)整篇
+ * 正文都是 <span data-as="p">,靠 CSS 渲染成块。所以按渲染盒子判定,标签名只作兜底
+ * (happy-dom 等环境下内联元素的 computed display 是空串而非 "inline")。
+ */
+const INLINE_DISPLAY = /^(?:|inline|inline-\w+|contents|none)$/u;
+
+function isRenderedBlock(element: Element): boolean {
   return (
-    element.matches(BLOCK_SELECTOR) &&
+    element.matches(LOOSE_BLOCK_SELECTOR) || !INLINE_DISPLAY.test(getComputedStyle(element).display)
+  );
+}
+
+function hasBlockChild(element: Element): boolean {
+  return Array.from(element.children).some(
+    (child) => isRenderedBlock(child) && (child.textContent ?? "").trim().length > 0,
+  );
+}
+
+function isBlockCandidate(element: Element, loose: boolean): boolean {
+  if (element.matches(BLOCK_SELECTOR)) return true;
+  if (!loose || !isRenderedBlock(element)) return false;
+  // 松散块只认叶子块,否则从光标往上找会撞到包着整篇正文的外层容器。
+  return !hasBlockChild(element);
+}
+
+function isSafeElement(element: Element, loose: boolean): boolean {
+  return (
+    isBlockCandidate(element, loose) &&
     element.closest(EXCLUSION_SELECTOR) === null &&
     element.querySelector(UNSAFE_DESCENDANT_SELECTOR) === null &&
     isLayoutVisible(element)
@@ -78,7 +107,7 @@ function getBlockId(element: Element): string {
 }
 
 function candidateText(element: Element, automatic: boolean): string | null {
-  if (!isSafeElement(element)) return null;
+  if (!isSafeElement(element, !automatic)) return null;
   const text = normalizedText(element);
   if (
     text.length === 0 ||
@@ -177,30 +206,25 @@ function fallbackRoot(root: ParentNode): Element | null {
   return best;
 }
 
-function ownerDocument(root: ParentNode): Document | null {
-  if (root.ownerDocument !== null) return root.ownerDocument;
-  return root.nodeType === Node.DOCUMENT_NODE ? (root as Document) : null;
-}
-
 function selectPrincipalRoot(root: ParentNode): Element | null {
   return semanticRoot(root) ?? fallbackRoot(root);
 }
 
 export function scanDocument(root: ParentNode): CandidateBlock[] {
   const principalRoot = selectPrincipalRoot(root);
-  const document = ownerDocument(root);
   if (principalRoot === null) return [];
-  if (document !== null) principalRoots.set(document, principalRoot);
   return queryElements(principalRoot, BLOCK_SELECTOR).flatMap((element) => {
     const candidate = createCandidate(element, true);
     return candidate === null ? [] : [candidate];
   });
 }
 
-export function nearestSafeBlock(
-  target: EventTarget | null,
-  options: NearestSafeBlockOptions = {},
-): CandidateBlock | null {
+/**
+ * 只服务用户显式手势(选中文本 / 快捷键悬停 / 右键此区域),所以不套用自动扫描
+ * 那两道取舍:不要求落在得分最高的正文容器里(多 article 页面、SPA 换页后缓存
+ * 失效都会误伤),也不设最短长度。指哪解析哪,歧义已由用户的鼠标消解。
+ */
+export function nearestSafeBlock(target: EventTarget | null): CandidateBlock | null {
   const start =
     target instanceof Element ? target : target instanceof Node ? target.parentElement : null;
   if (start === null) return null;
@@ -211,18 +235,9 @@ export function nearestSafeBlock(
     return null;
   }
 
-  const document = start.ownerDocument;
-  const principalRoot = options.selection
-    ? null
-    : (principalRoots.get(document) ?? selectPrincipalRoot(document));
-  if (!options.selection && (principalRoot === null || !principalRoot.contains(start))) return null;
-
   for (let current: Element | null = start; current !== null; current = current.parentElement) {
-    if (current.matches(BLOCK_SELECTOR)) {
-      const candidate = createCandidate(current, !options.selection);
-      if (candidate !== null) return candidate;
-    }
-    if (!options.selection && current === principalRoot) break;
+    const candidate = createCandidate(current, false);
+    if (candidate !== null) return candidate;
   }
   return null;
 }

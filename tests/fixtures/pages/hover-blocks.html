@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Hover Blocks Fixture</title>
+    <style>
+      body {
+        margin: 0;
+        font: 16px/1.6 sans-serif;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <p id="plain">The little girl reads an interesting story in the quiet library.</p>
+        <!-- 现代站点常见排版：用 div 承载正文。自动扫描不收它，但用户指着它按
+             快捷键必须能解析。 -->
+        <div id="div-paragraph">
+          Modern sites often lay out body copy with plain containers instead of paragraph tags.
+        </div>
+        <!-- 段内插图：卡片替换只是把原节点藏起来，插图不妨碍可逆渲染。 -->
+        <p id="illustrated">
+          This paragraph carries an inline illustration beside its ordinary English words.
+          <img
+            alt="chart"
+            src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="
+          />
+        </p>
+      </article>
+    </main>
+  </body>
+</html>

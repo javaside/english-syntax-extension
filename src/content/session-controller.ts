@@ -379,7 +379,7 @@ export class SessionController {
     if (text.length === 0) return CONTEXT_ERROR;
     if (this.state === "stopped") await this.start();
     const target = this.selectionTarget() ?? this.contextTarget;
-    const candidate = nearestSafeBlock(target, { selection: true });
+    const candidate = nearestSafeBlock(target);
     const element = candidate?.element ?? this.createSelectionAnchor(text);
     const id = `selection-${++this.operationVersion}`;
     const selectionCandidate: CandidateBlock = { id, element, text };
