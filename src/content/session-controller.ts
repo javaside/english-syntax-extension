@@ -372,7 +372,10 @@ export class SessionController {
     // 挂起的合批窗口必须取消，否则会话停掉之后还会冒出一条请求。
     for (const pending of this.pendingBatches.values()) this.cancelTimeout(pending.timer);
     this.pendingBatches.clear();
-    for (const block of this.blocks.values()) block.replacement.restore();
+    for (const block of this.blocks.values()) {
+      block.replacement.restore();
+      block.marker.clear();
+    }
     for (const anchor of this.ephemeralSelectionAnchors) anchor.remove();
     this.ephemeralSelectionAnchors.clear();
     this.pendingRequestIds.clear();
@@ -1127,6 +1130,8 @@ export class SessionController {
         // The bounded retry schedule handles transient worker startup races.
       }
     }
+    // 重连彻底失败:相位会停在 requesting,标记不清就会一直亮在页面上。
+    for (const block of this.blocks.values()) block.marker.clear();
   }
 
   private emitStatus(): void {

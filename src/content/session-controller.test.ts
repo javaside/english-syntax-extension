@@ -2269,4 +2269,37 @@ describe("段落解析中标记", () => {
 
     expect(subject.markers[0]?.marked).not.toBeNull();
   });
+
+  it("停止会话清空所有标记", async () => {
+    const pending = new FakeTransport(() => new Promise<ResponseMessage>(() => {}));
+    const subject = harness("Readers understand complex sentences.", pending);
+    await subject.controller.start();
+    subject.viewport.emit();
+    await vi.waitFor(() => expect(subject.markers[0]?.marked).not.toBeNull());
+
+    subject.controller.stop();
+
+    expect(subject.markers[0]?.marked).toBeNull();
+  });
+
+  it("重连彻底失败后不把标记留在页面上", async () => {
+    const transport = new FakeTransport(() => new Promise<ResponseMessage>(() => {}));
+    // 4 次退避全部失败,相位会停在 requesting。
+    const reconnect = vi.fn<() => Promise<void>>().mockRejectedValue(new Error("worker down"));
+    transport.reconnectHandler = reconnect;
+    const subject = harness("Readers understand complex sentences.", transport, {
+      setTimeout: (callback) => {
+        callback();
+        return 1 as unknown as ReturnType<typeof setTimeout>;
+      },
+    });
+    await subject.controller.start();
+    subject.viewport.emit();
+    await vi.waitFor(() => expect(subject.markers[0]?.marked).not.toBeNull());
+
+    transport.disconnect();
+    await vi.waitFor(() => expect(reconnect).toHaveBeenCalledTimes(4));
+
+    expect(subject.markers[0]?.marked).toBeNull();
+  });
 });
