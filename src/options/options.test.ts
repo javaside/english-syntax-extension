@@ -620,3 +620,41 @@ describe("detail prefetch toggle", () => {
     expect(setStreamRendering).toHaveBeenCalledWith(true);
   });
 });
+
+/**
+ * 不探测的话，第一次真实解析要拿用户等待的那次请求去试错:DeepSeek 拒绝
+ * json_schema 返回 400，扩展再降级重发，白费约 0.28 秒。保存时就探明能力，
+ * 这笔学费就不落在用户身上。
+ */
+describe("保存后自动探测端点能力", () => {
+  it("保存成功后自动跑一次连接测试", async () => {
+    const saveProfile = vi.fn(() => Promise.resolve());
+    const testProfile = vi.fn(() =>
+      Promise.resolve({
+        success: true as const,
+        latencyMs: 12,
+        jsonSchemaSupport: "unsupported" as const,
+      }),
+    );
+    await createOptionsPage(root(), dependencies({ saveProfile, testProfile }));
+
+    fillRequiredProfile();
+    document.querySelector<HTMLFormElement>("form")!.requestSubmit();
+
+    await vi.waitFor(() => expect(saveProfile).toHaveBeenCalled());
+    await vi.waitFor(() => expect(testProfile).toHaveBeenCalled());
+  });
+
+  it("探测失败不影响保存成功的提示", async () => {
+    const saveProfile = vi.fn(() => Promise.resolve());
+    const testProfile = vi.fn(() => Promise.reject(new Error("endpoint down")));
+    await createOptionsPage(root(), dependencies({ saveProfile, testProfile }));
+
+    fillRequiredProfile();
+    document.querySelector<HTMLFormElement>("form")!.requestSubmit();
+
+    await vi.waitFor(() =>
+      expect(document.querySelector("[data-connection-result]")?.textContent).toContain("已保存"),
+    );
+  });
+});

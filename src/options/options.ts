@@ -467,6 +467,10 @@ export async function createOptionsPage(
         apiKeyInput.placeholder = API_KEY_SAVED_HINT;
         result.textContent = "配置已保存。";
         await loadProfiles(profile.id);
+        // 顺手探明端点能力(是否收 json_schema / reasoning_effort)并持久化。不探的话,
+        // 第一次真实解析要拿用户等待的那次请求去试错:被拒的 response_format 要白费
+        // 一趟 4xx 再降级重发。探测失败无所谓——真实请求路径仍有降级兜底。
+        void dependencies.testProfile(profile.id).catch(() => undefined);
       } catch {
         result.textContent = "配置无效，请检查地址、必填项和超时时间。";
       } finally {
