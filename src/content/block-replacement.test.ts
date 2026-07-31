@@ -333,3 +333,39 @@ describe("BlockReplacement", () => {
     expect(document.head.querySelectorAll("style[data-syntax-learning-hide]")).toHaveLength(1);
   });
 });
+
+/**
+ * 卡片插在原元素之后，继承的是父容器字体而不是被替换的那个元素。于是 h2 换成
+ * 卡片后掉到正文字号，整篇文章的层级在解析后全部消失。卡片内部用的是 em 相对
+ * 单位，所以把原元素的字号与字重搬到 host 上，整张卡片就会按层级等比缩放。
+ */
+describe("卡片保留原元素的排版层级", () => {
+  it("把原元素的字号与字重搬到卡片上", () => {
+    document.body.replaceChildren();
+    const heading = document.createElement("h2");
+    heading.textContent = "Original";
+    heading.style.fontSize = "32px";
+    heading.style.fontWeight = "700";
+    document.body.append(heading);
+    const block = learningBlock(["sentence-1"]);
+    renderReady(block);
+
+    new BlockReplacement().show(heading, block);
+
+    expect(block.host.style.fontSize).toBe("32px");
+    expect(block.host.style.fontWeight).toBe("700");
+  });
+
+  it("普通段落不写死字号，继续跟随页面", () => {
+    document.body.replaceChildren();
+    const paragraph = document.createElement("p");
+    paragraph.textContent = "Original";
+    document.body.append(paragraph);
+    const block = learningBlock(["sentence-1"]);
+    renderReady(block);
+
+    new BlockReplacement().show(paragraph, block);
+
+    expect(block.host.style.fontWeight).toBe("");
+  });
+});

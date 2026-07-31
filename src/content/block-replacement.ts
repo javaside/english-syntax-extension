@@ -24,6 +24,26 @@ function assertLearningBlock(block: SyntaxLearningBlock): void {
   }
 }
 
+/**
+ * 卡片插在原元素之后,继承的是父容器字体而不是被替换的那个元素——h2 换成卡片后
+ * 会掉到正文字号,整篇文章的层级在解析后全部消失。卡片内部用 em 相对单位,所以
+ * 把原元素的字号与字重搬到 host 上,整张卡片就按层级等比缩放。
+ *
+ * 只搬「与父容器不同」的值:普通段落照旧跟随页面,不写死任何尺寸。
+ */
+function inheritTypography(original: HTMLElement, host: HTMLElement): void {
+  const parent = original.parentElement;
+  if (parent === null) return;
+  const own = getComputedStyle(original);
+  const inherited = getComputedStyle(parent);
+  if (own.fontSize !== "" && own.fontSize !== inherited.fontSize) {
+    host.style.fontSize = own.fontSize;
+  }
+  if (own.fontWeight !== "" && own.fontWeight !== inherited.fontWeight) {
+    host.style.fontWeight = own.fontWeight;
+  }
+}
+
 function createHideStyle(document: Document, hiddenClass: string): HTMLStyleElement {
   const style = document.createElement("style");
   style.setAttribute(STYLE_ATTRIBUTE, hiddenClass);
@@ -80,6 +100,7 @@ export class BlockReplacement {
     if (original.parentNode === null) {
       return;
     }
+    inheritTypography(original, block.host);
     const hiddenClass = this.#reserveHiddenClass(original);
     const style = createHideStyle(original.ownerDocument, hiddenClass);
     original.ownerDocument.head.append(style);
