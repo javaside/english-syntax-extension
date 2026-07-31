@@ -944,6 +944,7 @@ export function createProfileCapabilityWriters(configRepository: ProfileCapabili
     jsonSchemaSupport: ModelProfile["jsonSchemaSupport"],
   ) => Promise<void>;
   persistStreamSupport: (profileId: string, streamSupport: "unsupported") => Promise<void>;
+  persistReasoningControl: (profileId: string, reasoningControl: "unsupported") => Promise<void>;
 } {
   const update = async (profileId: string, patch: Partial<ModelProfile>): Promise<void> => {
     const profile = await configRepository.getProfile(profileId);
@@ -953,6 +954,8 @@ export function createProfileCapabilityWriters(configRepository: ProfileCapabili
     persistJsonSchemaSupport: (profileId, jsonSchemaSupport) =>
       update(profileId, { jsonSchemaSupport }),
     persistStreamSupport: (profileId, streamSupport) => update(profileId, { streamSupport }),
+    persistReasoningControl: (profileId, reasoningControl) =>
+      update(profileId, { reasoningControl }),
   };
 }
 

@@ -15,6 +15,13 @@ export interface ModelProfile {
    */
   streamSupport?: "unsupported";
   /**
+   * 思考模型会为一句话生成上万 token 推理(实测 deepseek-v4-flash 单句 153 秒 /
+   * 14789 tok,带 reasoning_effort:"none" 后 1.41 秒 / 135 tok),而 DeepSeek 现存的
+   * 两个模型都是思考模型。所以默认下发该字段,只持久化否定态:端点拒绝一次就记下,
+   * 之后不再交这笔学费。与 streamSupport 同款套路。
+   */
+  reasoningControl?: "unsupported";
+  /**
    * 思考模型(Qwen3 等)会为一句话生成上万字符推理:实测单句 246 秒,远超本扩展
    * 120 秒的超时上限,于是每句都超时、整页无译文。置位后请求体带
    * `reasoning_effort: "none"`,同一句降到 7 秒。
@@ -75,6 +82,9 @@ function validateProfile(profile: ModelProfile): ModelProfile {
   }
   if (profile.streamSupport !== undefined && profile.streamSupport !== "unsupported") {
     throw new Error("Model profile streamSupport is invalid");
+  }
+  if (profile.reasoningControl !== undefined && profile.reasoningControl !== "unsupported") {
+    throw new Error("Model profile reasoningControl is invalid");
   }
   if (profile.disableReasoning !== undefined && profile.disableReasoning !== true) {
     throw new Error("Model profile disableReasoning is invalid");
@@ -159,6 +169,9 @@ export class ConfigRepository {
       model: profile.model,
       timeoutMs: profile.timeoutMs,
       jsonSchemaSupport: profile.jsonSchemaSupport,
+      ...(profile.reasoningControl === undefined
+        ? {}
+        : { reasoningControl: profile.reasoningControl }),
     }));
   }
 

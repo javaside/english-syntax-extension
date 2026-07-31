@@ -35,6 +35,7 @@ export interface OpenAiCompatibleAdapterOptions {
     support: ModelProfile["jsonSchemaSupport"],
   ) => Promise<void>;
   persistStreamSupport?: (profileId: string, support: "unsupported") => Promise<void>;
+  persistReasoningControl?: (profileId: string, support: "unsupported") => Promise<void>;
 }
 
 /** Reports each component the stream completed, before the sentence is verified. */
@@ -63,11 +64,15 @@ function deltaContent(payload: string): string | undefined {
 }
 
 /**
- * 只在 profile 显式要求时出现:OpenAI 官方 API 只接受 low/medium/high,收到
- * "none" 会直接 400,所以这个字段绝不能无条件下发。
+ * 默认下发。思考模型会为一句话生成上万 token 推理(实测 deepseek-v4-flash 单句
+ * 153 秒 / 14789 tok,超过 120 秒超时上限;带 "none" 后 1.41 秒 / 135 tok),而
+ * DeepSeek 现存的两个模型都是思考模型——靠用户自己去勾选并不可靠。
+ *
+ * 部分端点(OpenAI 官方只收 low/medium/high)会因此 400,所以走与 response_format
+ * 相同的降级:被拒一次就记 reasoningControl="unsupported",之后不再下发。
  */
 function reasoningOverride(profile: ModelProfile): Record<string, unknown> {
-  return profile.disableReasoning === true ? { reasoning_effort: "none" } : {};
+  return profile.reasoningControl === "unsupported" ? {} : { reasoning_effort: "none" };
 }
 
 function responseFormat(schema: JsonSchemaSpec): Record<string, unknown> {
@@ -138,11 +143,15 @@ export class OpenAiCompatibleAdapter {
   private readonly persistStreamSupport: NonNullable<
     OpenAiCompatibleAdapterOptions["persistStreamSupport"]
   >;
+  private readonly persistReasoningControl: NonNullable<
+    OpenAiCompatibleAdapterOptions["persistReasoningControl"]
+  >;
 
   constructor(options: OpenAiCompatibleAdapterOptions = {}) {
     this.fetchImplementation = options.fetch ?? globalThis.fetch.bind(globalThis);
     this.persistJsonSchemaSupport = options.persistJsonSchemaSupport ?? (() => Promise.resolve());
     this.persistStreamSupport = options.persistStreamSupport ?? (() => Promise.resolve());
+    this.persistReasoningControl = options.persistReasoningControl ?? (() => Promise.resolve());
   }
 
   /**
@@ -220,6 +229,11 @@ export class OpenAiCompatibleAdapter {
           await this.persistStreamSupport(profile.id, "unsupported");
           // schema 能力沿用上面刚探到的结果，别再白探一次。
           return this.request(profile, messages, schema, signal, useSchema);
+        }
+        if (error instanceof UnsupportedReasoningControlError) {
+          await this.persistReasoningControl(profile.id, "unsupported");
+          profile = { ...profile, reasoningControl: "unsupported" as const };
+          continue;
         }
         throw error;
       }
@@ -360,6 +374,11 @@ export class OpenAiCompatibleAdapter {
         await this.persistJsonSchemaSupport(profile.id, "unsupported");
         return this.request(profile, messages, schema, signal, false);
       }
+      if (error instanceof UnsupportedReasoningControlError && !signal.aborted) {
+        await this.persistReasoningControl(profile.id, "unsupported");
+        const downgraded = { ...profile, reasoningControl: "unsupported" as const };
+        return this.request(downgraded, messages, schema, signal, useSchema);
+      }
       throw error;
     }
   }
@@ -459,6 +478,13 @@ export class OpenAiCompatibleAdapter {
         ) {
           throw new UnsupportedResponseFormatError();
         }
+        if (
+          profile.reasoningControl !== "unsupported" &&
+          (response.status === 400 || response.status === 422) &&
+          /reasoning[_ ]?effort/i.test(text)
+        ) {
+          throw new UnsupportedReasoningControlError();
+        }
         throw mapHttpError(response.status, response.headers.get("Retry-After"), text);
       }
 
@@ -478,7 +504,11 @@ export class OpenAiCompatibleAdapter {
         throw invalidOutput("Model message content is not valid JSON");
       }
     } catch (error) {
-      if (error instanceof ModelRequestError || error instanceof UnsupportedResponseFormatError) {
+      if (
+        error instanceof ModelRequestError ||
+        error instanceof UnsupportedResponseFormatError ||
+        error instanceof UnsupportedReasoningControlError
+      ) {
         throw error;
       }
       if (abortCause === "timeout") {
@@ -500,5 +530,8 @@ export class OpenAiCompatibleAdapter {
 }
 
 class UnsupportedResponseFormatError extends Error {}
+
+/** 端点拒绝 reasoning_effort(OpenAI 官方只收 low/medium/high)——去掉该字段重发一次。 */
+class UnsupportedReasoningControlError extends Error {}
 
 class UnsupportedStreamError extends Error {}

@@ -207,6 +207,8 @@ describe("OpenAI-compatible chat completions adapter", () => {
         messages,
         temperature: 0,
         stream: false,
+        // 默认关思考:思考模型解析单句要 153 秒/14789 tok，靠用户勾选不可靠。
+        reasoning_effort: "none",
         response_format: {
           type: "json_schema",
           json_schema: { name: "core_analysis", strict: true, schema: schema.schema },
@@ -686,12 +688,49 @@ describe("disabling model reasoning", () => {
   });
 
   // OpenAI 官方 API 不接受 "none"，所以这个字段绝不能默认出现。
-  it("omits the field entirely unless the profile opts in", async () => {
+});
+
+/**
+ * 思考模型为一句话生成上万 token 推理:实测 deepseek-v4-flash 解析单句
+ * 默认 153 秒 / 14789 tok，带 reasoning_effort:"none" 后 1.41 秒 / 135 tok。
+ * DeepSeek 现存的两个模型都是思考模型，靠用户自己去选项页勾选并不可靠，
+ * 所以改成默认下发 + 被拒降级（与 streamSupport 同款套路）。
+ */
+describe("默认关闭模型思考", () => {
+  it("默认就下发 reasoning_effort:none，无需用户勾选", async () => {
     const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(completion('{"ok":1}'));
     const adapter = new OpenAiCompatibleAdapter({ fetch });
 
     await adapter.completeJson(profile, messages, schema, new AbortController().signal);
 
+    expect(requestBody(fetch, 0)).toMatchObject({ reasoning_effort: "none" });
+  });
+
+  it("端点已知不接受时不再下发", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(completion('{"ok":1}'));
+    const adapter = new OpenAiCompatibleAdapter({ fetch });
+    const known = { ...profile, reasoningControl: "unsupported" as const };
+
+    await adapter.completeJson(known, messages, schema, new AbortController().signal);
+
     expect(requestBody(fetch, 0)).not.toHaveProperty("reasoning_effort");
+  });
+
+  it("被 4xx 拒绝后去掉该字段重发一次", async () => {
+    const rejection = new Response(
+      JSON.stringify({ error: { message: "Invalid value for 'reasoning_effort': none" } }),
+      { status: 400, headers: { "content-type": "application/json" } },
+    );
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValueOnce(rejection)
+      .mockResolvedValueOnce(completion('{"ok":1}'));
+    const adapter = new OpenAiCompatibleAdapter({ fetch });
+
+    await adapter.completeJson(profile, messages, schema, new AbortController().signal);
+
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(requestBody(fetch, 0)).toHaveProperty("reasoning_effort");
+    expect(requestBody(fetch, 1)).not.toHaveProperty("reasoning_effort");
   });
 });
