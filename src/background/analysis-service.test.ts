@@ -846,7 +846,12 @@ describe("blocks larger than one request", () => {
       { sentences: sentences.slice(6).map(rawFor) },
     ]);
 
-    const outcome = await service.analyzeCore(coreInput(sentences), new AbortController().signal);
+    // 本地端点:串行处理请求，合并成大块才快，用满 6 句上限。
+    const local = { ...profile, baseUrl: "http://localhost:11434/v1" };
+    const outcome = await service.analyzeCore(
+      coreInput(sentences, local),
+      new AbortController().signal,
+    );
 
     const counts = scheduler.schedule.mock.calls.map(([request]) => request.sentenceCount);
     expect(counts).toEqual([6, 1]);
@@ -872,7 +877,12 @@ describe("blocks larger than one request", () => {
       { sentences: [rawFor(sentences[0]!)] },
     ]);
 
-    const outcome = await service.analyzeCore(coreInput(sentences), new AbortController().signal);
+    // 本地端点:保持 [6,1] 两块，本用例验证的是分块后的隔离，与批次大小无关。
+    const localProfile = { ...profile, baseUrl: "http://localhost:11434/v1" };
+    const outcome = await service.analyzeCore(
+      coreInput(sentences, localProfile),
+      new AbortController().signal,
+    );
 
     expect(outcome.failures).toEqual([]);
     expect(outcome.result).toHaveLength(7);
@@ -888,7 +898,12 @@ describe("blocks larger than one request", () => {
       { sentences: sentences.slice(6).map(rawFor) },
     ]);
 
-    const outcome = await service.analyzeCore(coreInput(sentences), new AbortController().signal);
+    // 本地端点:保持 [6,1] 两块，本用例验证的是分块后的隔离，与批次大小无关。
+    const localProfile = { ...profile, baseUrl: "http://localhost:11434/v1" };
+    const outcome = await service.analyzeCore(
+      coreInput(sentences, localProfile),
+      new AbortController().signal,
+    );
 
     expect(outcome.result.map(({ sentenceId }) => sentenceId)).toEqual(["sentence-7"]);
     expect(outcome.failures.map(({ sentenceId }) => sentenceId)).toEqual(
@@ -904,6 +919,35 @@ describe("blocks larger than one request", () => {
     await expect(
       service.analyzeCore(coreInput([sentenceOne]), new AbortController().signal),
     ).rejects.toMatchObject({ code: "AUTH_FAILED" });
+  });
+  /**
+   * 云端 API 的耗时几乎只由输出 token 决定(实测 TTFT 恒定 ~0.65s、与输入无关),
+   * 把多句塞进一条请求等于让输出排成一队串行生成。实测同样 6 句:1 条 6 句 8.0s,
+   * 3 条 2 句并发 3.1s。本地模型串行处理请求,取舍相反,仍用大块。
+   */
+  it("云端端点拆成小块以便并行", async () => {
+    const sentences = Array.from({ length: 6 }, (_, index) => numbered(index + 1));
+    const { scheduler, service } = harness([
+      { sentences: sentences.slice(0, 2).map(rawFor) },
+      { sentences: sentences.slice(2, 4).map(rawFor) },
+      { sentences: sentences.slice(4).map(rawFor) },
+    ]);
+
+    await service.analyzeCore(coreInput(sentences), new AbortController().signal);
+
+    const counts = scheduler.schedule.mock.calls.map(([request]) => request.sentenceCount);
+    expect(counts).toEqual([2, 2, 2]);
+  });
+
+  it("本地端点保持大块——它串行处理请求，请求数才是杠杆", async () => {
+    const sentences = Array.from({ length: 6 }, (_, index) => numbered(index + 1));
+    const { scheduler, service } = harness([{ sentences: sentences.map(rawFor) }]);
+    const local = { ...profile, baseUrl: "http://127.0.0.1:11434/v1" };
+
+    await service.analyzeCore(coreInput(sentences, local), new AbortController().signal);
+
+    const counts = scheduler.schedule.mock.calls.map(([request]) => request.sentenceCount);
+    expect(counts).toEqual([6]);
   });
 });
 

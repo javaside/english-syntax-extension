@@ -8,6 +8,7 @@ import type {
   TokenRange,
 } from "../shared/grammar";
 import { MAX_SENTENCES_PER_REQUEST } from "../shared/protocol";
+import { isLoopbackBaseUrl } from "./base-url";
 import type { SentenceInput } from "../shared/protocol";
 import { CORE_SCHEMA_VERSION } from "../shared/versions";
 import { validateCoreBatch, validateDetail } from "../language/analysis-validator";
@@ -26,6 +27,20 @@ import {
 } from "./prompts";
 import type { StreamedComponent } from "./core-stream-parser";
 import type { ScheduledRequest, SchedulerPriority } from "./request-scheduler";
+
+/**
+ * 云端 API 的耗时几乎只由输出 token 决定——实测 TTFT 恒定 ~0.65s 且与输入大小
+ * 无关,总时 ≈ 0.65s + 输出token/190。把多句塞进一条请求,就是让这些输出排成
+ * 一队串行生成:同样 6 句,1 条 6 句 8.0s,3 条 2 句并发 3.1s。
+ *
+ * 本地(loopback)模型的取舍相反:它串行处理请求,请求数才是杠杆,合并成大块才快
+ * (CHANGELOG 1.0.4 记录的收益)。所以这里按端点分流,不能一刀切。
+ */
+const CLOUD_SENTENCES_PER_REQUEST = 2;
+
+function sentencesPerRequest(baseUrl: string): number {
+  return isLoopbackBaseUrl(baseUrl) ? MAX_SENTENCES_PER_REQUEST : CLOUD_SENTENCES_PER_REQUEST;
+}
 
 export interface AnalysisCachePort {
   getCore<T>(key: string): Promise<T | undefined>;
@@ -583,9 +598,10 @@ export class CachedAnalysisService implements AnalysisService {
       };
     }
 
+    const perRequest = sentencesPerRequest(input.profile.baseUrl);
     const chunks: Array<typeof missing> = [];
-    for (let index = 0; index < missing.length; index += MAX_SENTENCES_PER_REQUEST) {
-      chunks.push(missing.slice(index, index + MAX_SENTENCES_PER_REQUEST));
+    for (let index = 0; index < missing.length; index += perRequest) {
+      chunks.push(missing.slice(index, index + perRequest));
     }
     const settled = await Promise.allSettled(
       chunks.map((chunk) => this.analyzeCoreChunk(input, chunk, signal)),
