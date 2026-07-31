@@ -24,7 +24,7 @@ function event<T extends (...args: never[]) => unknown>() {
   };
 }
 
-function chromeMock() {
+function chromeMock(sessionSeed: Record<string, unknown> = {}) {
   const onInstalled = event<(details: chrome.runtime.InstalledDetails) => void>();
   const onMessage =
     event<
@@ -42,6 +42,15 @@ function chromeMock() {
   const onRemoved = event<(tabId: number) => void>();
   const onUpdated =
     event<(tabId: number, changeInfo: chrome.tabs.OnUpdatedInfo, tab: chrome.tabs.Tab) => void>();
+  // SW 休眠会清空内存态;session 存储专为熬过重启而设，测试要能跨"重启"共享它。
+  const sessionData: Record<string, unknown> = sessionSeed;
+  const sessionArea = {
+    get: (key: string) => Promise.resolve({ [key]: sessionData[key] }),
+    set: (items: Record<string, unknown>) => {
+      Object.assign(sessionData, items);
+      return Promise.resolve();
+    },
+  };
   const api = {
     runtime: {
       id: "extension-id",
@@ -57,6 +66,7 @@ function chromeMock() {
     },
     commands: { onCommand },
     scripting: { executeScript: vi.fn(() => Promise.resolve([])) },
+    storage: { session: sessionArea },
     tabs: {
       onRemoved,
       onUpdated,
@@ -65,7 +75,7 @@ function chromeMock() {
       ),
     },
   };
-  return { api: api as unknown as typeof chrome, events: api };
+  return { api: api as unknown as typeof chrome, events: api, sessionData };
 }
 
 const profiles: ModelProfile[] = [
@@ -1433,5 +1443,39 @@ describe("profile capability writers", () => {
     );
 
     expect(repository.port.saveProfile).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * MV3 的 service worker 空闲约 30 秒即被终止，而 activeTabs 是内存 Map——重启后
+ * 下一次操作会生成全新的 documentId，页面上已渲染的卡片却还攥着旧的那个，于是
+ * 点成分看详解、点「重新解析」全被判成过期文档拒成 REQUEST_CANCELLED。
+ */
+describe("documentId 熬过 service worker 重启", () => {
+  it("重启后复用 session 里记着的 documentId，而不是另生成一个", async () => {
+    const first = chromeMock();
+    registerServiceWorker(dependencies(), first.api);
+    first.events.commands.onCommand.listeners[0]!("parse-hovered-block", {
+      id: 7,
+    } as chrome.tabs.Tab);
+    await vi.waitFor(() =>
+      expect(first.events.tabs.sendMessage).toHaveBeenCalledWith(7, expect.anything()),
+    );
+    const before = (first.events.tabs.sendMessage.mock.calls[0]![1] as { documentId: string })
+      .documentId;
+
+    // 模拟重启:内存全丢，只有 session 存储留下来。
+    const restarted = chromeMock(first.sessionData);
+    registerServiceWorker(dependencies(), restarted.api);
+    restarted.events.commands.onCommand.listeners[0]!("parse-hovered-block", {
+      id: 7,
+    } as chrome.tabs.Tab);
+    await vi.waitFor(() =>
+      expect(restarted.events.tabs.sendMessage).toHaveBeenCalledWith(7, expect.anything()),
+    );
+    const after = (restarted.events.tabs.sendMessage.mock.calls[0]![1] as { documentId: string })
+      .documentId;
+
+    expect(after).toBe(before);
   });
 });

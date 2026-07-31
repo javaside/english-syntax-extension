@@ -213,6 +213,13 @@ function relayDocumentId(relay: StatusRelay): string | undefined {
   return marker > 0 ? relay.requestId.slice(0, marker) : undefined;
 }
 
+const ACTIVE_TABS_KEY = "activeTabs.v1";
+
+interface SessionArea {
+  get(key: string): Promise<Record<string, unknown>>;
+  set(items: Record<string, unknown>): Promise<void>;
+}
+
 function generatedDocumentId(tabId: number): string {
   return `tab-${tabId}:${crypto.randomUUID()}`;
 }
@@ -222,6 +229,34 @@ export function registerServiceWorker(
   chromeApi: typeof chrome = chrome,
 ): void {
   const activeTabs = new Map<number, ActiveDocument>();
+  /**
+   * MV3 的 service worker 空闲约 30 秒就被终止，内存里的 activeTabs 随之清空。
+   * 下一次操作于是生成全新的 documentId，而页面上已渲染的卡片还攥着旧的那个——
+   * 旧 controller 发出的详解/纠正请求就被 route() 判成过期文档拒成
+   * REQUEST_CANCELLED，表现为「点成分报错、点重新解析毫无反应」。
+   *
+   * session 存储正是为熬过 SW 重启而设(标签页关闭即清)，用它兜住这份状态。
+   * 拿不到该 API 时退回纯内存，行为与从前一致。
+   */
+  const sessionArea = (chromeApi.storage as { session?: SessionArea } | undefined)?.session;
+  const hydrated = (async () => {
+    if (sessionArea === undefined) return;
+    try {
+      const stored = await sessionArea.get(ACTIVE_TABS_KEY);
+      const entries = stored[ACTIVE_TABS_KEY];
+      if (!Array.isArray(entries)) return;
+      for (const entry of entries) {
+        if (!Array.isArray(entry) || typeof entry[0] !== "number") continue;
+        // 已经建立的会话优先:hydrate 只补空缺，绝不覆盖本次运行的现况。
+        if (!activeTabs.has(entry[0])) activeTabs.set(entry[0], entry[1] as ActiveDocument);
+      }
+    } catch {
+      // session 不可用:退回纯内存。
+    }
+  })();
+  const persistActiveTabs = (): void => {
+    void sessionArea?.set({ [ACTIVE_TABS_KEY]: [...activeTabs] }).catch(() => undefined);
+  };
   const pausedProfiles = new Map<string, string>();
   /** content 侧那条 syntax-learning 端口:流式分片的唯一推送通道。 */
   const documentPorts = new Map<string, chrome.runtime.Port>();
@@ -256,6 +291,7 @@ export function registerServiceWorker(
     if (active === undefined) return;
     dependencies.scheduler.cancelDocument(active.documentId);
     activeTabs.delete(tabId);
+    persistActiveTabs();
   };
 
   const inject = async (tabId: number): Promise<void> => {
@@ -310,6 +346,8 @@ export function registerServiceWorker(
         request.type === "GET_SESSION_STATUS" ||
         request.type === "SWITCH_PROFILE" ||
         request.type === "REANALYZE_VISIBLE");
+    // 拒绝判定读的就是 activeTabs:重启后若还没回填就判，会把合法请求当成过期文档。
+    await hydrated;
     if ("tabId" in request) {
       if (sender.tab?.id !== request.tabId && !trustedExtensionUi) {
         return errorResponse(request.requestId, "UNSUPPORTED_PAGE");
@@ -571,6 +609,7 @@ export function registerServiceWorker(
             documentId: active?.documentId ?? request.documentId,
             status: { ...(active?.status ?? emptyStatus("stopped")), profileId: profile.id },
           });
+          persistActiveTabs();
           return {
             version: MESSAGE_VERSION,
             requestId: request.requestId,
@@ -599,6 +638,7 @@ export function registerServiceWorker(
             profile !== undefined && (await dependencies.configRepository.getPrefetchDetail());
           const status = emptyStatus("running", profile?.id);
           activeTabs.set(request.tabId, { documentId, status });
+          persistActiveTabs();
           await sendPageCommand(request.tabId, documentId, {
             type: "START_SESSION",
             ...(prefetchDetail ? { prefetchDetail: true } : {}),
@@ -622,6 +662,7 @@ export function registerServiceWorker(
             state: request.type === "PAUSE_SESSION" ? "paused" : "stopped",
           } satisfies SessionStatus;
           activeTabs.set(request.tabId, { documentId, status });
+          persistActiveTabs();
           if (request.type === "STOP_SESSION") dependencies.scheduler.cancelDocument(documentId);
           return {
             version: MESSAGE_VERSION,
@@ -781,6 +822,7 @@ export function registerServiceWorker(
     if (tab.id === undefined) return;
     const tabId = tab.id;
     void (async () => {
+      await hydrated;
       const documentId = activeTabs.get(tabId)?.documentId ?? generatedDocumentId(tabId);
       await inject(tabId);
       const profile = await dependencies.configRepository.getActiveProfile();
@@ -790,6 +832,7 @@ export function registerServiceWorker(
         documentId,
         status: emptyStatus("running", profile?.id),
       });
+      persistActiveTabs();
       await sendPageCommand(tabId, documentId, {
         type: "START_SESSION",
         ...(prefetchDetail ? { prefetchDetail: true } : {}),
@@ -802,6 +845,7 @@ export function registerServiceWorker(
     const tabId = tab?.id;
     if (tabId === undefined) return;
     void (async () => {
+      await hydrated;
       const documentId = activeTabs.get(tabId)?.documentId ?? generatedDocumentId(tabId);
       await inject(tabId);
       const profile = await dependencies.configRepository.getActiveProfile();
@@ -809,6 +853,7 @@ export function registerServiceWorker(
         documentId,
         status: emptyStatus("running", profile?.id),
       });
+      persistActiveTabs();
       await sendPageCommand(tabId, documentId, { type: "PARSE_HOVERED_BLOCK" });
     })().catch(() => {
       // chrome:// 等不可注入页面：静默忽略。
@@ -820,6 +865,7 @@ export function registerServiceWorker(
     if (tabId === undefined) return;
     if (info.menuItemId === SELECTION_MENU_ID) {
       void (async () => {
+        await hydrated;
         const documentId = activeTabs.get(tabId)?.documentId ?? generatedDocumentId(tabId);
         await inject(tabId);
         const profile = await dependencies.configRepository.getActiveProfile();
@@ -827,6 +873,7 @@ export function registerServiceWorker(
           documentId,
           status: emptyStatus("running", profile?.id),
         });
+        persistActiveTabs();
         if (typeof info.selectionText === "string" && info.selectionText.trim().length > 0) {
           await sendPageCommand(tabId, documentId, {
             type: "PARSE_SELECTION",
@@ -859,6 +906,7 @@ export function registerServiceWorker(
           return errorResponse(value.requestId, "REQUEST_CANCELLED");
         }
         activeTabs.set(tabId, { documentId, status: value.status });
+        persistActiveTabs();
         return {
           version: MESSAGE_VERSION,
           requestId: value.requestId,
@@ -887,6 +935,7 @@ export function registerServiceWorker(
       documentId,
       status: existing?.status ?? emptyStatus("stopped"),
     });
+    persistActiveTabs();
     documentPorts.set(documentId, port);
     port.onDisconnect.addListener(() => {
       // 先摘端口再走会话清理:后者带 documentId 守卫，会漏掉已换代的陈旧端口。
@@ -897,6 +946,7 @@ export function registerServiceWorker(
       if (activeTabs.get(tabId)?.documentId !== documentId) return;
       dependencies.scheduler.cancelDocument(documentId);
       activeTabs.delete(tabId);
+      persistActiveTabs();
     });
   });
 
