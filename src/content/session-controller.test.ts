@@ -120,8 +120,10 @@ class FakeReplacement implements ControllerReplacement {
     this.restores += 1;
   }
 
-  currentElement(): Element {
-    return this.displayed;
+  // 忠实反映真实语义:没替换就还是原文,替换过才是卡片。否则「标记迁到卡片」
+  // 这类断言会恒成立,测不出任何东西。
+  currentElement(original: Element): Element {
+    return this.active ? this.displayed : original;
   }
 
   get active(): boolean {
@@ -1986,6 +1988,28 @@ describe("SessionController provisional streaming", () => {
     expect(subject.learningBlocks[0]!.cores).toHaveLength(1);
     expect(subject.learningBlocks[0]!.cores[0]!.components).toEqual(provisional);
     expect(subject.replacements[0]!.previews).toBe(1);
+  });
+
+  it("流式预览把标记迁到卡片上，整段完成前不撤", async () => {
+    const { subject, transport } = pendingHarness();
+    await subject.controller.start();
+    subject.viewport.emit();
+    await vi.waitFor(() =>
+      expect(subject.transport.sent.some(({ type }) => type === "ANALYZE_CORE")).toBe(true),
+    );
+
+    transport.emitStream({
+      version: 1,
+      type: "CORE_STREAM",
+      documentId: subject.controller.documentId,
+      sentenceId: "sentence-1",
+      components: provisional,
+    });
+
+    const replacement = subject.replacements[0]!;
+    expect(replacement.previews).toBe(1);
+    // 分片不改相位，句子仍在 requesting：标记必须还在，且已经迁到卡片上。
+    expect(subject.markers[0]!.marked).toBe(replacement.displayed);
   });
 
   it("does not count a provisional sentence as ready", async () => {

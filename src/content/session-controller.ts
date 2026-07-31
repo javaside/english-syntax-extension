@@ -787,6 +787,7 @@ export class SessionController {
     } else if (block.learningBlock.isReadyToReplace()) {
       block.replacement.show(original, block.learningBlock);
     }
+    this.refreshBlockActivity(block.candidate.id);
     this.emitStatus();
   }
 
@@ -1103,6 +1104,8 @@ export class SessionController {
     if (!block.replacement.active) {
       block.replacement.showPreview(block.candidate.element, block.learningBlock);
     }
+    // 预览换上卡片之后原文已被藏起来,标记得跟到当前呈现元素上。
+    this.refreshBlockActivity(block.candidate.id);
   }
 
   private readonly handleTransportDisconnect = (): void => {
