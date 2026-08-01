@@ -44,6 +44,8 @@ describe("release notes", () => {
     const body = buildReleaseBody(changelog, "1.0.0");
     expect(body.startsWith("## 安装")).toBe(true);
     expect(body).toContain("english-syntax-extension-v1.0.0.zip");
-    expect(body).toContain("关闭模型思考");
+    // 关思考已改为默认行为，安装说明不该再让用户去找那个开关。
+    expect(body).toContain("默认已要求模型不做思考");
+    expect(body).not.toContain("勾选「关闭模型思考」");
   });
 });
