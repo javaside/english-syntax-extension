@@ -543,7 +543,7 @@ describe("CachedAnalysisService isolated analysis modes", () => {
     const repairMessages = adapter.completeJson.mock.calls[1]![1] as AnalysisModelWork["messages"];
     expect(repairMessages[0]!.content).toContain(input.feedback);
     expect(repairMessages[0]!.content).toContain("Previously verified core analysis");
-    expect(repairMessages[0]!.content).toContain('"modelProfileId": "profile-1"');
+    expect(repairMessages[0]!.content).toContain('"modelProfileId":"profile-1"');
     expect(repairMessages[0]!.content).toContain("must be a non-empty array");
     expect(cache.correction.size).toBe(1);
   });
@@ -765,6 +765,66 @@ describe("service-built prompts reuse the compact sentence payload", () => {
     const messages = adapter.completeJson.mock.calls[1]![1] as AnalysisModelWork["messages"];
     expect(messages[0]!.content).not.toContain("leadingWhitespace");
     expect(messages[0]!.content).toContain('{"id":0,"text":"Learners"}');
+  });
+
+  // 修复 pass 是最贵的一趟：它把核心结果、校验错误和整份非法 JSON 全带上。
+  // 缩进美化在这里翻倍地浪费，而模型只读结构。
+  const indented = /\n {2}"/u;
+
+  it("纠错 prompt 回传的核心结果不带缩进", async () => {
+    const { adapter, service } = harness([{ sentences: [rawCore(sentenceOne)] }]);
+
+    await service.reanalyzeWithFeedback(
+      {
+        profile,
+        documentId: "document-1",
+        sentence: sentenceOne,
+        core: coreAnalysis(sentenceOne),
+        pageUrl: "https://reader.example/article",
+        sentenceInstanceId: "instance-1",
+        feedback: "Treat read as the predicate.",
+      },
+      new AbortController().signal,
+    );
+
+    const messages = adapter.completeJson.mock.calls[0]![1] as AnalysisModelWork["messages"];
+    expect(messages[0]!.content).not.toMatch(indented);
+  });
+
+  it("详解修复 prompt 的核心结果、focus 与非法 JSON 不带缩进", async () => {
+    const invalid = { ...rawDetail(focus), explanation: "" };
+    const { adapter, service } = harness([invalid, rawDetail(focus)]);
+
+    await service.analyzeDetail(
+      {
+        profile,
+        documentId: "document-1",
+        sentence: sentenceOne,
+        core: coreAnalysis(sentenceOne),
+        focus,
+      },
+      new AbortController().signal,
+    );
+
+    const messages = adapter.completeJson.mock.calls[1]![1] as AnalysisModelWork["messages"];
+    expect(messages[0]!.content).not.toMatch(indented);
+  });
+
+  it("整句详解修复 prompt 不带缩进", async () => {
+    const { adapter, service } = harness([{ details: [] }, { details: [] }]);
+
+    await service.analyzeSentenceDetails(
+      {
+        profile,
+        documentId: "document-1",
+        sentence: sentenceOne,
+        core: coreAnalysis(sentenceOne),
+      },
+      new AbortController().signal,
+    );
+
+    const messages = adapter.completeJson.mock.calls[1]![1] as AnalysisModelWork["messages"];
+    expect(messages[0]!.content).not.toMatch(indented);
   });
 });
 

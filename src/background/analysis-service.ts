@@ -23,6 +23,7 @@ import {
   buildRepairPrompt,
   buildSentenceDetailsPrompt,
   CORE_OUTPUT_SHAPE,
+  serialize,
   serializeSentence,
 } from "./prompts";
 import type { StreamedComponent } from "./core-stream-parser";
@@ -508,7 +509,7 @@ function correctionPrompt(input: CorrectionInput): string {
     "Keep the sentence ID and Tokens unchanged. Return core-analysis JSON only.",
     CORE_OUTPUT_SHAPE,
     `Sentence and Tokens:\n${serializeSentence(input.sentence)}`,
-    `Previously verified core analysis:\n${JSON.stringify(input.core, null, 2)}`,
+    `Previously verified core analysis:\n${serialize(input.core)}`,
     `Reader feedback:\n${input.feedback}`,
   ].join("\n\n");
 }
@@ -521,8 +522,8 @@ function correctionRepairPrompt(
   return [
     "Repair only the structure of the invalid correction analysis while preserving the entire correction context below.",
     correctionPrompt(input),
-    `Validation errors:\n${JSON.stringify(errors, null, 2)}`,
-    `Invalid JSON:\n${JSON.stringify(invalidJson, null, 2)}`,
+    `Validation errors:\n${serialize(errors)}`,
+    `Invalid JSON:\n${serialize(invalidJson)}`,
     "Return the repaired core-analysis JSON only. Do not add sentences or change sentence IDs or Tokens.",
   ].join("\n\n");
 }
@@ -536,10 +537,10 @@ function detailRepairPrompt(
     "Repair only the structure of the invalid detail-analysis JSON.",
     "Keep the sentence ID, Tokens, verified core analysis, and focus unchanged. Return JSON only.",
     `Sentence and Tokens:\n${serializeSentence(input.sentence)}`,
-    `Verified core analysis:\n${JSON.stringify(input.core, null, 2)}`,
-    `Focus:\n${JSON.stringify(input.focus, null, 2)}`,
-    `Validation errors:\n${JSON.stringify(errors, null, 2)}`,
-    `Invalid JSON:\n${JSON.stringify(invalidJson, null, 2)}`,
+    `Verified core analysis:\n${serialize(input.core)}`,
+    `Focus:\n${serialize(input.focus)}`,
+    `Validation errors:\n${serialize(errors)}`,
+    `Invalid JSON:\n${serialize(invalidJson)}`,
   ].join("\n\n");
 }
 
@@ -553,10 +554,10 @@ function sentenceDetailsRepairPrompt(
     "Repair only the structure of the invalid sentence-details JSON so every requested focus has one valid entry.",
     "Keep the sentence ID, Tokens, verified core analysis, and focus ranges unchanged. Return JSON only.",
     `Sentence and Tokens:\n${serializeSentence(input.sentence)}`,
-    `Verified core analysis:\n${JSON.stringify(input.core, null, 2)}`,
-    `Validation errors:\n${JSON.stringify(errors, null, 2)}`,
-    `Invalid JSON:\n${JSON.stringify(invalidJson, null, 2)}`,
-    `Requested focus ranges:\n${JSON.stringify(focuses, null, 2)}`,
+    `Verified core analysis:\n${serialize(input.core)}`,
+    `Validation errors:\n${serialize(errors)}`,
+    `Invalid JSON:\n${serialize(invalidJson)}`,
+    `Requested focus ranges:\n${serialize(focuses)}`,
   ].join("\n\n");
 }
 

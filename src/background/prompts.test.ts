@@ -106,6 +106,34 @@ describe("buildSentenceDetailsPrompt", () => {
   });
 });
 
+describe("prompt 内嵌的 JSON 同样紧凑", () => {
+  // 输出侧早就要求 minified（MINIFIED_OUTPUT），输入侧却把核心结果、校验错误、
+  // 待修复 JSON 缩进美化后发出去：一个 6 成分的句子光缩进空格就白扔 270+ 字符，
+  // 而模型只读结构、不读排版。
+  const indented = /\n {2}"/u;
+
+  it("详解 prompt 回传的核心结果不带缩进", () => {
+    const prompt = buildDetailPrompt(sentence, core, { startToken: 0, endToken: 1 });
+
+    expect(prompt).not.toMatch(indented);
+    expect(prompt).toContain('"role":"SUBJECT"');
+  });
+
+  it("整句详解 prompt 的核心结果与 focus 列表不带缩进", () => {
+    const prompt = buildSentenceDetailsPrompt(sentence, core, [{ startToken: 0, endToken: 1 }]);
+
+    expect(prompt).not.toMatch(indented);
+  });
+
+  it("核心修复 prompt 的校验错误与待修复 JSON 不带缩进", () => {
+    const prompt = buildRepairPrompt([sentence], [{ path: "sentences[0]", message: "bad" }], {
+      sentences: [{ sentenceId: sentence.sentenceId, components: [] }],
+    });
+
+    expect(prompt).not.toMatch(indented);
+  });
+});
+
 describe("紧凑输出指令", () => {
   it("core prompt 要求单行紧凑 JSON 且不带 Markdown 围栏", () => {
     const prompt = buildCorePrompt([sentence]);

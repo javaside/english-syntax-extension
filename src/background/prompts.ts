@@ -7,8 +7,14 @@ export interface ValidationErrorDescription {
   message: string;
 }
 
-function serialize(value: unknown): string {
-  return JSON.stringify(value, null, 2);
+/**
+ * prompt 里内嵌的 JSON(核心结果、focus、校验错误、待修复 JSON)一律不缩进。
+ * 缩进只服务人眼:一个 6 成分句子的核心结果,美化后 827 字符、紧凑后 555,
+ * 差的那 270 字符全是空格与换行。模型按结构读,排版一个字都用不上——
+ * 与 MINIFIED_OUTPUT 对输出侧的要求同理,只是这一侧付的是 prefill。
+ */
+export function serialize(value: unknown): string {
+  return JSON.stringify(value);
 }
 
 /**

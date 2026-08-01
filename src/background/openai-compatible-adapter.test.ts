@@ -430,7 +430,7 @@ describe("syntax prompts", () => {
       broken: true,
     });
     expect(prompt).toContain("gap");
-    expect(prompt).toContain('"broken": true');
+    expect(prompt).toContain('"broken":true');
     expect(prompt).toMatch(/do not change.*sentence IDs.*Tokens/is);
   });
 
@@ -442,9 +442,9 @@ describe("syntax prompts", () => {
       modelProfileId: "profile-1",
     };
     const prompt = buildDetailPrompt(sentence, core, { startToken: 0, endToken: 0 });
-    expect(prompt).toContain('"sentenceId": "s-1"');
-    expect(prompt).toContain('"modelProfileId": "profile-1"');
-    expect(prompt).toContain('"startToken": 0');
+    expect(prompt).toContain('"sentenceId":"s-1"');
+    expect(prompt).toContain('"modelProfileId":"profile-1"');
+    expect(prompt).toContain('"startToken":0');
   });
 
   it("requires Chinese role names and internal breakdown in detail structures", () => {
