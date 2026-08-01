@@ -238,7 +238,6 @@ describe("session completion", () => {
   });
 
   it.each([
-    ["nothing was discovered", {}],
     ["sentences are still queued", { discovered: 4, queued: 1, ready: 3 }],
     // 「结果没覆盖全部 discovered」本身不再意味着未完成:屏外句子要滚动到可见
     // 才入队，长页面永远覆盖不满。真正的未完成由在飞工作表达。
@@ -350,7 +349,9 @@ describe("isSessionComplete 与屏外未触发的句子", () => {
     expect(isSessionComplete({ ...base, queued: 3, inFlight: 0 })).toBe(false);
   });
 
-  it("一句都还没出结果时不算完成", () => {
-    expect(isSessionComplete({ ...base, ready: 0, inFlight: 0 })).toBe(false);
+  it("会话刚启动的空状态不算完成——那时 queued 与 inFlight 也都是 0", () => {
+    expect(
+      isSessionComplete({ state: "running", discovered: 0, queued: 0, ready: 0, failed: 0 }),
+    ).toBe(false);
   });
 });

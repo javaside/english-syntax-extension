@@ -99,13 +99,13 @@ export interface SessionStatus {
  * discovered 含屏外尚未触发的句子——它们要滚动到可见才入队。按旧口径要求全部
  * 达终态,长页面就永远停在「解析中…」,主按钮不会变成「恢复网页原文」。
  * queued 单独不够:requesting / validating 不在任何计数里,所以要有 inFlight。
+ *
+ * 仍要求 discovered > 0:会话刚启动时 SW 先塞一个空状态占位,那时 queued 与
+ * inFlight 都是 0,少了这道保护会把「还没开始」当成「已完成」。至于 discovered
+ * 始终为 0 的空转状态(status 上报没到达),由 popup 单独给恢复入口,不靠放宽这里。
  */
 export function isSessionComplete(status: SessionStatus): boolean {
-  return (
-    status.queued === 0 &&
-    (status.inFlight ?? 0) === 0 &&
-    status.ready + status.failed + (status.skipped ?? 0) > 0
-  );
+  return status.discovered > 0 && status.queued === 0 && (status.inFlight ?? 0) === 0;
 }
 
 export interface CacheStats {

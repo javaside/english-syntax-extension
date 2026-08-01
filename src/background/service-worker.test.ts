@@ -1479,3 +1479,31 @@ describe("documentId 熬过 service worker 重启", () => {
     expect(after).toBe(before);
   });
 });
+
+/**
+ * SPA(Mintlify 一类文档站)切换页面走 history.pushState，不重载文档，因此不会有
+ * status === "loading"。会话于是活到下一个页面，MutationObserver 一看到新内容就
+ * 自动解析——用户只是点了个链接，却发现新页面被整篇翻译了。
+ */
+describe("SPA 导航结束会话", () => {
+  it("URL 变化即取消该标签页的会话，即使没有重载", async () => {
+    const mock = chromeMock();
+    registerServiceWorker(dependencies(), mock.api);
+    // 先建立会话，否则没有可取消的东西。
+    mock.events.commands.onCommand.listeners[0]!("parse-hovered-block", {
+      id: 7,
+    } as chrome.tabs.Tab);
+    await vi.waitFor(() =>
+      expect(mock.events.tabs.sendMessage).toHaveBeenCalledWith(7, expect.anything()),
+    );
+    mock.events.tabs.sendMessage.mockClear();
+    const onUpdated = mock.events.tabs.onUpdated.listeners[0]!;
+
+    onUpdated(7, { url: "https://example.com/next" }, {} as chrome.tabs.Tab);
+
+    expect(mock.events.tabs.sendMessage).toHaveBeenCalledWith(
+      7,
+      expect.objectContaining({ type: "STOP_SESSION" }),
+    );
+  });
+});

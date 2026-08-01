@@ -286,12 +286,28 @@ export function registerServiceWorker(
     return false;
   };
 
-  const cancelTab = (tabId: number): void => {
+  /**
+   * @param notifyPage SPA 导航时必须置位:文档没有重载，content script 里的
+   *   controller 还活着，只清 SW 侧状态它照样会被 MutationObserver 唤醒去解析
+   *   新页面。标签页关闭那条路径不需要，页面已经没了。
+   */
+  const cancelTab = (tabId: number, notifyPage = false): void => {
     const active = activeTabs.get(tabId);
     if (active === undefined) return;
     dependencies.scheduler.cancelDocument(active.documentId);
     activeTabs.delete(tabId);
     persistActiveTabs();
+    if (!notifyPage) return;
+    void chromeApi.tabs
+      ?.sendMessage(tabId, {
+        version: MESSAGE_VERSION,
+        requestId: `background:${tabId}:${++commandCounter}`,
+        type: "STOP_SESSION",
+        tabId,
+        documentId: active.documentId,
+      })
+      // 页面可能已经卸载或没有 content script:静默忽略。
+      ?.catch?.(() => undefined);
   };
 
   const inject = async (tabId: number): Promise<void> => {
@@ -952,7 +968,9 @@ export function registerServiceWorker(
 
   chromeApi.tabs?.onRemoved?.addListener((tabId) => cancelTab(tabId));
   chromeApi.tabs?.onUpdated?.addListener((tabId, changeInfo) => {
-    if (changeInfo.status === "loading") cancelTab(tabId);
+    // SPA 换页走 history.pushState:不重载文档，没有 loading，只有 url 变化。
+    if (changeInfo.url !== undefined) cancelTab(tabId, true);
+    else if (changeInfo.status === "loading") cancelTab(tabId);
   });
 }
 
