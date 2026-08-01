@@ -389,3 +389,42 @@ describe("runtimeDependencies", () => {
     }
   });
 });
+
+/**
+ * popup 只在打开时取一次状态，之后不再更新:解析在弹窗开着的时候跑完，主按钮
+ * 仍停在「解析中…」，要关掉重开才会变成「恢复网页原文」。
+ */
+describe("popup 跟随会话状态刷新", () => {
+  it("解析跑完后主按钮自动变成恢复入口", async () => {
+    vi.useFakeTimers();
+    const getStatus = vi
+      .fn()
+      .mockResolvedValueOnce(
+        status({ state: "running", discovered: 4, queued: 1, ready: 1, inFlight: 1 }),
+      )
+      .mockResolvedValue(status({ state: "running", discovered: 4, queued: 0, ready: 4 }));
+    await createPopupPage(root(), dependencies({ getStatus }));
+
+    expect(primary().textContent).toContain("解析中");
+
+    await vi.advanceTimersByTimeAsync(1500);
+
+    expect(primary().textContent).toBe("恢复网页原文");
+    vi.useRealTimers();
+  });
+
+  it("弹窗关闭后停止轮询", async () => {
+    vi.useFakeTimers();
+    const getStatus = vi
+      .fn()
+      .mockResolvedValue(status({ state: "running", discovered: 4, queued: 1, inFlight: 1 }));
+    await createPopupPage(root(), dependencies({ getStatus }));
+    const calls = getStatus.mock.calls.length;
+
+    window.dispatchEvent(new Event("pagehide"));
+    await vi.advanceTimersByTimeAsync(5000);
+
+    expect(getStatus.mock.calls.length).toBe(calls);
+    vi.useRealTimers();
+  });
+});

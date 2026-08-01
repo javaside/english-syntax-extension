@@ -181,6 +181,22 @@ export async function createPopupPage(
   });
 
   renderStatus();
+
+  // 只取一次状态的话，解析在弹窗开着的时候跑完，主按钮会一直停在「解析中…」，
+  // 要关掉重开才变成「恢复网页原文」。会话活跃时轮询，弹窗一关就停。
+  if (context !== undefined) {
+    const timer = setInterval(() => {
+      if (status.state === "stopped") return;
+      void dependencies
+        .getStatus(context)
+        .then((next) => {
+          status = next;
+          renderStatus();
+        })
+        .catch(() => undefined);
+    }, 1_000);
+    globalThis.addEventListener?.("pagehide", () => clearInterval(timer), { once: true });
+  }
 }
 
 export function runtimeDependencies(): PopupDependencies {
