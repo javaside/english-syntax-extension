@@ -143,11 +143,14 @@ english-syntax-extension
 │   ├── language/           # 分句、分词、模型输出校验
 │   ├── options/ popup/     # 选项页与弹窗
 │   └── shared/             # 协议、错误码、语法角色等共享类型
+├── docs/architecture/      # 架构文档：总览、模块地图、协议、两条主链路、不变量
 └── tests
     ├── e2e/                # Playwright 端到端（真实 Chromium）
     ├── support/            # 本地 OpenAI 兼容伪服务
     └── fixtures/           # 固定页面与教学语料
 ```
+
+想深入代码，先读 **[架构文档](docs/architecture/README.md)**：一页概览 + 「要改 X 就去 Y」索引 + 已踩过的坑清单，比通读源码快得多。日常开发的门禁与工程约定见 [`AGENTS.md`](AGENTS.md)。
 
 ## 许可证
 

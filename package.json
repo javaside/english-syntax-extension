@@ -38,6 +38,7 @@
     "test:e2e": "playwright test",
     "lint": "eslint .",
     "lint:baseline": "node scripts/check-lint-baseline.mjs",
+    "docs:drift": "node scripts/check-docs-drift.mjs",
     "format:check": "prettier --check ."
   },
   "devDependencies": {

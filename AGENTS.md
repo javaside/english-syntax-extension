@@ -2,6 +2,8 @@
 
 Chrome MV3 英语句法学习扩展:TypeScript + Vite,Vitest(fake-indexeddb / happy-dom)单测,Playwright E2E(假 OpenAI 服务器)。本仓库由 springai-agentdemo 单仓拆出(git filter-repo,历史完整保留)。
 
+**本文件是权威简版,先读完它再动手。** 需要理解全局结构、跨层链路或某条约定的完整来龙去脉时,读 [`docs/architecture/`](docs/architecture/README.md)(总览 / 模块地图 / 协议参考 / 模型链路 / 渲染链路 / 构建发布 / 不变量清单)。两处冲突以本文件为准,并把架构文档改掉。
+
 ## 门禁(提交前全部过)
 
 ```bash
@@ -35,6 +37,25 @@ npm test && npx playwright test && npm run lint && npm run format:check && npm r
 - 脚本放 `.superpowers/acceptance/`(已 gitignore,**永不提交**)。
 - API key 只从环境变量读(如 `DEEPSEEK_API_KEY`,在 `~/.secrets`),日志一律脱敏(`key <masked>`)。
 - 运行:`source ~/.secrets && node .superpowers/acceptance/<script>.mjs`。
+
+## 文档同步(改代码时顺手做)
+
+`docs/architecture/` 要跟着代码走。两道防线:
+
+1. **`src/shared/architecture-docs.test.ts`**(随 `npm test` 跑)钉住**能机器判定**的部分:枚举/错误码/消息类型/storage 键/调度优先级/相位全覆盖、关键常量数值一致、新增源文件必须进模块地图。它红了就去改文档,**不要放宽断言**。
+2. **`npm run docs:drift`**(改完代码、提交前跑一次)按本次改动的文件反查该核对哪几份文档。上面那条测试只认「名字与数字」,改现有文件的内部逻辑它一条都不会红——而「新增功能」多半正是这一类,这个脚本补的就是那一段。它只判断「相关文档有没有被碰过」,改得对不对仍然靠你;确实没有新说法要记(改 typo、纯重构)就忽略。
+
+**两个工具都管不到、只能靠你的**——命中下列任一条就顺手改对应文档:
+
+| 你改了                                     | 同步                                                                 |
+| ------------------------------------------ | -------------------------------------------------------------------- |
+| 新增/删除源文件,或某模块职责变了           | `modules.md`                                                         |
+| 消息的字段、权限门、SW 侧行为              | `protocol.md`                                                        |
+| 提示词结构、降级逻辑、超时、分块、缓存策略 | `model-pipeline.md`                                                  |
+| 扫描规则、卡片结构、面板锚定、替换/标记    | `rendering.md`                                                       |
+| 门禁、测试分层、假服务器契约、发版流程     | `build-test-release.md`                                              |
+| 踩了新坑并修好                             | `invariants.md` 加一条(规则/为什么/症状/守护测试),重要的同步进本文件 |
+| 运行时上下文、链路时序、状态机             | `overview.md`                                                        |
 
 ## 流程
 
