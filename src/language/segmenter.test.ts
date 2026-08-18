@@ -1,5 +1,18 @@
+import vectors from "../../shared-fixtures/segmenter-vectors.json";
 import { describe, expect, it } from "vitest";
 import { createSentenceId, rebuildTokens, segmentBlock, tokenize } from "./segmenter";
+
+describe("shared segmenter vectors", () => {
+  it.each(vectors)("matches $name", ({ block, sentences }) => {
+    expect(segmentBlock(block).map(({ text }) => text)).toEqual(sentences.map(({ text }) => text));
+    for (const sentence of sentences) {
+      expect(tokenize(sentence.text).map((token) => token.text)).toEqual(sentence.tokens);
+      expect(tokenize(sentence.text).map((token) => token.punctuation)).toEqual(
+        sentence.punctuation,
+      );
+    }
+  });
+});
 
 describe("segmentBlock", () => {
   it("does not split an English honorific from its sentence", () => {

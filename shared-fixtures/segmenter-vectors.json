@@ -1,0 +1,29 @@
+[
+  {
+    "name": "abbreviation-and-apostrophe",
+    "block": "Dr. Smith doesn't guess. The parser works.",
+    "sentences": [
+      {
+        "text": "Dr. Smith doesn't guess.",
+        "tokens": ["Dr", ".", "Smith", "doesn't", "guess", "."],
+        "punctuation": [false, true, false, false, false, true]
+      },
+      {
+        "text": "The parser works.",
+        "tokens": ["The", "parser", "works", "."],
+        "punctuation": [false, false, false, true]
+      }
+    ]
+  },
+  {
+    "name": "unicode-dash",
+    "block": "Well-designed tools reduce context-switching.",
+    "sentences": [
+      {
+        "text": "Well-designed tools reduce context-switching.",
+        "tokens": ["Well-designed", "tools", "reduce", "context-switching", "."],
+        "punctuation": [false, false, false, false, true]
+      }
+    ]
+  }
+]

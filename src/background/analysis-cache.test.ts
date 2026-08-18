@@ -1,4 +1,5 @@
 import "fake-indexeddb/auto";
+import vectors from "../../shared-fixtures/cache-key-vectors.json";
 import { describe, expect, it, vi } from "vitest";
 import { AnalysisCache, createCoreCacheKey, createCorrectionCacheKey } from "./analysis-cache";
 
@@ -6,6 +7,15 @@ const coreIdentity = {
   normalizedSentence: "The cat sleeps.",
   schemaVersion: 1,
 };
+
+describe("shared cache key vectors", () => {
+  it.each(vectors.map((vector) => [vector.name, vector.input, vector.expected] as const))(
+    "%s matches the TypeScript digest",
+    async (_name, input, expected) => {
+      await expect(createCoreCacheKey(input)).resolves.toBe(expected);
+    },
+  );
+});
 
 describe("analysis cache keys", () => {
   it.each([

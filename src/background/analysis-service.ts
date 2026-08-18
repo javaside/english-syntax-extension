@@ -23,6 +23,7 @@ import {
   buildRepairPrompt,
   buildSentenceDetailsPrompt,
   CORE_OUTPUT_SHAPE,
+  PROMPT_FIRST_LINES,
   serialize,
   serializeSentence,
 } from "./prompts";
@@ -37,7 +38,8 @@ import type { ScheduledRequest, SchedulerPriority } from "./request-scheduler";
  * 本地(loopback)模型的取舍相反:它串行处理请求,请求数才是杠杆,合并成大块才快
  * (CHANGELOG 1.0.4 记录的收益)。所以这里按端点分流,不能一刀切。
  */
-const CLOUD_SENTENCES_PER_REQUEST = 2;
+export const CLOUD_SENTENCES_PER_REQUEST_FOR_CONTRACT = 2;
+const CLOUD_SENTENCES_PER_REQUEST = CLOUD_SENTENCES_PER_REQUEST_FOR_CONTRACT;
 
 function sentencesPerRequest(baseUrl: string): number {
   return isLoopbackBaseUrl(baseUrl) ? MAX_SENTENCES_PER_REQUEST : CLOUD_SENTENCES_PER_REQUEST;
@@ -534,7 +536,7 @@ function detailRepairPrompt(
   invalidJson: unknown,
 ): string {
   return [
-    "Repair only the structure of the invalid detail-analysis JSON.",
+    PROMPT_FIRST_LINES.detailRepair,
     "Keep the sentence ID, Tokens, verified core analysis, and focus unchanged. Return JSON only.",
     `Sentence and Tokens:\n${serializeSentence(input.sentence)}`,
     `Verified core analysis:\n${serialize(input.core)}`,

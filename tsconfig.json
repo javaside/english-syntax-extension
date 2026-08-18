@@ -17,6 +17,7 @@
   "include": [
     "src",
     "tests",
+    "shared-fixtures",
     "vite.config.ts",
     "vite.content.config.ts",
     "vitest.config.ts",

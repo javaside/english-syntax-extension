@@ -7,6 +7,15 @@ export interface ValidationErrorDescription {
   message: string;
 }
 
+export const PROMPT_FIRST_LINES = {
+  core: "Analyze the numbered English sentences below into core grammatical components.",
+  coreRepair:
+    "Repair only the structure of the invalid core-analysis JSON so it satisfies every validation error.",
+  detail: "Explain only the selected grammatical component in the single sentence below.",
+  detailRepair: "Repair only the structure of the invalid detail-analysis JSON.",
+  probeSystem: "Return only the requested JSON object.",
+} as const;
+
 /**
  * prompt 里内嵌的 JSON(核心结果、focus、校验错误、待修复 JSON)一律不缩进。
  * 缩进只服务人眼:一个 6 成分句子的核心结果,美化后 827 字符、紧凑后 555,
@@ -90,7 +99,7 @@ const SENTENCE_DETAILS_OUTPUT_SHAPE = [
 export function buildCorePrompt(sentences: readonly SentenceInput[]): string {
   const roles = Object.values(GrammarRole);
   return [
-    "Analyze the numbered English sentences below into core grammatical components.",
+    PROMPT_FIRST_LINES.core,
     `The role field is a closed ${roles.length}-role enum: ${roles.join(", ")}.`,
     "Every component uses a closed Token interval [startToken, endToken]; both endpoints are inclusive Token IDs from the supplied sentence.",
     'Each supplied Token is {"id","text"}; a Token is punctuation only when it carries "punctuation": true.',
@@ -112,7 +121,7 @@ export function buildRepairPrompt(
   invalidJson: unknown,
 ): string {
   return [
-    "Repair only the structure of the invalid core-analysis JSON so it satisfies every validation error.",
+    PROMPT_FIRST_LINES.coreRepair,
     "Do not change sentence IDs or Tokens. Do not add sentences and do not reinterpret the source text.",
     "Return the repaired JSON only, without a Markdown fence or prose.",
     CORE_OUTPUT_SHAPE,
@@ -131,7 +140,7 @@ export function buildDetailPrompt(
   focus: TokenRange,
 ): string {
   return [
-    "Explain only the selected grammatical component in the single sentence below.",
+    PROMPT_FIRST_LINES.detail,
     "Treat the verified core result and focus Token range as immutable. Refer only to supplied Token IDs.",
     "Return JSON only, with no Markdown or explanatory prose.",
     DETAIL_OUTPUT_SHAPE,

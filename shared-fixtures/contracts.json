@@ -1,0 +1,48 @@
+{
+  "messageVersion": 1,
+  "coreSchemaVersion": 1,
+  "corePromptVersion": 2,
+  "detailPromptVersion": 3,
+  "maxSentencesPerRequest": 6,
+  "cloudSentencesPerRequest": 2,
+  "roles": [
+    { "role": "SUBJECT", "label": "主语" },
+    { "role": "PREDICATE", "label": "谓语" },
+    { "role": "OBJECT", "label": "宾语" },
+    { "role": "PREDICATIVE", "label": "表语" },
+    { "role": "ATTRIBUTE", "label": "定语" },
+    { "role": "ADVERBIAL", "label": "状语" },
+    { "role": "COMPLEMENT", "label": "补语" },
+    { "role": "APPOSITIVE", "label": "同位语" },
+    { "role": "SUBJECT_CLAUSE", "label": "主语从句" },
+    { "role": "OBJECT_CLAUSE", "label": "宾语从句" },
+    { "role": "PREDICATIVE_CLAUSE", "label": "表语从句" },
+    { "role": "ATTRIBUTIVE_CLAUSE", "label": "定语从句" },
+    { "role": "ADVERBIAL_CLAUSE", "label": "状语从句" },
+    { "role": "INDEPENDENT_ELEMENT", "label": "独立成分" },
+    { "role": "COORDINATE_CLAUSE", "label": "并列分句" },
+    { "role": "CONJUNCTION", "label": "并列连词" }
+  ],
+  "errorCodes": [
+    "CONFIG_MISSING",
+    "HOST_PERMISSION_DENIED",
+    "AUTH_FAILED",
+    "MODEL_NOT_FOUND",
+    "RATE_LIMITED",
+    "NETWORK_ERROR",
+    "REQUEST_TIMEOUT",
+    "INVALID_MODEL_OUTPUT",
+    "UNSUPPORTED_PAGE",
+    "UNSAFE_CONTENT_BLOCK",
+    "SENTENCE_TOO_LONG",
+    "REQUEST_CANCELLED",
+    "NO_CACHE"
+  ],
+  "promptFirstLines": {
+    "core": "Analyze the numbered English sentences below into core grammatical components.",
+    "coreRepair": "Repair only the structure of the invalid core-analysis JSON so it satisfies every validation error.",
+    "detail": "Explain only the selected grammatical component in the single sentence below.",
+    "detailRepair": "Repair only the structure of the invalid detail-analysis JSON.",
+    "probeSystem": "Return only the requested JSON object."
+  }
+}
