@@ -2,6 +2,7 @@ plugins {
   alias(libs.plugins.kotlin.jvm)
   alias(libs.plugins.kotlin.serialization)
   id("org.jetbrains.intellij.platform")
+  id("java-test-fixtures")
 }
 
 group = "dev.codetui"
