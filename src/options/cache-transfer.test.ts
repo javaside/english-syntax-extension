@@ -9,6 +9,7 @@ import {
   importCacheFile,
   type CacheTransferPort,
 } from "./cache-transfer";
+import sharedTransferFile from "../../shared-fixtures/cache-transfer-v1.json";
 
 const KEY_A = "a".repeat(64);
 const KEY_B = "b".repeat(64);
@@ -136,5 +137,16 @@ describe("importCacheFile", () => {
       reason: "schema-mismatch",
     });
     expect(written.core).toHaveLength(0);
+  });
+
+  it("imports the IntelliJ shared transfer fixture", async () => {
+    const { port, written } = fakePort();
+    const report = await importCacheFile(port, JSON.stringify(sharedTransferFile));
+
+    expect(report).toEqual({ ok: true, added: 2, skipped: 0, invalid: 0 });
+    expect(written.core).toHaveLength(1);
+    expect(written.detail).toHaveLength(1);
+    expect(written.core[0]?.key).toBe(sharedTransferFile.core[0]?.key);
+    expect(written.detail[0]?.key).toBe(sharedTransferFile.detail[0]?.key);
   });
 });

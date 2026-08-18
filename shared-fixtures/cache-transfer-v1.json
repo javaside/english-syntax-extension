@@ -1,0 +1,70 @@
+{
+  "format": "english-syntax-cache",
+  "formatVersion": 1,
+  "schemaVersion": 1,
+  "exportedAt": "2026-08-18T00:00:00.000Z",
+  "core": [
+    {
+      "key": "49a9b9835761131d20496f0867eb10e2f38772fc51d5204ad148f78464bcc937",
+      "value": {
+        "schemaVersion": 1,
+        "sentenceId": "shared-fixture-core",
+        "components": [
+          {
+            "startToken": 0,
+            "endToken": 1,
+            "role": "SUBJECT",
+            "translation": "该服务"
+          },
+          {
+            "startToken": 2,
+            "endToken": 2,
+            "role": "PREDICATE",
+            "translation": "校验"
+          },
+          {
+            "startToken": 3,
+            "endToken": 4,
+            "role": "OBJECT",
+            "translation": "每个响应"
+          }
+        ],
+        "modelProfileId": "shared-fixture"
+      }
+    }
+  ],
+  "detail": [
+    {
+      "key": "e5876a844e369797d94e99f5ad82c8a79eb16c42841f8b7fea85d0377ffe32b2",
+      "value": {
+        "sentenceId": "shared-fixture-detail",
+        "focus": {
+          "startToken": 2,
+          "endToken": 4
+        },
+        "structures": [
+          {
+            "startToken": 2,
+            "endToken": 2,
+            "role": "谓语动词",
+            "explanation": "一般现在时的及物动词。",
+            "translation": "校验"
+          },
+          {
+            "startToken": 3,
+            "endToken": 4,
+            "role": "宾语",
+            "explanation": "名词短语作宾语。",
+            "translation": "每个响应"
+          }
+        ],
+        "grammarPoints": [
+          "一般现在时",
+          "及物动词"
+        ],
+        "explanation": "谓语校验宾语短语。",
+        "modelProfileId": "shared-fixture"
+      }
+    }
+  ]
+}

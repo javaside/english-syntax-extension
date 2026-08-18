@@ -4,9 +4,15 @@ import dev.codetui.englishsyntax.domain.ErrorCode
 import dev.codetui.englishsyntax.domain.ExtensionFailure
 import dev.codetui.englishsyntax.domain.FailureDetail
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.newSingleThreadContext
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -66,17 +72,23 @@ class RequestSchedulerTest {
     val scheduler = RequestScheduler(concurrency = 1)
     scheduler.pauseAll()
     val order = java.util.Collections.synchronizedList(mutableListOf<String>())
-    coroutineScope {
-      launch { scheduler.schedule(request(cacheKey = "normal-1")) { order += "normal-1" } }
-      launch { scheduler.schedule(request(cacheKey = "repair", jumpQueue = true)) { order += "repair" } }
-      launch { scheduler.schedule(request(cacheKey = "normal-2")) { order += "normal-2" } }
-      launch {
+    // 单线程 dispatcher 保证四个 schedule 调用按代码顺序入队（入队后即挂起等 deferred）。
+    val enqueueScope = CoroutineScope(newSingleThreadContext("enqueue") + Job())
+    val jobs = listOf(
+      enqueueScope.async { scheduler.schedule(request(cacheKey = "normal-1")) { order += "normal-1" } },
+      enqueueScope.async { scheduler.schedule(request(cacheKey = "repair", jumpQueue = true)) { order += "repair" } },
+      enqueueScope.async { scheduler.schedule(request(cacheKey = "normal-2")) { order += "normal-2" } },
+      enqueueScope.async {
         scheduler.schedule(request(cacheKey = "higher", priority = SchedulerPriority.USER_RETRY)) { order += "higher" }
-      }
-      delay(50)
-      scheduler.resumeAll()
-    }
+      },
+    )
+    // 等四个都真正进入队列（挂起在 deferred.await 上）再恢复调度。
+    waitUntil { true }
+    delay(100)
+    scheduler.resumeAll()
+    jobs.awaitAll()
     assertEquals(listOf("higher", "repair", "normal-1", "normal-2"), order.toList())
+    enqueueScope.cancel()
   }
 
   @Test
