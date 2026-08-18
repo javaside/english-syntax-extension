@@ -44,13 +44,17 @@ class FakeOpenAiServer : AutoCloseable {
       }
       firstRequestLatch.countDown()
       val response = synchronized(this) { responseQueue.removeFirstOrNull() ?: JsonResponse("{}", 500, emptyMap()) }
-      response.write(exchange)
+      response.write(exchange) { clientDisconnected = true }
     }
     server.start()
     baseUrl = "http://127.0.0.1:${server.address.port}/v1"
   }
 
   val requests: List<RecordedRequest> get() = synchronized(this) { recorded.toList() }
+
+  @Volatile
+  var clientDisconnected = false
+    private set
 
   fun awaitFirstRequest() {
     firstRequestLatch.await()
@@ -61,11 +65,16 @@ class FakeOpenAiServer : AutoCloseable {
   }
 
   fun enqueueSse(deltas: List<String>, includeDone: Boolean = true) {
-    synchronized(this) { responseQueue.addLast(SseResponse(deltas, includeDone, gapMillis = 0)) }
+    synchronized(this) { responseQueue.addLast(SseResponse(deltas, includeDone, gapMillis = 0, tailGapMillis = 0)) }
   }
 
-  fun enqueueSlowSse(deltas: List<String>, gapMillis: Long, includeDone: Boolean = true) {
-    synchronized(this) { responseQueue.addLast(SseResponse(deltas, includeDone, gapMillis)) }
+  fun enqueueSlowSse(
+    deltas: List<String>,
+    gapMillis: Long,
+    tailGapMillis: Long = 0,
+    includeDone: Boolean = true,
+  ) {
+    synchronized(this) { responseQueue.addLast(SseResponse(deltas, includeDone, gapMillis, tailGapMillis)) }
   }
 
   fun clearRequests() {
@@ -77,7 +86,7 @@ class FakeOpenAiServer : AutoCloseable {
   }
 
   private sealed interface QueuedResponse {
-    fun write(exchange: HttpExchange)
+    fun write(exchange: HttpExchange, onDisconnect: () -> Unit)
   }
 
   private data class JsonResponse(
@@ -85,13 +94,17 @@ class FakeOpenAiServer : AutoCloseable {
     val status: Int,
     val headers: Map<String, String>,
   ) : QueuedResponse {
-    override fun write(exchange: HttpExchange) {
+    override fun write(exchange: HttpExchange, onDisconnect: () -> Unit) {
       val payload = """{"choices":[{"message":{"content":${jsonString(content)}}}]}"""
       val bytes = payload.toByteArray(Charsets.UTF_8)
       exchange.responseHeaders.add("Content-Type", "application/json")
       headers.forEach { (name, value) -> exchange.responseHeaders.add(name, value) }
       exchange.sendResponseHeaders(status, bytes.size.toLong())
-      exchange.responseBody.use { it.write(bytes) }
+      try {
+        exchange.responseBody.use { it.write(bytes) }
+      } catch (_: java.io.IOException) {
+        onDisconnect()
+      }
     }
   }
 
@@ -99,20 +112,26 @@ class FakeOpenAiServer : AutoCloseable {
     val deltas: List<String>,
     val includeDone: Boolean,
     val gapMillis: Long,
+    val tailGapMillis: Long,
   ) : QueuedResponse {
-    override fun write(exchange: HttpExchange) {
+    override fun write(exchange: HttpExchange, onDisconnect: () -> Unit) {
       exchange.responseHeaders.add("Content-Type", "text/event-stream")
       exchange.sendResponseHeaders(200, 0)
-      exchange.responseBody.use { out ->
-        for ((index, delta) in deltas.withIndex()) {
-          out.write(sseFrame(delta).toByteArray(Charsets.UTF_8))
-          out.flush()
-          if (index < deltas.lastIndex && gapMillis > 0) Thread.sleep(gapMillis)
+      try {
+        exchange.responseBody.use { out ->
+          for ((index, delta) in deltas.withIndex()) {
+            out.write(sseFrame(delta).toByteArray(Charsets.UTF_8))
+            out.flush()
+            if (index < deltas.lastIndex && gapMillis > 0) Thread.sleep(gapMillis)
+          }
+          if (tailGapMillis > 0) Thread.sleep(tailGapMillis)
+          if (includeDone) {
+            out.write("data: [DONE]\n\n".toByteArray(Charsets.UTF_8))
+            out.flush()
+          }
         }
-        if (includeDone) {
-          out.write("data: [DONE]\n\n".toByteArray(Charsets.UTF_8))
-          out.flush()
-        }
+      } catch (_: java.io.IOException) {
+        onDisconnect()
       }
     }
 

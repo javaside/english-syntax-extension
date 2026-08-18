@@ -186,15 +186,22 @@ class OpenAiCompatibleClientTest {
     FakeOpenAiServer().use { server ->
       server.enqueueSlowSse(
         listOf(
-          """{"sentences":[{"sentenceId":"s1","components":[{"startToken":0,"endToken":0,"role":"SUBJECT","translation":"它"}]}""",
-          "]}",
+          """{"sentences":[{"sentenceId":"s1","components":[{"startToken":0,"endToken":0,"role":"SUBJECT","translation":"它"}""",
+          """,{"startToken":1,"endToken":1,"role":"PREDICATE","translation":"工作"}""",
+          "]}]}",
         ),
-        gapMillis = 200,
+        gapMillis = 20,
+        tailGapMillis = 200,
+        includeDone = true,
       )
+      var components = 0
       val error = runCatching {
-        client().completeCoreStreaming(profile(server.baseUrl, timeoutMs = 50), messages, schema) {}
+        client().completeCoreStreaming(profile(server.baseUrl, timeoutMs = 50), messages, schema) {
+          components += 1
+        }
       }.exceptionOrNull() as ExtensionFailure
       assertEquals(ErrorCode.REQUEST_TIMEOUT, error.code)
+      assertEquals(2, components)
     }
   }
 
@@ -206,7 +213,7 @@ class OpenAiCompatibleClientTest {
           """{"sentences":[{"sentenceId":"s1","components":[{"startToken":0,"endToken":0,"role":"SUBJECT","translation":"它"}]}""",
           "]}",
         ),
-        gapMillis = 2_000,
+        gapMillis = 1_500,
       )
       val componentSeen = CompletableFuture<Void>()
       val errorSeen = CompletableFuture<Throwable>()
@@ -239,6 +246,7 @@ class OpenAiCompatibleClientTest {
       assertEquals(ErrorCode.NETWORK_ERROR, error.code)
       assertTrue(error.message.contains("[redacted]"))
       assertFalse(error.message.contains("secret-integration-key"))
+      assertFalse(error.details.toString().contains("secret-integration-key"))
     }
   }
 }

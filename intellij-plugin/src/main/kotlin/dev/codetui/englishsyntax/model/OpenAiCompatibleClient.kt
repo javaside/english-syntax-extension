@@ -21,7 +21,6 @@ import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -145,11 +144,11 @@ class OpenAiCompatibleClient(
     )
     var support = JsonSchemaSupport.SUPPORTED
     val value = try {
-      completeJsonInternal(profile, messages, schema, useSchema = true)
+      singleJsonRequest(profile, messages, schema, useSchema = true)
     } catch (error: UnsupportedResponseFormatException) {
       support = JsonSchemaSupport.UNSUPPORTED
       capabilityWriter.markJsonSchemaUnsupported(profile.id)
-      completeJsonInternal(profile, messages, schema, useSchema = false)
+      singleJsonRequest(profile, messages, schema, useSchema = false)
     }
     val objectValue = value as? JsonObject
       ?: throw ExtensionFailure(ErrorCode.INVALID_MODEL_OUTPUT, "Model did not follow the connection probe JSON instruction", false)
@@ -157,6 +156,18 @@ class OpenAiCompatibleClient(
       throw ExtensionFailure(ErrorCode.INVALID_MODEL_OUTPUT, "Model did not follow the connection probe JSON instruction", false)
     }
     support
+  }
+
+  /** 单发、不做任何降级的原始缓冲请求；连接探测需要自己观察拒绝异常。 */
+  private suspend fun singleJsonRequest(
+    profile: ModelProfile,
+    messages: List<ChatMessage>,
+    schema: JsonSchemaSpec,
+    useSchema: Boolean,
+  ): JsonElement {
+    val body = requestBody(profile, messages, schema, stream = false, useSchema = useSchema)
+    val text = bufferedRequest(profile, body, useSchema)
+    return parseEnvelopeContent(text)
   }
 
   private suspend fun completeJsonInternal(
@@ -170,7 +181,7 @@ class OpenAiCompatibleClient(
     while (true) {
       try {
         val body = requestBody(current, messages, schema, stream = false, useSchema = schemaOn)
-        val text = bufferedRequest(current, body)
+        val text = bufferedRequest(current, body, schemaOn)
         return parseEnvelopeContent(text)
       } catch (error: UnsupportedResponseFormatException) {
         if (!schemaOn) throw error
@@ -197,7 +208,7 @@ class OpenAiCompatibleClient(
     while (true) {
       try {
         val body = requestBody(current, messages, schema, stream = true, useSchema = schemaOn)
-        return streamRequest(current, body, createExtractor())
+        return streamRequest(current, body, schemaOn, createExtractor())
       } catch (error: UnsupportedResponseFormatException) {
         if (!schemaOn) throw error
         capabilityWriter.markJsonSchemaUnsupported(current.id)
@@ -244,7 +255,7 @@ class OpenAiCompatibleClient(
     }
   }
 
-  private suspend fun bufferedRequest(profile: ModelProfile, body: JsonObject): String {
+  private suspend fun bufferedRequest(profile: ModelProfile, body: JsonObject, useSchema: Boolean): String {
     val request = httpRequest(profile, body)
     val response = try {
       withTimeout(profile.timeoutMs.toLong()) {
@@ -252,11 +263,14 @@ class OpenAiCompatibleClient(
       }
     } catch (_: TimeoutCancellationException) {
       throw ExtensionFailure(ErrorCode.REQUEST_TIMEOUT, "Model request timed out", true)
+    } catch (error: Exception) {
+      if (error is CancellationException) throw error
+      throw ExtensionFailure(ErrorCode.NETWORK_ERROR, error.message ?: "Model network request failed", true)
     }
     val text = response.body()
     if (response.statusCode() !in 200..299) {
       val validationRejection = response.statusCode() == 400 || response.statusCode() == 422
-      if (validationRejection && Regex("response[_ ]?format|json[_ ]?schema", RegexOption.IGNORE_CASE).containsMatchIn(text)) {
+      if (useSchema && validationRejection && Regex("response[_ ]?format|json[_ ]?schema", RegexOption.IGNORE_CASE).containsMatchIn(text)) {
         throw UnsupportedResponseFormatException()
       }
       if (profile.reasoningControl != CapabilityState.UNSUPPORTED &&
@@ -272,6 +286,7 @@ class OpenAiCompatibleClient(
   private suspend fun streamRequest(
     profile: ModelProfile,
     body: JsonObject,
+    useSchema: Boolean,
     consume: (String) -> Unit,
   ): JsonElement {
     val request = httpRequest(profile, body)
@@ -281,12 +296,19 @@ class OpenAiCompatibleClient(
       }
     } catch (_: TimeoutCancellationException) {
       throw ExtensionFailure(ErrorCode.REQUEST_TIMEOUT, "Model request timed out", true)
+    } catch (error: Exception) {
+      if (error is CancellationException) throw error
+      throw ExtensionFailure(ErrorCode.NETWORK_ERROR, error.message ?: "Model network request failed", true)
     }
     val input = response.body()
     if (response.statusCode() !in 200..299) {
-      val text = input.readAllBytes().toString(Charsets.UTF_8)
+      val text = try {
+        input.readAllBytes().toString(Charsets.UTF_8)
+      } finally {
+        runCatching { input.close() }
+      }
       val validationRejection = response.statusCode() == 400 || response.statusCode() == 422
-      if (validationRejection && Regex("response[_ ]?format|json[_ ]?schema", RegexOption.IGNORE_CASE).containsMatchIn(text)) {
+      if (useSchema && validationRejection && Regex("response[_ ]?format|json[_ ]?schema", RegexOption.IGNORE_CASE).containsMatchIn(text)) {
         throw UnsupportedResponseFormatException()
       }
       if (validationRejection && Regex("stream", RegexOption.IGNORE_CASE).containsMatchIn(text)) {
@@ -350,6 +372,11 @@ class OpenAiCompatibleClient(
       }
     } catch (_: SilentTimeoutException) {
       throw ExtensionFailure(ErrorCode.REQUEST_TIMEOUT, "Model request timed out", true)
+    } catch (error: Exception) {
+      if (error is CancellationException) throw error
+      throw ExtensionFailure(ErrorCode.NETWORK_ERROR, error.message ?: "Model stream failed", true)
+    } finally {
+      runCatching { input.close() }
     }
 
     if (content.isEmpty()) throw UnsupportedStreamException()
@@ -357,21 +384,15 @@ class OpenAiCompatibleClient(
   }
 
   private suspend fun httpRequest(profile: ModelProfile, body: JsonObject): HttpRequest {
-    val secrets = mutableListOf<String>()
     val apiKey = credentials.get(profile.id, CredentialStore.API_KEY_FIELD).orEmpty()
-    secrets += apiKey
-    val headers = linkedMapOf<String, String>()
-    headers["Content-Type"] = "application/json"
-    headers["Authorization"] = "Bearer $apiKey"
-    for (name in profile.headerNames.sorted()) {
-      val value = credentials.get(profile.id, "header:$name") ?: continue
-      secrets += value
-      headers[name] = value
-    }
     return HttpRequest.newBuilder(URI(chatCompletionsUrl(profile.baseUrl)))
       .header("Content-Type", "application/json")
       .header("Authorization", "Bearer $apiKey")
-      .apply { for ((name, value) in headers) if (name != "Content-Type" && name != "Authorization") header(name, value) }
+      .apply {
+        for (name in profile.headerNames.sorted()) {
+          credentials.get(profile.id, "header:$name")?.let { header(name, it) }
+        }
+      }
       .POST(HttpRequest.BodyPublishers.ofString(json.encodeToString(JsonObject.serializer(), body)))
       .build()
   }
