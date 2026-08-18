@@ -3,6 +3,7 @@ package dev.codetui.englishsyntax.cache
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -50,18 +51,25 @@ object CacheTransfer {
 
   suspend fun importCacheFile(cache: AnalysisCache, text: String): ImportReport {
     val parsed = try {
-      json.parseToJsonElement(text).jsonObject
+      json.parseToJsonElement(text)
     } catch (_: Exception) {
       return ImportReport.Failure("not-json")
     }
-    if (parsed["format"]?.jsonPrimitive?.content != CACHE_FILE_FORMAT ||
-      parsed["formatVersion"]?.jsonPrimitive?.content?.toIntOrNull() != CACHE_FILE_FORMAT_VERSION ||
-      parsed["core"] !is JsonArray ||
-      parsed["detail"] !is JsonArray
+    // 顶层必须是 JSON 对象；合法 JSON 的数组/原始值归为 bad-format（与 TS 分类一致）。
+    val root = parsed as? JsonObject ?: return ImportReport.Failure("bad-format")
+    // 字段必须是 JSON string primitive 才可比对；对象/数组/null 一律视为格式非法，
+    // 与 TS 端 `typeof value === "string"` 的严格性一致，而不是在畸形形状上抛异常。
+    fun stringValue(field: String): String? = (root[field] as? JsonPrimitive)?.takeIf { it.isString }?.content
+    fun intValue(field: String): Int? = (root[field] as? JsonPrimitive)?.takeIf { it.isString.not() }?.content?.toIntOrNull()
+
+    if (stringValue("format") != CACHE_FILE_FORMAT ||
+      intValue("formatVersion") != CACHE_FILE_FORMAT_VERSION ||
+      root["core"] !is JsonArray ||
+      root["detail"] !is JsonArray
     ) {
       return ImportReport.Failure("bad-format")
     }
-    if (parsed["schemaVersion"]?.jsonPrimitive?.content?.toIntOrNull() != AnalysisCache.SCHEMA_VERSION) {
+    if ((root["schemaVersion"] as? JsonPrimitive)?.content?.toIntOrNull() != AnalysisCache.SCHEMA_VERSION) {
       return ImportReport.Failure("schema-mismatch")
     }
 
@@ -69,11 +77,11 @@ object CacheTransfer {
     var skipped = 0
     var invalid = 0
     for (store in listOf(CacheStore.CORE, CacheStore.DETAIL)) {
-      val candidates = parsed[if (store == CacheStore.CORE) "core" else "detail"]!!.jsonArray
+      val candidates = root[if (store == CacheStore.CORE) "core" else "detail"]!!.jsonArray
       val valid = mutableListOf<TransferEntry>()
       for (candidate in candidates) {
         val entry = candidate as? JsonObject
-        val key = entry?.get("key")?.jsonPrimitive?.takeIf { it.isString }?.content
+        val key = (entry?.get("key") as? JsonPrimitive)?.takeIf { it.isString }?.content
         if (key == null || !HEX_KEY.matches(key) || entry["value"] !is JsonObject) {
           invalid += 1
           continue

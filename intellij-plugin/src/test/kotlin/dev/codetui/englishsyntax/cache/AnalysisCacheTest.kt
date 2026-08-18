@@ -90,8 +90,9 @@ class AnalysisCacheTest {
   @Test
   fun `evicts across core and detail stores by lru`() = runBlocking {
     var clock = 1_000L
-    // 每条约 256+ 字节；上限 600 只够放两条。
-    cache(limitBytes = 600, now = { clock }).use { cache ->
+    // 每条 estimateBytes = pad 编码长度 + 256；上限 1200 放得下两条、放不下三条，
+    // 第三条写入时按 last_accessed_at 淘汰最旧的 a（跨 core/detail store）。
+    cache(limitBytes = 1_200, now = { clock }).use { cache ->
       cache.putCore("a".repeat(64), "p", buildJsonObject { put("pad", "x".repeat(300)) })
       clock += 1
       cache.putCore("b".repeat(64), "p", buildJsonObject { put("pad", "x".repeat(300)) })
@@ -102,6 +103,7 @@ class AnalysisCacheTest {
       assertNotNull(cache.getCore("b".repeat(64)))
       assertNotNull(cache.getDetail("c".repeat(64)))
     }
+    Unit
   }
 
   @Test
@@ -140,11 +142,13 @@ class AnalysisCacheTest {
   @Test
   fun `export contains no profile credentials`() = runBlocking {
     cache().use { cache ->
-      cache.putCore("a".repeat(64), "secret-profile", buildJsonObject { put("data", "value") })
+      val stored = buildJsonObject { put("data", "value") }
+      cache.putCore("a".repeat(64), "secret-profile", stored)
 
       val entries = cache.exportEntries(CacheStore.CORE)
-      assertEquals(1, entries.size)
-      assertTrue(entries.none { it.key.contains("secret") })
+      // 导出条目恰好是 {key, value}：不携带 profile_id、时间戳、字节估算等簿记字段。
+      assertEquals(listOf(TransferEntry("a".repeat(64), stored)), entries)
     }
+    Unit
   }
 }

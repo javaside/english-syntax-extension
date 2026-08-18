@@ -64,6 +64,11 @@ class CacheTransferTest {
     AnalysisCache(tempDir.resolve("cache.sqlite")).use { cache ->
       assertEquals(ImportReport.Failure("not-json"), CacheTransfer.importCacheFile(cache, "{oops"))
       assertEquals(ImportReport.Failure("bad-format"), CacheTransfer.importCacheFile(cache, """{"format":"other"}"""))
+      // format 字段是数组 / 对象而不是 string primitive：整体拒绝而不是抛异常。
+      assertEquals(ImportReport.Failure("bad-format"), CacheTransfer.importCacheFile(cache, """{"format":[]}"""))
+      assertEquals(ImportReport.Failure("bad-format"), CacheTransfer.importCacheFile(cache, """{"format":{}}"""))
+      // 合法 JSON 顶层非对象：bad-format，与 TS 分类一致。
+      assertEquals(ImportReport.Failure("bad-format"), CacheTransfer.importCacheFile(cache, "[1,2]"))
       assertEquals(
         ImportReport.Failure("schema-mismatch"),
         CacheTransfer.importCacheFile(
@@ -73,6 +78,7 @@ class CacheTransferTest {
       )
       assertEquals(0, cache.stats().entries)
     }
+    Unit
   }
 
   @Test
