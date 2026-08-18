@@ -12,3 +12,7 @@ test-results/
 release/
 RELEASE_NOTES.md
 store-assets/
+.gradle/
+**/build/
+intellij-plugin/.intellijPlatform/
+intellij-plugin/.sandbox/

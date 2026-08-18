@@ -1,0 +1,10 @@
+<idea-plugin>
+  <id>dev.codetui.english-syntax-idea</id>
+  <name>English Syntax Learning</name>
+  <vendor email="noreply@codetui.dev">CodeTui</vendor>
+  <description><![CDATA[
+    Learn English syntax directly in IntelliJ IDEA Markdown previews.
+  ]]></description>
+  <depends>com.intellij.modules.platform</depends>
+  <depends>org.intellij.plugins.markdown</depends>
+</idea-plugin>
