@@ -29,6 +29,14 @@ private val promptJson = Json {
 /** prompt 内嵌 JSON 一律不缩进；模型按结构读，排版一个字符都用不上。 */
 fun serialize(value: JsonElement): String = promptJson.encodeToString(JsonElement.serializer(), value)
 
+/** 域对象转可序列化 JSON 元素（修复 prompt 里内嵌核心结果/focus 时使用）。 */
+fun CoreAnalysis.toJsonElement(): JsonElement = promptJson.encodeToJsonElement(CoreAnalysis.serializer(), this)
+
+fun TokenRange.toJsonElement(): JsonElement = buildJsonObject {
+  put("startToken", startToken)
+  put("endToken", endToken)
+}
+
 private fun modelSentence(sentence: SentenceInput): JsonObject = buildJsonObject {
   put("sentenceId", sentence.sentenceId)
   put("text", sentence.text)

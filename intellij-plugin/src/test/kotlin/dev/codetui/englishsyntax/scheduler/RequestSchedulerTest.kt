@@ -125,7 +125,9 @@ class RequestSchedulerTest {
           }
         }
       }
-      waitUntil { started.size >= 3 }
+      waitUntil(timeoutMs = 5_000) { started.size >= 3 }
+      // 第 4 个背景项在 backgroundConcurrency=3 上限下必须仍未启动。
+      waitUntil(timeoutMs = 500) { true }
       assertEquals(3, started.size)
 
       launch { scheduler.schedule(request(cacheKey = "interactive")) { started += "interactive" } }

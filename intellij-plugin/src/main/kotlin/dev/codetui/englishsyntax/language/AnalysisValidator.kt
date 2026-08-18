@@ -8,6 +8,7 @@ import dev.codetui.englishsyntax.domain.GrammarRole
 import dev.codetui.englishsyntax.domain.SentenceInput
 import dev.codetui.englishsyntax.domain.Token
 import dev.codetui.englishsyntax.domain.TokenRange
+import dev.codetui.englishsyntax.domain.ValidationError
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -22,8 +23,6 @@ private val coreComponentKeys = setOf("startToken", "endToken", "role", "transla
 private val detailEnvelopeKeys = setOf("sentenceId", "focus", "structures", "grammarPoints", "explanation")
 private val detailFocusKeys = setOf("startToken", "endToken")
 private val detailStructureKeys = setOf("startToken", "endToken", "role", "explanation", "translation")
-
-data class ValidationError(val path: String, val message: String)
 
 /** A validation result never throws for malformed model JSON. */
 sealed interface ValidationResult<out T> {
