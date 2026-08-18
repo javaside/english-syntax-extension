@@ -121,9 +121,15 @@ data class DetailAnalysis(
 @Serializable
 data class ValidationError(val path: String, val message: String)
 
+sealed interface FailureDetail {
+  data class StringValue(val value: String) : FailureDetail
+  data class NumberValue(val value: Number) : FailureDetail
+  data class BooleanValue(val value: Boolean) : FailureDetail
+}
+
 data class ExtensionFailure(
   val code: ErrorCode,
   override val message: String,
   val retryable: Boolean,
-  val details: Map<String, String> = emptyMap(),
+  val details: Map<String, FailureDetail> = emptyMap(),
 ) : RuntimeException(message)

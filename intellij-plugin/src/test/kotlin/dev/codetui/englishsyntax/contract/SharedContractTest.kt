@@ -2,6 +2,8 @@ package dev.codetui.englishsyntax.contract
 
 import dev.codetui.englishsyntax.domain.ContractVersions
 import dev.codetui.englishsyntax.domain.ErrorCode
+import dev.codetui.englishsyntax.domain.ExtensionFailure
+import dev.codetui.englishsyntax.domain.FailureDetail
 import dev.codetui.englishsyntax.domain.GRAMMAR_LABELS
 import dev.codetui.englishsyntax.domain.GrammarRole
 import kotlinx.serialization.json.Json
@@ -18,8 +20,32 @@ class SharedContractTest {
   fun `versions and constants match Chrome`() {
     assertEquals(ContractVersions.MESSAGE, root.getValue("messageVersion").jsonPrimitive.content.toInt())
     assertEquals(ContractVersions.CORE_SCHEMA, root.getValue("coreSchemaVersion").jsonPrimitive.content.toInt())
-    assertEquals(6, root.getValue("maxSentencesPerRequest").jsonPrimitive.content.toInt())
-    assertEquals(2, root.getValue("cloudSentencesPerRequest").jsonPrimitive.content.toInt())
+    assertEquals(ContractVersions.CORE_PROMPT, root.getValue("corePromptVersion").jsonPrimitive.content.toInt())
+    assertEquals(ContractVersions.DETAIL_PROMPT, root.getValue("detailPromptVersion").jsonPrimitive.content.toInt())
+    assertEquals(
+      ContractVersions.MAX_SENTENCES_PER_REQUEST,
+      root.getValue("maxSentencesPerRequest").jsonPrimitive.content.toInt(),
+    )
+    assertEquals(
+      ContractVersions.CLOUD_SENTENCES_PER_REQUEST,
+      root.getValue("cloudSentencesPerRequest").jsonPrimitive.content.toInt(),
+    )
+  }
+
+  @Test
+  fun `failure details preserve TypeScript scalar values`() {
+    val failure = ExtensionFailure(
+      code = ErrorCode.RATE_LIMITED,
+      message = "slow down",
+      retryable = true,
+      details = mapOf(
+        "provider" to FailureDetail.StringValue("OpenAI"),
+        "retryAfterMs" to FailureDetail.NumberValue(2_500),
+        "retryableByProvider" to FailureDetail.BooleanValue(true),
+      ),
+    )
+
+    assertEquals(2_500, (failure.details.getValue("retryAfterMs") as FailureDetail.NumberValue).value)
   }
 
   @Test
