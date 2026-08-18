@@ -1,18 +1,13 @@
 plugins {
   alias(libs.plugins.kotlin.jvm)
   alias(libs.plugins.kotlin.serialization)
-  alias(libs.plugins.intellij.platform)
+  id("org.jetbrains.intellij.platform")
 }
 
 group = "dev.codetui"
 version = "0.1.0-SNAPSHOT"
 
 kotlin { jvmToolchain(21) }
-
-repositories {
-  mavenCentral()
-  intellijPlatform { defaultRepositories() }
-}
 
 dependencies {
   intellijPlatform {
