@@ -63,4 +63,35 @@ class StreamParserTest {
     assertEquals(1, emitted.size)
     assertTrue(emitted[0].jsonObject.containsKey("nested"))
   }
+
+  @Test
+  fun `core parser emits the same result when fed one character at a time`() {
+    val whole =
+      """{"sentences":[{"sentenceId":"s1","components":[{"startToken":0,"endToken":0,"role":"SUBJECT","translation":"它"}]}]}"""
+    val oneShot = CoreStreamParser().push(whole)
+    val parser = CoreStreamParser()
+    val incremental = whole.map { parser.push(it.toString()) }.flatten()
+    assertEquals(oneShot.size, incremental.size)
+    assertEquals(oneShot[0].component, incremental[0].component)
+  }
+
+  @Test
+  fun `core parser ignores braces and quotes inside string values`() {
+    val parser = CoreStreamParser()
+    val emitted = parser.push(
+      """{"sentences":[{"sentenceId":"s1","components":[{"startToken":0,"endToken":0,"role":"SUBJECT","translation":"他说 \"hello\" 和 {braces}"}]}]}""",
+    )
+    assertEquals(1, emitted.size)
+    assertEquals("他说 \"hello\" 和 {braces}", emitted[0].component["translation"]?.jsonPrimitive?.content)
+  }
+
+  @Test
+  fun `detail parser ignores braces and quotes inside string values`() {
+    val parser = DetailStreamParser()
+    val emitted = parser.push(
+      """{"structures":[{"startToken":0,"endToken":0,"role":"主语","explanation":"含 \"引号\" 与 {花括号}"}]}""",
+    )
+    assertEquals(1, emitted.size)
+    assertEquals("含 \"引号\" 与 {花括号}", emitted[0]["explanation"]?.jsonPrimitive?.content)
+  }
 }

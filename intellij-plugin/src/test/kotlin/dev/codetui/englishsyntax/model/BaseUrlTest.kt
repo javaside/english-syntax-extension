@@ -64,6 +64,18 @@ class BaseUrlTest {
   }
 
   @Test
+  fun `normalizes scheme and host case and strips default ports`() {
+    assertEquals("https://api.example.com/v1", normalizeBaseUrl("HTTPS://API.EXAMPLE.COM/v1"))
+    assertEquals("https://api.example.com/v1", normalizeBaseUrl("https://api.example.com:443/v1"))
+    assertEquals("http://localhost/v1", normalizeBaseUrl("http://localhost:80/v1"))
+  }
+
+  @Test
+  fun `rejects a URL without a host`() {
+    assertFailsWith<IllegalArgumentException> { normalizeBaseUrl("https:///path") }
+  }
+
+  @Test
   fun `isLoopbackBaseUrl distinguishes local from remote and tolerates malformed input`() {
     assertTrue(isLoopbackBaseUrl("http://localhost:11434/v1"))
     assertTrue(isLoopbackBaseUrl("http://127.0.0.1:1234/v1"))

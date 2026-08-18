@@ -1,5 +1,6 @@
 package dev.codetui.englishsyntax.model
 
+import dev.codetui.englishsyntax.contract.FixtureLoader
 import dev.codetui.englishsyntax.domain.CoreAnalysis
 import dev.codetui.englishsyntax.domain.CoreComponent
 import dev.codetui.englishsyntax.domain.GrammarRole
@@ -7,22 +8,29 @@ import dev.codetui.englishsyntax.domain.SentenceInput
 import dev.codetui.englishsyntax.domain.TokenRange
 import dev.codetui.englishsyntax.domain.ValidationError
 import dev.codetui.englishsyntax.language.tokenize
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlin.test.Test
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class PromptsTest {
+  private val contractJson = Json
+  private val contractFirstLines = contractJson.parseToJsonElement(FixtureLoader.text("contracts.json"))
+    .jsonObject.getValue("promptFirstLines").jsonObject
+
   private fun sentence(text: String) = SentenceInput(sentenceId = "s1", text = text, tokens = tokenize(text))
+
+  private fun firstLine(key: String): String = contractFirstLines.getValue(key).jsonPrimitive.content
 
   @Test
   fun `core prompt starts with shared line and compact sentence payload`() {
     val prompt = buildCorePrompt(listOf(sentence("The service works.")))
-    assertTrue(
-      prompt.startsWith("Analyze the numbered English sentences below into core grammatical components."),
-    )
+    assertTrue(prompt.startsWith(firstLine("core")))
     assertTrue(prompt.contains("""{"sentenceId":"s1""""))
     assertFalse(prompt.contains("\n  \"sentenceId\""))
     assertTrue(prompt.contains("Output minified JSON on a single line"))
@@ -43,9 +51,7 @@ class PromptsTest {
       listOf(ValidationError("sentences[0]", "is missing")),
       invalid,
     )
-    assertTrue(
-      prompt.startsWith("Repair only the structure of the invalid core-analysis JSON so it satisfies every validation error."),
-    )
+    assertTrue(prompt.startsWith(firstLine("coreRepair")))
     assertTrue(prompt.contains("""{"path":"sentences[0]","message":"is missing"}"""))
     assertFalse(prompt.contains("\n  \"path\""))
   }
@@ -60,8 +66,10 @@ class PromptsTest {
       modelProfileId = "profile-1",
     )
     val prompt = buildDetailPrompt(sentence("The service works."), core, TokenRange(0, 1))
-    assertTrue(prompt.startsWith("Explain only the selected grammatical component in the single sentence below."))
+    assertTrue(prompt.startsWith(firstLine("detail")))
     assertTrue(prompt.contains("\"sentenceId\":\"s1\",\"text\":\"The service works.\""))
+    assertTrue(prompt.contains("\"schemaVersion\":1"))
+    assertTrue(prompt.contains("\"role\":\"SUBJECT\""))
     assertTrue(prompt.contains("\"startToken\":0,\"endToken\":1"))
   }
 }

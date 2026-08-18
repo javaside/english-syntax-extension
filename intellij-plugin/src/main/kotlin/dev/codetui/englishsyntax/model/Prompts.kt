@@ -6,7 +6,6 @@ import dev.codetui.englishsyntax.domain.SentenceInput
 import dev.codetui.englishsyntax.domain.TokenRange
 import dev.codetui.englishsyntax.domain.ValidationError
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonArray
@@ -17,13 +16,18 @@ import kotlinx.serialization.json.add
 import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.encodeToJsonElement
 
-private val compactJson = Json {
-  encodeDefaults = false
+/**
+ * 与 TS `JSON.stringify` 等价：只关闭缩进，不省略字段。kotlinx 的 `encodeDefaults`
+ * 默认是 false，会把带默认值的字段（如 CoreAnalysis.schemaVersion = 1）从内嵌结果里
+ * 吞掉，造成跨端 prompt 分叉，所以这里必须显式置 true。
+ */
+private val promptJson = Json {
   prettyPrint = false
+  encodeDefaults = true
 }
 
 /** prompt 内嵌 JSON 一律不缩进；模型按结构读，排版一个字符都用不上。 */
-fun serialize(value: JsonElement): String = compactJson.encodeToString(JsonElement.serializer(), value)
+fun serialize(value: JsonElement): String = promptJson.encodeToString(JsonElement.serializer(), value)
 
 private fun modelSentence(sentence: SentenceInput): JsonObject = buildJsonObject {
   put("sentenceId", sentence.sentenceId)
@@ -95,7 +99,7 @@ fun buildRepairPrompt(
   "Original sentence IDs and Tokens:",
   serializeSentences(sentences),
   "Validation errors:",
-  serialize(compactJson.encodeToJsonElement(errors)),
+  serialize(promptJson.encodeToJsonElement(errors)),
   "Invalid JSON:",
   serialize(invalidJson),
 ).joinToString("\n\n")
@@ -112,7 +116,7 @@ fun buildDetailPrompt(
   "Selected sentence:",
   serializeSentence(sentence),
   "Verified core result:",
-  serialize(compactJson.encodeToJsonElement(verifiedCore)),
+  serialize(promptJson.encodeToJsonElement(verifiedCore)),
   "Focus range:",
-  serialize(compactJson.encodeToJsonElement(focus)),
+  serialize(promptJson.encodeToJsonElement(focus)),
 ).joinToString("\n\n")

@@ -21,12 +21,17 @@ fun normalizeBaseUrl(baseUrl: String): String {
   }
   val scheme = uri.scheme?.lowercase()
   val host = uri.host?.lowercase()
+  require(host != null) { "Model base URL must include a host" }
   val isLocalHttp = scheme == "http" && (host == "localhost" || host == "127.0.0.1")
   if (scheme != "https" && !isLocalHttp) {
     throw IllegalArgumentException("Model base URL must use HTTPS unless it is localhost")
   }
+  // 与 JS `URL.toString()` 等价：scheme/host 小写、去掉显式默认端口。
+  val port = if ((scheme == "https" && uri.port == 443) || (scheme == "http" && uri.port == 80)) -1 else uri.port
+  val path = uri.path.ifEmpty { null }
+  val normalized = URI(scheme, null, host, port, path, null, null)
   // 与 JS `url.toString().replace(/\/$/, "")` 相同：只去掉恰好一个尾斜杠。
-  return uri.toString().removeSuffix("/")
+  return normalized.toString().removeSuffix("/")
 }
 
 fun chatCompletionsUrl(baseUrl: String): String {
