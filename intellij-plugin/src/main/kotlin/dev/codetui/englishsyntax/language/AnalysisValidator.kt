@@ -12,12 +12,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.intOrNull
-import kotlinx.serialization.json.jsonArray
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 
 private val unsafeText = Regex("<script|<iframe|javascript:|\\u0000", RegexOption.IGNORE_CASE)
 
@@ -31,18 +26,36 @@ private val detailStructureKeys = setOf("startToken", "endToken", "role", "expla
 data class ValidationError(val path: String, val message: String)
 
 /** A validation result never throws for malformed model JSON. */
-data class ValidationResult<T>(val ok: Boolean, val value: T? = null, val errors: List<ValidationError> = emptyList()) {
-  companion object {
-    fun <T> success(value: T) = ValidationResult(true, value)
-    fun <T> failure(errors: List<ValidationError>) = ValidationResult<T>(false, errors = errors)
+sealed interface ValidationResult<out T> {
+  data class Valid<T>(val value: T) : ValidationResult<T> {
+    override val errors: List<ValidationError> = emptyList()
   }
+  data class Invalid(override val errors: List<ValidationError>) : ValidationResult<Nothing>
+
+  val ok: Boolean
+    get() = this is Valid
+
+  val errors: List<ValidationError>
 }
+
+private fun <T> valid(value: T): ValidationResult<T> = ValidationResult.Valid(value)
+private fun invalid(errors: List<ValidationError>): ValidationResult<Nothing> = ValidationResult.Invalid(errors)
 
 private fun error(path: String, message: String) = ValidationError(path, message)
 private fun JsonObject.hasOnly(expected: Set<String>): Boolean = this.keys.all { it in expected }
 private fun JsonElement.asObject(): JsonObject? = this as? JsonObject
-private fun JsonElement.safeText(): String? = (this as? JsonPrimitive)?.contentOrNull?.takeUnless { unsafeText.containsMatchIn(it) }
-private fun JsonElement.safeInt(): Int? = (this as? JsonPrimitive)?.intOrNull
+private fun JsonElement.safeText(): String? = (this as? JsonPrimitive)
+  ?.takeIf { it.isString }
+  ?.contentOrNull
+  ?.takeUnless { unsafeText.containsMatchIn(it) }
+
+private fun JsonElement.safeInt(): Int? {
+  val primitive = this as? JsonPrimitive ?: return null
+  if (primitive.isString) return null
+  val text = primitive.content
+  if (!Regex("-?(0|[1-9][0-9]*)").matches(text)) return null
+  return text.toLongOrNull()?.takeIf { it in Int.MIN_VALUE..Int.MAX_VALUE }?.toInt()
+}
 
 private fun parseRange(value: JsonObject, path: String, errors: MutableList<ValidationError>): TokenRange? {
   val start = value["startToken"]?.safeInt()
@@ -91,15 +104,6 @@ private fun parseCoreComponent(
   val role = roleText?.let { runCatching { GrammarRole.valueOf(it) }.getOrNull() }
   return if (range == null || role == null || translation == null || translation.trim().isEmpty()) null
   else CoreComponent(range.startToken, range.endToken, role, translation)
-}
-
-private fun isWholePunctuationRange(value: JsonElement, tokens: List<Token>): Boolean {
-  val objectValue = value.asObject() ?: return false
-  val start = objectValue["startToken"]?.safeInt() ?: return false
-  val end = objectValue["endToken"]?.safeInt() ?: return false
-  if (start < 0 || end < start) return false
-  val covered = tokens.filter { it.id in start..end }
-  return covered.isNotEmpty() && covered.all { it.punctuation }
 }
 
 private fun parseCoreSentence(
@@ -156,10 +160,10 @@ private fun parseCoreSentence(
 fun validateCoreBatch(raw: JsonElement, requests: List<SentenceInput>, profileId: String): ValidationResult<List<CoreAnalysis>> {
   return try {
     val errors = mutableListOf<ValidationError>()
-    val envelope = raw.asObject() ?: return ValidationResult.failure(listOf(error("", "must be an object")))
+    val envelope = raw.asObject() ?: return invalid(listOf(error("", "must be an object")))
   if (!envelope.hasOnly(coreEnvelopeKeys)) errors += error("", "contains unknown fields")
   val sentences = envelope["sentences"]
-  if (sentences !is kotlinx.serialization.json.JsonArray) return ValidationResult.failure(errors + error("sentences", "must be an array"))
+  if (sentences !is JsonArray) return invalid(errors + error("sentences", "must be an array"))
   val requestById = requests.associateBy { it.sentenceId }
   val seen = mutableSetOf<String>()
   val analyses = mutableMapOf<String, CoreAnalysis>()
@@ -179,17 +183,17 @@ fun validateCoreBatch(raw: JsonElement, requests: List<SentenceInput>, profileId
       errors += error("sentences[$index].sentenceId", "is duplicated")
       return@forEachIndexed
     }
-    val components = objectValue["components"]
-    val cleaned = if (components is kotlinx.serialization.json.JsonArray) {
-      JsonObject(objectValue + ("components" to JsonArray(components.filterNot { isWholePunctuationRange(it, request.tokens) })))
-    } else objectValue
-    parseCoreSentence(cleaned, request, index, profileId, errors)?.let { analyses[id] = it }
+    parseCoreSentence(objectValue, request, index, profileId, errors)?.let { analysis ->
+      analyses[id] = analysis.copy(components = analysis.components.filterNot { component ->
+        request.tokens.filter { it.id in component.startToken..component.endToken }.all { it.punctuation }
+      })
+    }
   }
   requests.forEach { if (it.sentenceId !in seen) errors += error("sentences", "requested sentence ${it.sentenceId} is missing") }
-  if (errors.isNotEmpty()) ValidationResult.failure(errors)
-  else ValidationResult.success(requests.map { analyses.getValue(it.sentenceId) })
+  if (errors.isNotEmpty()) invalid(errors)
+  else valid(requests.map { analyses.getValue(it.sentenceId) })
 } catch (exception: Exception) {
-    ValidationResult.failure(listOf(error("", "invalid JSON structure")))
+    invalid(listOf(error("", "invalid JSON structure")))
   }
 }
 
@@ -217,7 +221,7 @@ private fun parseDetailStructure(value: JsonElement, tokens: List<Token>, path: 
 
 fun validateDetail(raw: JsonElement, request: SentenceInput, requestedFocus: TokenRange, profileId: String): ValidationResult<DetailAnalysis> = try {
   val errors = mutableListOf<ValidationError>()
-  val envelope = raw.asObject() ?: return ValidationResult.failure(listOf(error("", "must be an object")))
+  val envelope = raw.asObject() ?: return invalid(listOf(error("", "must be an object")))
   if (!envelope.hasOnly(detailEnvelopeKeys)) errors += error("", "contains unknown fields")
   if (envelope["sentenceId"]?.safeText() != request.sentenceId) errors += error("sentenceId", "does not match the requested sentence")
   val focusValue = envelope["focus"]
@@ -247,8 +251,8 @@ fun validateDetail(raw: JsonElement, request: SentenceInput, requestedFocus: Tok
   }
   val explanation = envelope["explanation"]?.safeText()
   if (explanation == null || explanation.trim().isEmpty()) errors += error("explanation", "must be a non-empty safe string")
-  if (errors.isNotEmpty() || focus == null || explanation == null) ValidationResult.failure(errors)
-  else ValidationResult.success(DetailAnalysis(request.sentenceId, focus, structures, grammarPoints, explanation, profileId))
+  if (errors.isNotEmpty() || focus == null || explanation == null) invalid(errors)
+  else valid(DetailAnalysis(request.sentenceId, focus, structures, grammarPoints, explanation, profileId))
 } catch (exception: Exception) {
-  ValidationResult.failure(listOf(error("", "invalid JSON structure")))
+  invalid(listOf(error("", "invalid JSON structure")))
 }
