@@ -7,4 +7,8 @@
   ]]></description>
   <depends>com.intellij.modules.platform</depends>
   <depends>org.intellij.plugins.markdown</depends>
+  <extensions defaultExtensionNs="com.intellij">
+    <applicationService serviceImplementation="dev.codetui.englishsyntax.settings.ProfileRepository"/>
+    <applicationConfigurable parentId="tools" instance="dev.codetui.englishsyntax.settings.EnglishSyntaxConfigurable"/>
+  </extensions>
 </idea-plugin>
