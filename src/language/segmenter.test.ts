@@ -4,12 +4,19 @@ import { createSentenceId, rebuildTokens, segmentBlock, tokenize } from "./segme
 
 describe("shared segmenter vectors", () => {
   it.each(vectors)("matches $name", ({ block, sentences }) => {
-    expect(segmentBlock(block).map(({ text }) => text)).toEqual(sentences.map(({ text }) => text));
+    expect(segmentBlock(block)).toEqual(
+      sentences.map(({ text, start, end }) => ({ text, start, end })),
+    );
     for (const sentence of sentences) {
-      expect(tokenize(sentence.text).map((token) => token.text)).toEqual(sentence.tokens);
-      expect(tokenize(sentence.text).map((token) => token.punctuation)).toEqual(
-        sentence.punctuation,
-      );
+      expect(
+        tokenize(sentence.text).map(({ text, start, end, leadingWhitespace, punctuation }) => ({
+          text,
+          start,
+          end,
+          leadingWhitespace,
+          punctuation,
+        })),
+      ).toEqual(sentence.tokens);
     }
   });
 });

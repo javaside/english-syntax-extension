@@ -6,8 +6,11 @@ import java.text.BreakIterator
 import java.util.Locale
 
 private val abbreviations = listOf("Mr.", "Mrs.", "Ms.", "Dr.", "Prof.", "Sr.", "Jr.", "e.g.", "i.e.", "U.S.")
-private val tokenPattern = Regex("[\\p{L}\\p{N}]+(?:['’-][\\p{L}\\p{N}]+)*|[^\\s]")
+private val tokenPattern = Regex(
+  "[\\p{L}\\p{N}]+(?:['’-][\\p{L}\\p{N}]+)*|[^\\s\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff]",
+)
 private val wordStart = Regex("^[\\p{L}\\p{N}]")
+private val javascriptWhitespace = Regex("^[\\s\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff]$")
 
 data class SegmentedSentence(val text: String, val start: Int, val end: Int)
 
@@ -33,10 +36,13 @@ fun segmentBlock(text: String): List<SegmentedSentence> {
     }
   }
   return merged.mapNotNull { (rawStart, rawEnd) ->
-    val source = text.substring(rawStart, rawEnd)
-    val leading = source.length - source.trimStart().length
-    val value = source.trim()
-    if (value.isEmpty()) null else SegmentedSentence(value, rawStart + leading, rawStart + leading + value.length)
+    var start = rawStart
+    while (start < rawEnd && javascriptWhitespace.matches(text[start].toString())) start += 1
+
+    var end = rawEnd
+    while (end > start && javascriptWhitespace.matches(text[end - 1].toString())) end -= 1
+
+    if (start == end) null else SegmentedSentence(text.substring(start, end), start, end)
   }
 }
 
