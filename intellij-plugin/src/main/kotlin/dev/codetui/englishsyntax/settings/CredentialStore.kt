@@ -2,8 +2,9 @@ package dev.codetui.englishsyntax.settings
 
 import com.intellij.credentialStore.CredentialAttributes
 import com.intellij.credentialStore.Credentials
-import com.intellij.ide.passwordSafe.PasswordSafe
 import com.intellij.credentialStore.generateServiceName
+import com.intellij.ide.passwordSafe.PasswordSafe
+import dev.codetui.englishsyntax.PluginIdentity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -20,9 +21,11 @@ interface CredentialStore {
 }
 
 class PasswordSafeCredentialStore : CredentialStore {
-  private fun attributes(profileId: String, field: String) = CredentialAttributes(
-    generateServiceName("English Syntax Learning", "$profileId:$field"),
-  )
+  companion object {
+    fun attributes(profileId: String, field: String) = CredentialAttributes(
+      generateServiceName(PluginIdentity.ID, "$profileId:$field"),
+    )
+  }
 
   override suspend fun get(profileId: String, field: String): String? = withContext(Dispatchers.IO) {
     PasswordSafe.instance.get(attributes(profileId, field))?.getPasswordAsString()

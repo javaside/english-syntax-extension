@@ -1,23 +1,49 @@
 package dev.codetui.englishsyntax.settings
 
-import com.intellij.openapi.components.Service
 import java.net.URI
 
-@Service(Service.Level.APP)
 class ProfileRepository(
   private val profileState: ProfileState = com.intellij.openapi.components.service(),
   private val credentials: CredentialStore = PasswordSafeCredentialStore(),
 ) {
   fun list(): List<ModelProfile> = profileState.state.profiles.map(::fromStored)
 
-  suspend fun save(profile: ModelProfile) {
+  suspend fun save(
+    profile: ModelProfile,
+    apiKey: String? = null,
+    headerValues: Map<String, String> = emptyMap(),
+  ) {
     val validated = validate(profile)
+    require(headerValues.keys == validated.headerNames || headerValues.isEmpty()) {
+      "Custom header values must match profile header names"
+    }
+    val previous = profileState.state.profiles.firstOrNull { it.id == validated.id }
     val stored = toStored(validated)
     val profiles = profileState.state.profiles.toMutableList()
     val index = profiles.indexOfFirst { it.id == stored.id }
     if (index == -1) profiles += stored else profiles[index] = stored
     profileState.state.profiles = profiles
     if (profileState.state.activeProfileId == null) profileState.state.activeProfileId = validated.id
+
+    when {
+      apiKey == null -> Unit
+      apiKey.isBlank() -> credentials.delete(validated.id, CredentialStore.API_KEY_FIELD)
+      else -> credentials.put(validated.id, CredentialStore.API_KEY_FIELD, apiKey)
+    }
+    headerValues.forEach { (name, value) ->
+      if (value.isBlank()) credentials.delete(validated.id, headerField(name))
+      else credentials.put(validated.id, headerField(name), value)
+    }
+    previous?.headers?.values
+      ?.filterNot(stored.headers::containsValue)
+      ?.forEach { credentials.delete(validated.id, it) }
+  }
+
+  suspend fun apiKey(profileId: String): String? = credentials.get(profileId, CredentialStore.API_KEY_FIELD)
+
+  suspend fun headerValues(profileId: String): Map<String, String> {
+    val stored = profileState.state.profiles.firstOrNull { it.id == profileId } ?: return emptyMap()
+    return stored.headers.mapNotNull { (name, field) -> credentials.get(profileId, field)?.let { name to it } }.toMap()
   }
 
   suspend fun delete(id: String) {
@@ -52,11 +78,15 @@ class ProfileRepository(
     require(profile.timeoutMs in 5_000..120_000) { "Model profile timeout must be between 5000 and 120000 milliseconds" }
     require(profile.streamSupport == null || profile.streamSupport == CapabilityState.UNSUPPORTED) { "Model profile streamSupport is invalid" }
     require(profile.reasoningControl == null || profile.reasoningControl == CapabilityState.UNSUPPORTED) { "Model profile reasoningControl is invalid" }
-    profile.headerNames.forEach { name ->
-      require(name.isNotBlank()) { "Custom header name must not be blank" }
-      require(name.trim().lowercase() !in FORBIDDEN_HEADERS) { "Custom header $name is forbidden" }
+    val normalizedHeaders = profile.headerNames.map { it.trim() }
+    require(normalizedHeaders.map(String::lowercase).toSet().size == normalizedHeaders.size) {
+      "Custom header names must be unique"
     }
-    return profile.copy(baseUrl = normalizeBaseUrl(profile.baseUrl), headerNames = profile.headerNames.map { it.trim() }.toSet())
+    normalizedHeaders.forEach { name ->
+      require(HEADER_NAME.matches(name)) { "Custom header $name is invalid" }
+      require(name.lowercase() !in FORBIDDEN_HEADERS) { "Custom header $name is forbidden" }
+    }
+    return profile.copy(baseUrl = normalizeBaseUrl(profile.baseUrl), headerNames = normalizedHeaders.toSet())
   }
 
   private fun normalizeBaseUrl(value: String): String {
@@ -65,11 +95,19 @@ class ProfileRepository(
     } catch (exception: Exception) {
       throw IllegalArgumentException("Model profile baseUrl is invalid", exception)
     }
-    val host = uri.host?.lowercase()
-    require(uri.scheme == "https" || (uri.scheme == "http" && host in LOOPBACK_HOSTS)) { "Model profile baseUrl must use HTTPS or local HTTP" }
+    val scheme = uri.scheme?.lowercase()
+    val host = uri.host?.lowercase()?.removeSurrounding("[", "]")
+    val port = try {
+      uri.port
+    } catch (exception: IllegalArgumentException) {
+      throw IllegalArgumentException("Model profile baseUrl has an invalid port", exception)
+    }
     require(host != null) { "Model profile baseUrl must include a host" }
+    require(scheme == "https" || (scheme == "http" && host in LOOPBACK_HOSTS)) { "Model profile baseUrl must use HTTPS or local HTTP" }
+    require(port in -1..65_535) { "Model profile baseUrl has an invalid port" }
     require(uri.userInfo == null && uri.query == null && uri.fragment == null) { "Model profile baseUrl is invalid" }
-    return uri.toString().trimEnd('/')
+    require(!uri.path.endsWith("//")) { "Model profile baseUrl has an invalid path" }
+    return URI(scheme, null, host, port, uri.path.trimEnd('/'), null, null).toString()
   }
 
   private fun toStored(profile: ModelProfile) = StoredProfile(
@@ -98,7 +136,8 @@ class ProfileRepository(
 
   companion object {
     private val FORBIDDEN_HEADERS = setOf("authorization", "host", "content-length", "origin", "x-syntax-request-id")
-    private val LOOPBACK_HOSTS = setOf("localhost", "127.0.0.1")
+    private val LOOPBACK_HOSTS = setOf("localhost", "127.0.0.1", "::1")
+    private val HEADER_NAME = Regex("^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
 
     fun headerField(name: String) = "header:$name"
   }

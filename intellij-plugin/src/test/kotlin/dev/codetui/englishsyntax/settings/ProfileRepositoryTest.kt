@@ -1,10 +1,17 @@
 package dev.codetui.englishsyntax.settings
 
+import com.intellij.credentialStore.generateServiceName
+import com.intellij.openapi.util.JDOMUtil
+import com.intellij.util.xmlb.XmlSerializer
+import dev.codetui.englishsyntax.PluginIdentity
 import kotlinx.coroutines.runBlocking
+import kotlin.io.path.Path
+import kotlin.io.path.readText
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -25,8 +32,10 @@ class ProfileRepositoryTest {
     }
   }
 
-  private fun repository(credentials: FakeCredentialStore = FakeCredentialStore()) =
-    ProfileRepository(ProfileState(), credentials)
+  private fun repository(
+    credentials: FakeCredentialStore = FakeCredentialStore(),
+    state: ProfileState = ProfileState(),
+  ) = ProfileRepository(state, credentials)
 
   private fun profile(
     baseUrl: String = "https://api.example.com/v1/",
@@ -67,16 +76,57 @@ class ProfileRepositoryTest {
   }
 
   @Test
-  fun `api key is never serialized into persistent state`() = runBlocking {
+  fun `real persistent state XML contains references but no plaintext credentials`() = runBlocking {
     val credentials = FakeCredentialStore()
     val state = ProfileState()
     val repository = ProfileRepository(state, credentials)
-    credentials.put("profile-1", CredentialStore.API_KEY_FIELD, "secret-profile-key")
 
-    repository.save(profile())
+    repository.save(
+      profile(headers = mapOf("X-Api-Key" to "secret-header-value")),
+      apiKey = "secret-profile-key",
+      headerValues = mapOf("X-Api-Key" to "secret-header-value"),
+    )
 
-    assertFalse(state.state.toString().contains("secret-profile-key"))
-    assertEquals("secret-profile-key", credentials.get("profile-1", CredentialStore.API_KEY_FIELD))
+    val serialized = XmlSerializer.serialize(state.state)
+    val xml = JDOMUtil.writeElement(serialized)
+    val restoredState = ProfileState()
+    restoredState.loadState(XmlSerializer.deserialize(serialized, ProfileState.Data::class.java))
+    val restored = ProfileRepository(restoredState, credentials)
+
+    assertTrue(xml.contains("header:X-Api-Key"))
+    assertFalse(xml.contains("secret-profile-key"))
+    assertFalse(xml.contains("secret-header-value"))
+    assertEquals("secret-profile-key", restored.apiKey("profile-1"))
+    assertEquals(mapOf("X-Api-Key" to "secret-header-value"), restored.headerValues("profile-1"))
+  }
+
+  @Test
+  fun `profile and credentials survive repository round trip`() = runBlocking {
+    val credentials = FakeCredentialStore()
+    val state = ProfileState()
+    val first = ProfileRepository(state, credentials)
+    first.save(
+      profile(headers = mapOf("X-Tenant" to "tenant-a")),
+      apiKey = "round-trip-key",
+      headerValues = mapOf("X-Tenant" to "tenant-a"),
+    )
+
+    val restored = ProfileRepository(state, credentials)
+
+    assertEquals("https://api.example.com/v1", restored.list().single().baseUrl)
+    assertEquals("round-trip-key", restored.apiKey("profile-1"))
+    assertEquals(mapOf("X-Tenant" to "tenant-a"), restored.headerValues("profile-1"))
+    restored.setActive("profile-1")
+    assertEquals("profile-1", restored.active()?.id)
+  }
+
+  @Test
+  fun `credential attributes map plugin profile and field deterministically`() {
+    val attributes = PasswordSafeCredentialStore.attributes("profile-1", ProfileRepository.headerField("X-Tenant"))
+
+    assertTrue(attributes.serviceName.contains(PluginIdentity.ID))
+    assertTrue(attributes.serviceName.contains("profile-1"))
+    assertTrue(attributes.serviceName.contains("header:X-Tenant"))
   }
 
   @Test
@@ -113,9 +163,66 @@ class ProfileRepositoryTest {
   @Test
   fun `accepts HTTPS remote and HTTP loopback URLs`() = runBlocking {
     val repository = repository()
-    listOf("https://api.example.com/v1", "http://localhost:11434/v1", "http://127.0.0.1:8080/v1").forEach {
-      repository.save(profile(baseUrl = it))
+    listOf(
+      "HTTPS://API.EXAMPLE.COM/v1/",
+      "http://localhost:11434/v1",
+      "http://127.0.0.1:8080/v1",
+      "http://[::1]:11434/v1",
+    ).forEach { repository.save(profile(baseUrl = it)) }
+  }
+
+  @Test
+  fun `rejects malformed URLs and invalid header names`() = runBlocking {
+    val repository = repository()
+    listOf(
+      "http://api.example.com/v1",
+      "https://api.example.com:bad/v1",
+      "https://api.example.com/v1//",
+      "https://api.example.com/v1?token=secret",
+      "https://user:secret@api.example.com/v1",
+    ).forEach { baseUrl ->
+      assertFailsWith<IllegalArgumentException>(baseUrl) { repository.save(profile(baseUrl = baseUrl)) }
     }
+    listOf("Bad Header", "X-Test\nInjected", "X-Test:").forEach { header ->
+      assertFailsWith<IllegalArgumentException>(header) {
+        repository.save(profile(headers = mapOf(header to "value")))
+      }
+    }
+    assertFailsWith<IllegalArgumentException> {
+      repository.save(profile(headers = linkedMapOf("X-Tenant" to "one", " x-tenant " to "two")))
+    }
+  }
+
+  @Test
+  fun `configurable has real reset modified and apply behavior with nonempty action status`() = runBlocking {
+    val credentials = FakeCredentialStore()
+    val repository = repository(credentials)
+    repository.save(profile(), apiKey = "old-key")
+    val configurable = EnglishSyntaxConfigurable(repository, ProfileState())
+
+    configurable.resetForm()
+    assertFalse(configurable.isFormModified())
+    configurable.form.name = "Updated"
+    configurable.form.apiKey = "new-key"
+    assertTrue(configurable.isFormModified())
+
+    configurable.applyForm()
+    assertEquals("Updated", repository.list().single().name)
+    assertEquals("new-key", repository.apiKey("profile-1"))
+    assertFalse(configurable.isFormModified())
+
+    configurable.runConnectionAction()
+    assertTrue(configurable.actionStatus.isNotBlank())
+  }
+
+  @Test
+  fun `plugin XML registers ProfileRepository service exactly once`() {
+    val annotationCount = ProfileRepository::class.annotations.count { it.annotationClass.simpleName == "Service" }
+    val pluginXml = Path("src/main/resources/META-INF/plugin.xml").readText()
+    val xmlCount = Regex("serviceImplementation=\\\"dev\\.codetui\\.englishsyntax\\.settings\\.ProfileRepository\\\"").findAll(pluginXml).count()
+
+    assertEquals(1, annotationCount + xmlCount)
+    assertNotNull(Regex("applicationConfigurable[^>]+EnglishSyntaxConfigurable").find(pluginXml))
   }
 
   @Test
@@ -126,5 +233,60 @@ class ProfileRepositoryTest {
     assertFailsWith<IllegalArgumentException> { repository.save(profile().copy(model = " ")) }
     assertFailsWith<IllegalArgumentException> { repository.setActive("missing") }
     assertNull(repository.active())
+  }
+
+  @Test
+  fun `clearing credentials removes values from the credential store`() = runBlocking {
+    val credentials = FakeCredentialStore()
+    val repository = repository(credentials)
+    repository.save(
+      profile(headers = mapOf("X-Tenant" to "old")),
+      apiKey = "old-key",
+      headerValues = mapOf("X-Tenant" to "old"),
+    )
+
+    repository.save(
+      profile(headers = mapOf("X-Tenant" to "old")),
+      apiKey = "",
+      headerValues = mapOf("X-Tenant" to ""),
+    )
+
+    assertNull(repository.apiKey("profile-1"))
+    assertEquals(emptyMap(), repository.headerValues("profile-1"))
+  }
+
+  @Test
+  fun `configurable rejects exact and case insensitive duplicate header lines`() = runBlocking {
+    val repository = repository()
+    repository.save(profile())
+    val configurable = EnglishSyntaxConfigurable(repository, ProfileState())
+
+    listOf(
+      "X-Tenant: one\nX-Tenant: two",
+      "X-Tenant: one\n x-tenant : two",
+    ).forEach { headers ->
+      configurable.form.headers = headers
+      assertFailsWith<IllegalArgumentException> { configurable.saveForm() }
+    }
+  }
+
+  @Test
+  fun `configurable exposes save delete and activate operations`() = runBlocking {
+    val credentials = FakeCredentialStore()
+    val repository = repository(credentials)
+    repository.save(profile())
+    repository.save(profile().copy(id = "profile-2", name = "Second"))
+    val configurable = EnglishSyntaxConfigurable(repository, ProfileState())
+
+    configurable.selectProfile("profile-2")
+    configurable.form.name = "Updated second"
+    configurable.saveForm()
+    assertEquals("Updated second", repository.list().single { it.id == "profile-2" }.name)
+
+    configurable.activateForm()
+    assertEquals("profile-2", repository.active()?.id)
+
+    configurable.deleteForm()
+    assertNull(repository.list().find { it.id == "profile-2" })
   }
 }
