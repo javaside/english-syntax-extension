@@ -58,4 +58,10 @@ tasks {
   test {
     useJUnitPlatform()
   }
+  // 聚合门禁：测试 + 构建 + 插件校验（供 npm run test:all 与 CI 调用）。
+  register("intellijCheck") {
+    group = "verification"
+    description = "Runs tests, builds the plugin, and verifies plugin configuration."
+    dependsOn("test", "buildPlugin", "verifyPluginProjectConfiguration")
+  }
 }

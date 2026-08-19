@@ -16,3 +16,4 @@ store-assets/
 **/build/
 intellij-plugin/.intellijPlatform/
 intellij-plugin/.sandbox/
+.intellijPlatform/

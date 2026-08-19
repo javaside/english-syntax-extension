@@ -247,3 +247,13 @@ correction 键  = SHA-256(["correction", …同上…, pageUrl, sentenceInstance
 ```
 
 `PublicModelProfile` = 去掉 `apiKey` 与 `headers`,给 popup / options 列表用。
+
+## IntelliJ 预览桥协议(JCEF)
+
+Chrome 端协议(SW↔content)之外,IntelliJ 端定义 JCEF 页面↔Kotlin 的独立协议,两侧镜像实现(`BridgeProtocol.kt` / `web/bridge.ts`):
+
+- **JS→Kotlin**:`PREVIEW_READY`、`VISIBLE_BLOCKS`(≤50 块,每块 ≤20,000 字符)、`DETAIL_REQUEST`(focus 非负闭区间)、`RETRY_SENTENCE`。
+- **Kotlin→JS**:`SESSION_STATE`、`CORE_STREAM`、`CORE_RESULT`、`CORE_ERROR`、`DETAIL_STREAM`、`DETAIL_RESULT`、`RESTORE_ALL`。
+- 公共字段:`version=1`、`previewId`、`generation`;句子消息再加 `sentenceId`。
+- **键白名单**:每类型一组允许键,多余键整体拒绝;`apiKey`/`headers`/`baseUrl` 永远禁止。JS 侧对 Kotlin 回调复检 generation,旧代次丢弃。
+- 修改任一侧必须同步另一侧,并让 `bridge.test.ts` 与 `BridgeProtocolTest` 同时红/绿。

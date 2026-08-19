@@ -182,3 +182,14 @@ discovered ─▶ cache-check ─▶ queued ─▶ requesting ─▶ validating 
 1. **发送方校验**:`isRequestMessage()` 逐类型白名单字段(`hasOnlyKeys`),SW 收到不合规消息直接回 `INVALID_MODEL_OUTPUT`。
 2. **来源与新鲜度校验**:带 `tabId` 的消息必须来自该 tab,或来自受信任扩展 UI(`sender.tab === undefined && sender.id === runtime.id && sender.url` 以本扩展 origin 开头);`documentId` 还必须与当前会话一致。此外 7 条命令(`START_SESSION` / `PAUSE_SESSION` / `STOP_SESSION` / `REANALYZE_VISIBLE` / 三个 `PARSE_*`)在各自 case 里**额外要求受信任 UI**。这三道门互相独立,细节见 [`protocol.md` §2.1](./protocol.md#21-三道门别混为一谈)——`GET_SESSION_STATUS` 与 `SWITCH_PROFILE` 常被误以为也有第三道门,其实没有。
 3. **模型输出校验 + 脱敏**:`validateCoreBatch` / `validateDetail` 拒绝越界区间、未知角色、覆盖率违规,以及含 `<script` / `<iframe` / `javascript:` / NUL 的文本;所有返回页面的模型文本都经 `redactProfileSecrets()` 把 apiKey 与自定义头值替换成 `[redacted]`——**流式分片也不例外**。
+
+## IntelliJ 插件运行时(第二运行时)
+
+Chrome 扩展之外,本仓库还交付一个 IntelliJ IDEA Markdown 预览插件(`intellij-plugin/`)。两个运行时**不共享运行代码**,只共享契约:
+
+- `shared-fixtures/` 的分句/缓存键向量、交换 fixture 由 TS 与 Kotlin 测试同时消费——两端任何一侧改规则,另一侧的测试立刻红。
+- 模型链路(prompt、校验、修复、降级)在 Kotlin 侧按同一骨架重新实现(见 [model-pipeline.md](./model-pipeline.md) 的 IntelliJ 小节)。
+
+链路时序:IntelliJ 打开 `.md` 预览 → `EnglishSyntaxPreviewProvider` 提供 JCEF 面板 → `setHtml` 递增 generation 并通知页面 → JS 扫描可见块回传 `VISIBLE_BLOCKS` → `PreviewSession` 分句分词、合批、查 SQLite 缓存(与 Chrome 扩展互通)→ 未命中经 `RequestScheduler` 调模型 → 校验/一次修复 → `CORE_RESULT`/`CORE_STREAM` 回推页面 → `render.ts` 可逆替换卡片。用户手势(Tools 菜单的三个 Action)驱动 start/pause/stop;stop 发 `RESTORE_ALL` 恢复原文。
+
+生命周期:每个预览一个 `PreviewSession`(child Job),面板 dispose 时随项目 scope 取消;Profile 是 start 时刻的快照,设置变更后由 Manager 刷新。JCEF 不可用时 Provider 报 UNAVAILABLE,Action 提示切换 JetBrains Runtime。

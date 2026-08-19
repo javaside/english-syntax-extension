@@ -58,10 +58,7 @@
             "translation": "每个响应"
           }
         ],
-        "grammarPoints": [
-          "一般现在时",
-          "及物动词"
-        ],
+        "grammarPoints": ["一般现在时", "及物动词"],
         "explanation": "谓语校验宾语短语。",
         "modelProfileId": "shared-fixture"
       }

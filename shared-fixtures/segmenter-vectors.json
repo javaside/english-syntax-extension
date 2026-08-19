@@ -11,8 +11,20 @@
           { "text": "Dr", "start": 0, "end": 2, "leadingWhitespace": "", "punctuation": false },
           { "text": ".", "start": 2, "end": 3, "leadingWhitespace": "", "punctuation": true },
           { "text": "Smith", "start": 4, "end": 9, "leadingWhitespace": " ", "punctuation": false },
-          { "text": "doesn't", "start": 10, "end": 17, "leadingWhitespace": " ", "punctuation": false },
-          { "text": "guess", "start": 18, "end": 23, "leadingWhitespace": " ", "punctuation": false },
+          {
+            "text": "doesn't",
+            "start": 10,
+            "end": 17,
+            "leadingWhitespace": " ",
+            "punctuation": false
+          },
+          {
+            "text": "guess",
+            "start": 18,
+            "end": 23,
+            "leadingWhitespace": " ",
+            "punctuation": false
+          },
           { "text": ".", "start": 23, "end": 24, "leadingWhitespace": "", "punctuation": true }
         ]
       },
@@ -22,8 +34,20 @@
         "end": 42,
         "tokens": [
           { "text": "The", "start": 0, "end": 3, "leadingWhitespace": "", "punctuation": false },
-          { "text": "parser", "start": 4, "end": 10, "leadingWhitespace": " ", "punctuation": false },
-          { "text": "works", "start": 11, "end": 16, "leadingWhitespace": " ", "punctuation": false },
+          {
+            "text": "parser",
+            "start": 4,
+            "end": 10,
+            "leadingWhitespace": " ",
+            "punctuation": false
+          },
+          {
+            "text": "works",
+            "start": 11,
+            "end": 16,
+            "leadingWhitespace": " ",
+            "punctuation": false
+          },
           { "text": ".", "start": 16, "end": 17, "leadingWhitespace": "", "punctuation": true }
         ]
       }
@@ -38,10 +62,34 @@
         "start": 0,
         "end": 45,
         "tokens": [
-          { "text": "Well-designed", "start": 0, "end": 13, "leadingWhitespace": "", "punctuation": false },
-          { "text": "tools", "start": 14, "end": 19, "leadingWhitespace": " ", "punctuation": false },
-          { "text": "reduce", "start": 20, "end": 26, "leadingWhitespace": " ", "punctuation": false },
-          { "text": "context-switching", "start": 27, "end": 44, "leadingWhitespace": " ", "punctuation": false },
+          {
+            "text": "Well-designed",
+            "start": 0,
+            "end": 13,
+            "leadingWhitespace": "",
+            "punctuation": false
+          },
+          {
+            "text": "tools",
+            "start": 14,
+            "end": 19,
+            "leadingWhitespace": " ",
+            "punctuation": false
+          },
+          {
+            "text": "reduce",
+            "start": 20,
+            "end": 26,
+            "leadingWhitespace": " ",
+            "punctuation": false
+          },
+          {
+            "text": "context-switching",
+            "start": 27,
+            "end": 44,
+            "leadingWhitespace": " ",
+            "punctuation": false
+          },
           { "text": ".", "start": 44, "end": 45, "leadingWhitespace": "", "punctuation": true }
         ]
       }

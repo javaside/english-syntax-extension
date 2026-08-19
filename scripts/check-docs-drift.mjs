@@ -32,6 +32,37 @@ const RULES = [
   ["src/language/", ["rendering.md", "protocol.md"]],
   ["src/popup/", ["modules.md"]],
   ["src/options/", ["modules.md", "protocol.md"]],
+  [
+    "intellij-plugin/src/main/kotlin/dev/codetui/englishsyntax/domain/",
+    ["protocol.md", "overview.md"],
+  ],
+  [
+    "intellij-plugin/src/main/kotlin/dev/codetui/englishsyntax/bridge/",
+    ["protocol.md", "overview.md"],
+  ],
+  ["intellij-plugin/src/main/kotlin/dev/codetui/englishsyntax/model/", ["model-pipeline.md"]],
+  ["intellij-plugin/src/main/kotlin/dev/codetui/englishsyntax/analysis/", ["model-pipeline.md"]],
+  ["intellij-plugin/src/main/kotlin/dev/codetui/englishsyntax/cache/", ["model-pipeline.md"]],
+  ["intellij-plugin/src/main/kotlin/dev/codetui/englishsyntax/scheduler/", ["model-pipeline.md"]],
+  [
+    "intellij-plugin/src/main/kotlin/dev/codetui/englishsyntax/markdown/",
+    ["rendering.md", "overview.md"],
+  ],
+  [
+    "intellij-plugin/src/main/kotlin/dev/codetui/englishsyntax/session/",
+    ["rendering.md", "overview.md"],
+  ],
+  [
+    "intellij-plugin/src/main/kotlin/dev/codetui/englishsyntax/settings/",
+    ["model-pipeline.md", "build-test-release.md"],
+  ],
+  ["intellij-plugin/src/main/kotlin/dev/codetui/englishsyntax/actions/", ["rendering.md"]],
+  ["intellij-plugin/src/main/resources/web/", ["rendering.md"]],
+  ["intellij-plugin/src/main/resources/META-INF/", ["build-test-release.md"]],
+  ["intellij-plugin/src/test/kotlin/", ["build-test-release.md"]],
+  ["intellij-plugin/build.gradle.kts", ["build-test-release.md"]],
+  ["intellij-plugin/gradle/", ["build-test-release.md"]],
+  ["shared-fixtures/", ["build-test-release.md", "protocol.md"]],
   ["tests/support/", ["build-test-release.md"]],
   ["tests/e2e/", ["build-test-release.md"]],
   ["scripts/", ["build-test-release.md"]],
@@ -41,7 +72,12 @@ const RULES = [
 
 /** 改动了这些文件就必须动 modules.md——模块地图是逐文件的清单。 */
 function isModuleRosterChange(status, path) {
-  return (status === "A" || status === "D" || status === "R") && path.startsWith("src/");
+  return (
+    (status === "A" || status === "D" || status === "R") &&
+    (path.startsWith("src/") ||
+      path.startsWith("intellij-plugin/src/main/kotlin/") ||
+      path.startsWith("intellij-plugin/src/main/resources/web/"))
+  );
 }
 
 /** 只改测试不要求动文档:测试跟着实现走,实现没动就没有新说法要记。 */

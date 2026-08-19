@@ -14,15 +14,15 @@ Chrome MV3 扩展"英语句法伴读":把网页里的英文段落**就地替换*
 
 ## 该读哪一份
 
-| 你要做的事                               | 先读                                               |
-| ---------------------------------------- | -------------------------------------------------- |
-| 完全不了解这个项目                       | 本页 →[`overview.md`](./overview.md)               |
-| 找"改这个功能该动哪个文件"               | [`modules.md`](./modules.md)                       |
-| 加 / 改一条扩展内部消息                  | [`protocol.md`](./protocol.md)                     |
-| 调 prompt、换模型、改并发/超时/降级/缓存 | [`model-pipeline.md`](./model-pipeline.md)         |
-| 改页面上的卡片、面板、扫描规则、进度提示 | [`rendering.md`](./rendering.md)                   |
-| 跑测试、加测试、发版                     | [`build-test-release.md`](./build-test-release.md) |
-| 动手之前想知道"哪里有雷"                 | [`invariants.md`](./invariants.md)                 |
+| 你要做的事                                | 先读                                               |
+| ----------------------------------------- | -------------------------------------------------- |
+| 完全不了解这个项目                        | 本页 →[`overview.md`](./overview.md)               |
+| 找"改这个功能该动哪个文件"                | [`modules.md`](./modules.md)                       |
+| 加 / 改一条扩展内部消息或 IntelliJ 桥消息 | [`protocol.md`](./protocol.md)                     |
+| 调 prompt、换模型、改并发/超时/降级/缓存  | [`model-pipeline.md`](./model-pipeline.md)         |
+| 改页面上的卡片、面板、扫描规则、进度提示  | [`rendering.md`](./rendering.md)                   |
+| 跑测试、加测试、发版                      | [`build-test-release.md`](./build-test-release.md) |
+| 动手之前想知道"哪里有雷"                  | [`invariants.md`](./invariants.md)                 |
 
 ## 与仓库其它文档的分工
 

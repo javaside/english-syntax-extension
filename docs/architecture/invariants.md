@@ -221,3 +221,35 @@
 ### I-27 验收脚本永不提交
 
 **规则** 放 `.superpowers/acceptance/`(已 gitignore),API key 只从环境变量读,日志一律脱敏。
+
+## IntelliJ 插件
+
+### 密钥不进 JCEF
+
+**规则**:API key 只经 `CredentialStore` 存取(生产实现是 PasswordSafe);任何发往 JCEF 页面的脚本、bridge 消息、缓存值、日志与异常 message 都不得包含它。
+
+**为什么**:预览页运行在 JCEF 渲染进程里,等于把内容暴露给一条不可信信道;一旦 key 混进 JS 可见面,页面注入即可外传。`onPageMessage` 在入口就经 `BridgeProtocol.parsePageMessage` 做键白名单过滤,`apiKey`/`headers`/`baseUrl` 一律整体拒绝。
+
+**症状**:密钥泄漏通常没有功能症状,只在审查/抓包时暴露——所以靠测试钉住而不是靠观察。
+
+**守护测试**:`intellij-plugin/src/test/kotlin/.../integration/SecretIsolationTest.kt`(脚本与桥消息双向断言)。
+
+### generation 双闸
+
+**规则**:预览重渲染(`setHtml`)后 generation 递增;Kotlin 侧 `PreviewSession.onGenerationChanged` 取消旧 document 的在飞请求并清空句子记录,JS 侧 `parseHostMessage` 丢弃 generation 不匹配的一切回调。
+
+**为什么**:Markdown 每次保存都会重建预览 DOM;不设闸的话,旧文档的迟到响应会把新 DOM 渲染成上一版内容(卡片文本与页面文本错位)。只在一端校验不够:Kotlin 漏闸会浪费请求并污染会话,JS 漏闸会污染 DOM。
+
+**症状**:切换文档后短暂出现"不属于这篇文章的译文"。
+
+**守护测试**:`PreviewSessionTest`(`generation change bumps and clears sentences`)+ `bridge.test.ts`(`drops messages from stale generations`)。
+
+### Markdown 内部 API 不出 `markdown/` 包
+
+**规则**:`org.intellij.plugins.markdown.*` 类型只允许出现在 `markdown/` 包与 `plugin.xml`;不反射访问官方 `MarkdownJCEFHtmlPanel` 私有字段。
+
+**为什么**:Markdown 插件的 API 没有 compat 承诺;泄漏面每多一个包,升级时编译断裂点就多一处。
+
+**症状**:IDEA 版本升级后随机位置编译红。
+
+**守护测试**:无自动化(包依赖约定);`check-docs-drift.mjs` 会把 `markdown/` 的改动路由到 rendering/overview 提醒核对。

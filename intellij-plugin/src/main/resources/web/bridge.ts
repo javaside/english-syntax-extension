@@ -87,11 +87,21 @@ export function parsePageMessage(value: unknown): PageMessage | null {
   switch (value.type) {
     case "PREVIEW_READY": {
       if (!hasOnlyKeys(value, PAGE_KEYS_BY_TYPE.PREVIEW_READY!)) return null;
-      return { version: BRIDGE_VERSION, type: "PREVIEW_READY", previewId: value.previewId, generation: value.generation };
+      return {
+        version: BRIDGE_VERSION,
+        type: "PREVIEW_READY",
+        previewId: value.previewId,
+        generation: value.generation,
+      };
     }
     case "VISIBLE_BLOCKS": {
       if (!hasOnlyKeys(value, PAGE_KEYS_BY_TYPE.VISIBLE_BLOCKS!)) return null;
-      if (!Array.isArray(value.blocks) || value.blocks.length === 0 || value.blocks.length > MAX_BLOCKS) return null;
+      if (
+        !Array.isArray(value.blocks) ||
+        value.blocks.length === 0 ||
+        value.blocks.length > MAX_BLOCKS
+      )
+        return null;
       const blocks: VisibleBlockText[] = [];
       for (const block of value.blocks) {
         if (!isRecord(block)) return null;
@@ -100,7 +110,13 @@ export function parsePageMessage(value: unknown): PageMessage | null {
         if (typeof block.text !== "string" || block.text.length > MAX_BLOCK_TEXT) return null;
         blocks.push({ blockId: block.blockId, text: block.text });
       }
-      return { version: BRIDGE_VERSION, type: "VISIBLE_BLOCKS", previewId: value.previewId, generation: value.generation, blocks };
+      return {
+        version: BRIDGE_VERSION,
+        type: "VISIBLE_BLOCKS",
+        previewId: value.previewId,
+        generation: value.generation,
+        blocks,
+      };
     }
     case "DETAIL_REQUEST": {
       if (!hasOnlyKeys(value, PAGE_KEYS_BY_TYPE.DETAIL_REQUEST!)) return null;
@@ -108,7 +124,8 @@ export function parsePageMessage(value: unknown): PageMessage | null {
       if (!isRecord(value.focus)) return null;
       if (!hasOnlyKeys(value.focus, ["startToken", "endToken"])) return null;
       const { startToken, endToken } = value.focus;
-      if (!isNonNegativeInt(startToken) || !isNonNegativeInt(endToken) || endToken < startToken) return null;
+      if (!isNonNegativeInt(startToken) || !isNonNegativeInt(endToken) || endToken < startToken)
+        return null;
       return {
         version: BRIDGE_VERSION,
         type: "DETAIL_REQUEST",
@@ -171,7 +188,8 @@ export function parseHostMessage(value: unknown, currentGeneration: number): Hos
         discovered: value.discovered,
       };
     case "CORE_STREAM":
-      if (!isNonEmptyString(value.sentenceId) || typeof value.componentsJson !== "string") return null;
+      if (!isNonEmptyString(value.sentenceId) || typeof value.componentsJson !== "string")
+        return null;
       return {
         version: BRIDGE_VERSION,
         type: "CORE_STREAM",
@@ -182,7 +200,8 @@ export function parseHostMessage(value: unknown, currentGeneration: number): Hos
       };
     case "CORE_RESULT":
     case "DETAIL_RESULT":
-      if (!isNonEmptyString(value.sentenceId) || typeof value.analysisJson !== "string") return null;
+      if (!isNonEmptyString(value.sentenceId) || typeof value.analysisJson !== "string")
+        return null;
       return {
         version: BRIDGE_VERSION,
         type: value.type,
@@ -192,7 +211,8 @@ export function parseHostMessage(value: unknown, currentGeneration: number): Hos
         analysisJson: value.analysisJson,
       };
     case "DETAIL_STREAM":
-      if (!isNonEmptyString(value.sentenceId) || typeof value.structuresJson !== "string") return null;
+      if (!isNonEmptyString(value.sentenceId) || typeof value.structuresJson !== "string")
+        return null;
       return {
         version: BRIDGE_VERSION,
         type: "DETAIL_STREAM",
@@ -214,7 +234,12 @@ export function parseHostMessage(value: unknown, currentGeneration: number): Hos
         message: value.message,
       };
     case "RESTORE_ALL":
-      return { version: BRIDGE_VERSION, type: "RESTORE_ALL", previewId: value.previewId, generation: value.generation };
+      return {
+        version: BRIDGE_VERSION,
+        type: "RESTORE_ALL",
+        previewId: value.previewId,
+        generation: value.generation,
+      };
     default:
       return null;
   }

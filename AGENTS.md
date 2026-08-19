@@ -1,17 +1,34 @@
 # 项目指令(english-syntax-extension)
 
-Chrome MV3 英语句法学习扩展:TypeScript + Vite,Vitest(fake-indexeddb / happy-dom)单测,Playwright E2E(假 OpenAI 服务器)。本仓库由 springai-agentdemo 单仓拆出(git filter-repo,历史完整保留)。
+双运行时项目:**Chrome MV3 英语句法学习扩展**(TypeScript + Vite,Vitest(fake-indexeddb / happy-dom)单测,Playwright E2E 假 OpenAI 服务器)+ **IntelliJ IDEA Markdown 预览插件**(`intellij-plugin/`,Kotlin + Gradle IntelliJ Platform,SQLite 缓存,JCEF 桥接预览页)。两运行时共享契约:`shared-fixtures/` 的向量与 fixture 由 TS/Kotlin 双端测试同时消费。本仓库由 springai-agentdemo 单仓拆出(git filter-repo,历史完整保留)。
 
 **本文件是权威简版,先读完它再动手。** 需要理解全局结构、跨层链路或某条约定的完整来龙去脉时,读 [`docs/architecture/`](docs/architecture/README.md)(总览 / 模块地图 / 协议参考 / 模型链路 / 渲染链路 / 构建发布 / 不变量清单)。两处冲突以本文件为准,并把架构文档改掉。
 
 ## 门禁(提交前全部过)
 
+Chrome 扩展:
+
 ```bash
 npm test && npx playwright test && npm run lint && npm run format:check && npm run build
 ```
 
+IntelliJ 插件(动了 `intellij-plugin/`、`shared-fixtures/` 或桥协议时):
+
+```bash
+npm run test:idea-web \
+  && ./gradlew :intellij-plugin:test :intellij-plugin:buildPlugin :intellij-plugin:verifyPluginProjectConfiguration
+```
+
+一键全量:`npm run test:all`(= npm test + test:idea-web + `./gradlew intellijCheck`)。
+
 - **lint 基线:恰好 1 个错误**——`src/options/options.test.ts` 的 `no-unnecessary-type-assertion`。不要修它,也不要新增任何错误。
 - 提交信息用中文主题。
+
+## IntelliJ 插件的三条硬不变量
+
+- **密钥不进 JCEF**:API key 只存 PasswordSafe(经 `CredentialStore`),永不进 panel 外发脚本、bridge 消息、缓存或日志。`SecretIsolationTest` 钉住。
+- **generation 在 Kotlin/JS 双端校验**:Kotlin 侧 `PreviewSession.onGenerationChanged` 取消旧请求并清空记录;JS 侧 `parseHostMessage` 丢弃非当前 generation 的一切回调。任何一端漏掉都会让旧响应污染新 DOM。
+- **Markdown 插件内部 API 只留在 `markdown/` 包**:`org.intellij.plugins.markdown` 的类型不泄漏到 session/analysis/actions;不反射访问官方 `MarkdownJCEFHtmlPanel` 私有字段。升级 Markdown 插件时只有这一个包要对着编译。
 
 ## 关键工程约定
 

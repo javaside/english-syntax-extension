@@ -3,7 +3,12 @@ import { parseHostMessage, parsePageMessage } from "./bridge";
 
 describe("parsePageMessage", () => {
   it("accepts minimal preview ready", () => {
-    const message = parsePageMessage({ version: 1, type: "PREVIEW_READY", previewId: "p1", generation: 0 });
+    const message = parsePageMessage({
+      version: 1,
+      type: "PREVIEW_READY",
+      previewId: "p1",
+      generation: 0,
+    });
     expect(message).toEqual({ version: 1, type: "PREVIEW_READY", previewId: "p1", generation: 0 });
   });
 
@@ -23,7 +28,13 @@ describe("parsePageMessage", () => {
   it("rejects more than fifty blocks", () => {
     const blocks = Array.from({ length: 51 }, (_, i) => ({ blockId: `b${i}`, text: "x" }));
     expect(
-      parsePageMessage({ version: 1, type: "VISIBLE_BLOCKS", previewId: "p1", generation: 0, blocks }),
+      parsePageMessage({
+        version: 1,
+        type: "VISIBLE_BLOCKS",
+        previewId: "p1",
+        generation: 0,
+        blocks,
+      }),
     ).toBeNull();
   });
 
@@ -40,28 +51,54 @@ describe("parsePageMessage", () => {
   });
 
   it("rejects unknown type", () => {
-    expect(parsePageMessage({ version: 1, type: "HACK", previewId: "p1", generation: 0 })).toBeNull();
+    expect(
+      parsePageMessage({ version: 1, type: "HACK", previewId: "p1", generation: 0 }),
+    ).toBeNull();
   });
 
   it("rejects extra keys", () => {
     expect(
-      parsePageMessage({ version: 1, type: "PREVIEW_READY", previewId: "p1", generation: 0, apiKey: "leak" }),
+      parsePageMessage({
+        version: 1,
+        type: "PREVIEW_READY",
+        previewId: "p1",
+        generation: 0,
+        apiKey: "leak",
+      }),
     ).toBeNull();
     expect(
-      parsePageMessage({ version: 1, type: "PREVIEW_READY", previewId: "p1", generation: 0, headers: {} }),
+      parsePageMessage({
+        version: 1,
+        type: "PREVIEW_READY",
+        previewId: "p1",
+        generation: 0,
+        headers: {},
+      }),
     ).toBeNull();
     expect(
-      parsePageMessage({ version: 1, type: "PREVIEW_READY", previewId: "p1", generation: 0, baseUrl: "https://evil" }),
+      parsePageMessage({
+        version: 1,
+        type: "PREVIEW_READY",
+        previewId: "p1",
+        generation: 0,
+        baseUrl: "https://evil",
+      }),
     ).toBeNull();
   });
 
   it("rejects wrong version", () => {
-    expect(parsePageMessage({ version: 2, type: "PREVIEW_READY", previewId: "p1", generation: 0 })).toBeNull();
+    expect(
+      parsePageMessage({ version: 2, type: "PREVIEW_READY", previewId: "p1", generation: 0 }),
+    ).toBeNull();
   });
 
   it("rejects blank previewId and negative generation", () => {
-    expect(parsePageMessage({ version: 1, type: "PREVIEW_READY", previewId: "", generation: 0 })).toBeNull();
-    expect(parsePageMessage({ version: 1, type: "PREVIEW_READY", previewId: "p1", generation: -1 })).toBeNull();
+    expect(
+      parsePageMessage({ version: 1, type: "PREVIEW_READY", previewId: "", generation: 0 }),
+    ).toBeNull();
+    expect(
+      parsePageMessage({ version: 1, type: "PREVIEW_READY", previewId: "p1", generation: -1 }),
+    ).toBeNull();
   });
 
   it("rejects detail request with negative or reversed focus", () => {
@@ -106,7 +143,15 @@ describe("parsePageMessage", () => {
 describe("parseHostMessage", () => {
   it("accepts session state for the current generation", () => {
     const message = parseHostMessage(
-      { version: 1, type: "SESSION_STATE", previewId: "p1", generation: 3, state: "running", ready: 1, discovered: 4 },
+      {
+        version: 1,
+        type: "SESSION_STATE",
+        previewId: "p1",
+        generation: 3,
+        state: "running",
+        ready: 1,
+        discovered: 4,
+      },
       3,
     );
     expect(message && message.type === "SESSION_STATE" ? message.ready : null).toBe(1);
@@ -115,7 +160,14 @@ describe("parseHostMessage", () => {
   it("drops messages from stale generations", () => {
     expect(
       parseHostMessage(
-        { version: 1, type: "CORE_RESULT", previewId: "p1", generation: 2, sentenceId: "s1", analysisJson: "{}" },
+        {
+          version: 1,
+          type: "CORE_RESULT",
+          previewId: "p1",
+          generation: 2,
+          sentenceId: "s1",
+          analysisJson: "{}",
+        },
         5,
       ),
     ).toBeNull();

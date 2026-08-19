@@ -128,3 +128,11 @@ tag `v*` 触发,`permissions: contents: write`:
 | TypeScript   | `strict` + `noUncheckedIndexedAccess` + `noImplicitOverride` + `isolatedModules`,`noEmit`(Vite 负责产出)                   |
 | Node         | `>= 22.20.0`                                                                                                               |
 | 依赖         | 全部是 devDependencies——运行时零依赖                                                                                       |
+
+## IntelliJ 插件的构建、测试与发布
+
+- **门禁**:`./gradlew :intellij-plugin:test :intellij-plugin:buildPlugin :intellij-plugin:verifyPluginProjectConfiguration`;聚合任务 `intellijCheck` 供 `npm run test:all` 与 CI 调用。桥协议的 TS 侧测试走 `npm run test:idea-web`(vitest 已包含 `intellij-plugin/src/main/resources/web/`)。
+- **测试分层**:Kotlin 单测(JUnit5,154 例)覆盖模型/调度/缓存/会话;集成测试(`integration/`)用 FakeOpenAiServer + 真实 AnalysisService 走全链路,断言用探针(请求计数、发送记录)不用墙钟;`SecretIsolationTest` 钉密钥隔离。跨端契约由 `shared-fixtures/` 双端消费(`npm run test:contracts`)。
+- **假模型服务器**:Kotlin 侧复用 `testsupport/FakeOpenAiServer`(本地 HTTP,FIFO 响应队列);并发分块用例的响应内容做成"任意配对都合法",不依赖 HTTP 到达顺序。
+- **CI**:三个 job——Chrome(gate)、IntelliJ(intellij:JDK21 + Gradle 缓存 + 插件 zip 产物)、contracts(契约 + 预览 web)。不上传 PasswordSafe/沙箱目录。
+- **发版**:`buildPlugin` 产出带版本 zip;Plugin Verifier 对 IC 2025.1+ 校验。JCEF 不可用的运行时里 Provider 报 UNAVAILABLE,Action 引导切换 JetBrains Runtime。

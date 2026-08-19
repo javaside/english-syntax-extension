@@ -10,7 +10,6 @@ import type { HostMessage } from "./bridge";
 const HIDDEN_ATTRIBUTE = "data-english-syntax-hidden";
 const CARD_TAG = "div";
 const CARD_ATTRIBUTE = "data-english-syntax-card";
-const BLOCK_ID_ATTRIBUTE = "data-english-syntax-block";
 
 interface BlockRecord {
   blockId: string;
@@ -42,12 +41,22 @@ interface ComponentPayload {
 interface DetailPayload {
   sentenceId: string;
   focus: { startToken: number; endToken: number };
-  structures: Array<{ startToken: number; endToken: number; role: string; explanation: string; translation?: string }>;
+  structures: Array<{
+    startToken: number;
+    endToken: number;
+    role: string;
+    explanation: string;
+    translation?: string;
+  }>;
   grammarPoints: string[];
   explanation: string;
 }
 
-export type DetailRequestHandler = (sentenceId: string, focusStart: number, focusEnd: number) => void;
+export type DetailRequestHandler = (
+  sentenceId: string,
+  focusStart: number,
+  focusEnd: number,
+) => void;
 
 export class PreviewRenderer {
   readonly #blocks = new Map<string, BlockRecord>();
@@ -69,7 +78,10 @@ export class PreviewRenderer {
   handleHostMessage(message: HostMessage): void {
     switch (message.type) {
       case "CORE_STREAM":
-        this.renderCoreStream(message.sentenceId, JSON.parse(message.componentsJson) as ComponentPayload[]);
+        this.renderCoreStream(
+          message.sentenceId,
+          JSON.parse(message.componentsJson) as ComponentPayload[],
+        );
         break;
       case "CORE_RESULT":
         this.renderCoreResult(message.sentenceId, JSON.parse(message.analysisJson) as CorePayload);
@@ -150,7 +162,11 @@ export class PreviewRenderer {
   ): void {
     const entry = this.#sentences.get(sentenceId);
     if (entry == null) return;
-    this.#currentDetail = { sentenceId, focusStart: detail?.focus.startToken ?? 0, focusEnd: detail?.focus.endToken ?? 0 };
+    this.#currentDetail = {
+      sentenceId,
+      focusStart: detail?.focus.startToken ?? 0,
+      focusEnd: detail?.focus.endToken ?? 0,
+    };
     this.#repaintBlock(entry.blockId, { detailStructures: structures, detail });
   }
 
@@ -163,16 +179,27 @@ export class PreviewRenderer {
 
   #repaintBlock(
     blockId: string,
-    options: { errorSentenceId?: string; message?: string; detailStructures?: DetailPayload["structures"]; detail?: DetailPayload } = {},
+    options: {
+      errorSentenceId?: string;
+      message?: string;
+      detailStructures?: DetailPayload["structures"];
+      detail?: DetailPayload;
+    } = {},
   ): void {
     const record = this.#blocks.get(blockId);
     if (record === undefined) return;
     const order = this.#blockSentenceOrder.get(blockId) ?? [];
     const hasContent = order.some((id) => {
       const sentence = record.sentences.get(id);
-      return sentence !== undefined && (sentence.analysis !== null || sentence.provisional !== null);
+      return (
+        sentence !== undefined && (sentence.analysis !== null || sentence.provisional !== null)
+      );
     });
-    if (!hasContent && options.errorSentenceId === undefined && options.detailStructures === undefined) {
+    if (
+      !hasContent &&
+      options.errorSentenceId === undefined &&
+      options.detailStructures === undefined
+    ) {
       this.#restoreBlock(record);
       return;
     }
@@ -188,7 +215,12 @@ export class PreviewRenderer {
   #renderCard(
     record: BlockRecord,
     order: string[],
-    options: { errorSentenceId?: string; message?: string; detailStructures?: DetailPayload["structures"]; detail?: DetailPayload },
+    options: {
+      errorSentenceId?: string;
+      message?: string;
+      detailStructures?: DetailPayload["structures"];
+      detail?: DetailPayload;
+    },
   ): void {
     const card = record.card!;
     const owner = record.element.ownerDocument;
@@ -258,7 +290,11 @@ export class PreviewRenderer {
         role.textContent = structure.role;
         const english = owner.createElement("span");
         english.className = "english-syntax-detail-english";
-        english.textContent = this.#componentText(record, this.#currentDetail?.sentenceId ?? "", structure);
+        english.textContent = this.#componentText(
+          record,
+          this.#currentDetail?.sentenceId ?? "",
+          structure,
+        );
         const translation = owner.createElement("span");
         translation.className = "english-syntax-detail-translation";
         translation.textContent = structure.translation ?? "";
@@ -282,7 +318,11 @@ export class PreviewRenderer {
     card.append(container);
   }
 
-  #componentText(record: BlockRecord, sentenceId: string, component: { startToken: number; endToken: number; text?: string }): string {
+  #componentText(
+    record: BlockRecord,
+    sentenceId: string,
+    component: { startToken: number; endToken: number; text?: string },
+  ): string {
     // 预览层优先使用 Kotlin 侧回填的 text；缺失时留空（后续由会话层补 token 文本）。
     void record;
     void sentenceId;

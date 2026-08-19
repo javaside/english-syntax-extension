@@ -62,6 +62,44 @@
 | `options/cache-transfer.ts`   | 缓存导出文件的格式定义与导入校验(格式 / schema 版本 / 键形状)                                                                               |
 | `options/options.html` `.css` | 挂载点与样式                                                                                                                                |
 
+## intellij-plugin —— IntelliJ IDEA Markdown 预览插件(第二运行时)
+
+| 路径                                         | 职责                                                                                                |
+| -------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `domain/Domain.kt`                           | Kotlin 领域模型:Token/SentenceInput/CoreAnalysis/DetailAnalysis/错误码,与 TS 契约同构               |
+| `language/Segmenter.kt`                      | 分句分词(与 TS `segmenter.ts` 同规则,共享向量钉住)                                                  |
+| `language/AnalysisValidator.kt`              | 模型输出校验(与 TS `analysis-validator.ts` 同规则)                                                  |
+| `model/Prompts.kt`                           | core/detail/修复 prompt 构造,serialize 不缩进                                                       |
+| `model/BaseUrl.kt`                           | URL 规范化与 loopback 判定(决定每请求句数上限)                                                      |
+| `model/OpenAiCompatibleClient.kt`            | OpenAI 兼容客户端:缓冲/流式/JSON Schema 降级/reasoning 降级                                         |
+| `model/SseDecoder.kt`                        | SSE 逐块解码(静默超时重置)                                                                          |
+| `model/CoreStreamParser.kt`                  | core 流式增量解析(暂定成分)                                                                         |
+| `model/DetailStreamParser.kt`                | detail 流式增量解析(暂定结构)                                                                       |
+| `model/StreamJsonSupport.kt`                 | 流式能力降级位持久化                                                                                |
+| `settings/ProfileState.kt`                   | Profile 持久化状态(JsonSchemaSupport 等降级位)                                                      |
+| `settings/ProfileRepository.kt`              | Profile 仓库:敏感字段走 CredentialStore(PasswordSafe)                                               |
+| `settings/CredentialStore.kt`                | 凭据存储抽象:密钥只进 PasswordSafe,永不入 state                                                     |
+| `settings/EnglishSyntaxConfigurable.kt`      | 设置页 UI                                                                                           |
+| `scheduler/RequestScheduler.kt`              | 优先级调度器:一请求一槽位、jumpQueue、backgroundConcurrency、按 document 取消(与 Chrome 端同名对应) |
+| `cache/CacheKeys.kt`                         | 跨端一致的缓存键(SHA-256,共享向量钉住)                                                              |
+| `cache/AnalysisCache.kt`                     | SQLite 缓存:跨 store LRU、单调时间戳、导入合并                                                      |
+| `cache/CacheTransfer.kt`                     | 与 Chrome 扩展互通的导出/导入(格式头/schema 校验)                                                   |
+| `analysis/AnalysisService.kt`                | 编排:查缓存→分块→调度→校验→一次修复→写缓存;AnalysisServicePort 供测试替换                           |
+| `bridge/BridgeProtocol.kt`                   | JCEF 桥协议:键白名单严格校验,apiKey/headers/baseUrl 一律拒绝                                        |
+| `markdown/EnglishSyntaxPreviewProvider.kt`   | Markdown 预览 Provider(注册到 org.intellij.markdown.html.panel.provider)                            |
+| `markdown/EnglishSyntaxPreviewPanel.kt`      | 预览面板:previewId/generation、桥接入口、dispose 语义                                               |
+| `session/PreviewSession.kt`                  | 单预览会话状态机:start/pause/resume/stop、可见块合批、优先级映射、generation 守卫                   |
+| `session/PreviewSessionManager.kt`           | 项目级会话管理:每 preview 一个 child Job、活跃预览、Profile 快照刷新                                |
+| `actions/PreviewActionSupport.kt`            | Action 启用条件与进度文案(纯函数)                                                                   |
+| `actions/StartSyntaxLearningAction.kt`       | 开始句法学习(经 FileEditorManager 定位面板,不扫 Swing)                                              |
+| `actions/TogglePauseSyntaxLearningAction.kt` | 暂停/继续切换                                                                                       |
+| `actions/StopSyntaxLearningAction.kt`        | 停止并恢复原文                                                                                      |
+| `EnglishSyntaxBundle.kt`                     | 消息 bundle 接线                                                                                    |
+| `PluginIdentity.kt`                          | 插件身份常量                                                                                        |
+| `resources/web/bridge.ts`                    | JS 侧桥协议镜像:hasOnlyKeys + generation 复检,旧代次丢弃                                            |
+| `resources/web/preview.ts`                   | 预览 DOM 扫描:候选/排除选择器、英文占比、可见性观察                                                 |
+| `resources/web/render.ts`                    | 句法卡片渲染:可逆替换、流式暂定卡、详解面板,XSS 安全 textContent                                    |
+
 ## tests / scripts
 
 | 路径                                     | 职责                                                                                                                                                    |

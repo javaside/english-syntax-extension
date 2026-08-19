@@ -17,7 +17,7 @@ const EXCLUDED_SELECTOR =
   "pre,code,table,.math,.katex,.mermaid,.footnotes,[role='doc-endnotes']," +
   "button,input,textarea,select,iframe,[contenteditable],[data-english-syntax-card]";
 const HIDDEN_ATTRIBUTE = "data-english-syntax-hidden";
-const CARD_ATTRIBUTE = "data-english-syntax-card";
+const BLOCK_ID_ATTRIBUTE = "data-english-syntax-block";
 const MIN_TEXT_LENGTH = 20;
 const ENGLISH_RATIO = 0.6;
 const BLOCK_SELECTOR_PREFIX = "english-syntax-block-";
@@ -68,13 +68,15 @@ export function scanMarkdownBlocks(root: ParentNode): PreviewBlock[] {
     collectCandidates(element, elements);
   }
   return elements
-    .filter((element) => !registeredElements.has(element) && !element.hasAttribute(HIDDEN_ATTRIBUTE))
+    .filter(
+      (element) => !registeredElements.has(element) && !element.hasAttribute(HIDDEN_ATTRIBUTE),
+    )
     .map((element) => {
       registeredElements.add(element);
       // 已带 block 标记的元素沿用旧 id（防重复扫描产生双 id）。
       const existing = element.getAttribute("data-english-syntax-block");
       const blockId = existing ?? `${BLOCK_SELECTOR_PREFIX}${nextBlockId++}`;
-      if (existing === null) element.setAttribute("data-english-syntax-block", blockId);
+      if (existing === null) element.setAttribute(BLOCK_ID_ATTRIBUTE, blockId);
       return { blockId, element, text: (element.textContent ?? "").trim() };
     });
 }

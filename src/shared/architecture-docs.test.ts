@@ -67,6 +67,21 @@ function implementationFiles(): string[] {
     );
 }
 
+/** IntelliJ 插件侧实现文件：Kotlin 主源集 + web 资源里的实现 ts（测试文件豁免）。 */
+function intellijImplementationFiles(): string[] {
+  const kotlinRoot = join(root, "intellij-plugin", "src", "main", "kotlin");
+  const walk = (dir: string): string[] =>
+    readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+      const child = join(dir, entry.name);
+      return entry.isDirectory() ? walk(child) : entry.name.endsWith(".kt") ? [child] : [];
+    });
+  const webRoot = join(root, "intellij-plugin", "src", "main", "resources", "web");
+  const webFiles = readdirSync(webRoot)
+    .filter((name) => name.endsWith(".ts") && !name.endsWith(".test.ts"))
+    .map((name) => join(webRoot, name));
+  return [...walk(kotlinRoot), ...webFiles];
+}
+
 describe("架构文档与代码同步", () => {
   it("每一份文档都非空,且首行是标题", () => {
     expect(docFileNames.length).toBeGreaterThanOrEqual(7);
@@ -91,6 +106,17 @@ describe("架构文档与代码同步", () => {
       expect(modules, `modules.md 缺少 ${relativePath}——新增模块要补进模块地图`).toContain(
         fileName,
       );
+    }
+  });
+
+  it("intellij-plugin 每个实现文件都在模块地图里出现", () => {
+    const modules = docs.get("modules.md")!;
+    for (const filePath of intellijImplementationFiles()) {
+      const fileName = filePath.split(/[\\/]/).at(-1)!;
+      expect(
+        modules,
+        `modules.md 缺少 ${fileName}——IntelliJ 插件新增实现文件要补进模块地图`,
+      ).toContain(fileName);
     }
   });
 

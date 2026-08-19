@@ -225,3 +225,13 @@ currentElement(original)                  当前呈现的元素:替换中返回�
 ### 断线重连
 
 端口断开 → `reconnectAndResume()`:按 `[0, 250, 500, 1000]` ms 重试连接;成功后把所有未达终态的块重新入队(paused 时放进 `pausedBlocks`)。全部失败则清掉所有块的活动标记。
+
+## IntelliJ 插件的渲染链路(预览页)
+
+Chrome 端在真实网页里替换 DOM;IntelliJ 端在 JCEF 渲染的 Markdown 预览页里做同样的事,但取舍不同:
+
+- **扫描**:`preview.ts` 的 `scanMarkdownBlocks` 只认 Markdown 渲染产物——候选固定为 `h1-h6/p/li/blockquote`(blockquote 只取安全叶子),排除 `pre/code/table/.math/.katex/.mermaid/.footnotes/交互控件`与插件自己的卡片;英文占比 ≥ 60%、最短 20 字符。Chrome 端"正文容器得分"那套在这里不适用。
+- **可见性**:IntersectionObserver(rootMargin 上下各一屏),不支持时退化为 rAF 节流的 scroll/resize。
+- **卡片**:`render.ts` 用 `data-english-syntax-hidden` 隐藏原文、在其后插入 `data-english-syntax-card` 卡片;`restoreAll` 精确删除插件节点与 data 属性。模型文本一律 `textContent`,杜绝 `<img onerror>` 注入。
+- **generation 双闸**:页面收到旧 generation 的 `CORE_RESULT`/`DETAIL_*` 一律丢弃(见 [invariants.md](./invariants.md))。
+- **详解**:点击成分经 bridge 发 `DETAIL_REQUEST`,面板同时只展开一个详解面板;再次点击同一成分关闭。
