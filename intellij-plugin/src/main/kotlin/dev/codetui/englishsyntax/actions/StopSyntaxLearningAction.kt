@@ -8,7 +8,9 @@ import dev.codetui.englishsyntax.session.SessionState
 
 /** 停止并恢复原文：取消 document、发送 RESTORE_ALL、清空卡片。 */
 class StopSyntaxLearningAction(
-  private val managerProvider: (com.intellij.openapi.project.Project) -> PreviewSessionManager? = { null },
+  private val managerProvider: (com.intellij.openapi.project.Project) -> PreviewSessionManager? = { _ ->
+      com.intellij.openapi.components.service<dev.codetui.englishsyntax.PreviewSessionManagerService>().manager
+    },
 ) : AnAction() {
 
   override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT

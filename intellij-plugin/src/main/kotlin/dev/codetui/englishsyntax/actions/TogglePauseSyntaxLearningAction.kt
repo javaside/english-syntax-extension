@@ -8,7 +8,9 @@ import dev.codetui.englishsyntax.session.SessionState
 
 /** 暂停/继续切换：文案随会话状态变化，由 update 驱动。 */
 class TogglePauseSyntaxLearningAction(
-  private val managerProvider: (com.intellij.openapi.project.Project) -> PreviewSessionManager? = { null },
+  private val managerProvider: (com.intellij.openapi.project.Project) -> PreviewSessionManager? = { _ ->
+      com.intellij.openapi.components.service<dev.codetui.englishsyntax.PreviewSessionManagerService>().manager
+    },
 ) : AnAction() {
 
   override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT

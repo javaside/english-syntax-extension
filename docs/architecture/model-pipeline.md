@@ -230,6 +230,6 @@ raw → dropPunctuationOnlyComponents → validateCoreBatch
 - **优先级**:五档同名同序(`USER_RETRY > DETAIL_CLICK > ACTIVE_VISIBLE_CORE > OTHER_VISIBLE_CORE > ACTIVE_PREFETCH_CORE`)。IntelliJ 侧多一档语义:非活动预览的可见块走 `OTHER_VISIBLE_CORE`(Chrome 端只有单文档,用不到)。
 - **分块**:`isLoopbackBaseUrl` 判定本地端点(Ollama 等)时每请求 6 句,云端 2 句——与 Chrome 端的 `CLOUD_SENTENCES_PER_REQUEST` 语义一致。
 - **缓存**:SQLite(`analysis_cache` 表,跨 core/detail store 的 LRU,键与 Chrome 扩展逐字节一致),导入导出格式与 Chrome 选项页互通(`english-syntax-cache` v1)。
-- **降级**:`JsonSchemaSupport`/`streamSupport`/reasoningControl 三块与 Chrome 端对称,只持久化否定态。
+- **降级**:`JsonSchemaSupport`/`streamSupport`/reasoningControl 三块与 Chrome 端对称,只持久化否定态。设置页「测试连接」按钮(ConnectionProbe)会先保存 profile、再经 `probeJsonCapability` 打一次真模型探测,把 JSON schema 支持态写回 profile 并在状态栏反馈——与 Chrome 选项页「测试连接」同套路。
 - **修复 pass**:整块校验失败只把非法句送修复(`jumpQueue` 同优先级插队),修复后仍失败记 `INVALID_MODEL_OUTPUT`,兄弟句不受连坐。
 - **流式**:分片先经 `ProvisionalComponents`/`ProvisionalStructures` 安全过滤(角色枚举、区间界内、有序不重叠)再作为 `CORE_STREAM` 推给页面;分片不写缓存、不改相位——与 Chrome 端约定一致。

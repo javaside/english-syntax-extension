@@ -12,15 +12,16 @@ import org.intellij.plugins.markdown.ui.preview.MarkdownHtmlPanelProvider
  */
 class EnglishSyntaxPreviewProvider(
   private val jcefSupported: () -> Boolean = JBCefApp::isSupported,
-  private val panelFactory: (Project?, VirtualFile?) -> EnglishSyntaxPreviewPanel = { project, file ->
-    EnglishSyntaxPreviewPanel(project, file)
+  private val panelFactory: (Project?, VirtualFile?) -> EnglishSyntaxPreviewPanel? = { project, file ->
+    EnglishSyntaxPreviewPanel.createWithJcef(project, file, null)
   },
 ) : MarkdownHtmlPanelProvider() {
 
   override fun createHtmlPanel(): MarkdownHtmlPanel = panelFactory(null, null)
+    ?: throw IllegalStateException("JCEF assembly unavailable")
 
   override fun createHtmlPanel(project: Project, virtualFile: VirtualFile): MarkdownHtmlPanel =
-    panelFactory(project, virtualFile)
+    panelFactory(project, virtualFile) ?: throw IllegalStateException("JCEF assembly unavailable")
 
   override fun isAvailable(): AvailabilityInfo =
     if (jcefSupported()) AvailabilityInfo.AVAILABLE else AvailabilityInfo.UNAVAILABLE

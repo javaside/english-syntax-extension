@@ -98,7 +98,9 @@
 | `actions/StopSyntaxLearningAction.kt`        | 停止并恢复原文                                                                                      |
 | `EnglishSyntaxBundle.kt`                     | 消息 bundle 接线                                                                                    |
 | `PluginIdentity.kt`                          | 插件身份常量                                                                                        |
+| `PluginServices.kt`                          | 生产装配:应用级服务注册(ModelClientService/AnalysisServiceService/PreviewSessionManagerService),把模型客户端、SQLite 缓存、调度器与会话管理器接进 IntelliJ 服务容器 |
 | `resources/web/bridge.ts`                    | JS 侧桥协议镜像:hasOnlyKeys + generation 复检,旧代次丢弃                                            |
+| `resources/web/bootstrap-entry.ts`           | JCEF 页面入口:接 bridge/preview/render 到 window 全局(`__englishSyntaxInitialize` 等),由 rolldown 打包成 bundle.js 注入 |
 | `resources/web/preview.ts`                   | 预览 DOM 扫描:候选/排除选择器、英文占比、可见性观察                                                 |
 | `resources/web/render.ts`                    | 句法卡片渲染:可逆替换、流式暂定卡、详解面板,XSS 安全 textContent                                    |
 | `package.json` / `vitest.config.ts` / `tsconfig.json` | 子工程 npm 工程:web TS 测试(`npm ci && npm test`)独立运行,不挂在 chrome-plugin 依赖下      |

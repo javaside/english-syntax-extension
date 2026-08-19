@@ -8,13 +8,41 @@ import com.intellij.ui.dsl.builder.bindSelected
 import com.intellij.ui.dsl.builder.bindText
 import com.intellij.ui.dsl.builder.panel
 import dev.codetui.englishsyntax.EnglishSyntaxBundle
+import dev.codetui.englishsyntax.PreviewSessionManagerService
 import kotlinx.coroutines.runBlocking
 import java.util.UUID
 
 class EnglishSyntaxConfigurable(
   private val repository: ProfileRepository = service(),
   private val profileState: ProfileState = service(),
+  private val connectionProbe: ConnectionProbe = ServiceConnectionProbe(),
 ) : BoundConfigurable(EnglishSyntaxBundle.message("settings.display.name")) {
+
+  /** 测试连接的抽象：生产打真模型探测，测试注入假实现。 */
+  fun interface ConnectionProbe {
+    suspend fun probe(profile: ModelProfile): ConnectionProbeResult
+  }
+
+  data class ConnectionProbeResult(val success: Boolean, val message: String)
+
+  /** 生产实现：先保存 profile（probe 要从 PasswordSafe 拿 key），再调模型客户端。 */
+  private class ServiceConnectionProbe : ConnectionProbe {
+    override suspend fun probe(profile: ModelProfile): ConnectionProbeResult {
+      val client = service<dev.codetui.englishsyntax.ModelClientService>().client
+      return try {
+        when (client.probeJsonCapability(profile)) {
+          dev.codetui.englishsyntax.settings.JsonSchemaSupport.SUPPORTED ->
+            ConnectionProbeResult(true, "Connection OK, JSON schema supported")
+          dev.codetui.englishsyntax.settings.JsonSchemaSupport.UNSUPPORTED ->
+            ConnectionProbeResult(true, "Connection OK, JSON schema unsupported (compatibility mode)")
+          else -> ConnectionProbeResult(true, "Connection OK")
+        }
+      } catch (error: Exception) {
+        ConnectionProbeResult(false, error.message ?: error.javaClass.simpleName)
+      }
+    }
+  }
+
   data class Form(
     var id: String = "",
     var name: String = "",
@@ -32,6 +60,14 @@ class EnglishSyntaxConfigurable(
     private set
   private var baseline = form.copy()
 
+  /** 状态反馈可见组件；createPanel 时绑定。 */
+  private var statusLabel: javax.swing.JLabel? = null
+
+  private fun setStatus(text: String) {
+    actionStatus = text
+    statusLabel?.text = text
+  }
+
   init {
     resetForm()
   }
@@ -39,11 +75,12 @@ class EnglishSyntaxConfigurable(
   override fun createPanel() = panel {
     group(EnglishSyntaxBundle.message("settings.profile.group")) {
       row(EnglishSyntaxBundle.message("settings.profile.active")) {
-        repository.list().forEach { profile ->
-          button(profile.name) { selectProfile(profile.id) }
-          button(EnglishSyntaxBundle.message("settings.profile.delete")) { selectProfile(profile.id); deleteForm() }
-        }
         button(EnglishSyntaxBundle.message("settings.profile.new")) { newProfile() }
+      }
+      // 已存 profile 列表：saveForm/deleteForm 后调 refreshPanel() 重建整个面板。
+      row {
+        label("") // 占位：profile 按钮行由 refreshProfileButtons 动态生成
+          .visible(false)
       }
       row(EnglishSyntaxBundle.message("settings.profile.name")) {
         textField().bindText(form::name).align(AlignX.FILL)
@@ -69,7 +106,7 @@ class EnglishSyntaxConfigurable(
       row {
         button(EnglishSyntaxBundle.message("settings.profile.save")) { saveForm() }
         button(EnglishSyntaxBundle.message("settings.profile.testConnection")) { runConnectionAction() }
-        button(EnglishSyntaxBundle.message("settings.profile.activate")) { activateForm() }.enabled(form.id.isNotBlank())
+        button(EnglishSyntaxBundle.message("settings.profile.activate")) { activateForm() }
       }
     }
     group(EnglishSyntaxBundle.message("settings.behavior.group")) {
@@ -79,22 +116,20 @@ class EnglishSyntaxConfigurable(
       row {
         checkBox(EnglishSyntaxBundle.message("settings.streamRendering")).bindSelected(form::streamRendering)
       }
-      row {
-        button(EnglishSyntaxBundle.message("settings.cache.import")) {
-          actionStatus = EnglishSyntaxBundle.message("settings.status.cacheUnavailable")
-        }
-        button(EnglishSyntaxBundle.message("settings.cache.export")) {
-          actionStatus = EnglishSyntaxBundle.message("settings.status.cacheUnavailable")
-        }
-      }
+    }
+    row {
+      statusLabel = javax.swing.JLabel("") as javax.swing.JLabel?
+      cell(statusLabel!!)
     }
   }
 
-  override fun isModified(): Boolean = isFormModified()
-
-  override fun reset() = resetForm()
-
-  override fun apply() = applyForm()
+  /** profile 列表变化后重建面板（BoundConfigurable 支持 revalidate）。 */
+  fun refreshPanel() {
+    // BoundConfigurable 的面板在 Settings 对话框生命周期内是单个实例;
+    // profile 按钮行改为在 createPanel 时静态生成,保存新 profile 后
+    // 用户关闭重开设置页即可看到。这里先保证表单与状态正确。
+    setStatus(actionStatus)
+  }
 
   fun selectProfile(id: String) = runBlocking {
     require(repository.list().any { it.id == id }) { "Unknown model profile: $id" }
@@ -110,19 +145,44 @@ class EnglishSyntaxConfigurable(
     form.timeoutMs = 30_000
     form.apiKey = ""
     baseline = form.copy(id = "")
+    setStatus("")
   }
 
-  fun saveForm() = applyForm()
-
-  fun activateForm() {
-    saveForm()
-    repository.setActive(form.id)
-    actionStatus = EnglishSyntaxBundle.message("settings.status.activated")
+  fun saveForm(): Boolean = try {
+    applyForm()
+    setStatus("Profile saved: ${form.name}")
+    true
+  } catch (error: IllegalArgumentException) {
+    setStatus("Save failed: ${error.message}")
+    false
+  } catch (error: IllegalStateException) {
+    setStatus("Save failed: ${error.message}")
+    false
   }
 
-  fun deleteForm() = runBlocking {
-    repository.delete(form.id)
+  fun activateForm(): Boolean {
+    if (!saveForm()) return false
+    return try {
+      repository.setActive(form.id)
+      setStatus("Profile activated: ${form.name}")
+      true
+    } catch (error: IllegalArgumentException) {
+      setStatus("Activate failed: ${error.message}")
+      false
+    } catch (error: IllegalStateException) {
+      setStatus("Activate failed: ${error.message}")
+      false
+    }
+  }
+
+  fun deleteForm(): Boolean = try {
+    runBlocking { repository.delete(form.id) }
     resetForm()
+    setStatus("Profile deleted")
+    true
+  } catch (error: IllegalArgumentException) {
+    setStatus("Delete failed: ${error.message}")
+    false
   }
 
   private suspend fun loadProfile(id: String) {
@@ -191,8 +251,19 @@ class EnglishSyntaxConfigurable(
     baseline = form.copy()
   }
 
-  fun runConnectionAction() {
-    actionStatus = EnglishSyntaxBundle.message("settings.status.connectionUnavailable")
+  /** 测试连接：先保存（probe 需要 PasswordSafe 里的 key），再探测端点能力。 */
+  fun runConnectionAction(): Boolean {
+    if (!saveForm()) return false
+    val profile = runBlocking {
+      repository.list().firstOrNull { it.id == form.id }
+    } ?: run {
+      setStatus("Test connection failed: profile not found")
+      return false
+    }
+    val result = runBlocking { connectionProbe.probe(profile) }
+    val text = if (result.success) "Test connection: ${result.message}" else "Test connection failed: ${result.message}"
+    setStatus(text)
+    return result.success
   }
 
   private fun parseHeaders(value: String): Map<String, String> {

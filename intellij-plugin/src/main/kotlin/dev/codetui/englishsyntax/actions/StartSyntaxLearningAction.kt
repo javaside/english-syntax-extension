@@ -16,7 +16,9 @@ import dev.codetui.englishsyntax.session.PreviewSessionManager
  * 面板定位只走 FileEditorManager 的 selected editor，不做 Swing 全局扫描。
  */
 class StartSyntaxLearningAction(
-  private val managerProvider: (Project) -> PreviewSessionManager? = { null },
+  private val managerProvider: (Project) -> PreviewSessionManager? = { _ ->
+      com.intellij.openapi.components.service<dev.codetui.englishsyntax.PreviewSessionManagerService>().manager
+    },
   private val jcefSupported: () -> Boolean = JBCefApp::isSupported,
 ) : AnAction() {
 

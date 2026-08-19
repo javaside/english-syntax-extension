@@ -10,7 +10,9 @@
   },
   "scripts": {
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:idea-web": "vitest run src/main/resources/web",
+    "bundle-web": "node scripts/bundle-web.mjs"
   },
   "devDependencies": {
     "@types/node": "26.1.1",

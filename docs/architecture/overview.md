@@ -192,6 +192,6 @@ Chrome 扩展之外,本仓库还交付一个 IntelliJ IDEA Markdown 预览插件
 - 仓库根 `shared-fixtures/` 的分句/缓存键向量、交换 fixture 由 TS(chrome-plugin)与 Kotlin(intellij-plugin)测试同时消费——两端任何一侧改规则,另一侧的测试立刻红。
 - 模型链路(prompt、校验、修复、降级)在 Kotlin 侧按同一骨架重新实现(见 [model-pipeline.md](./model-pipeline.md) 的 IntelliJ 小节)。
 
-链路时序:IntelliJ 打开 `.md` 预览 → `EnglishSyntaxPreviewProvider` 提供 JCEF 面板 → `setHtml` 递增 generation 并通知页面 → JS 扫描可见块回传 `VISIBLE_BLOCKS` → `PreviewSession` 分句分词、合批、查 SQLite 缓存(与 Chrome 扩展互通)→ 未命中经 `RequestScheduler` 调模型 → 校验/一次修复 → `CORE_RESULT`/`CORE_STREAM` 回推页面 → `render.ts` 可逆替换卡片。用户手势(Tools 菜单的三个 Action)驱动 start/pause/stop;stop 发 `RESTORE_ALL` 恢复原文。
+链路时序:IntelliJ 打开 `.md` 预览 → `EnglishSyntaxPreviewProvider.createHtmlPanel` 经 `createWithJcef` 装配面板(JBCefBrowser + JBCefJSQuery,`onLoadEnd` 时把 `web/bundle.js` 与 `preview.css` 经 executeJavaScript 注入预览页;bundle 由 `scripts/bundle-web.mjs` 从 `bootstrap-entry.ts` 打包)→ `setHtml` 递增 generation 并通知页面 → JS 扫描可见块回传 `VISIBLE_BLOCKS` → `PreviewSession` 分句分词、合批、查 SQLite 缓存(与 Chrome 扩展互通)→ 未命中经 `RequestScheduler` 调模型 → 校验/一次修复 → `CORE_RESULT`/`CORE_STREAM` 回推页面 → `render.ts` 可逆替换卡片。用户手势(Tools 菜单的三个 Action)经 `PreviewSessionManagerService` 取 manager 驱动 start/pause/stop;stop 发 `RESTORE_ALL` 恢复原文。
 
 生命周期:每个预览一个 `PreviewSession`(child Job),面板 dispose 时随项目 scope 取消;Profile 是 start 时刻的快照,设置变更后由 Manager 刷新。JCEF 不可用时 Provider 报 UNAVAILABLE,Action 提示切换 JetBrains Runtime。

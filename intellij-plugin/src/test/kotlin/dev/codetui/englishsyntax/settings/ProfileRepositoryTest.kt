@@ -198,7 +198,9 @@ class ProfileRepositoryTest {
     val credentials = FakeCredentialStore()
     val repository = repository(credentials)
     repository.save(profile(), apiKey = "old-key")
-    val configurable = EnglishSyntaxConfigurable(repository, ProfileState())
+    val configurable = EnglishSyntaxConfigurable(repository, ProfileState(), EnglishSyntaxConfigurable.ConnectionProbe { _ ->
+        EnglishSyntaxConfigurable.ConnectionProbeResult(true, "stub")
+      })
 
     configurable.resetForm()
     assertFalse(configurable.isFormModified())
@@ -256,17 +258,56 @@ class ProfileRepositoryTest {
   }
 
   @Test
+  fun `connection probe success and failure are surfaced in action status`() = runBlocking {
+    val repository = repository()
+    repository.save(profile())
+    val successProbe = EnglishSyntaxConfigurable.ConnectionProbe { _ ->
+      EnglishSyntaxConfigurable.ConnectionProbeResult(true, "Connection OK, JSON schema supported")
+    }
+    val failureProbe = EnglishSyntaxConfigurable.ConnectionProbe { _ ->
+      EnglishSyntaxConfigurable.ConnectionProbeResult(false, "timeout")
+    }
+
+    val ok = EnglishSyntaxConfigurable(repository, ProfileState(), successProbe)
+    ok.resetForm()
+    assertTrue(ok.runConnectionAction())
+    assertTrue(ok.actionStatus.contains("OK"))
+
+    val bad = EnglishSyntaxConfigurable(repository, ProfileState(), failureProbe)
+    bad.resetForm()
+    assertFalse(bad.runConnectionAction())
+    assertTrue(bad.actionStatus.contains("failed"))
+  }
+
+  @Test
+  fun `save with invalid base url reports failure and keeps repository unchanged`() = runBlocking {
+    val repository = repository()
+    repository.save(profile())
+    val configurable = EnglishSyntaxConfigurable(repository, ProfileState(), EnglishSyntaxConfigurable.ConnectionProbe { _ ->
+      EnglishSyntaxConfigurable.ConnectionProbeResult(true, "stub")
+    })
+    configurable.resetForm()
+    configurable.form.baseUrl = "http://api.example.com/v1"
+    assertFalse(configurable.saveForm())
+    assertTrue(configurable.actionStatus.contains("HTTPS"))
+    assertEquals("https://api.example.com/v1", repository.active()?.baseUrl)
+  }
+
+  @Test
   fun `configurable rejects exact and case insensitive duplicate header lines`() = runBlocking {
     val repository = repository()
     repository.save(profile())
-    val configurable = EnglishSyntaxConfigurable(repository, ProfileState())
+    val configurable = EnglishSyntaxConfigurable(repository, ProfileState(), EnglishSyntaxConfigurable.ConnectionProbe { _ ->
+        EnglishSyntaxConfigurable.ConnectionProbeResult(true, "stub")
+      })
 
     listOf(
       "X-Tenant: one\nX-Tenant: two",
       "X-Tenant: one\n x-tenant : two",
     ).forEach { headers ->
       configurable.form.headers = headers
-      assertFailsWith<IllegalArgumentException> { configurable.saveForm() }
+      assertFalse(configurable.saveForm())
+      assertTrue(configurable.actionStatus.contains("unique"))
     }
   }
 
@@ -276,7 +317,9 @@ class ProfileRepositoryTest {
     val repository = repository(credentials)
     repository.save(profile())
     repository.save(profile().copy(id = "profile-2", name = "Second"))
-    val configurable = EnglishSyntaxConfigurable(repository, ProfileState())
+    val configurable = EnglishSyntaxConfigurable(repository, ProfileState(), EnglishSyntaxConfigurable.ConnectionProbe { _ ->
+        EnglishSyntaxConfigurable.ConnectionProbeResult(true, "stub")
+      })
 
     configurable.selectProfile("profile-2")
     configurable.form.name = "Updated second"

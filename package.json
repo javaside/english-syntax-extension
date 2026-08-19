@@ -1,0 +1,10 @@
+{
+  "name": "english-syntax-extension",
+  "version": "0.1.0",
+  "private": true,
+  "description": "双运行时仓库（Chrome MV3 扩展 + IntelliJ 插件）的聚合脚本入口；各子模块的构建依赖在其自身目录",
+  "license": "MIT",
+  "scripts": {
+    "test:all": "npm test --prefix chrome-plugin && npm run test:idea-web --prefix intellij-plugin && ./gradlew intellijCheck"
+  }
+}
