@@ -2,6 +2,12 @@
 
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## 未发布（仓库重组）
+
+### 变更
+
+- **仓库重组为双子模块结构**：Chrome 扩展的全部源码、测试、脚本与配置迁入 `chrome-plugin/`（完整自治 npm 工程），与 `intellij-plugin/` 平级；仓库根只保留双端共享的东西——`shared-fixtures/` 契约向量、`docs/architecture/` 架构文档、`CHANGELOG.md` 与各根文档。对使用者无任何影响（构建产物、功能、发布流程均不变），源码路径全部前移一层。开发者注意：Chrome 侧 npm 命令现在在 `chrome-plugin/` 里跑；`intellij-plugin/` 有了自己的 `package.json`，web 桥测试改在子目录里独立运行。
+
 ## 1.1.0 — 2026-08-01
 
 这一版围绕「该翻的都翻到、翻得更快、状态看得懂」三件事。**升级后请重新加载扩展并刷新页面。**

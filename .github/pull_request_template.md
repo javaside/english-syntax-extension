@@ -8,13 +8,13 @@
 
 ## 门禁
 
-<!-- 全部跑过再勾。CI 会重跑一遍。 -->
+<!-- 全部跑过再勾（Chrome 侧命令在 `chrome-plugin/` 里跑；动了 `intellij-plugin/`、`shared-fixtures/` 或桥协议时，另跑 AGENTS.md 里的 Gradle + web 测试门禁）。CI 会重跑一遍。 -->
 
-- [ ] `npm test`
-- [ ] `npx playwright test`
-- [ ] `npm run lint:baseline`（基线是**恰好 1 个错误**，不是 0）
-- [ ] `npm run format:check`
-- [ ] `npm run build`
+- [ ] `cd chrome-plugin && npm test`
+- [ ] `cd chrome-plugin && npx playwright test`
+- [ ] `cd chrome-plugin && npm run lint:baseline`（基线是**恰好 1 个错误**，不是 0）
+- [ ] `cd chrome-plugin && npm run format:check`
+- [ ] `cd chrome-plugin && npm run build`
 
 ## 自查
 

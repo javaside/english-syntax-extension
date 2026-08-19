@@ -6,11 +6,12 @@
 
 ## 30 秒概览
 
-Chrome MV3 扩展"英语句法伴读":把网页里的英文段落**就地替换**成逐句句法拆解卡片(每个成分三行——角色标签 / 英文原文 / 中文译文),点任一成分展开详细解析面板。句法分析由用户自配的**任意 OpenAI 兼容端点**完成(云端 API 或本地 Ollama),结果按句缓存在 IndexedDB。
+仓库根下两个平级子模块,同一套「英语句法伴读」的两个平台实现:
 
-- 技术栈:TypeScript + Vite + `vite-plugin-web-extension`;Vitest(happy-dom / fake-indexeddb)单测,Playwright E2E(加载真实构建产物 + 本地假 OpenAI 服务器)。
-- 无后端、无遥测:除了用户自己填的模型端点,扩展不向任何服务器发请求。
-- 仓库由 `springai-agentdemo` 单仓拆出(git filter-repo,历史完整保留)。
+- **`chrome-plugin/`** —— Chrome MV3 扩展:把网页里的英文段落**就地替换**成逐句句法拆解卡片(每个成分三行——角色标签 / 英文原文 / 中文译文),点任一成分展开详细解析面板。句法分析由用户自配的**任意 OpenAI 兼容端点**完成(云端 API 或本地 Ollama),结果按句缓存在 IndexedDB。完整 npm 工程,TypeScript + Vite + `vite-plugin-web-extension`;Vitest(happy-dom / fake-indexeddb)单测,Playwright E2E(加载真实构建产物 + 本地假 OpenAI 服务器)。
+- **`intellij-plugin/`** —— IntelliJ IDEA Markdown 预览插件:Kotlin + Gradle IntelliJ Platform,SQLite 缓存(与 Chrome 扩展互通),JCEF 桥接预览页;web 侧 TS 测试在该子目录里独立跑。
+
+两运行时**不共享运行代码**,只共享契约:仓库根 `shared-fixtures/` 的向量与 fixture 由 TS / Kotlin 测试同时消费;`docs/architecture/` 与 `CHANGELOG.md` 也是仓库级。无后端、无遥测:除了用户自己填的模型端点,扩展不向任何服务器发请求。仓库由 `springai-agentdemo` 单仓拆出(git filter-repo,历史完整保留)。
 
 ## 该读哪一份
 

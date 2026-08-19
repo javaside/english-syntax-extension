@@ -10,7 +10,7 @@
 
 ## 上传物
 
-`release/english-syntax-extension-v1.1.0.zip`（194 KB，19 个文件，已排除 source map）。
+`chrome-plugin/release/english-syntax-extension-v1.1.0.zip`（194 KB，19 个文件，已排除 source map）。本文所有命令都在 `chrome-plugin/` 里跑，产物相对路径也在 `chrome-plugin/` 下。
 
 用 `npm run package` 生成。zip 里必须是**扩展根目录直接展开**，不能多套一层文件夹——当前打包脚本已保证这点，并会校验 `manifest.json` 与 `content-script.js` 在包内。
 
@@ -65,12 +65,12 @@ https://github.com/javaside/english-syntax-extension
 
 ## 图片素材
 
-| 用途         | 规格             | 状态                                                            |
-| ------------ | ---------------- | --------------------------------------------------------------- |
-| 商店图标     | 128×128          | ✅ 取自 manifest 的 `assets/icon-128.png`                       |
-| 截图         | 1280×800，1–5 张 | ⚠️ `npm run screenshots` 生成到 `store-assets/`，**需人工挑选** |
-| 小宣传图块   | 440×280          | ✅ `npm run promo` → `store-assets/promo-small-440x280.png`     |
-| 顶部宣传图块 | 1400×560         | ✅ `npm run promo` → `store-assets/promo-marquee-1400x560.png`  |
+| 用途         | 规格             | 状态                                                                          |
+| ------------ | ---------------- | ----------------------------------------------------------------------------- |
+| 商店图标     | 128×128          | ✅ 取自 manifest 的 `assets/icon-128.png`                                     |
+| 截图         | 1280×800，1–5 张 | ⚠️ `npm run screenshots` 生成到 `chrome-plugin/store-assets/`，**需人工挑选** |
+| 小宣传图块   | 440×280          | ✅ `npm run promo` → `chrome-plugin/store-assets/promo-small-440x280.png`     |
+| 顶部宣传图块 | 1400×560         | ✅ `npm run promo` → `chrome-plugin/store-assets/promo-marquee-1400x560.png`  |
 
 **小宣传图块名义上可选，实际不能省**：官方文档写明没有它的扩展在列表里排在有图的之后。1400×560 才是真可选的那张，只影响能否被首页轮播选中。老文档里的 920×680「大图块」已废弃，忽略。
 

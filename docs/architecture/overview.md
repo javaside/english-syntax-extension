@@ -187,7 +187,7 @@ discovered ─▶ cache-check ─▶ queued ─▶ requesting ─▶ validating 
 
 ## IntelliJ 插件运行时(第二运行时)
 
-Chrome 扩展之外,本仓库还交付一个 IntelliJ IDEA Markdown 预览插件(`intellij-plugin/`)。两个运行时**不共享运行代码**,只共享契约:
+Chrome 扩展之外,本仓库还交付一个 IntelliJ IDEA Markdown 预览插件(`intellij-plugin/`,与 `chrome-plugin/` 平级的独立子模块:Kotlin 构建归 Gradle,`resources/web/` 的 TS 桥测试在 `intellij-plugin/` 里 `npm ci && npm test` 独立跑)。两个运行时**不共享运行代码**,只共享契约:
 
 - 仓库根 `shared-fixtures/` 的分句/缓存键向量、交换 fixture 由 TS(chrome-plugin)与 Kotlin(intellij-plugin)测试同时消费——两端任何一侧改规则,另一侧的测试立刻红。
 - 模型链路(prompt、校验、修复、降级)在 Kotlin 侧按同一骨架重新实现(见 [model-pipeline.md](./model-pipeline.md) 的 IntelliJ 小节)。
