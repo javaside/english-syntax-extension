@@ -95,3 +95,29 @@
   font: inherit;
   font-size: 0.85em;
 }
+
+/* 预览页右下角状态浮层：开始后立即可见，区分「解析中」与「没反应」。 */
+#english-syntax-status {
+  position: fixed;
+  right: 12px;
+  bottom: 12px;
+  z-index: 2147483000;
+  max-width: 280px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgba(30, 30, 30, 0.85);
+  color: #eee;
+  font-size: 12px;
+  line-height: 1.4;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+  user-select: none;
+}
+
+#english-syntax-status[data-kind="paused"] {
+  background: rgba(150, 110, 20, 0.9);
+}
+
+#english-syntax-status[data-kind="error"] {
+  background: rgba(150, 40, 30, 0.9);
+}

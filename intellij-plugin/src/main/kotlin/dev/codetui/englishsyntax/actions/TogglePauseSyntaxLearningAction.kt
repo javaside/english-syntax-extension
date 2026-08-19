@@ -3,8 +3,11 @@ package dev.codetui.englishsyntax.actions
 import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
+import dev.codetui.englishsyntax.markdown.EnglishSyntaxPreviewPanel
 import dev.codetui.englishsyntax.session.PreviewSessionManager
 import dev.codetui.englishsyntax.session.SessionState
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 /** 暂停/继续切换：文案随会话状态变化，由 update 驱动。 */
 class TogglePauseSyntaxLearningAction(
@@ -35,10 +38,27 @@ class TogglePauseSyntaxLearningAction(
       ActionNotifier.warn(project, "当前没有进行中的句法学习会话")
       return
     }
-    when (manager.session(previewId)?.state) {
+    val session = manager.session(previewId) ?: return
+    when (session.state) {
       SessionState.RUNNING -> manager.pause(previewId)
       SessionState.PAUSED -> manager.resume(previewId)
-      else -> Unit
+      else -> return
+    }
+    // 让预览页状态浮层反映暂停/继续。
+    val panel = EnglishSyntaxPreviewPanel.findPanel(project)
+    if (panel != null) {
+      val counts = session.counts
+      panel.send(
+        buildJsonObject {
+          put("version", 1)
+          put("type", "SESSION_STATE")
+          put("previewId", previewId)
+          put("generation", panel.generation)
+          put("state", session.state.name.lowercase())
+          put("ready", counts.ready)
+          put("discovered", counts.discovered)
+        },
+      )
     }
   }
 }

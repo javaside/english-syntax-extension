@@ -11,6 +11,11 @@ import com.intellij.openapi.project.Project
  */
 object ActionNotifier {
 
+  fun info(project: Project?, content: String) {
+    val group = NotificationGroupManager.getInstance().getNotificationGroup("EnglishSyntax") ?: return
+    Notifications.Bus.notify(group.createNotification(content, NotificationType.INFORMATION), project)
+  }
+
   fun warn(project: Project?, content: String) {
     val group = NotificationGroupManager.getInstance().getNotificationGroup("EnglishSyntax") ?: return
     Notifications.Bus.notify(group.createNotification(content, NotificationType.WARNING), project)

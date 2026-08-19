@@ -19,6 +19,36 @@ interface RuntimeState {
 
 let state: RuntimeState | null = null;
 
+// —— 预览页状态浮层（右下角）：开始后立即可见，让用户区分「在解析」与「没反应」。 ——
+const STATUS_ID = "english-syntax-status";
+let statusEl: HTMLElement | null = null;
+let returnedCount = 0;
+
+function ensureStatusElement(): HTMLElement {
+  if (statusEl !== null && statusEl.isConnected) return statusEl;
+  statusEl = document.createElement("div");
+  statusEl.id = STATUS_ID;
+  statusEl.hidden = true;
+  document.body.appendChild(statusEl);
+  return statusEl;
+}
+
+function setStatus(text: string, kind: "running" | "paused" | "error"): void {
+  const el = ensureStatusElement();
+  el.textContent = text;
+  el.dataset.kind = kind;
+  el.hidden = false;
+}
+
+function hideStatus(): void {
+  if (statusEl !== null) statusEl.hidden = true;
+}
+
+function bumpReturned(): void {
+  returnedCount += 1;
+  setStatus(`句法学习：解析中…（已处理 ${returnedCount} 句）`, "running");
+}
+
 function postToHost(message: Record<string, unknown>): void {
   const host = (window as unknown as Record<string, unknown>).EnglishSyntaxHost as
     | { post(text: string): void }
@@ -43,6 +73,10 @@ function rescan(): void {
       generation: s.generation,
       blocks: visible.map((block) => ({ blockId: block.blockId, text: block.text })),
     });
+    // 开始后的第一反馈：扫描完成、请求已发出（首次模型调用可能较慢）。
+    if (statusEl === null || statusEl.hidden) {
+      setStatus(`句法学习：正在解析 ${visible.length} 段…`, "running");
+    }
   });
   s.visibility.start();
 }
@@ -93,6 +127,8 @@ function initialize(previewId: string, generation: number): void {
   const s = ensureState();
   s.previewId = previewId;
   s.generation = generation;
+  returnedCount = 0;
+  ensureStatusElement(); // 官方 updateDom 重写 body 会清掉浮层，换代后重建。
   if (s.observer !== null) s.observer.disconnect();
   s.observer = new MutationObserver(() => {
     if (trackPreviewRendered()) return;
@@ -125,6 +161,29 @@ function handleHostMessage(hostJson: unknown): void {
   const s = ensureState();
   const message = parseHostMessage(hostJson, s.generation);
   if (message === null) return;
+  switch (message.type) {
+    case "SESSION_STATE": {
+      // 暂停/继续等状态变化：浮层同步（renderer 不消费此消息）。
+      if (message.state === "paused") {
+        setStatus(`句法学习：已暂停（${message.ready}/${message.discovered}）`, "paused");
+      } else {
+        setStatus(`句法学习：${message.ready}/${message.discovered}`, "running");
+      }
+      return;
+    }
+    case "CORE_STREAM":
+      break; // 流式分片不计数，交给 renderer 渲染暂定卡。
+    case "CORE_RESULT":
+    case "CORE_ERROR":
+      bumpReturned();
+      break;
+    case "RESTORE_ALL":
+      returnedCount = 0;
+      hideStatus();
+      break;
+    default:
+      break;
+  }
   s.renderer.handleHostMessage(message);
 }
 

@@ -517,6 +517,30 @@
 	* 由构建(rolldown)打包成单文件 IIFE 注入预览页。
 	*/
 	let state = null;
+	const STATUS_ID = "english-syntax-status";
+	let statusEl = null;
+	let returnedCount = 0;
+	function ensureStatusElement() {
+		if (statusEl !== null && statusEl.isConnected) return statusEl;
+		statusEl = document.createElement("div");
+		statusEl.id = STATUS_ID;
+		statusEl.hidden = true;
+		document.body.appendChild(statusEl);
+		return statusEl;
+	}
+	function setStatus(text, kind) {
+		const el = ensureStatusElement();
+		el.textContent = text;
+		el.dataset.kind = kind;
+		el.hidden = false;
+	}
+	function hideStatus() {
+		if (statusEl !== null) statusEl.hidden = true;
+	}
+	function bumpReturned() {
+		returnedCount += 1;
+		setStatus(`句法学习：解析中…（已处理 ${returnedCount} 句）`, "running");
+	}
 	function postToHost(message) {
 		const host = window.EnglishSyntaxHost;
 		if (host !== void 0 && typeof host.post === "function") host.post(JSON.stringify(message));
@@ -539,6 +563,7 @@
 					text: block.text
 				}))
 			});
+			if (statusEl === null || statusEl.hidden) setStatus(`句法学习：正在解析 ${visible.length} 段…`, "running");
 		});
 		s.visibility.start();
 	}
@@ -591,6 +616,8 @@
 		const s = ensureState();
 		s.previewId = previewId;
 		s.generation = generation;
+		returnedCount = 0;
+		ensureStatusElement();
 		if (s.observer !== null) s.observer.disconnect();
 		s.observer = new MutationObserver(() => {
 			if (trackPreviewRendered()) return;
@@ -628,6 +655,20 @@
 		const s = ensureState();
 		const message = parseHostMessage(hostJson, s.generation);
 		if (message === null) return;
+		switch (message.type) {
+			case "SESSION_STATE":
+				if (message.state === "paused") setStatus(`句法学习：已暂停（${message.ready}/${message.discovered}）`, "paused");
+				else setStatus(`句法学习：${message.ready}/${message.discovered}`, "running");
+				return;
+			case "CORE_STREAM": break;
+			case "CORE_RESULT":
+			case "CORE_ERROR":
+				bumpReturned();
+				break;
+			case "RESTORE_ALL":
+				returnedCount = 0;
+				hideStatus();
+		}
 		s.renderer.handleHostMessage(message);
 	}
 	document.addEventListener("click", (event) => {

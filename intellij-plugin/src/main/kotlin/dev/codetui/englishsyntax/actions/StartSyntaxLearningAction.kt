@@ -54,6 +54,8 @@ class StartSyntaxLearningAction(
       // JS 侧扫描入口：setHtml 后的 initialize 脚本驱动 scanMarkdownBlocks → VISIBLE_BLOCKS。
       panel.onPageMessage("""{"version":1,"type":"PREVIEW_READY","previewId":"${panel.previewId}","generation":${panel.generation}}""")
     }
+    // 即时反馈：点击生效 + 首次模型请求可能较慢（尤其云端端点），预览页右下角有进度浮层。
+    ActionNotifier.info(project, "句法学习已开始，正在解析可见段落…（进度见预览页右下角）")
   }
 
   /** 经 Markdown 插件的 PREVIEW_BROWSER UserData 定位当前预览面板（面板不是 FileEditor 本身）。 */
