@@ -43,11 +43,7 @@ class AnalysisServiceTest {
     tempDir = createTempDirectory("analysis-service")
     server = FakeOpenAiServer()
     cache = AnalysisCache(tempDir.resolve("cache.sqlite"))
-    service = AnalysisService(
-      client = OpenAiCompatibleClient(NoopCredentialStore),
-      cache = cache,
-      scheduler = RequestScheduler(concurrency = 4),
-    )
+    service = newService()
   }
 
   @AfterTest
@@ -62,6 +58,13 @@ class AnalysisServiceTest {
     override suspend fun put(profileId: String, field: String, value: String) = Unit
     override suspend fun delete(profileId: String, field: String) = Unit
   }
+
+  private fun newService(loopbackDetector: (String) -> Boolean = { true }) = AnalysisService(
+    client = OpenAiCompatibleClient(NoopCredentialStore),
+    cache = cache,
+    scheduler = RequestScheduler(concurrency = 4),
+    loopbackDetector = loopbackDetector,
+  )
 
   private fun profile(baseUrl: String = server.baseUrl) = ModelProfile(
     id = "profile-1",
@@ -86,14 +89,14 @@ class AnalysisServiceTest {
   @Test
   fun `cache hit does not call the client`() = runBlocking {
     val sentence = sentence("s1", "The service validates every response.")
-    // 直接以 envelope 形状写入一条合法缓存（与 service 内部写缓存的形状一致）。
+    // 直接以 Chrome CoreAnalysis 交换形状写入一条合法缓存。
     val key = dev.codetui.englishsyntax.cache.createCoreCacheKey(
       dev.codetui.englishsyntax.cache.CoreCacheKeyInput("The service validates every response.", 1),
     )
     cache.putCore(
       key,
       "other-profile",
-      json.parseToJsonElement("""{"sentences":[{"sentenceId":"s1","components":[{"startToken":0,"endToken":5,"role":"SUBJECT","translation":"整句"}]}]}""") as JsonObject,
+      json.parseToJsonElement("""{"schemaVersion":1,"sentenceId":"s1","components":[{"startToken":0,"endToken":5,"role":"SUBJECT","translation":"整句"}],"modelProfileId":"other-profile"}""") as JsonObject,
     )
 
     val outcome = service.analyzeCore(profile(), "doc-1", listOf(sentence))
@@ -121,18 +124,20 @@ class AnalysisServiceTest {
 
   @Test
   fun `remote chunking uses two sentences per request`() = runBlocking {
-    // 远端 URL（HTTPS）无法用本地假服务器触达；这里验证分块逻辑本身：
-    // 5 句按云端 2 句/请求切成 3 块（2/2/1）。
+    val remoteService = newService(loopbackDetector = { false })
     val sentences = (1..5).map { sentence("s$it", "Sentence number $it has words.") }
-    // 用反射读不到私有函数；改由 loopback 测试 + isLoopbackBaseUrl 单测共同覆盖。
-    // 此测试断言远端 URL 不被 loopback 判定：
-    assertTrue(!dev.codetui.englishsyntax.model.isLoopbackBaseUrl("https://api.example.com/v1"))
-    assertTrue(dev.codetui.englishsyntax.model.isLoopbackBaseUrl(server.baseUrl))
-    // 5 句在 loopback 下单请求覆盖：
-    server.enqueueJson(validCoreRaw(*Array(5) { "s${it + 1}" }))
-    val outcome = service.analyzeCore(profile(), "doc-1", sentences)
-    assertEquals(1, server.requests.size)
+    // 假服务器按 FIFO 回队，而 3 个 chunk 的 HTTP 到达顺序不定；每份响应都包含
+    // 全部 5 句（校验按句提取，多余的兄弟句无副作用），任意配对都能通过。
+    val anyChunk = validCoreRaw("s1", "s2", "s3", "s4", "s5")
+    server.enqueueJson(anyChunk)
+    server.enqueueJson(anyChunk)
+    server.enqueueJson(anyChunk)
+
+    val outcome = remoteService.analyzeCore(profile(), "doc-1", sentences)
+
+    assertEquals(3, server.requests.size)
     assertEquals(5, outcome.result.size)
+    assertTrue(outcome.failures.isEmpty())
   }
 
   @Test

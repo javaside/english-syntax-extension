@@ -12,7 +12,6 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.newSingleThreadContext
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -72,23 +71,22 @@ class RequestSchedulerTest {
     val scheduler = RequestScheduler(concurrency = 1)
     scheduler.pauseAll()
     val order = java.util.Collections.synchronizedList(mutableListOf<String>())
-    // 单线程 dispatcher 保证四个 schedule 调用按代码顺序入队（入队后即挂起等 deferred）。
-    val enqueueScope = CoroutineScope(newSingleThreadContext("enqueue") + Job())
-    val jobs = listOf(
-      enqueueScope.async { scheduler.schedule(request(cacheKey = "normal-1")) { order += "normal-1" } },
-      enqueueScope.async { scheduler.schedule(request(cacheKey = "repair", jumpQueue = true)) { order += "repair" } },
-      enqueueScope.async { scheduler.schedule(request(cacheKey = "normal-2")) { order += "normal-2" } },
-      enqueueScope.async {
+    // runBlocking 的单线程事件循环内顺序 launch：协程按创建序依次执行到第一个
+    // 挂起点（schedule 内的 deferred.await），入队顺序因此确定；再显式 yield 若干
+    // 轮确保四个 launch 全部到达挂起点后，才恢复调度。
+    val jobs = mutableListOf<kotlinx.coroutines.Job>()
+    coroutineScope {
+      jobs += launch { scheduler.schedule(request(cacheKey = "normal-1")) { order += "normal-1" } }
+      jobs += launch { scheduler.schedule(request(cacheKey = "repair", jumpQueue = true)) { order += "repair" } }
+      jobs += launch { scheduler.schedule(request(cacheKey = "normal-2")) { order += "normal-2" } }
+      jobs += launch {
         scheduler.schedule(request(cacheKey = "higher", priority = SchedulerPriority.USER_RETRY)) { order += "higher" }
-      },
-    )
-    // 等四个都真正进入队列（挂起在 deferred.await 上）再恢复调度。
-    waitUntil { true }
-    delay(100)
-    scheduler.resumeAll()
-    jobs.awaitAll()
+      }
+      for (i in 1..8) kotlinx.coroutines.yield()
+      scheduler.resumeAll()
+      jobs.forEach { it.join() }
+    }
     assertEquals(listOf("higher", "repair", "normal-1", "normal-2"), order.toList())
-    enqueueScope.cancel()
   }
 
   @Test
@@ -125,17 +123,21 @@ class RequestSchedulerTest {
           }
         }
       }
-      waitUntil(timeoutMs = 5_000) { started.size >= 3 }
-      // 第 4 个背景项在 backgroundConcurrency=3 上限下必须仍未启动。
-      waitUntil(timeoutMs = 500) { true }
-      assertEquals(3, started.size)
+      // 稳定等待：前三个背景项都已启动（每项在 started 记录后阻塞在 gate 上，
+      // 此时第 4 槽对背景项关闭是调度器的确定状态，不再依赖墙钟）。
+      waitUntil(timeoutMs = 5_000) { started.count { it.startsWith("bg-") } >= 3 }
 
       launch { scheduler.schedule(request(cacheKey = "interactive")) { started += "interactive" } }
-      waitUntil { started.contains("interactive") }
+      // 交互项立即占第 4 槽——背景上限只限背景类，不拦交互项。
+      waitUntil(timeoutMs = 5_000) { started.contains("interactive") }
       assertTrue(started.contains("interactive"))
 
+      // 第 4 个背景项在三个 gate 释放前必须仍未启动。
+      assertEquals(3, started.count { it.startsWith("bg-") })
+
       gate.complete(Unit)
-      waitUntil { started.size == 5 }
+      waitUntil(timeoutMs = 5_000) { started.size == 5 }
+      assertEquals(4, started.count { it.startsWith("bg-") })
     }
   }
 

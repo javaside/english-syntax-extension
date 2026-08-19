@@ -85,6 +85,7 @@ class AnalysisService(
   private val client: OpenAiCompatibleClient,
   private val cache: AnalysisCache,
   private val scheduler: RequestScheduler,
+  private val loopbackDetector: (String) -> Boolean = ::isLoopbackBaseUrl,
 ) {
   private val coreSchema = JsonSchemaSpec(
     name = "core_analysis",
@@ -192,7 +193,7 @@ class AnalysisService(
     val missing = mutableListOf<Pair<SentenceInput, String>>()
     keyed.forEachIndexed { index, (sentence, key) ->
       val value = cached[index]?.let { raw ->
-        validateCoreBatch(raw, listOf(sentence), CACHE_ONLY_PROFILE_ID).let { result ->
+        validateCoreBatch(cachedCoreEnvelope(raw), listOf(sentence), CACHE_ONLY_PROFILE_ID).let { result ->
           (result as? ValidationResult.Valid)?.value?.firstOrNull()
         }
       }
@@ -203,24 +204,31 @@ class AnalysisService(
       return CoreBatchOutcome(sentences.map { results.getValue(it.sentenceId) }, emptyList(), cacheHit = true)
     }
 
-    val perRequest = if (isLoopbackBaseUrl(profile.baseUrl)) {
+    val perRequest = if (loopbackDetector(profile.baseUrl)) {
       ContractVersions.MAX_SENTENCES_PER_REQUEST
     } else {
       ContractVersions.CLOUD_SENTENCES_PER_REQUEST
     }
     val chunks = missing.chunked(perRequest)
     val settled = coroutineScope {
-      chunks.map { chunk -> async { analyzeCoreChunk(profile, documentId, chunk, priority, onStreamedComponent) } }.awaitAll()
+      chunks.map { chunk ->
+        async { chunk to runCatching { analyzeCoreChunk(profile, documentId, chunk, priority, onStreamedComponent) } }
+      }.awaitAll()
     }
 
     val failuresBySentence = mutableMapOf<String, AnalysisFailure>()
-    settled.forEach { outcome ->
-      outcome.valid.forEach { analysis -> results[analysis.sentenceId] = analysis }
-      outcome.invalid.forEach { (sentence, errors) ->
-        failuresBySentence[sentence.sentenceId] = AnalysisFailure(
-          sentence.sentenceId,
-          invalidOutput(errors),
-        )
+    settled.forEach { (chunk, outcome) ->
+      outcome.onSuccess { value ->
+        value.valid.forEach { analysis -> results[analysis.sentenceId] = analysis }
+        value.invalid.forEach { (sentence, errors) ->
+          failuresBySentence[sentence.sentenceId] = AnalysisFailure(sentence.sentenceId, invalidOutput(errors))
+        }
+      }.onFailure { error ->
+        val failure = error as? ExtensionFailure
+          ?: ExtensionFailure(ErrorCode.NETWORK_ERROR, error.message ?: "Model request failed", true)
+        chunk.forEach { (sentence, _) ->
+          failuresBySentence[sentence.sentenceId] = AnalysisFailure(sentence.sentenceId, failure)
+        }
       }
     }
     return CoreBatchOutcome(
@@ -234,7 +242,7 @@ class AnalysisService(
     return sentences.mapNotNull { sentence ->
       val key = createCoreCacheKey(CoreCacheKeyInput(normalize(sentence.text), ContractVersions.CORE_SCHEMA))
       val raw = cache.getCore(key) ?: return@mapNotNull null
-      validateCoreBatch(raw, listOf(sentence), CACHE_ONLY_PROFILE_ID).let { result ->
+      validateCoreBatch(cachedCoreEnvelope(raw), listOf(sentence), CACHE_ONLY_PROFILE_ID).let { result ->
         (result as? ValidationResult.Valid)?.value?.firstOrNull()
       }
     }
@@ -251,7 +259,7 @@ class AnalysisService(
     val key = detailKey(sentence, focus)
     val cachedRaw = cache.getDetail(key)
     val cached = cachedRaw?.let { raw ->
-      validateDetail(raw, sentence, focus, CACHE_ONLY_PROFILE_ID).let { result ->
+      validateDetail(cachedDetailEnvelope(raw), sentence, focus, CACHE_ONLY_PROFILE_ID).let { result ->
         (result as? ValidationResult.Valid)?.value
       }
     }
@@ -295,7 +303,7 @@ class AnalysisService(
 
   suspend fun lookupDetail(sentence: SentenceInput, focus: TokenRange): DetailAnalysis? {
     val raw = cache.getDetail(detailKey(sentence, focus)) ?: return null
-    return validateDetail(raw, sentence, focus, CACHE_ONLY_PROFILE_ID).let { result ->
+    return validateDetail(cachedDetailEnvelope(raw), sentence, focus, CACHE_ONLY_PROFILE_ID).let { result ->
       (result as? ValidationResult.Valid)?.value
     }
   }
@@ -320,6 +328,7 @@ class AnalysisService(
       chunk.joinToString(":") { it.second },
       listOf(ChatMessage("user", buildCorePrompt(sentences))),
       coreSchema,
+      sentenceCount = chunk.size,
       onComponent = if (provisional != null) {
         { streamed ->
           val accepted = provisional.accept(streamed)
@@ -348,6 +357,7 @@ class AnalysisService(
           ),
         ),
         coreSchema,
+        sentenceCount = invalid.size,
         jumpQueue = true,
       )
       val keysById = chunk.associate { (sentence, key) -> sentence.sentenceId to key }
@@ -411,6 +421,7 @@ class AnalysisService(
     cacheKey: String,
     messages: List<ChatMessage>,
     schema: JsonSchemaSpec,
+    sentenceCount: Int = 1,
     jumpQueue: Boolean = false,
     onComponent: ((StreamedComponent) -> Unit)? = null,
     onDetailStreamed: ((kotlinx.serialization.json.JsonObject) -> Unit)? = null,
@@ -420,7 +431,7 @@ class AnalysisService(
         cacheKey = cacheKey,
         documentId = documentId,
         priority = priority,
-        sentenceCount = 1,
+        sentenceCount = sentenceCount,
         jumpQueue = jumpQueue,
       ),
     ) {
@@ -500,36 +511,47 @@ class AnalysisService(
       }
     }
 
-    /** 缓存存 envelope 形状：读取时直接经 validateCoreBatch 复检（与 TS 提取路径语义等价）。 */
+    /**
+     * 缓存值保持 Chrome 交换格式：CoreAnalysis 领域对象形状（schemaVersion/sentenceId/
+     * components/modelProfileId）。读取时由 cachedCoreEnvelope 提取 sentenceId/components
+     * 构造校验 envelope；modelProfileId 再改写为当前 profile。
+     */
     private fun analysisToJson(analysis: CoreAnalysis): JsonObject = buildJsonObject {
+      put("schemaVersion", analysis.schemaVersion)
+      put("sentenceId", analysis.sentenceId)
+      put(
+        "components",
+        buildJsonArray {
+          analysis.components.forEach { component ->
+            add(
+              buildJsonObject {
+                put("startToken", component.startToken)
+                put("endToken", component.endToken)
+                put("role", component.role.name)
+                put("translation", component.translation)
+              },
+            )
+          }
+        },
+      )
+      put("modelProfileId", analysis.modelProfileId)
+    }
+
+    private fun cachedCoreEnvelope(cached: JsonObject): JsonObject = buildJsonObject {
       put(
         "sentences",
         buildJsonArray {
           add(
             buildJsonObject {
-              put("sentenceId", analysis.sentenceId)
-              put(
-                "components",
-                buildJsonArray {
-                  analysis.components.forEach { component ->
-                    add(
-                      buildJsonObject {
-                        put("startToken", component.startToken)
-                        put("endToken", component.endToken)
-                        put("role", component.role.name)
-                        put("translation", component.translation)
-                      },
-                    )
-                  }
-                },
-              )
+              put("sentenceId", cached["sentenceId"] ?: JsonPrimitive(""))
+              put("components", cached["components"] ?: JsonArray(emptyList()))
             },
           )
         },
       )
     }
 
-    /** modelProfileId 不入缓存值——读取时由当前 profile 注入。 */
+    /** DetailAnalysis 同样保持 Chrome 交换格式；读取校验前去掉 modelProfileId。 */
     private fun detailToJson(analysis: DetailAnalysis): JsonObject = buildJsonObject {
       put("sentenceId", analysis.sentenceId)
       put("focus", buildJsonObject { put("startToken", analysis.focus.startToken); put("endToken", analysis.focus.endToken) })
@@ -551,6 +573,15 @@ class AnalysisService(
       )
       put("grammarPoints", buildJsonArray { analysis.grammarPoints.forEach { add(JsonPrimitive(it)) } })
       put("explanation", analysis.explanation)
+      put("modelProfileId", analysis.modelProfileId)
+    }
+
+    private fun cachedDetailEnvelope(cached: JsonObject): JsonObject = buildJsonObject {
+      put("sentenceId", cached["sentenceId"] ?: JsonPrimitive(""))
+      put("focus", cached["focus"] ?: JsonObject(emptyMap()))
+      put("structures", cached["structures"] ?: JsonArray(emptyList()))
+      put("grammarPoints", cached["grammarPoints"] ?: JsonArray(emptyList()))
+      put("explanation", cached["explanation"] ?: JsonPrimitive(""))
     }
   }
 }
