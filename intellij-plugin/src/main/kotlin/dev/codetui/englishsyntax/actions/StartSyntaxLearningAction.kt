@@ -4,7 +4,6 @@ import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
-import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.project.Project
 import com.intellij.ui.jcef.JBCefApp
 import dev.codetui.englishsyntax.markdown.EnglishSyntaxPreviewPanel
@@ -40,7 +39,7 @@ class StartSyntaxLearningAction(
     if (panel == null) {
       ActionNotifier.warn(
         project,
-        "未找到句法预览面板：请确认当前 Markdown 预览由 English Syntax 插件的 JCEF 面板提供",
+        "未找到句法预览面板：请先在 Settings → Languages & Frameworks → Markdown → Preview 中把预览提供者切换为 \"English Syntax Chromium Preview\"，再打开 Markdown 预览",
       )
       return
     }
@@ -55,8 +54,7 @@ class StartSyntaxLearningAction(
     }
   }
 
-  internal fun currentPanel(project: Project): EnglishSyntaxPreviewPanel? {
-    val editor = FileEditorManager.getInstance(project).selectedEditor ?: return null
-    return (editor as? EnglishSyntaxPreviewPanel)
-  }
+  /** 经 Markdown 插件的 PREVIEW_BROWSER UserData 定位当前预览面板（面板不是 FileEditor 本身）。 */
+  internal fun currentPanel(project: Project): EnglishSyntaxPreviewPanel? =
+    EnglishSyntaxPreviewPanel.findPanel(project)
 }

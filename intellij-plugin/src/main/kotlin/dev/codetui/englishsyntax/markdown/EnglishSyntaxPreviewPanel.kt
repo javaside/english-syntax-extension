@@ -2,6 +2,8 @@ package dev.codetui.englishsyntax.markdown
 
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.fileEditor.FileEditorManager
+import com.intellij.openapi.fileEditor.TextEditorWithPreview
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.util.Key
@@ -25,6 +27,7 @@ import org.cef.browser.CefBrowser
 import org.cef.browser.CefFrame
 import org.cef.handler.CefLoadHandlerAdapter
 import org.intellij.plugins.markdown.ui.preview.MarkdownHtmlPanel
+import org.intellij.plugins.markdown.ui.preview.MarkdownPreviewFileEditor
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -113,6 +116,30 @@ class EnglishSyntaxPreviewPanel(
       )
       assembly.browser.loadHTML("<html><head><meta charset='utf-8'></head><body></body></html>")
       return panel
+    }
+
+    /**
+     * 从 FileEditorManager 定位当前 Markdown 预览面板。
+     *
+     * Markdown 插件把 htmlPanel 以 WeakReference 存在 MarkdownPreviewFileEditor 的
+     * PREVIEW_BROWSER UserData 里（Companion 公开 Key）；preview editor 可能是裸的
+     * MarkdownPreviewFileEditor，也可能包在 MarkdownEditorWithPreview
+     * （TextEditorWithPreview）里。面板不是 FileEditor 本身——绝不能对
+     * selectedEditor 做 `as? EnglishSyntaxPreviewPanel` 强转（永远 null）。
+     */
+    fun findPanel(project: Project): EnglishSyntaxPreviewPanel? {
+      val manager = FileEditorManager.getInstance(project)
+      val file = manager.selectedFiles.firstOrNull() ?: return null
+      return manager.getAllEditors(file)
+        .asSequence()
+        .flatMap { editor ->
+          if (editor is TextEditorWithPreview) sequenceOf(editor, editor.previewEditor)
+          else sequenceOf(editor)
+        }
+        .filterIsInstance<MarkdownPreviewFileEditor>()
+        .firstNotNullOfOrNull { previewEditor ->
+          previewEditor.getUserData(MarkdownPreviewFileEditor.PREVIEW_BROWSER)?.get() as? EnglishSyntaxPreviewPanel
+        }
     }
 
     private fun buildAssembly(): JcefAssembly {
