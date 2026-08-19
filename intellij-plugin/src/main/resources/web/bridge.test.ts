@@ -184,6 +184,46 @@ describe("parseHostMessage", () => {
     expect(message && message.type === "SESSION_STATE" ? message.ready : null).toBe(1);
   });
 
+  it("accepts core result with blockId", () => {
+    const message = parseHostMessage(
+      {
+        version: 1,
+        type: "CORE_RESULT",
+        previewId: "p1",
+        generation: 3,
+        sentenceId: "s-b1-0",
+        blockId: "b1",
+        analysisJson: "{}",
+      },
+      3,
+    );
+    expect(message).toEqual({
+      version: 1,
+      type: "CORE_RESULT",
+      previewId: "p1",
+      generation: 3,
+      sentenceId: "s-b1-0",
+      blockId: "b1",
+      analysisJson: "{}",
+    });
+  });
+
+  it("rejects core result without blockId", () => {
+    expect(
+      parseHostMessage(
+        {
+          version: 1,
+          type: "CORE_RESULT",
+          previewId: "p1",
+          generation: 3,
+          sentenceId: "s1",
+          analysisJson: "{}",
+        },
+        3,
+      ),
+    ).toBeNull();
+  });
+
   it("drops messages from stale generations", () => {
     expect(
       parseHostMessage(
@@ -193,6 +233,7 @@ describe("parseHostMessage", () => {
           previewId: "p1",
           generation: 2,
           sentenceId: "s1",
+          blockId: "b1",
           analysisJson: "{}",
         },
         5,

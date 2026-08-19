@@ -48,9 +48,9 @@ export type PageMessage = PreviewReady | VisibleBlocks | DetailRequest | RetrySe
 
 export type HostMessage =
   | ({ type: "SESSION_STATE"; state: string; ready: number; discovered: number } & PageMessageBase)
-  | ({ type: "CORE_STREAM"; sentenceId: string; componentsJson: string } & PageMessageBase)
-  | ({ type: "CORE_RESULT"; sentenceId: string; analysisJson: string } & PageMessageBase)
-  | ({ type: "CORE_ERROR"; sentenceId: string; code: string; message: string } & PageMessageBase)
+  | ({ type: "CORE_STREAM"; sentenceId: string; blockId: string; componentsJson: string } & PageMessageBase)
+  | ({ type: "CORE_RESULT"; sentenceId: string; blockId: string; analysisJson: string } & PageMessageBase)
+  | ({ type: "CORE_ERROR"; sentenceId: string; blockId: string; code: string; message: string } & PageMessageBase)
   | ({ type: "DETAIL_STREAM"; sentenceId: string; structuresJson: string } & PageMessageBase)
   | ({ type: "DETAIL_RESULT"; sentenceId: string; analysisJson: string } & PageMessageBase)
   | ({ type: "RESTORE_ALL" } & PageMessageBase);
@@ -167,9 +167,9 @@ export function parsePageMessage(value: unknown): PageMessage | null {
 
 const HOST_KEYS_BY_TYPE: Readonly<Record<string, readonly string[]>> = {
   SESSION_STATE: ["version", "type", "previewId", "generation", "state", "ready", "discovered"],
-  CORE_STREAM: ["version", "type", "previewId", "generation", "sentenceId", "componentsJson"],
-  CORE_RESULT: ["version", "type", "previewId", "generation", "sentenceId", "analysisJson"],
-  CORE_ERROR: ["version", "type", "previewId", "generation", "sentenceId", "code", "message"],
+  CORE_STREAM: ["version", "type", "previewId", "generation", "sentenceId", "blockId", "componentsJson"],
+  CORE_RESULT: ["version", "type", "previewId", "generation", "sentenceId", "blockId", "analysisJson"],
+  CORE_ERROR: ["version", "type", "previewId", "generation", "sentenceId", "blockId", "code", "message"],
   DETAIL_STREAM: ["version", "type", "previewId", "generation", "sentenceId", "structuresJson"],
   DETAIL_RESULT: ["version", "type", "previewId", "generation", "sentenceId", "analysisJson"],
   RESTORE_ALL: ["version", "type", "previewId", "generation"],
@@ -202,23 +202,35 @@ export function parseHostMessage(value: unknown, currentGeneration: number): Hos
         discovered: value.discovered,
       };
     case "CORE_STREAM":
-      if (!isNonEmptyString(value.sentenceId) || typeof value.componentsJson !== "string")
-        return null;
+    case "CORE_RESULT":
+      if (!isNonEmptyString(value.sentenceId) || !isNonEmptyString(value.blockId)) return null;
+      if (value.type === "CORE_STREAM") {
+        if (typeof value.componentsJson !== "string") return null;
+        return {
+          version: BRIDGE_VERSION,
+          type: "CORE_STREAM",
+          previewId: value.previewId,
+          generation: value.generation,
+          sentenceId: value.sentenceId,
+          blockId: value.blockId,
+          componentsJson: value.componentsJson,
+        };
+      }
+      if (typeof value.analysisJson !== "string") return null;
       return {
         version: BRIDGE_VERSION,
-        type: "CORE_STREAM",
+        type: "CORE_RESULT",
         previewId: value.previewId,
         generation: value.generation,
         sentenceId: value.sentenceId,
-        componentsJson: value.componentsJson,
+        blockId: value.blockId,
+        analysisJson: value.analysisJson,
       };
-    case "CORE_RESULT":
     case "DETAIL_RESULT":
-      if (!isNonEmptyString(value.sentenceId) || typeof value.analysisJson !== "string")
-        return null;
+      if (!isNonEmptyString(value.sentenceId) || typeof value.analysisJson !== "string") return null;
       return {
         version: BRIDGE_VERSION,
-        type: value.type,
+        type: "DETAIL_RESULT",
         previewId: value.previewId,
         generation: value.generation,
         sentenceId: value.sentenceId,
@@ -236,7 +248,12 @@ export function parseHostMessage(value: unknown, currentGeneration: number): Hos
         structuresJson: value.structuresJson,
       };
     case "CORE_ERROR":
-      if (!isNonEmptyString(value.sentenceId) || !isNonEmptyString(value.code)) return null;
+      if (
+        !isNonEmptyString(value.sentenceId) ||
+        !isNonEmptyString(value.blockId) ||
+        !isNonEmptyString(value.code)
+      )
+        return null;
       if (typeof value.message !== "string") return null;
       return {
         version: BRIDGE_VERSION,
@@ -244,6 +261,7 @@ export function parseHostMessage(value: unknown, currentGeneration: number): Hos
         previewId: value.previewId,
         generation: value.generation,
         sentenceId: value.sentenceId,
+        blockId: value.blockId,
         code: value.code,
         message: value.message,
       };

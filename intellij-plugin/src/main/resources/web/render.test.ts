@@ -55,7 +55,7 @@ describe("PreviewRenderer", () => {
 
   it("renders a provisional card from the first streamed component", () => {
     const { renderer, element } = setup();
-    renderer.renderCoreStream("s1", [
+    renderer.renderCoreStream("s1", "b1", [
       { startToken: 0, endToken: 1, role: "主语", translation: "该服务", text: "The service" },
     ]);
 
@@ -72,11 +72,12 @@ describe("PreviewRenderer", () => {
 
   it("replaces the provisional card with the final result", () => {
     const { renderer } = setup();
-    renderer.renderCoreStream("s1", [
+    renderer.renderCoreStream("s1", "b1", [
       { startToken: 0, endToken: 1, role: "主语", translation: "该服务", text: "The service" },
     ]);
     renderer.renderCoreResult(
       "s1",
+      "b1",
       corePayload("s1", [
         { startToken: 0, endToken: 1, role: "主语", translation: "该服务", text: "The service" },
         { startToken: 2, endToken: 2, role: "谓语", translation: "校验", text: "validates" },
@@ -92,11 +93,12 @@ describe("PreviewRenderer", () => {
     const { renderer, element, detailRequests } = setup();
     renderer.renderCoreResult(
       "s1",
+      "b1",
       corePayload("s1", [
         { startToken: 0, endToken: 1, role: "主语", translation: "该服务", text: "The service" },
       ]),
     );
-    renderer.renderCoreError("s1", "INVALID_MODEL_OUTPUT", "解析失败");
+    renderer.renderCoreError("s1", "b1", "INVALID_MODEL_OUTPUT", "解析失败");
 
     const retry = document.querySelector(".english-syntax-retry") as HTMLButtonElement;
     expect(retry).not.toBeNull();
@@ -111,6 +113,7 @@ describe("PreviewRenderer", () => {
     const { renderer, element } = setup();
     renderer.renderCoreResult(
       "s1",
+      "b1",
       corePayload("s1", [
         { startToken: 0, endToken: 1, role: "主语", translation: "该服务", text: "The service" },
       ]),
@@ -127,6 +130,7 @@ describe("PreviewRenderer", () => {
     const { renderer } = setup();
     renderer.renderCoreResult(
       "s1",
+      "b1",
       corePayload("s1", [
         {
           startToken: 0,
@@ -147,6 +151,7 @@ describe("PreviewRenderer", () => {
     const { renderer, detailRequests } = setup();
     renderer.renderCoreResult(
       "s1",
+      "b1",
       corePayload("s1", [
         { startToken: 0, endToken: 1, role: "主语", translation: "该服务", text: "The service" },
       ]),
@@ -192,6 +197,7 @@ describe("PreviewRenderer", () => {
     const { renderer } = setup();
     renderer.renderCoreResult(
       "s1",
+      "b1",
       corePayload("s1", [
         { startToken: 0, endToken: 1, role: "主语", translation: "该服务", text: "The service" },
         { startToken: 5, endToken: 5, role: "标点", translation: ".", text: "." },
@@ -226,6 +232,46 @@ describe("PreviewRenderer", () => {
       type: "RESTORE_ALL",
       previewId: "p1",
       generation: 0,
+    } as never);
+    expect(document.querySelector("[data-english-syntax-card]")).toBeNull();
+  });
+
+  it("renders a card from a CORE_RESULT without prior sentence registration (production path)", () => {
+    // 生产链路：只 registerBlock（扫描），句子由 CORE_RESULT 携带的 blockId 惰性注册。
+    const element = paragraph("p1");
+    const renderer = new PreviewRenderer(() => {});
+    renderer.registerBlock("b1", element);
+
+    renderer.handleHostMessage({
+      version: 1,
+      type: "CORE_RESULT",
+      previewId: "p1",
+      generation: 0,
+      sentenceId: "s-b1-0",
+      blockId: "b1",
+      analysisJson: JSON.stringify(
+        corePayload("s-b1-0", [
+          { startToken: 0, endToken: 1, role: "主语", translation: "该服务", text: "The service" },
+        ]),
+      ),
+    } as never);
+
+    expect(element.hasAttribute(HIDDEN)).toBe(true);
+    const card = document.querySelector("[data-english-syntax-card]");
+    expect(card).not.toBeNull();
+    expect(card?.textContent).toContain("该服务");
+  });
+
+  it("ignores a CORE_RESULT whose block was never registered", () => {
+    const renderer = new PreviewRenderer(() => {});
+    renderer.handleHostMessage({
+      version: 1,
+      type: "CORE_RESULT",
+      previewId: "p1",
+      generation: 0,
+      sentenceId: "s-unknown-0",
+      blockId: "unknown",
+      analysisJson: JSON.stringify(corePayload("s-unknown-0", [])),
     } as never);
     expect(document.querySelector("[data-english-syntax-card]")).toBeNull();
   });

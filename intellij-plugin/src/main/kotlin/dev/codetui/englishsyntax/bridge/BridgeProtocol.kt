@@ -63,6 +63,7 @@ sealed interface HostMessage {
     override val previewId: String,
     override val generation: Int,
     val sentenceId: String,
+    val blockId: String,
     val componentsJson: String,
   ) : HostMessage
 
@@ -70,6 +71,7 @@ sealed interface HostMessage {
     override val previewId: String,
     override val generation: Int,
     val sentenceId: String,
+    val blockId: String,
     val analysisJson: String,
   ) : HostMessage
 
@@ -77,6 +79,7 @@ sealed interface HostMessage {
     override val previewId: String,
     override val generation: Int,
     val sentenceId: String,
+    val blockId: String,
     val code: String,
     val message: String,
   ) : HostMessage
@@ -184,15 +187,21 @@ object BridgeProtocol {
           value.int("discovered") ?: return null,
         )
       }
-      "CORE_STREAM", "CORE_RESULT", "DETAIL_RESULT" -> {
-        val sentenceKey = if (value.keys.contains("analysisJson")) "analysisJson" else null
-        if (!hasOnlyKeys(value, "version", "type", "previewId", "generation", "sentenceId", sentenceKey ?: "componentsJson")) return null
+      "CORE_STREAM", "CORE_RESULT" -> {
+        val sentenceKey = if (value.keys.contains("analysisJson")) "analysisJson" else "componentsJson"
+        if (!hasOnlyKeys(value, "version", "type", "previewId", "generation", "sentenceId", "blockId", sentenceKey)) return null
         val sentenceId = value.string("sentenceId")?.takeIf { it.isNotEmpty() } ?: return null
-        val payload = value.string(sentenceKey ?: "componentsJson") ?: return null
+        val blockId = value.string("blockId")?.takeIf { it.isNotEmpty() } ?: return null
+        val payload = value.string(sentenceKey) ?: return null
         when (value.string("type")) {
-          "CORE_STREAM" -> HostMessage.CoreStream(previewId, generation, sentenceId, payload)
-          else -> HostMessage.CoreResult(previewId, generation, sentenceId, payload)
+          "CORE_STREAM" -> HostMessage.CoreStream(previewId, generation, sentenceId, blockId, payload)
+          else -> HostMessage.CoreResult(previewId, generation, sentenceId, blockId, payload)
         }
+      }
+      "DETAIL_RESULT" -> {
+        if (!hasOnlyKeys(value, "version", "type", "previewId", "generation", "sentenceId", "analysisJson")) return null
+        val sentenceId = value.string("sentenceId")?.takeIf { it.isNotEmpty() } ?: return null
+        HostMessage.DetailResult(previewId, generation, sentenceId, value.string("analysisJson") ?: return null)
       }
       "DETAIL_STREAM" -> {
         if (!hasOnlyKeys(value, "version", "type", "previewId", "generation", "sentenceId", "structuresJson")) return null
@@ -200,10 +209,11 @@ object BridgeProtocol {
         HostMessage.DetailStream(previewId, generation, sentenceId, value.string("structuresJson") ?: return null)
       }
       "CORE_ERROR" -> {
-        if (!hasOnlyKeys(value, "version", "type", "previewId", "generation", "sentenceId", "code", "message")) return null
+        if (!hasOnlyKeys(value, "version", "type", "previewId", "generation", "sentenceId", "blockId", "code", "message")) return null
         val sentenceId = value.string("sentenceId")?.takeIf { it.isNotEmpty() } ?: return null
+        val blockId = value.string("blockId")?.takeIf { it.isNotEmpty() } ?: return null
         HostMessage.CoreError(
-          previewId, generation, sentenceId,
+          previewId, generation, sentenceId, blockId,
           value.string("code") ?: return null,
           value.string("message") ?: return null,
         )

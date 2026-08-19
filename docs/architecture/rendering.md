@@ -236,7 +236,7 @@ Chrome 端在真实网页里替换 DOM;IntelliJ 端在 **IDEA 默认的官方 Ma
 - **面板定位**:Action 拿面板**不能**对 `selectedEditor` 做 `as? EnglishSyntaxPreviewPanel`——面板不是 `FileEditor` 本身,那样永远 null。`EnglishSyntaxPreviewPanel.findPanel` 从 `FileEditorManager` 取当前文件的所有 editor(展开 `TextEditorWithPreview` 的 `previewEditor`),找 `MarkdownPreviewFileEditor`,经其公开的 `PREVIEW_BROWSER` UserData(`Key<WeakReference<MarkdownHtmlPanel>>`)取回**官方** `MarkdownJCEFHtmlPanel` 并包装(包装缓存挂在面板 UserData 上,previewId 稳定)。
 - **扫描**:`preview.ts` 的 `scanMarkdownBlocks` 只认 Markdown 渲染产物——候选固定为 `h1-h6/p/li/blockquote`(blockquote 只取安全叶子),排除 `pre/code/table/.math/.katex/.mermaid/.footnotes/交互控件`与插件自己的卡片;英文占比 ≥ 60%、最短 20 字符。Chrome 端"正文容器得分"那套在这里不适用。
 - **可见性**:IntersectionObserver(rootMargin 上下各一屏),不支持时退化为 rAF 节流的 scroll/resize。
-- **卡片**:`render.ts` 用 `data-english-syntax-hidden` 隐藏原文、在其后插入 `data-english-syntax-card` 卡片;`restoreAll` 精确删除插件节点与 data 属性。模型文本一律 `textContent`,杜绝 `<img onerror>` 注入。
+- **卡片**:`render.ts` 用 `data-english-syntax-hidden` 隐藏原文、在其后插入 `data-english-syntax-card` 卡片;`restoreAll` 精确删除插件节点与 data 属性。模型文本一律 `textContent`,杜绝 `<img onerror>` 注入。**句子惰性注册**:sentenceId 由 Kotlin 权威生成(`s-{blockId}-{index}`),JS 端不做分句;`CORE_STREAM`/`CORE_RESULT`/`CORE_ERROR` 携带 `blockId`,渲染器在消息首次到达时按 blockId 注册句子再渲染——曾因生产路径从不注册句子(`registerSentence` 被当成测试辅助),`#sentences` 永远为空、`entry === undefined` 直接 return,卡片永远不出现。
 - **generation 双闸**:页面收到旧 generation 的 `CORE_RESULT`/`DETAIL_*` 一律丢弃(见 [invariants.md](./invariants.md))。
 - **详解**:点击成分经 bridge 发 `DETAIL_REQUEST`,面板同时只展开一个详解面板;再次点击同一成分关闭。
 - **状态反馈**:点「开始句法学习」立即弹 BALLOON;预览页右下角注入 `#english-syntax-status` 浮层——扫描完成显示「正在解析 N 段」,每个 `CORE_RESULT`/`CORE_ERROR` 更新「已处理 k 句」,`SESSION_STATE`(Toggle 暂停/继续时由 Kotlin 推送)显示「已暂停 / ready/discovered」,`RESTORE_ALL` 隐藏。用户始终能区分「在解析(慢)」与「没反应(bug)」。

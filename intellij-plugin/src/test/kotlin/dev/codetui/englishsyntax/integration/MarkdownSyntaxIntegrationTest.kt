@@ -25,6 +25,7 @@ import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 /**
@@ -90,7 +91,11 @@ class MarkdownSyntaxIntegrationTest {
     kotlinx.coroutines.delay(300)
 
     assertEquals(1, server.requests.size)
-    assertEquals(1, sent.count { it["type"]?.jsonPrimitive?.contentOrNull == "CORE_RESULT" })
+    val result = sent.firstOrNull { it["type"]?.jsonPrimitive?.contentOrNull == "CORE_RESULT" }
+    assertNotNull(result)
+    // 协议必带 blockId：JS 侧靠它惰性注册句子渲染卡片。
+    assertEquals("b1", result["blockId"]?.jsonPrimitive?.contentOrNull)
+    assertTrue(result["analysisJson"]?.jsonPrimitive?.contentOrNull?.contains("\"components\"") == true)
     manager.disposeAll()
   }
 

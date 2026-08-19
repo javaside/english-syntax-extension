@@ -80,14 +80,15 @@ export class PreviewRenderer {
       case "CORE_STREAM":
         this.renderCoreStream(
           message.sentenceId,
+          message.blockId,
           JSON.parse(message.componentsJson) as ComponentPayload[],
         );
         break;
       case "CORE_RESULT":
-        this.renderCoreResult(message.sentenceId, JSON.parse(message.analysisJson) as CorePayload);
+        this.renderCoreResult(message.sentenceId, message.blockId, JSON.parse(message.analysisJson) as CorePayload);
         break;
       case "CORE_ERROR":
-        this.renderCoreError(message.sentenceId, message.code, message.message);
+        this.renderCoreError(message.sentenceId, message.blockId, message.code, message.message);
         break;
       case "DETAIL_STREAM":
       case "DETAIL_RESULT": {
@@ -109,7 +110,8 @@ export class PreviewRenderer {
     }
   }
 
-  renderCoreStream(sentenceId: string, components: ComponentPayload[]): void {
+  renderCoreStream(sentenceId: string, blockId: string, components: ComponentPayload[]): void {
+    this.#ensureSentence(blockId, sentenceId);
     const entry = this.#sentences.get(sentenceId);
     if (entry === undefined) return;
     entry.record.provisional = components;
@@ -119,7 +121,8 @@ export class PreviewRenderer {
     this.#repaintBlock(entry.blockId);
   }
 
-  renderCoreResult(sentenceId: string, analysis: CorePayload): void {
+  renderCoreResult(sentenceId: string, blockId: string, analysis: CorePayload): void {
+    this.#ensureSentence(blockId, sentenceId);
     const entry = this.#sentences.get(sentenceId);
     if (entry === undefined) return;
     entry.record.analysis = analysis;
@@ -133,14 +136,28 @@ export class PreviewRenderer {
     this.#repaintBlock(entry.blockId);
   }
 
-  renderCoreError(sentenceId: string, code: string, message: string): void {
+  renderCoreError(sentenceId: string, blockId: string, code: string, message: string): void {
     void code;
+    this.#ensureSentence(blockId, sentenceId);
     const entry = this.#sentences.get(sentenceId);
     if (entry === undefined) return;
     entry.record.failed = true;
     entry.record.analysis = null;
     entry.record.provisional = null;
     this.#repaintBlock(entry.blockId, { errorSentenceId: sentenceId, message });
+  }
+
+  /**
+   * 惰性注册句子：sentenceId 由 Kotlin 侧权威生成（s-{blockId}-{index}），
+   * JS 端不做分句，CORE_* 消息首次到达时按消息里的 blockId 注册即可渲染。
+   * 若 blockId 尚未 registerBlock（极端乱序），则忽略——下一轮 VISIBLE_BLOCKS 会补上。
+   */
+  #ensureSentence(blockId: string, sentenceId: string): void {
+    if (this.#sentences.has(sentenceId)) return;
+    const record = this.#blocks.get(blockId);
+    if (record === undefined) return;
+    record.sentences.set(sentenceId, { analysis: null, provisional: null, failed: false });
+    this.#sentences.set(sentenceId, { blockId, record: record.sentences.get(sentenceId)! });
   }
 
   renderDetailStream(sentenceId: string, structures: DetailPayload["structures"]): void {

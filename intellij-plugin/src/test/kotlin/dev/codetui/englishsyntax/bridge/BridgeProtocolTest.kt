@@ -130,4 +130,36 @@ class BridgeProtocolTest {
     ).jsonObject
     assertNull(BridgeProtocol.parseHostMessage(hostile))
   }
+
+  @Test
+  fun `core result carries blockId`() {
+    val message = BridgeProtocol.parseHostMessage(
+      Json.parseToJsonElement(
+        """{"version":1,"type":"CORE_RESULT","previewId":"p1","generation":0,"sentenceId":"s-b1-0","blockId":"b1","analysisJson":"{}"}""",
+      ).jsonObject,
+    )
+    val core = message as HostMessage.CoreResult
+    assertEquals("s-b1-0", core.sentenceId)
+    assertEquals("b1", core.blockId)
+  }
+
+  @Test
+  fun `core result without blockId is rejected`() {
+    val message = BridgeProtocol.parseHostMessage(
+      Json.parseToJsonElement(
+        """{"version":1,"type":"CORE_RESULT","previewId":"p1","generation":0,"sentenceId":"s1","analysisJson":"{}"}""",
+      ).jsonObject,
+    )
+    assertNull(message)
+  }
+
+  @Test
+  fun `detail result parses without blockId`() {
+    val message = BridgeProtocol.parseHostMessage(
+      Json.parseToJsonElement(
+        """{"version":1,"type":"DETAIL_RESULT","previewId":"p1","generation":0,"sentenceId":"s1","analysisJson":"{}"}""",
+      ).jsonObject,
+    )
+    assertNotNull(message as HostMessage.DetailResult)
+  }
 }

@@ -215,6 +215,7 @@ class PreviewSession(
         put("previewId", previewId)
         put("generation", generation)
         put("sentenceId", analysis.sentenceId)
+        put("blockId", sentences[analysis.sentenceId]?.blockId ?: "")
         put("analysisJson", analysisToJson(analysis))
       })
     }
@@ -226,6 +227,7 @@ class PreviewSession(
         put("previewId", previewId)
         put("generation", generation)
         put("sentenceId", failure.sentenceId)
+        put("blockId", sentences[failure.sentenceId]?.blockId ?: "")
         put("code", failure.error.code.name)
         put("message", failure.error.message ?: "failed")
       })

@@ -32,6 +32,7 @@
 			"previewId",
 			"generation",
 			"sentenceId",
+			"blockId",
 			"componentsJson"
 		],
 		CORE_RESULT: [
@@ -40,6 +41,7 @@
 			"previewId",
 			"generation",
 			"sentenceId",
+			"blockId",
 			"analysisJson"
 		],
 		CORE_ERROR: [
@@ -48,6 +50,7 @@
 			"previewId",
 			"generation",
 			"sentenceId",
+			"blockId",
 			"code",
 			"message"
 		],
@@ -98,21 +101,35 @@
 					discovered: value.discovered
 				};
 			case "CORE_STREAM":
-				if (!isNonEmptyString(value.sentenceId) || typeof value.componentsJson !== "string") return null;
+			case "CORE_RESULT":
+				if (!isNonEmptyString(value.sentenceId) || !isNonEmptyString(value.blockId)) return null;
+				if (value.type === "CORE_STREAM") {
+					if (typeof value.componentsJson !== "string") return null;
+					return {
+						version: 1,
+						type: "CORE_STREAM",
+						previewId: value.previewId,
+						generation: value.generation,
+						sentenceId: value.sentenceId,
+						blockId: value.blockId,
+						componentsJson: value.componentsJson
+					};
+				}
+				if (typeof value.analysisJson !== "string") return null;
 				return {
 					version: 1,
-					type: "CORE_STREAM",
+					type: "CORE_RESULT",
 					previewId: value.previewId,
 					generation: value.generation,
 					sentenceId: value.sentenceId,
-					componentsJson: value.componentsJson
+					blockId: value.blockId,
+					analysisJson: value.analysisJson
 				};
-			case "CORE_RESULT":
 			case "DETAIL_RESULT":
 				if (!isNonEmptyString(value.sentenceId) || typeof value.analysisJson !== "string") return null;
 				return {
 					version: 1,
-					type: value.type,
+					type: "DETAIL_RESULT",
 					previewId: value.previewId,
 					generation: value.generation,
 					sentenceId: value.sentenceId,
@@ -129,7 +146,7 @@
 					structuresJson: value.structuresJson
 				};
 			case "CORE_ERROR":
-				if (!isNonEmptyString(value.sentenceId) || !isNonEmptyString(value.code)) return null;
+				if (!isNonEmptyString(value.sentenceId) || !isNonEmptyString(value.blockId) || !isNonEmptyString(value.code)) return null;
 				if (typeof value.message !== "string") return null;
 				return {
 					version: 1,
@@ -137,6 +154,7 @@
 					previewId: value.previewId,
 					generation: value.generation,
 					sentenceId: value.sentenceId,
+					blockId: value.blockId,
 					code: value.code,
 					message: value.message
 				};
@@ -290,13 +308,13 @@
 		handleHostMessage(message) {
 			switch (message.type) {
 				case "CORE_STREAM":
-					this.renderCoreStream(message.sentenceId, JSON.parse(message.componentsJson));
+					this.renderCoreStream(message.sentenceId, message.blockId, JSON.parse(message.componentsJson));
 					break;
 				case "CORE_RESULT":
-					this.renderCoreResult(message.sentenceId, JSON.parse(message.analysisJson));
+					this.renderCoreResult(message.sentenceId, message.blockId, JSON.parse(message.analysisJson));
 					break;
 				case "CORE_ERROR":
-					this.renderCoreError(message.sentenceId, message.code, message.message);
+					this.renderCoreError(message.sentenceId, message.blockId, message.code, message.message);
 					break;
 				case "DETAIL_STREAM":
 				case "DETAIL_RESULT": {
@@ -308,7 +326,8 @@
 				case "RESTORE_ALL": this.restoreAll();
 			}
 		}
-		renderCoreStream(sentenceId, components) {
+		renderCoreStream(sentenceId, blockId, components) {
+			this.#ensureSentence(blockId, sentenceId);
 			const entry = this.#sentences.get(sentenceId);
 			if (entry === void 0) return;
 			entry.record.provisional = components;
@@ -317,7 +336,8 @@
 			this.#blockSentenceOrder.set(entry.blockId, order);
 			this.#repaintBlock(entry.blockId);
 		}
-		renderCoreResult(sentenceId, analysis) {
+		renderCoreResult(sentenceId, blockId, analysis) {
+			this.#ensureSentence(blockId, sentenceId);
 			const entry = this.#sentences.get(sentenceId);
 			if (entry === void 0) return;
 			entry.record.analysis = analysis;
@@ -329,7 +349,8 @@
 			this.#blockSentenceOrder.set(entry.blockId, order);
 			this.#repaintBlock(entry.blockId);
 		}
-		renderCoreError(sentenceId, code, message) {
+		renderCoreError(sentenceId, blockId, code, message) {
+			this.#ensureSentence(blockId, sentenceId);
 			const entry = this.#sentences.get(sentenceId);
 			if (entry === void 0) return;
 			entry.record.failed = true;
@@ -338,6 +359,25 @@
 			this.#repaintBlock(entry.blockId, {
 				errorSentenceId: sentenceId,
 				message
+			});
+		}
+		/**
+		* 惰性注册句子：sentenceId 由 Kotlin 侧权威生成（s-{blockId}-{index}），
+		* JS 端不做分句，CORE_* 消息首次到达时按消息里的 blockId 注册即可渲染。
+		* 若 blockId 尚未 registerBlock（极端乱序），则忽略——下一轮 VISIBLE_BLOCKS 会补上。
+		*/
+		#ensureSentence(blockId, sentenceId) {
+			if (this.#sentences.has(sentenceId)) return;
+			const record = this.#blocks.get(blockId);
+			if (record === void 0) return;
+			record.sentences.set(sentenceId, {
+				analysis: null,
+				provisional: null,
+				failed: false
+			});
+			this.#sentences.set(sentenceId, {
+				blockId,
+				record: record.sentences.get(sentenceId)
 			});
 		}
 		renderDetailStream(sentenceId, structures) {
