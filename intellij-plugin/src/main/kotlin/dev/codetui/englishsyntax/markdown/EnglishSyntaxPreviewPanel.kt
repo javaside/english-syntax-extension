@@ -1,23 +1,15 @@
 package dev.codetui.englishsyntax.markdown
 
 import com.intellij.openapi.Disposable
-import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.TextEditorWithPreview
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.util.Key
 import com.intellij.openapi.util.UserDataHolderBase
-import com.intellij.openapi.vfs.VirtualFile
-import com.intellij.ui.jcef.JBCefApp
-import com.intellij.ui.jcef.JBCefBrowser
-import com.intellij.ui.jcef.JBCefBrowserBase
 import com.intellij.ui.jcef.JBCefJSQuery
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.isActive
+import dev.codetui.englishsyntax.bridge.BridgeProtocol
+import dev.codetui.englishsyntax.bridge.PageMessage
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -26,7 +18,7 @@ import kotlinx.serialization.json.jsonObject
 import org.cef.browser.CefBrowser
 import org.cef.browser.CefFrame
 import org.cef.handler.CefLoadHandlerAdapter
-import org.intellij.plugins.markdown.ui.preview.MarkdownHtmlPanel
+import org.intellij.plugins.markdown.ui.preview.jcef.MarkdownJCEFHtmlPanel
 import org.intellij.plugins.markdown.ui.preview.MarkdownPreviewFileEditor
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
@@ -36,96 +28,68 @@ fun interface PageMessageHandler {
   fun onMessage(json: JsonObject)
 }
 
-/** Kotlin → JS 的发送通道抽象：生产环境是 JCEF executeJavaScript，测试用假实现。 */
+/** Kotlin → JS 的发送通道抽象：生产环境是 CEF executeJavaScript，测试用假实现。 */
 fun interface HostMessageTransport {
   fun post(script: String)
 }
 
 /**
- * 自定义 Markdown 预览面板：持有 previewId/generation、桥接入口与可释放资源。
+ * 官方 Markdown 预览的能力层包装：**不**自建预览浏览器，而是复用 IDEA 默认的
+ * `MarkdownJCEFHtmlPanel`（官方 JCEF 预览）——它继承 `JCEFHtmlPanel` → `JBCefBrowser`，
+ * 因此 `executeJavaScript` 与 `JBCefJSQuery.create` 都是公开 API，无需反射、无需让
+ * 用户切换 provider。
  *
- * JCEF 的浏览器装配集中在 [transport]；本类只负责协议与生命周期，不反射访问
- * 官方面板内部。generation 在每次 setHtml 完成后递增并通知页面重新初始化。
+ * 渲染仍由官方完成（显示问题随官方走）；本包装只负责：向官方面板的页面注入
+ * web 资源（CSS + bundle + JS→Kotlin 通道）、维护 previewId/generation、在官方
+ * 整体重渲染（JS 侧检测到卡片被清掉后上报 `PREVIEW_RENDERED`）时换代并重扫。
+ *
+ * 纯协议测试可传 `hostPanel = null` + `transportOverride`，不触碰 JCEF。
  */
 class EnglishSyntaxPreviewPanel(
-  private val projectRef: Project?,
-  private val virtualFileRef: VirtualFile?,
-  private val transportOverride: HostMessageTransport? = null,
+  private val hostPanel: MarkdownJCEFHtmlPanel? = null,
+  transportOverride: HostMessageTransport? = null,
   parentDisposable: Disposable? = null,
-  private val jcefAssembly: JcefAssembly? = null,
-) : MarkdownHtmlPanel, UserDataHolderBase() {
-
-  /** JCEF 装配：持有 browser/JSQuery，测试传 null 走假 transport。 */
-  class JcefAssembly(
-    val browser: JBCefBrowser,
-    val jsQuery: JBCefJSQuery,
-    val styleCss: String,
-    val bundleJs: String,
-  )
-
-  override fun getProject(): Project? = projectRef
-
-  override fun getVirtualFile(): VirtualFile? = virtualFileRef
+) : UserDataHolderBase(), Disposable {
 
   val previewId: String = "preview-${java.util.UUID.randomUUID()}"
   private val generationCounter = AtomicInteger(0)
   val generation: Int get() = generationCounter.get()
 
-  val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-
-  private val scrollListeners = CopyOnWriteArrayList<MarkdownHtmlPanel.ScrollListener>()
   private val pageHandlers = CopyOnWriteArrayList<PageMessageHandler>()
+
+  /** 渲染换代回调：Start 时接上 manager.onGenerationChanged，官方重渲染后清空旧记录。 */
+  @Volatile
+  var onGenerationChanged: ((Int) -> Unit)? = null
 
   @Volatile
   private var disposed = false
 
   private val json = Json { ignoreUnknownKeys = true }
 
-  /** 测试注入假 transport；生产走 CEF executeJavaScript。 */
+  /** JS→Kotlin 通道：JBCefJSQuery 挂在官方面板的 JBCefBrowser 上（公开 API，不反射）。 */
+  private val jsQuery: JBCefJSQuery? =
+    hostPanel?.let { runCatching { JBCefJSQuery.create(it) }.getOrNull() }
+
+  /** Kotlin→JS 通道：生产走 CEF executeJavaScript，测试注入假 transport。 */
   private val transport: HostMessageTransport =
     transportOverride ?: HostMessageTransport { script ->
-      val cef = jcefAssembly?.browser?.cefBrowser ?: return@HostMessageTransport
+      val cef = hostPanel?.cefBrowser ?: return@HostMessageTransport
       cef.executeJavaScript(script, cef.url, 0)
     }
 
-  /** 生产装配入口：JCEF 可用时创建 browser+JSQuery 并注入 web 资源。 */
   companion object {
-    fun createWithJcef(
-      project: Project?,
-      file: VirtualFile?,
-      parentDisposable: Disposable?,
-    ): EnglishSyntaxPreviewPanel? {
-      if (!JBCefApp.isSupported()) return null
-      val assembly = runCatching { buildAssembly() }.getOrNull() ?: return null
-      val panel = EnglishSyntaxPreviewPanel(
-        projectRef = project,
-        virtualFileRef = file,
-        transportOverride = null,
-        parentDisposable = parentDisposable,
-        jcefAssembly = assembly,
-      )
-      assembly.jsQuery.addHandler { text -> panel.onPageMessage(text); null }
-      Disposer.register(panel, assembly.browser)
-      assembly.browser.jbCefClient.addLoadHandler(
-        object : CefLoadHandlerAdapter() {
-          override fun onLoadEnd(browser: CefBrowser?, frame: CefFrame?, httpStatusCode: Int) {
-            if (frame?.isMain == true) panel.injectWebResources()
-          }
-        },
-        assembly.browser.cefBrowser,
-      )
-      assembly.browser.loadHTML("<html><head><meta charset='utf-8'></head><body></body></html>")
-      return panel
-    }
+    /** 包装缓存 key：挂在官方面板上，保证同一面板的 previewId 稳定复用。 */
+    private val WRAPPER_KEY = Key.create<EnglishSyntaxPreviewPanel>("english-syntax-wrapper")
 
     /**
-     * 从 FileEditorManager 定位当前 Markdown 预览面板。
+     * 定位当前 Markdown 预览的官方面板并包装。
      *
      * Markdown 插件把 htmlPanel 以 WeakReference 存在 MarkdownPreviewFileEditor 的
      * PREVIEW_BROWSER UserData 里（Companion 公开 Key）；preview editor 可能是裸的
      * MarkdownPreviewFileEditor，也可能包在 MarkdownEditorWithPreview
      * （TextEditorWithPreview）里。面板不是 FileEditor 本身——绝不能对
      * selectedEditor 做 `as? EnglishSyntaxPreviewPanel` 强转（永远 null）。
+     * 只认官方 `MarkdownJCEFHtmlPanel`（IDEA 默认预览就是它），其它面板返回 null。
      */
     fun findPanel(project: Project): EnglishSyntaxPreviewPanel? {
       val manager = FileEditorManager.getInstance(project)
@@ -138,16 +102,19 @@ class EnglishSyntaxPreviewPanel(
         }
         .filterIsInstance<MarkdownPreviewFileEditor>()
         .firstNotNullOfOrNull { previewEditor ->
-          previewEditor.getUserData(MarkdownPreviewFileEditor.PREVIEW_BROWSER)?.get() as? EnglishSyntaxPreviewPanel
+          val panel = previewEditor.getUserData(MarkdownPreviewFileEditor.PREVIEW_BROWSER)?.get()
+          (panel as? MarkdownJCEFHtmlPanel)?.let(::wrap)
         }
     }
 
-    private fun buildAssembly(): JcefAssembly {
-      val browser = JBCefBrowser()
-      val jsQuery = JBCefJSQuery.create(browser)
-      val bundleJs = loadWebResource("web/bundle.js")
-      val styleCss = loadWebResource("web/preview.css")
-      return JcefAssembly(browser, jsQuery, styleCss, bundleJs)
+    /** 包装（或复用已有包装）：挂 UserData 保证 previewId 稳定，官方面板 dispose 时释放。 */
+    fun wrap(hostPanel: MarkdownJCEFHtmlPanel): EnglishSyntaxPreviewPanel {
+      hostPanel.getUserData(WRAPPER_KEY)?.let { return it }
+      val wrapper = EnglishSyntaxPreviewPanel(hostPanel = hostPanel)
+      hostPanel.putUserData(WRAPPER_KEY, wrapper)
+      Disposer.register(hostPanel, wrapper)
+      wrapper.attach()
+      return wrapper
     }
 
     private fun loadWebResource(path: String): String {
@@ -155,21 +122,38 @@ class EnglishSyntaxPreviewPanel(
         ?: error("Missing bundled web resource: $path")
       return stream.use { it.readBytes().toString(Charsets.UTF_8) }
     }
+
+    private fun String.escapeJsString(): String =
+      replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n")
   }
 
+  /** 挂 JSQuery 回调 + 等页面 load 完成后注入 web 资源。 */
+  private fun attach() {
+    val cef = hostPanel?.cefBrowser ?: return
+    jsQuery?.addHandler { text -> onPageMessage(text); null }
+    val inject = { if (!disposed) injectWebResources() }
+    // 页面已加载完成（Action 通常在预览打开后触发）→ 立即注入；
+    // 未完成 → 等 onLoadEnd。inject 有 __englishSyntaxLoaded 幂等守卫，双路径安全。
+    if (!cef.isLoading() && cef.url.isNotBlank()) {
+      inject()
+    } else {
+      hostPanel.jbCefClient.addLoadHandler(
+        object : CefLoadHandlerAdapter() {
+          override fun onLoadEnd(browser: CefBrowser?, frame: CefFrame?, httpStatusCode: Int) {
+            if (frame?.isMain == true) inject()
+          }
+        },
+        cef,
+      )
+    }
+  }
+
+  /** 注入顺序：样式 → JSQuery 通道 → bundle；bundle 定义的全局入口依赖前两者。 */
   private fun injectWebResources() {
-    val assembly = jcefAssembly ?: return
-    val injectCss = assembly.styleCss
-      .replace("\\", "\\\\")
-      .replace("'", "\\'")
-      .replace("\n", "\\n")
-    val injectJs = assembly.bundleJs
-      .replace("\\", "\\\\")
-      .replace("'", "\\'")
-      .replace("\n", "\\n")
-    // 注入顺序:样式 → JSQuery 通道 → bootstrap;bootstrap 定义的全局入口依赖前两者。
-    val cef = assembly.browser.cefBrowser
-    cef.executeJavaScript(
+    val injectCss = loadWebResource("web/preview.css").escapeJsString()
+    val injectJs = loadWebResource("web/bundle.js").escapeJsString()
+    val queryInject = jsQuery?.inject("text") ?: "null"
+    execute(
       """
       (function() {
         if (window.__englishSyntaxLoaded) return;
@@ -177,17 +161,23 @@ class EnglishSyntaxPreviewPanel(
         var style = document.createElement('style');
         style.textContent = '$injectCss';
         document.head.appendChild(style);
-        window.EnglishSyntaxHost = { post: function(text) { ${assembly.jsQuery.inject("text")} } };
+        window.EnglishSyntaxHost = { post: function(text) { $queryInject } };
         eval('$injectJs');
       })();
       """.trimIndent(),
-      cef.url,
-      0,
     )
+    // 注入完成后页面才有全局入口，再通知初始化扫描。
+    notifyInitialize()
   }
 
-  init {
-    parentDisposable?.let { Disposer.register(it, this) }
+  private fun notifyInitialize() {
+    val previewIdLiteral = Json.encodeToString(JsonElement.serializer(), JsonPrimitive(previewId))
+    execute("window.__englishSyntaxInitialize($previewIdLiteral, $generation);")
+  }
+
+  private fun execute(script: String) {
+    if (disposed) return
+    transport.post(script)
   }
 
   /** 测试辅助：注册页面消息处理器。 */
@@ -203,64 +193,39 @@ class EnglishSyntaxPreviewPanel(
   fun onPageMessage(text: String) {
     if (disposed) return
     val parsed = runCatching { json.parseToJsonElement(text).jsonObject }.getOrNull() ?: return
-    if (dev.codetui.englishsyntax.bridge.BridgeProtocol.parsePageMessage(parsed) == null) return
-    pageHandlers.forEach { it.onMessage(parsed) }
+    when (val message = BridgeProtocol.parsePageMessage(parsed)) {
+      null -> Unit
+      is PageMessage.PreviewRendered -> handlePageRendered()
+      else -> pageHandlers.forEach { it.onMessage(parsed) }
+    }
   }
 
-  override fun getComponent(): javax.swing.JComponent =
-    jcefAssembly?.browser?.component
-      ?: throw UnsupportedOperationException("JCEF assembly is not attached; use createWithJcef or inject a test transport")
-
-  override fun setHtml(html: String, offset: Int, file: VirtualFile?) {
+  /**
+   * 官方整体重渲染（JS 侧检测到卡片被官方 updateDom 清掉）→ 递增 generation、
+   * 通知会话清空旧记录，并以新 generation 重发 initialize 重新扫描。
+   */
+  private fun handlePageRendered() {
     if (disposed) return
-    generationCounter.incrementAndGet()
-    // Markdown 渲染产物进 JCEF;onLoadEnd 注入 web 资源后由 initialize 重新扫描。
-    jcefAssembly?.browser?.loadHTML(html)
-    // 通知页面重新初始化：固定全局入口 + JSON 参数，绝不拼接模型文本。
-    val previewIdLiteral = Json.encodeToString(JsonElement.serializer(), JsonPrimitive(previewId))
-    transport.post("window.__englishSyntaxInitialize($previewIdLiteral, $generation);")
+    val next = generationCounter.incrementAndGet()
+    onGenerationChanged?.invoke(next)
+    notifyInitialize()
   }
 
-  override fun reloadWithOffset(offset: Int) {
-    if (disposed) return
-    generationCounter.incrementAndGet()
-    transport.post("window.__englishSyntaxReload($offset);")
-  }
-
-  override fun scrollToMarkdownSrcOffset(offset: Int, smooth: Boolean) {
-    if (disposed) return
-    transport.post("window.__englishSyntaxScrollTo($offset, $smooth);")
-  }
-
-  override fun addScrollListener(listener: MarkdownHtmlPanel.ScrollListener) {
-    scrollListeners += listener
-  }
-
-  override fun removeScrollListener(listener: MarkdownHtmlPanel.ScrollListener) {
-    scrollListeners -= listener
-  }
-
-  fun notifyScroll(offset: Int) {
-    scrollListeners.forEach { it.onScroll(offset) }
-  }
-
-  val scopeActive: Boolean get() = scope.isActive
-
-  override fun dispose() {
-    if (disposed) return
-    disposed = true
-    scope.cancel()
-    pageHandlers.clear()
-    scrollListeners.clear()
-  }
-
-  fun isDisposed(): Boolean = disposed
-
-  /** 已释放后再发送必须抛错——调用方依赖这个信号清理会话。 */
+  /** Kotlin→JS 下发模型消息。已释放后再发送必须抛错——调用方依赖这个信号清理会话。 */
   fun send(hostJson: JsonObject) {
     check(!disposed) { "Panel is disposed" }
     transport.post("window.__englishSyntaxMessage(${Json.encodeToString(JsonObject.serializer(), hostJson)});")
   }
+
+  override fun dispose() {
+    if (disposed) return
+    disposed = true
+    runCatching { jsQuery?.let(Disposer::dispose) }
+    pageHandlers.clear()
+    onGenerationChanged = null
+  }
+
+  fun isDisposed(): Boolean = disposed
 
   override fun <T : Any> getUserData(key: Key<T>): T? = super<UserDataHolderBase>.getUserData(key)
 

@@ -40,7 +40,11 @@ export interface RetrySentence extends PageMessageBase {
   sentenceId: string;
 }
 
-export type PageMessage = PreviewReady | VisibleBlocks | DetailRequest | RetrySentence;
+export interface PreviewRendered extends PageMessageBase {
+  type: "PREVIEW_RENDERED";
+}
+
+export type PageMessage = PreviewReady | VisibleBlocks | DetailRequest | RetrySentence | PreviewRendered;
 
 export type HostMessage =
   | ({ type: "SESSION_STATE"; state: string; ready: number; discovered: number } & PageMessageBase)
@@ -74,6 +78,7 @@ const PAGE_KEYS_BY_TYPE: Readonly<Record<string, readonly string[]>> = {
   VISIBLE_BLOCKS: ["version", "type", "previewId", "generation", "blocks"],
   DETAIL_REQUEST: ["version", "type", "previewId", "generation", "sentenceId", "focus"],
   RETRY_SENTENCE: ["version", "type", "previewId", "generation", "sentenceId"],
+  PREVIEW_RENDERED: ["version", "type", "previewId", "generation"],
 };
 
 /** JS → Kotlin 方向：白名单校验后返回封闭联合，或 null 表示拒绝。 */
@@ -144,6 +149,15 @@ export function parsePageMessage(value: unknown): PageMessage | null {
         previewId: value.previewId,
         generation: value.generation,
         sentenceId: value.sentenceId,
+      };
+    }
+    case "PREVIEW_RENDERED": {
+      if (!hasOnlyKeys(value, PAGE_KEYS_BY_TYPE.PREVIEW_RENDERED!)) return null;
+      return {
+        version: BRIDGE_VERSION,
+        type: "PREVIEW_RENDERED",
+        previewId: value.previewId,
+        generation: value.generation,
       };
     }
     default:

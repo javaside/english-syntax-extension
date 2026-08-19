@@ -38,6 +38,12 @@ sealed interface PageMessage {
     override val generation: Int,
     val sentenceId: String,
   ) : PageMessage
+
+  /** 官方 Markdown 预览整体重渲染（updateDom 重写了 body,插件卡片被清掉）。 */
+  data class PreviewRendered(
+    override val previewId: String,
+    override val generation: Int,
+  ) : PageMessage
 }
 
 /** Kotlin → JS 的封闭消息集合。 */
@@ -137,6 +143,11 @@ object BridgeProtocol {
         if (!hasOnlyKeys(value, "version", "type", "previewId", "generation", "sentenceId")) return null
         val sentenceId = value.string("sentenceId")?.takeIf { it.isNotEmpty() } ?: return null
         PageMessage.RetrySentence(previewId, generation, sentenceId)
+      }
+
+      "PREVIEW_RENDERED" -> {
+        if (!hasOnlyKeys(value, "version", "type", "previewId", "generation")) return null
+        PageMessage.PreviewRendered(previewId, generation)
       }
 
       else -> null

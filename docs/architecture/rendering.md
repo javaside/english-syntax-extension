@@ -228,10 +228,12 @@ currentElement(original)                  当前呈现的元素:替换中返回�
 
 ## IntelliJ 插件的渲染链路(预览页)
 
-Chrome 端在真实网页里替换 DOM;IntelliJ 端在 JCEF 渲染的 Markdown 预览页里做同样的事,但取舍不同:
+Chrome 端在真实网页里替换 DOM;IntelliJ 端在 **IDEA 默认的官方 Markdown 预览**(`MarkdownJCEFHtmlPanel`,官方 JCEF 渲染)里做同样的事,但取舍不同:
 
-- **JCEF 桥**:`EnglishSyntaxPreviewPanel.createWithJcef` 创建 JBCefBrowser + JBCefJSQuery,`onLoadEnd` 时经 `executeJavaScript` 注入 web 资源(先样式与 `EnglishSyntaxHost.post`,再 `eval(bundle.js)`);bundle 由 `scripts/bundle-web.mjs` 用 rolldown 从 `bootstrap-entry.ts` 打包成单文件 IIFE。Kotlin→JS 走四个固定全局入口(`__englishSyntaxInitialize`/`__englishSyntaxReload`/`__englishSyntaxScrollTo`/`__englishSyntaxMessage`,参数一律 JSON 序列化,绝不拼接模型文本);JS→Kotlin 走 `EnglishSyntaxHost.post(jsonText)`(JBCefJSQuery 注入的回调)。`setHtml` 每次 `loadHTML` 后靠 `__englishSyntaxInitialize` 触发重新扫描。
-- **面板定位**:Action 拿预览面板**不能**对 `selectedEditor` 做 `as? EnglishSyntaxPreviewPanel`——面板不是 `FileEditor` 本身,那样永远 null。`EnglishSyntaxPreviewPanel.findPanel` 从 `FileEditorManager` 取当前文件的所有 editor(展开 `TextEditorWithPreview` 的 `previewEditor`),找 `MarkdownPreviewFileEditor`,再经其**公开**的 `PREVIEW_BROWSER` UserData(`Key<WeakReference<MarkdownHtmlPanel>>`)取回面板。前提是 Markdown 预览确实由本插件的 provider 提供(Settings → Markdown → Preview 选 "English Syntax Chromium Preview");否则 UserData 里是官方面板,cast 失败,Action 弹通知引导切换。
+- **不自建预览**:插件**不注册** `html.panel.provider`,不创建自己的浏览器——渲染、滚动、缩放全是官方的。`EnglishSyntaxPreviewPanel` 只是官方 JCEF 面板的**能力层包装**:`MarkdownJCEFHtmlPanel` 继承 `JCEFHtmlPanel` → `JBCefBrowser`,`executeJavaScript` 与 `JBCefJSQuery.create` 都是公开 API,不反射、无需用户切换 provider。
+- **注入**:包装在页面 load 完成(立即或 `onLoadEnd`)后经 `executeJavaScript` 注入 web 资源(先样式与 `EnglishSyntaxHost.post` 绑定到 `JBCefJSQuery`,再 `eval(bundle.js)`);bundle 由 `scripts/bundle-web.mjs` 用 rolldown 从 `bootstrap-entry.ts` 打包成单文件 IIFE。Kotlin→JS 走四个固定全局入口(`__englishSyntaxInitialize`/`__englishSyntaxReload`/`__englishSyntaxScrollTo`/`__englishSyntaxMessage`,参数一律 JSON 序列化,绝不拼接模型文本);JS→Kotlin 走 `EnglishSyntaxHost.post(jsonText)`(JBCefJSQuery 注入的回调)。
+- **渲染换代**:官方每次 `updateDom` 会重写整个 body、清掉插件卡片。JS 侧 MutationObserver 检测「卡片从有到无」的边沿,上报 `PREVIEW_RENDERED`;Kotlin 侧递增 generation、经 `onGenerationChanged` 清空会话旧记录,再重发 `__englishSyntaxInitialize(新 generation)` 重新扫描——旧响应不会污染新 DOM。
+- **面板定位**:Action 拿面板**不能**对 `selectedEditor` 做 `as? EnglishSyntaxPreviewPanel`——面板不是 `FileEditor` 本身,那样永远 null。`EnglishSyntaxPreviewPanel.findPanel` 从 `FileEditorManager` 取当前文件的所有 editor(展开 `TextEditorWithPreview` 的 `previewEditor`),找 `MarkdownPreviewFileEditor`,经其公开的 `PREVIEW_BROWSER` UserData(`Key<WeakReference<MarkdownHtmlPanel>>`)取回**官方** `MarkdownJCEFHtmlPanel` 并包装(包装缓存挂在面板 UserData 上,previewId 稳定)。
 - **扫描**:`preview.ts` 的 `scanMarkdownBlocks` 只认 Markdown 渲染产物——候选固定为 `h1-h6/p/li/blockquote`(blockquote 只取安全叶子),排除 `pre/code/table/.math/.katex/.mermaid/.footnotes/交互控件`与插件自己的卡片;英文占比 ≥ 60%、最短 20 字符。Chrome 端"正文容器得分"那套在这里不适用。
 - **可见性**:IntersectionObserver(rootMargin 上下各一屏),不支持时退化为 rAF 节流的 scroll/resize。
 - **卡片**:`render.ts` 用 `data-english-syntax-hidden` 隐藏原文、在其后插入 `data-english-syntax-card` 卡片;`restoreAll` 精确删除插件节点与 data 属性。模型文本一律 `textContent`,杜绝 `<img onerror>` 注入。

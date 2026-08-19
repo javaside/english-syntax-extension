@@ -20,8 +20,7 @@ class SecretIsolationTest {
   @Test
   fun `panel outbound scripts never contain the key`() {
     val scripts = mutableListOf<String>()
-    val panel = EnglishSyntaxPreviewPanel(null, null, HostMessageTransport { scripts += it })
-    panel.setHtml("<p>hello</p>", 0, null as com.intellij.openapi.vfs.VirtualFile?)
+    val panel = EnglishSyntaxPreviewPanel(transportOverride = HostMessageTransport { scripts += it })
     panel.send(buildJsonObject { put("type", "SESSION_STATE"); put("state", "running") })
     panel.dispose()
     scripts.forEach { script -> assertFalse(script.contains(secret), "leaked: $script") }
@@ -30,7 +29,7 @@ class SecretIsolationTest {
   @Test
   fun `bridge messages carry no credential fields`() = runBlocking {
     val received = mutableListOf<JsonObject>()
-    val panel = EnglishSyntaxPreviewPanel(null, null, HostMessageTransport { })
+    val panel = EnglishSyntaxPreviewPanel(transportOverride = HostMessageTransport { })
     panel.addPageMessageHandler { received += it }
     // 恶意页面尝试夹带凭据字段：协议层应整体丢弃。
     panel.onPageMessage("""{"version":1,"type":"PREVIEW_READY","previewId":"p","generation":0,"apiKey":"$secret"}""")

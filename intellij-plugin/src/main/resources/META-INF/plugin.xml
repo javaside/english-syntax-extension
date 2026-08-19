@@ -12,9 +12,6 @@
     <applicationConfigurable parentId="tools" instance="dev.codetui.englishsyntax.settings.EnglishSyntaxConfigurable"/>
     <notificationGroup id="EnglishSyntax" displayType="BALLOON"/>
   </extensions>
-  <extensions defaultExtensionNs="org.intellij.markdown">
-    <html.panel.provider implementation="dev.codetui.englishsyntax.markdown.EnglishSyntaxPreviewProvider"/>
-  </extensions>
   <actions>
     <group id="EnglishSyntaxLearning.Actions" text="句法学习" popup="true">
       <add-to-group group-id="ToolsMenu" anchor="last"/>

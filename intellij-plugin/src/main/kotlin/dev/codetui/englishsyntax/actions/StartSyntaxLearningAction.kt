@@ -39,7 +39,7 @@ class StartSyntaxLearningAction(
     if (panel == null) {
       ActionNotifier.warn(
         project,
-        "未找到句法预览面板：请先在 Settings → Languages & Frameworks → Markdown → Preview 中把预览提供者切换为 \"English Syntax Chromium Preview\"，再打开 Markdown 预览",
+        "未找到 Markdown 预览面板：请先打开一个 .md 文件的 Markdown 预览（IDEA 默认 JCEF 预览即可）",
       )
       return
     }
@@ -48,6 +48,8 @@ class StartSyntaxLearningAction(
       ActionNotifier.warn(project, "句法学习服务不可用：请检查设置页配置（SQLite 缓存初始化失败时也会走到这里）")
       return
     }
+    // 官方预览整体重渲染（内容更新）时换代：取消旧请求、清空记录，避免旧响应污染新 DOM。
+    panel.onGenerationChanged = { generation -> manager.onGenerationChanged(panel.previewId, generation) }
     manager.start(panel.previewId, HostSender { panel.send(it) }) {
       // JS 侧扫描入口：setHtml 后的 initialize 脚本驱动 scanMarkdownBlocks → VISIBLE_BLOCKS。
       panel.onPageMessage("""{"version":1,"type":"PREVIEW_READY","previewId":"${panel.previewId}","generation":${panel.generation}}""")

@@ -88,8 +88,7 @@
 | `cache/CacheTransfer.kt`                     | 与 Chrome 扩展互通的导出/导入(格式头/schema 校验)                                                   |
 | `analysis/AnalysisService.kt`                | 编排:查缓存→分块→调度→校验→一次修复→写缓存;AnalysisServicePort 供测试替换                           |
 | `bridge/BridgeProtocol.kt`                   | JCEF 桥协议:键白名单严格校验,apiKey/headers/baseUrl 一律拒绝                                        |
-| `markdown/EnglishSyntaxPreviewProvider.kt`   | Markdown 预览 Provider(注册到 org.intellij.markdown.html.panel.provider)                            |
-| `markdown/EnglishSyntaxPreviewPanel.kt`      | 预览面板:previewId/generation、桥接入口、dispose 语义                                               |
+| `markdown/EnglishSyntaxPreviewPanel.kt`      | 官方 MarkdownJCEFHtmlPanel 的能力层包装:复用官方 JCEF 预览(不注册自建 provider),注入 web 资源、previewId/generation、PREVIEW_RENDERED 换代、桥接入口、dispose 语义 |
 | `session/PreviewSession.kt`                  | 单预览会话状态机:start/pause/resume/stop、可见块合批、优先级映射、generation 守卫                   |
 | `session/PreviewSessionManager.kt`           | 项目级会话管理:每 preview 一个 child Job、活跃预览、Profile 快照刷新                                |
 | `actions/PreviewActionSupport.kt`            | Action 启用条件与进度文案(纯函数)                                                                   |

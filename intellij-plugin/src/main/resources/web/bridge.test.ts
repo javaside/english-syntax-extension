@@ -138,6 +138,33 @@ describe("parsePageMessage", () => {
       endToken: 4,
     });
   });
+
+  it("accepts preview rendered with minimal keys", () => {
+    const message = parsePageMessage({
+      version: 1,
+      type: "PREVIEW_RENDERED",
+      previewId: "p1",
+      generation: 3,
+    });
+    expect(message).toEqual({
+      version: 1,
+      type: "PREVIEW_RENDERED",
+      previewId: "p1",
+      generation: 3,
+    });
+  });
+
+  it("rejects preview rendered with extra keys", () => {
+    expect(
+      parsePageMessage({
+        version: 1,
+        type: "PREVIEW_RENDERED",
+        previewId: "p1",
+        generation: 3,
+        blocks: [],
+      }),
+    ).toBeNull();
+  });
 });
 
 describe("parseHostMessage", () => {

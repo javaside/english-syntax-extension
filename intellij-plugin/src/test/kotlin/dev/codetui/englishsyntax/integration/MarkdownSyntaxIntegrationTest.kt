@@ -78,7 +78,7 @@ class MarkdownSyntaxIntegrationTest {
   @Test
   fun `start with visible block issues exactly one core request`() = runBlocking {
     val sent = mutableListOf<JsonObject>()
-    val panel = EnglishSyntaxPreviewPanel(null, null, HostMessageTransport { })
+    val panel = EnglishSyntaxPreviewPanel(transportOverride = HostMessageTransport { })
     val manager = PreviewSessionManager(scope, AnalysisService(OpenAiCompatibleClient(KeyCredStore), cache, RequestScheduler(concurrency = 4), loopbackDetector = { true }), { profile() })
     val session = manager.obtain(panel.previewId, HostSender { sent += it }) {
       panel.onPageMessage("""{"version":1,"type":"PREVIEW_READY","previewId":"${panel.previewId}","generation":${panel.generation}}""")

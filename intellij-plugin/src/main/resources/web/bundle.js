@@ -542,6 +542,28 @@
 		});
 		s.visibility.start();
 	}
+	let previewHadCards = false;
+	/**
+	* 官方预览整体重渲染检测：官方 updateDom 会重写整个 body，把我们插入的卡片全部清掉。
+	* 卡片从「有」到「无」是官方重渲染的可靠信号（我们自己的 DOM 操作只会增卡、不会删光），
+	* 借此上报 PREVIEW_RENDERED 让 Kotlin 换代并重发 initialize 重新扫描。
+	*/
+	function trackPreviewRendered() {
+		const hasCards = document.querySelector("[data-english-syntax-card]") !== null;
+		if (previewHadCards && !hasCards) {
+			const s = state;
+			if (s !== null) postToHost({
+				version: 1,
+				type: "PREVIEW_RENDERED",
+				previewId: s.previewId,
+				generation: s.generation
+			});
+			previewHadCards = false;
+			return true;
+		}
+		if (hasCards) previewHadCards = true;
+		return false;
+	}
 	function ensureState() {
 		if (state !== null) return state;
 		state = {
@@ -570,7 +592,10 @@
 		s.previewId = previewId;
 		s.generation = generation;
 		if (s.observer !== null) s.observer.disconnect();
-		s.observer = new MutationObserver(() => rescan());
+		s.observer = new MutationObserver(() => {
+			if (trackPreviewRendered()) return;
+			rescan();
+		});
 		s.observer.observe(document.documentElement, {
 			childList: true,
 			subtree: true,

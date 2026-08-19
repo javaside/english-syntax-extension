@@ -252,7 +252,7 @@ correction 键  = SHA-256(["correction", …同上…, pageUrl, sentenceInstance
 
 Chrome 端协议(SW↔content)之外,IntelliJ 端定义 JCEF 页面↔Kotlin 的独立协议,两侧镜像实现(`BridgeProtocol.kt` / `web/bridge.ts`):
 
-- **JS→Kotlin**:`PREVIEW_READY`、`VISIBLE_BLOCKS`(≤50 块,每块 ≤20,000 字符)、`DETAIL_REQUEST`(focus 非负闭区间)、`RETRY_SENTENCE`。
+- **JS→Kotlin**:`PREVIEW_READY`、`VISIBLE_BLOCKS`(≤50 块,每块 ≤20,000 字符)、`DETAIL_REQUEST`(focus 非负闭区间)、`RETRY_SENTENCE`、`PREVIEW_RENDERED`(官方预览整体重渲染,带 previewId/generation,四键白名单)。
 - **Kotlin→JS**:`SESSION_STATE`、`CORE_STREAM`、`CORE_RESULT`、`CORE_ERROR`、`DETAIL_STREAM`、`DETAIL_RESULT`、`RESTORE_ALL`。
 - 公共字段:`version=1`、`previewId`、`generation`;句子消息再加 `sentenceId`。
 - **键白名单**:每类型一组允许键,多余键整体拒绝;`apiKey`/`headers`/`baseUrl` 永远禁止。JS 侧对 Kotlin 回调复检 generation,旧代次丢弃。
