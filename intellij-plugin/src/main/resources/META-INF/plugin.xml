@@ -11,4 +11,7 @@
     <applicationService serviceImplementation="dev.codetui.englishsyntax.settings.ProfileRepository"/>
     <applicationConfigurable parentId="tools" instance="dev.codetui.englishsyntax.settings.EnglishSyntaxConfigurable"/>
   </extensions>
+  <extensions defaultExtensionNs="org.intellij.markdown">
+    <html.panel.provider implementation="dev.codetui.englishsyntax.markdown.EnglishSyntaxPreviewProvider"/>
+  </extensions>
 </idea-plugin>
