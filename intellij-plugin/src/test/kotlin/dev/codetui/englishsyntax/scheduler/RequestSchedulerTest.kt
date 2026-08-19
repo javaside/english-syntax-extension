@@ -6,6 +6,7 @@ import dev.codetui.englishsyntax.domain.FailureDetail
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancel
@@ -31,11 +32,13 @@ class RequestSchedulerTest {
   private suspend fun waitUntil(timeoutMs: Long = 2_000, condition: suspend () -> Boolean) {
     val deadline = System.currentTimeMillis() + timeoutMs
     while (!condition() && System.currentTimeMillis() < deadline) delay(10)
+    require(condition()) { "waitUntil timed out after ${timeoutMs}ms" }
   }
 
   @Test
   fun `orders all five priority classes`() = runBlocking {
-    val scheduler = RequestScheduler(concurrency = 5)
+    // concurrency=1：出队顺序即执行顺序，断言五档优先级的完整排序。
+    val scheduler = RequestScheduler(concurrency = 1)
     scheduler.pauseAll()
     val order = java.util.Collections.synchronizedList(mutableListOf<SchedulerPriority>())
     val priorities = listOf(
@@ -45,16 +48,15 @@ class RequestSchedulerTest {
       SchedulerPriority.DETAIL_CLICK,
       SchedulerPriority.USER_RETRY,
     )
-    coroutineScope {
-      for (priority in priorities) {
-        launch {
-          scheduler.schedule(request(priority = priority, cacheKey = "k-${priority.name}")) { order += priority }
-        }
+    val jobs = mutableListOf<kotlinx.coroutines.Job>()
+    for (priority in priorities) {
+      jobs += launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+        scheduler.schedule(request(priority = priority, cacheKey = "k-${priority.name}")) { order += priority }
       }
-      // 确定性等待：五个 schedule 全部真正入队后再恢复，不依赖墙钟。
-      waitUntil(timeoutMs = 5_000) { scheduler.queueSizeForTest() == priorities.size }
-      scheduler.resumeAll()
     }
+    waitUntil(timeoutMs = 5_000) { scheduler.queueSizeForTest() == priorities.size }
+    scheduler.resumeAll()
+    jobs.forEach { it.join() }
     assertEquals(
       listOf(
         SchedulerPriority.USER_RETRY,
@@ -72,22 +74,24 @@ class RequestSchedulerTest {
     val scheduler = RequestScheduler(concurrency = 1)
     scheduler.pauseAll()
     val order = java.util.Collections.synchronizedList(mutableListOf<String>())
-    // 并发 launch 的入队顺序不确定，断言因此只钉住排序规则本身：
-    // 1) higher（更高优先级）第一个执行；
-    // 2) repair（jumpQueue）先于两个同优先级普通项执行；
-    // 3) 两个普通项都在 repair 之后。
+    // 入队顺序在并发下不严格保证，断言只钉排序规则：更高优先级最先、
+    // jumpQueue 修复先于同优先级普通项；两个普通项的相对顺序无关紧要。
     val jobs = mutableListOf<kotlinx.coroutines.Job>()
-    coroutineScope {
-      jobs += launch { scheduler.schedule(request(cacheKey = "normal-1")) { order += "normal-1" } }
-      jobs += launch { scheduler.schedule(request(cacheKey = "repair", jumpQueue = true)) { order += "repair" } }
-      jobs += launch { scheduler.schedule(request(cacheKey = "normal-2")) { order += "normal-2" } }
-      jobs += launch {
-        scheduler.schedule(request(cacheKey = "higher", priority = SchedulerPriority.USER_RETRY)) { order += "higher" }
-      }
-      waitUntil(timeoutMs = 5_000) { scheduler.queueSizeForTest() == 4 }
-      scheduler.resumeAll()
-      jobs.forEach { it.join() }
+    jobs += launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+      scheduler.schedule(request(cacheKey = "normal-1")) { order += "normal-1" }
     }
+    jobs += launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+      scheduler.schedule(request(cacheKey = "repair", jumpQueue = true)) { order += "repair" }
+    }
+    jobs += launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+      scheduler.schedule(request(cacheKey = "normal-2")) { order += "normal-2" }
+    }
+    jobs += launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+      scheduler.schedule(request(cacheKey = "higher", priority = SchedulerPriority.USER_RETRY)) { order += "higher" }
+    }
+    waitUntil(timeoutMs = 5_000) { scheduler.queueSizeForTest() == 4 }
+    scheduler.resumeAll()
+    jobs.forEach { it.join() }
     assertEquals("higher", order.first())
     assertEquals("repair", order[1])
     assertEquals(setOf("normal-1", "normal-2"), order.drop(2).toSet())
@@ -116,34 +120,41 @@ class RequestSchedulerTest {
   @Test
   fun `background work leaves one of four slots free`() = runBlocking {
     val scheduler = RequestScheduler(concurrency = 4, backgroundConcurrency = 3)
-    val gate = CompletableDeferred<Unit>()
+    val bgGate = CompletableDeferred<Unit>()
+    val interactiveGate = CompletableDeferred<Unit>()
     val started = java.util.Collections.synchronizedList(mutableListOf<String>())
-    coroutineScope {
-      for (i in 1..4) {
-        launch {
-          scheduler.schedule(request(cacheKey = "bg-$i", priority = SchedulerPriority.ACTIVE_PREFETCH_CORE)) {
-            started += "bg-$i"
-            gate.await()
-          }
+    // 独立 scope（不继承 runBlocking 的 job，避免 cancel 连坐）：入队协程挂起在
+    // deferred.await 上，UNDISPATCHED 让入队段在当前线程直接推进。
+    val enqueueScope = CoroutineScope(SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)
+    val jobs = mutableListOf<kotlinx.coroutines.Job>()
+    for (i in 1..4) {
+      jobs += enqueueScope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+        scheduler.schedule(request(cacheKey = "bg-$i", priority = SchedulerPriority.ACTIVE_PREFETCH_CORE)) {
+          started += "bg-$i"
+          bgGate.await()
         }
       }
-      // 稳定等待：前三个背景项都已启动（每项在 started 记录后阻塞在 gate 上，
-      // 此时第 4 槽对背景项关闭是调度器的确定状态，不再依赖墙钟）。
-      waitUntil(timeoutMs = 5_000) { started.count { it.startsWith("bg-") } >= 3 }
-
-      launch { scheduler.schedule(request(cacheKey = "interactive")) { started += "interactive" } }
-      // 交互项立即占第 4 槽——背景上限只限背景类，不拦交互项。
-      waitUntil(timeoutMs = 5_000) { started.contains("interactive") }
-      assertTrue(started.contains("interactive"))
-
-      // 第 4 个背景项在三个 gate 释放前必须仍未启动。
-      assertEquals(3, started.count { it.startsWith("bg-") })
-
-      gate.complete(Unit)
-      waitUntil(timeoutMs = 5_000) { started.size == 5 }
-      assertEquals(4, started.count { it.startsWith("bg-") })
     }
+    jobs += enqueueScope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+      scheduler.schedule(request(cacheKey = "interactive")) {
+        started += "interactive"
+        interactiveGate.await()
+      }
+    }
+    // 终态：3 背景 + 1 交互在飞（各自阻塞在自己的 gate 上，计数稳定），第 4 背景排队。
+    waitUntil(timeoutMs = 5_000) { scheduler.activeCountForTest() == 4 && scheduler.queueSizeForTest() == 1 }
+    assertEquals(4, scheduler.activeCountForTest())
+    assertEquals(1, scheduler.queueSizeForTest())
+
+    bgGate.complete(Unit)
+    interactiveGate.complete(Unit)
+    jobs.forEach { it.join() }
+    assertEquals(4, started.count { it.startsWith("bg-") })
+    assertTrue(started.contains("interactive"))
+    enqueueScope.cancel()
   }
+
+  private fun independentScope() = CoroutineScope(SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)
 
   @Test
   fun `deduplicates document and cache key`() = runBlocking {

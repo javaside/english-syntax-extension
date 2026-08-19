@@ -95,6 +95,9 @@ class RequestScheduler(
   /** 测试可见的排队深度（不含在飞）；用于确定性等待入队完成。 */
   suspend fun queueSizeForTest(): Int = mutex.withLock { queue.size }
 
+  /** 测试可见的在飞任务数；用于断言并发上限与背景槽位。 */
+  suspend fun activeCountForTest(): Int = mutex.withLock { active.size }
+
   suspend fun cancelDocument(documentId: String) {
     mutex.withLock {
       val rejected = queue.filter { it.request.documentId == documentId }
