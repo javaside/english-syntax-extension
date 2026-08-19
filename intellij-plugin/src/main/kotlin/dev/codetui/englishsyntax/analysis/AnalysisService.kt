@@ -78,6 +78,35 @@ fun interface StreamedStructureSink {
 }
 
 /**
+ * 会话层依赖的分析服务端口（便于测试用假实现替换具体类）。
+ */
+interface AnalysisServicePort {
+  suspend fun analyzeCore(
+    profile: ModelProfile,
+    documentId: String,
+    sentences: List<SentenceInput>,
+    priority: SchedulerPriority = SchedulerPriority.ACTIVE_VISIBLE_CORE,
+    bypassCache: Boolean = false,
+    onStreamedComponent: StreamedComponentSink? = null,
+  ): CoreBatchOutcome
+
+  suspend fun lookupCore(sentences: List<SentenceInput>): List<CoreAnalysis>
+
+  suspend fun analyzeDetail(
+    profile: ModelProfile,
+    documentId: String,
+    sentence: SentenceInput,
+    core: CoreAnalysis,
+    focus: TokenRange,
+    onStreamedStructure: StreamedStructureSink? = null,
+  ): DetailOutcome
+
+  suspend fun lookupDetail(sentence: SentenceInput, focus: TokenRange): DetailAnalysis?
+
+  suspend fun cancelDocument(documentId: String)
+}
+
+/**
  * 核心编排：查缓存 → 按端点分块 → Prompt → 调度 → 校验 → 一次修复 → 写缓存。
  * 与 Chrome 端 `analysis-service.ts` 同一骨架。
  */
@@ -86,7 +115,7 @@ class AnalysisService(
   private val cache: AnalysisCache,
   private val scheduler: RequestScheduler,
   private val loopbackDetector: (String) -> Boolean = ::isLoopbackBaseUrl,
-) {
+) : AnalysisServicePort {
   private val coreSchema = JsonSchemaSpec(
     name = "core_analysis",
     schema = buildJsonObject {
@@ -172,13 +201,13 @@ class AnalysisService(
   private val serializeMutex = Mutex()
   private val json = Json { prettyPrint = false }
 
-  suspend fun analyzeCore(
+  override suspend fun analyzeCore(
     profile: ModelProfile,
     documentId: String,
     sentences: List<SentenceInput>,
-    priority: SchedulerPriority = SchedulerPriority.ACTIVE_VISIBLE_CORE,
-    bypassCache: Boolean = false,
-    onStreamedComponent: StreamedComponentSink? = null,
+    priority: SchedulerPriority,
+    bypassCache: Boolean,
+    onStreamedComponent: StreamedComponentSink?,
   ): CoreBatchOutcome {
     val keyed = sentences.map { sentence ->
       sentence to createCoreCacheKey(CoreCacheKeyInput(normalize(sentence.text), ContractVersions.CORE_SCHEMA))
@@ -238,7 +267,7 @@ class AnalysisService(
     )
   }
 
-  suspend fun lookupCore(sentences: List<SentenceInput>): List<CoreAnalysis> {
+  override suspend fun lookupCore(sentences: List<SentenceInput>): List<CoreAnalysis> {
     return sentences.mapNotNull { sentence ->
       val key = createCoreCacheKey(CoreCacheKeyInput(normalize(sentence.text), ContractVersions.CORE_SCHEMA))
       val raw = cache.getCore(key) ?: return@mapNotNull null
@@ -248,13 +277,13 @@ class AnalysisService(
     }
   }
 
-  suspend fun analyzeDetail(
+  override suspend fun analyzeDetail(
     profile: ModelProfile,
     documentId: String,
     sentence: SentenceInput,
     core: CoreAnalysis,
     focus: TokenRange,
-    onStreamedStructure: StreamedStructureSink? = null,
+    onStreamedStructure: StreamedStructureSink?,
   ): DetailOutcome {
     val key = detailKey(sentence, focus)
     val cachedRaw = cache.getDetail(key)
@@ -301,14 +330,14 @@ class AnalysisService(
     return DetailOutcome(valid.value, cacheHit = false)
   }
 
-  suspend fun lookupDetail(sentence: SentenceInput, focus: TokenRange): DetailAnalysis? {
+  override suspend fun lookupDetail(sentence: SentenceInput, focus: TokenRange): DetailAnalysis? {
     val raw = cache.getDetail(detailKey(sentence, focus)) ?: return null
     return validateDetail(cachedDetailEnvelope(raw), sentence, focus, CACHE_ONLY_PROFILE_ID).let { result ->
       (result as? ValidationResult.Valid)?.value
     }
   }
 
-  suspend fun cancelDocument(documentId: String) = scheduler.cancelDocument(documentId)
+  override suspend fun cancelDocument(documentId: String) = scheduler.cancelDocument(documentId)
 
   private suspend fun analyzeCoreChunk(
     profile: ModelProfile,
