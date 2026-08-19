@@ -1,0 +1,97 @@
+/* 预览句法卡片样式：注入 Shadow DOM 内部，不污染 Markdown 主题。 */
+
+.english-syntax-sentences {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75em;
+}
+
+.english-syntax-sentence {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5em 0.75em;
+}
+
+.english-syntax-component {
+  display: inline-grid;
+  grid-template-areas:
+    "role"
+    "english"
+    "translation";
+  justify-items: start;
+  gap: 0.1em;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+
+.english-syntax-component > .english-syntax-role {
+  grid-area: role;
+  font-size: 0.72em;
+  opacity: 0.66;
+}
+
+.english-syntax-component > .english-syntax-english {
+  grid-area: english;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.22em;
+}
+
+.english-syntax-component > .english-syntax-translation {
+  grid-area: translation;
+  font-size: 0.82em;
+  opacity: 0.85;
+}
+
+.english-syntax-provisional {
+  opacity: 0.75;
+}
+
+.english-syntax-detail {
+  margin-top: 0.5em;
+  padding: 0.6em 0.8em;
+  border-inline-start: 2px solid currentColor;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4em;
+}
+
+.english-syntax-detail-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.4em 0.7em;
+}
+
+.english-syntax-detail-role {
+  font-size: 0.72em;
+  opacity: 0.66;
+}
+
+.english-syntax-detail-translation {
+  font-size: 0.82em;
+  opacity: 0.85;
+}
+
+.english-syntax-grammar-points {
+  font-size: 0.85em;
+  opacity: 0.8;
+}
+
+.english-syntax-explanation {
+  font-size: 0.9em;
+}
+
+.english-syntax-error {
+  color: #c0392b;
+}
+
+.english-syntax-retry {
+  font: inherit;
+  font-size: 0.85em;
+}
