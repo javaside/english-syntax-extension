@@ -14,4 +14,18 @@
   <extensions defaultExtensionNs="org.intellij.markdown">
     <html.panel.provider implementation="dev.codetui.englishsyntax.markdown.EnglishSyntaxPreviewProvider"/>
   </extensions>
+  <actions>
+    <group id="EnglishSyntaxLearning.Actions" text="句法学习" popup="true">
+      <add-to-group group-id="ToolsMenu" anchor="last"/>
+      <action id="EnglishSyntax.Start"
+              class="dev.codetui.englishsyntax.actions.StartSyntaxLearningAction"
+              text="开始句法学习"/>
+      <action id="EnglishSyntax.TogglePause"
+              class="dev.codetui.englishsyntax.actions.TogglePauseSyntaxLearningAction"
+              text="暂停句法学习"/>
+      <action id="EnglishSyntax.Stop"
+              class="dev.codetui.englishsyntax.actions.StopSyntaxLearningAction"
+              text="停止并恢复原文"/>
+    </group>
+  </actions>
 </idea-plugin>

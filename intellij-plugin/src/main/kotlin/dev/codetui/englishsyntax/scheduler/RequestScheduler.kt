@@ -137,7 +137,44 @@ class RequestScheduler(
     if (globallyPaused) return
     while (active.size < concurrency && queue.isNotEmpty()) {
       val item = takeNext() ?: return
-      launchTask(item)
+      // 同步占位：run 协程在 Default 上启动前先把槽位计入 active，
+      // 否则 pump 的 while 会重复放行（同一轮启动多个任务、压过并发上限）。
+      val placeholder = Job()
+      active[placeholder] = item
+      scope.launch {
+        val job = kotlin.coroutines.coroutineContext[Job]!!
+        mutex.withLock {
+          active.remove(placeholder)
+          active[job] = item
+        }
+        try {
+          var attempt = 0
+          while (true) {
+            try {
+              item.deferred.complete(item.run())
+              return@launch
+            } catch (error: Throwable) {
+              if (error is kotlinx.coroutines.CancellationException) throw error
+              val failure = error as? ExtensionFailure
+              if (failure?.retryable == true && attempt < maxRetries) {
+                val delayMs = retryDelayFor(failure, attempt)
+                delay(delayMs)
+                attempt += 1
+              } else {
+                item.deferred.completeExceptionally(error)
+                return@launch
+              }
+            }
+          }
+        } finally {
+          mutex.withLock {
+            active.remove(job)
+            inFlightByKey.remove(dedupeKey(item.request))
+            if (!item.deferred.isCompleted) item.deferred.completeExceptionally(cancellationFailure())
+            pump()
+          }
+        }
+      }
     }
   }
 
