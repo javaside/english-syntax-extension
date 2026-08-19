@@ -10,6 +10,7 @@
   <extensions defaultExtensionNs="com.intellij">
     <applicationService serviceImplementation="dev.codetui.englishsyntax.settings.ProfileRepository"/>
     <applicationConfigurable parentId="tools" instance="dev.codetui.englishsyntax.settings.EnglishSyntaxConfigurable"/>
+    <notificationGroup id="EnglishSyntax" displayType="BALLOON"/>
   </extensions>
   <extensions defaultExtensionNs="org.intellij.markdown">
     <html.panel.provider implementation="dev.codetui.englishsyntax.markdown.EnglishSyntaxPreviewProvider"/>

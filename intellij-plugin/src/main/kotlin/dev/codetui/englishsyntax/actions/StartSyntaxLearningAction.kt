@@ -36,8 +36,19 @@ class StartSyntaxLearningAction(
 
   override fun actionPerformed(event: AnActionEvent) {
     val project = event.project ?: return
-    val panel = currentPanel(project) ?: return
-    val manager = managerProvider(project) ?: return
+    val panel = currentPanel(project)
+    if (panel == null) {
+      ActionNotifier.warn(
+        project,
+        "未找到句法预览面板：请确认当前 Markdown 预览由 English Syntax 插件的 JCEF 面板提供",
+      )
+      return
+    }
+    val manager = runCatching { managerProvider(project) }.getOrNull()
+    if (manager == null) {
+      ActionNotifier.warn(project, "句法学习服务不可用：请检查设置页配置（SQLite 缓存初始化失败时也会走到这里）")
+      return
+    }
     manager.start(panel.previewId, HostSender { panel.send(it) }) {
       // JS 侧扫描入口：setHtml 后的 initialize 脚本驱动 scanMarkdownBlocks → VISIBLE_BLOCKS。
       panel.onPageMessage("""{"version":1,"type":"PREVIEW_READY","previewId":"${panel.previewId}","generation":${panel.generation}}""")

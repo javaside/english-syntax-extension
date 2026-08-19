@@ -17,7 +17,7 @@ class TogglePauseSyntaxLearningAction(
 
   override fun update(event: AnActionEvent) {
     val project = event.project
-    val manager = project?.let(managerProvider)
+    val manager = project?.let { runCatching { managerProvider(it) }.getOrNull() }
     val session = manager?.activePreviewId?.let { manager.session(it) }
     event.presentation.isEnabled = session?.state == SessionState.RUNNING || session?.state == SessionState.PAUSED
     session?.let { event.presentation.text = PreviewActionSupport.togglePauseText(it.state) }
@@ -25,8 +25,16 @@ class TogglePauseSyntaxLearningAction(
 
   override fun actionPerformed(event: AnActionEvent) {
     val project = event.project ?: return
-    val manager = managerProvider(project) ?: return
-    val previewId = manager.activePreviewId ?: return
+    val manager = runCatching { managerProvider(project) }.getOrNull()
+    if (manager == null) {
+      ActionNotifier.warn(project, "句法学习服务不可用：请检查设置页配置")
+      return
+    }
+    val previewId = manager.activePreviewId
+    if (previewId == null) {
+      ActionNotifier.warn(project, "当前没有进行中的句法学习会话")
+      return
+    }
     when (manager.session(previewId)?.state) {
       SessionState.RUNNING -> manager.pause(previewId)
       SessionState.PAUSED -> manager.resume(previewId)

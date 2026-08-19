@@ -236,3 +236,4 @@ Chrome 端在真实网页里替换 DOM;IntelliJ 端在 JCEF 渲染的 Markdown �
 - **卡片**:`render.ts` 用 `data-english-syntax-hidden` 隐藏原文、在其后插入 `data-english-syntax-card` 卡片;`restoreAll` 精确删除插件节点与 data 属性。模型文本一律 `textContent`,杜绝 `<img onerror>` 注入。
 - **generation 双闸**:页面收到旧 generation 的 `CORE_RESULT`/`DETAIL_*` 一律丢弃(见 [invariants.md](./invariants.md))。
 - **详解**:点击成分经 bridge 发 `DETAIL_REQUEST`,面板同时只展开一个详解面板;再次点击同一成分关闭。
+- **Action 反馈**:Tools 菜单三个 Action 的失败不再静默——`ActionNotifier` 走 `EnglishSyntax` 通知组弹 BALLOON(未找到预览面板 / 服务不可用 / 无进行中会话);Toggle/Stop 的 `update` 与 `actionPerformed` 都 `runCatching` 包住 manager 获取,初始化异常(如 SQLite 缓存)只导致按钮禁用或通知,不再冒泡成 ActionUpdater 的 SEVERE。

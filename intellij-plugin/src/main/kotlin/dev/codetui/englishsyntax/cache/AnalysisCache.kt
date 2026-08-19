@@ -9,10 +9,10 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
+import org.sqlite.SQLiteDataSource
 import java.nio.file.Files
 import java.nio.file.Path
 import java.sql.Connection
-import java.sql.DriverManager
 import java.util.concurrent.atomic.AtomicLong
 
 data class CacheStats(
@@ -42,7 +42,12 @@ class AnalysisCache(
 
   init {
     Files.createDirectories(databasePath.toAbsolutePath().parent)
-    connection = DriverManager.getConnection("jdbc:sqlite:$databasePath")
+    // 不用 DriverManager:IDEA 插件 classloader 下 sqlite-jdbc 的 ServiceLoader
+    // 注册不可靠,会抛 "No suitable driver found"。SQLiteDataSource 走直接实例化,
+    // 不碰全局驱动注册表,动态卸载也无类加载器泄漏。
+    val dataSource = SQLiteDataSource()
+    dataSource.url = "jdbc:sqlite:$databasePath"
+    connection = dataSource.connection
     connection.createStatement().use { statement ->
       statement.executeUpdate(DDL)
     }

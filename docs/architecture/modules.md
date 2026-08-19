@@ -93,6 +93,7 @@
 | `session/PreviewSession.kt`                  | 单预览会话状态机:start/pause/resume/stop、可见块合批、优先级映射、generation 守卫                   |
 | `session/PreviewSessionManager.kt`           | 项目级会话管理:每 preview 一个 child Job、活跃预览、Profile 快照刷新                                |
 | `actions/PreviewActionSupport.kt`            | Action 启用条件与进度文案(纯函数)                                                                   |
+| `actions/ActionNotifier.kt`                  | Action 的用户可见反馈:BALLOON 通知(未找到面板/服务不可用/无会话),避免静默失败                       |
 | `actions/StartSyntaxLearningAction.kt`       | 开始句法学习(经 FileEditorManager 定位面板,不扫 Swing)                                              |
 | `actions/TogglePauseSyntaxLearningAction.kt` | 暂停/继续切换                                                                                       |
 | `actions/StopSyntaxLearningAction.kt`        | 停止并恢复原文                                                                                      |
