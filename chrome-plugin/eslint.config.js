@@ -9,7 +9,6 @@ export default tseslint.config(
       "playwright-report/**",
       "test-results/**",
       ".superpowers/**",
-      "intellij-plugin/build/**",
     ],
   },
   eslint.configs.recommended,

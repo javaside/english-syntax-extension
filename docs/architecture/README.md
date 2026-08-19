@@ -34,7 +34,7 @@ Chrome MV3 扩展"英语句法伴读":把网页里的英文段落**就地替换*
 | `CHANGELOG.md`                | 按版本记录变更与性能实测数字                        | 查"某个取舍是什么时候、为什么定下来的" |
 | `docs/superpowers/specs/*`    | 单个功能的设计稿(写于实现之前)                      | 考古某个功能的原始需求                 |
 | `docs/superpowers/plans/*`    | 单个功能的分步实现计划                              | 同上                                   |
-| `docs/chrome-web-store.md`    | 应用商店上架文案与素材说明                          | 发布时                                 |
+| `chrome-plugin/docs/chrome-web-store.md`    | 应用商店上架文案与素材说明                          | 发布时                                 |
 | `PRIVACY.md` / `SECURITY.md`  | 隐私声明与安全披露流程                              | 合规                                   |
 
 **冲突时以 `AGENTS.md` 为准**,并把本目录里过时的那段改掉。
@@ -45,11 +45,11 @@ Chrome MV3 扩展"英语句法伴读":把网页里的英文段落**就地替换*
 
 ### 第一道:门禁里的自动守护
 
-`src/shared/architecture-docs.test.ts` 随 `npm test` 一起跑,钉住能机器判定的部分:
+`chrome-plugin/src/shared/architecture-docs.test.ts` 随 `chrome-plugin/` 的 `npm test` 一起跑(它从子目录回看仓库根的文档与 `intellij-plugin/`),钉住能机器判定的部分:
 
 | 断言                                                                                                                                                                                      | 改了什么会让它变红 |
 | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
-| `src/` 下每个实现文件都在 `modules.md` 出现                                                                                                                                               | 新增或重命名模块   |
+| `chrome-plugin/src/` 与 `intellij-plugin/` 下每个实现文件都在 `modules.md` 出现                                                                                                                                               | 新增或重命名模块   |
 | 每条 `RequestMessage` / `ResponseMessage` 都在 `protocol.md` 出现                                                                                                                         | 增删消息类型       |
 | 每个 `GrammarRole` 与中文标签都在 `protocol.md` 出现;文档里写的角色数量正确                                                                                                               | 增删语法角色       |
 | 每个 `ERROR_CODES` 成员都在 `protocol.md` 出现                                                                                                                                            | 增删错误码         |
@@ -66,7 +66,9 @@ Chrome MV3 扩展"英语句法伴读":把网页里的英文段落**就地替换*
 
 第一道只认**名字与数字**。改现有文件的内部逻辑时它一条都不会红——而"新增功能"多半正是这一类,这是最容易漂的地方。
 
-`scripts/check-docs-drift.mjs` 补的就是这一段:读本次 git 改动(含未跟踪的新文件),按文件路径反查该核对哪几份文档,列出"这些源文件变了、对应文档却没动"。
+`chrome-plugin/scripts/check-docs-drift.mjs` 补的就是这一段:读本次 git 改动(含未跟踪的新文件),按文件路径反查该核对哪几份文档,列出"这些源文件变了、对应文档却没动"。
+
+在 `chrome-plugin/` 里跑(git 操作由脚本从仓库根执行):
 
 ```bash
 npm run docs:drift                              # 比工作区与 HEAD

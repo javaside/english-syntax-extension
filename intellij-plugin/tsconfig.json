@@ -12,16 +12,7 @@
     "isolatedModules": true,
     "skipLibCheck": true,
     "noEmit": true,
-    "types": ["chrome", "vitest/globals"]
+    "types": ["vitest/globals"]
   },
-  "include": [
-    "src",
-    "tests",
-    "shared-fixtures",
-    "intellij-plugin/src/main/resources/web",
-    "vite.config.ts",
-    "vite.content.config.ts",
-    "vitest.config.ts",
-    "playwright.config.ts"
-  ]
+  "include": ["src/main/resources/web", "vitest.config.ts"]
 }

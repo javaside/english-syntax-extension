@@ -13,25 +13,29 @@
 // 那部分是人的责任,见 AGENTS.md「文档同步」。
 
 import { execFileSync } from "node:child_process";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
+// 脚本从 chrome-plugin/ 里跑,但架构文档与 git 改动都以仓库根为基准。
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const DOCS_DIR = "docs/architecture/";
 
 /** 源文件前缀 → 该核对的文档。按从具体到宽泛匹配,命中即取该条。 */
 const RULES = [
-  ["src/background/service-worker.ts", ["protocol.md", "overview.md"]],
-  ["src/background/analysis-cache.ts", ["model-pipeline.md", "protocol.md"]],
-  ["src/background/config-repository.ts", ["protocol.md", "model-pipeline.md"]],
-  ["src/background/", ["model-pipeline.md"]],
-  ["src/content/content-script.ts", ["protocol.md", "rendering.md"]],
-  ["src/content/session-controller.ts", ["rendering.md", "overview.md"]],
-  ["src/content/", ["rendering.md"]],
-  ["src/shared/protocol.ts", ["protocol.md"]],
-  ["src/shared/grammar.ts", ["protocol.md"]],
-  ["src/shared/errors.ts", ["protocol.md"]],
-  ["src/shared/versions.ts", ["protocol.md"]],
-  ["src/language/", ["rendering.md", "protocol.md"]],
-  ["src/popup/", ["modules.md"]],
-  ["src/options/", ["modules.md", "protocol.md"]],
+  ["chrome-plugin/src/background/service-worker.ts", ["protocol.md", "overview.md"]],
+  ["chrome-plugin/src/background/analysis-cache.ts", ["model-pipeline.md", "protocol.md"]],
+  ["chrome-plugin/src/background/config-repository.ts", ["protocol.md", "model-pipeline.md"]],
+  ["chrome-plugin/src/background/", ["model-pipeline.md"]],
+  ["chrome-plugin/src/content/content-script.ts", ["protocol.md", "rendering.md"]],
+  ["chrome-plugin/src/content/session-controller.ts", ["rendering.md", "overview.md"]],
+  ["chrome-plugin/src/content/", ["rendering.md"]],
+  ["chrome-plugin/src/shared/protocol.ts", ["protocol.md"]],
+  ["chrome-plugin/src/shared/grammar.ts", ["protocol.md"]],
+  ["chrome-plugin/src/shared/errors.ts", ["protocol.md"]],
+  ["chrome-plugin/src/shared/versions.ts", ["protocol.md"]],
+  ["chrome-plugin/src/language/", ["rendering.md", "protocol.md"]],
+  ["chrome-plugin/src/popup/", ["modules.md"]],
+  ["chrome-plugin/src/options/", ["modules.md", "protocol.md"]],
   [
     "intellij-plugin/src/main/kotlin/dev/codetui/englishsyntax/domain/",
     ["protocol.md", "overview.md"],
@@ -63,10 +67,10 @@ const RULES = [
   ["intellij-plugin/build.gradle.kts", ["build-test-release.md"]],
   ["intellij-plugin/gradle/", ["build-test-release.md"]],
   ["shared-fixtures/", ["build-test-release.md", "protocol.md"]],
-  ["tests/support/", ["build-test-release.md"]],
-  ["tests/e2e/", ["build-test-release.md"]],
-  ["scripts/", ["build-test-release.md"]],
-  ["manifest.json", ["overview.md"]],
+  ["chrome-plugin/tests/support/", ["build-test-release.md"]],
+  ["chrome-plugin/tests/e2e/", ["build-test-release.md"]],
+  ["chrome-plugin/scripts/", ["build-test-release.md"]],
+  ["chrome-plugin/manifest.json", ["overview.md"]],
   [".github/workflows/", ["build-test-release.md"]],
 ];
 
@@ -74,7 +78,7 @@ const RULES = [
 function isModuleRosterChange(status, path) {
   return (
     (status === "A" || status === "D" || status === "R") &&
-    (path.startsWith("src/") ||
+    (path.startsWith("chrome-plugin/src/") ||
       path.startsWith("intellij-plugin/src/main/kotlin/") ||
       path.startsWith("intellij-plugin/src/main/resources/web/"))
   );
@@ -146,6 +150,7 @@ function main() {
 
   const range = base ? [`${base}...HEAD`] : ["HEAD"];
   const raw = execFileSync("git", ["diff", "--name-status", ...range], {
+    cwd: REPO_ROOT,
     encoding: "utf8",
   });
   const changes = parseNameStatus(raw);
@@ -154,6 +159,7 @@ function main() {
   // 场景,而它在 `git add` 之前对 `git diff` 完全不可见——只看 diff 会静默漏掉。
   if (!base) {
     const untracked = execFileSync("git", ["ls-files", "--others", "--exclude-standard"], {
+      cwd: REPO_ROOT,
       encoding: "utf8",
     })
       .split("\n")

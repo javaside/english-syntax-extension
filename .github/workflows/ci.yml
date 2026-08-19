@@ -6,8 +6,11 @@ on:
   pull_request:
 
 jobs:
-  gate:
+  chrome:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: chrome-plugin
     steps:
       - uses: actions/checkout@v7
 
@@ -15,6 +18,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: chrome-plugin/package-lock.json
 
       - name: 安装依赖
         run: npm ci
@@ -55,7 +59,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: playwright-report
-          path: playwright-report/
+          path: chrome-plugin/playwright-report/
           retention-days: 7
 
   intellij:
@@ -69,6 +73,17 @@ jobs:
           distribution: zulu
           java-version: 21
           cache: gradle
+
+      - name: 安装 Node 22
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: 预览 Web 测试（Kotlin/TS 桥协议镜像）
+        working-directory: intellij-plugin
+        run: |
+          npm ci
+          npm test
 
       - name: Gradle 测试 / 构建 / 插件校验
         run: ./gradlew :intellij-plugin:test :intellij-plugin:buildPlugin :intellij-plugin:verifyPluginProjectConfiguration
@@ -89,12 +104,12 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: chrome-plugin/package-lock.json
 
       - name: 安装依赖
+        working-directory: chrome-plugin
         run: npm ci
 
       - name: 跨端契约与共享向量测试
+        working-directory: chrome-plugin
         run: npm run test:contracts
-
-      - name: 预览 Web 测试（Kotlin/TS 桥协议镜像）
-        run: npm run test:idea-web

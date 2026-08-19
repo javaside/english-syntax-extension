@@ -6,12 +6,12 @@ MV3 把扩展拆成互不共享内存的几个世界。**每个模块能做什�
 
 | 上下文                   | 入口                               | 能力                                           | 关键限制                                                                                        |
 | ------------------------ | ---------------------------------- | ---------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| **Service Worker(后台)** | `src/background/service-worker.ts` | 唯一能发模型请求的地方;持有缓存、调度器、配置  | **空闲约 30 秒即被终止**,内存状态随之清空                                                       |
-| **Content script(页面)** | `src/content/content-script.ts`    | 读写页面 DOM、扫描段落、渲染卡片               | **读不到 `chrome.storage`**(SW 启动时设了 `TRUSTED_CONTEXTS`);`window.customElements` 为 `null` |
-| **Popup(弹窗)**          | `src/popup/popup.ts`               | 启停会话、显示进度                             | 关闭即销毁;属于受信任扩展 UI                                                                    |
-| **Options(选项页)**      | `src/options/options.ts`           | 管理 profile、缓存统计 / 上限 / 导入导出、开关 | 与 SW 同源,**直连同一个 IndexedDB**(大文件不过消息通道)                                         |
+| **Service Worker(后台)** | `chrome-plugin/src/background/service-worker.ts` | 唯一能发模型请求的地方;持有缓存、调度器、配置  | **空闲约 30 秒即被终止**,内存状态随之清空                                                       |
+| **Content script(页面)** | `chrome-plugin/src/content/content-script.ts`    | 读写页面 DOM、扫描段落、渲染卡片               | **读不到 `chrome.storage`**(SW 启动时设了 `TRUSTED_CONTEXTS`);`window.customElements` 为 `null` |
+| **Popup(弹窗)**          | `chrome-plugin/src/popup/popup.ts`               | 启停会话、显示进度                             | 关闭即销毁;属于受信任扩展 UI                                                                    |
+| **Options(选项页)**      | `chrome-plugin/src/options/options.ts`           | 管理 profile、缓存统计 / 上限 / 导入导出、开关 | 与 SW 同源,**直连同一个 IndexedDB**(大文件不过消息通道)                                         |
 
-### manifest 与权限面(`manifest.json`)
+### manifest 与权限面(`chrome-plugin/manifest.json`)
 
 `minimum_chrome_version: 120`。权限刻意收得很紧,`manifest.test.ts` 钉住这个形态:
 
@@ -32,6 +32,8 @@ MV3 把扩展拆成互不共享内存的几个世界。**每个模块能做什�
 3. **流式分片走端口,不走 `sendMessage`。** content script 建一条名为 `syntax-learning:<documentId>` 的 `runtime.Port`,SW 通过它 `postMessage` 推送分片。这条端口同时兼任**页面存活探测**:断开即取消该文档的全部在飞请求。
 
 ## 2. 分层
+
+以下与后文所有 `src/...` 路径都在 `chrome-plugin/` 里(intellij-plugin 的对应实现见 `modules.md` 专节)。
 
 ```
 ┌─ src/popup ─────────┐   ┌─ src/options ───────────────┐
@@ -187,7 +189,7 @@ discovered ─▶ cache-check ─▶ queued ─▶ requesting ─▶ validating 
 
 Chrome 扩展之外,本仓库还交付一个 IntelliJ IDEA Markdown 预览插件(`intellij-plugin/`)。两个运行时**不共享运行代码**,只共享契约:
 
-- `shared-fixtures/` 的分句/缓存键向量、交换 fixture 由 TS 与 Kotlin 测试同时消费——两端任何一侧改规则,另一侧的测试立刻红。
+- 仓库根 `shared-fixtures/` 的分句/缓存键向量、交换 fixture 由 TS(chrome-plugin)与 Kotlin(intellij-plugin)测试同时消费——两端任何一侧改规则,另一侧的测试立刻红。
 - 模型链路(prompt、校验、修复、降级)在 Kotlin 侧按同一骨架重新实现(见 [model-pipeline.md](./model-pipeline.md) 的 IntelliJ 小节)。
 
 链路时序:IntelliJ 打开 `.md` 预览 → `EnglishSyntaxPreviewProvider` 提供 JCEF 面板 → `setHtml` 递增 generation 并通知页面 → JS 扫描可见块回传 `VISIBLE_BLOCKS` → `PreviewSession` 分句分词、合批、查 SQLite 缓存(与 Chrome 扩展互通)→ 未命中经 `RequestScheduler` 调模型 → 校验/一次修复 → `CORE_RESULT`/`CORE_STREAM` 回推页面 → `render.ts` 可逆替换卡片。用户手势(Tools 菜单的三个 Action)驱动 start/pause/stop;stop 发 `RESTORE_ALL` 恢复原文。

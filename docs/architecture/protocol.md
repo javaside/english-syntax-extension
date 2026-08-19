@@ -1,6 +1,6 @@
 # 协议与数据模型参考
 
-一切定义在 `src/shared/`。**这是唯一真相**——`background` 与 `content` 互不 import,只靠这里的类型对齐。
+一切定义在 `chrome-plugin/src/shared/`。**这是唯一真相**——`background` 与 `content` 互不 import,只靠这里的类型对齐。
 
 ## 1. 版本常量(`shared/versions.ts`)
 

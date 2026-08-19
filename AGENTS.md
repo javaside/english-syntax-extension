@@ -1,27 +1,25 @@
 # 项目指令(english-syntax-extension)
 
-双运行时项目:**Chrome MV3 英语句法学习扩展**(TypeScript + Vite,Vitest(fake-indexeddb / happy-dom)单测,Playwright E2E 假 OpenAI 服务器)+ **IntelliJ IDEA Markdown 预览插件**(`intellij-plugin/`,Kotlin + Gradle IntelliJ Platform,SQLite 缓存,JCEF 桥接预览页)。两运行时共享契约:`shared-fixtures/` 的向量与 fixture 由 TS/Kotlin 双端测试同时消费。本仓库由 springai-agentdemo 单仓拆出(git filter-repo,历史完整保留)。
+双运行时仓库,根下两个平级子模块:**`chrome-plugin/`** 是 Chrome MV3 英语句法学习扩展(TypeScript + Vite,Vitest(fake-indexeddb / happy-dom)单测,Playwright E2E 假 OpenAI 服务器,自带 package.json 完整 npm 工程);**`intellij-plugin/`** 是 IntelliJ IDEA Markdown 预览插件(Kotlin + Gradle IntelliJ Platform,SQLite 缓存,JCEF 桥接预览页,web 侧 TS 测试有自己的 package.json)。仓库根保留双端共享的东西:`shared-fixtures/` 的向量与 fixture 由 TS/Kotlin 双端测试同时消费,`docs/architecture/` 与 CHANGELOG 也是仓库级。本仓库由 springai-agentdemo 单仓拆出(git filter-repo,历史完整保留)。
 
 **本文件是权威简版,先读完它再动手。** 需要理解全局结构、跨层链路或某条约定的完整来龙去脉时,读 [`docs/architecture/`](docs/architecture/README.md)(总览 / 模块地图 / 协议参考 / 模型链路 / 渲染链路 / 构建发布 / 不变量清单)。两处冲突以本文件为准,并把架构文档改掉。
 
 ## 门禁(提交前全部过)
 
-Chrome 扩展:
+Chrome 扩展(在 `chrome-plugin/` 里跑):
 
 ```bash
-npm test && npx playwright test && npm run lint && npm run format:check && npm run build
+cd chrome-plugin && npm test && npx playwright test && npm run lint && npm run format:check && npm run build
 ```
 
-IntelliJ 插件(动了 `intellij-plugin/`、`shared-fixtures/` 或桥协议时):
+IntelliJ 插件(动了 `intellij-plugin/`、`shared-fixtures/` 或桥协议时;仓库根跑 gradle,子目录跑 npm):
 
 ```bash
-npm run test:idea-web \
+(cd intellij-plugin && npm ci && npm test) \
   && ./gradlew :intellij-plugin:test :intellij-plugin:buildPlugin :intellij-plugin:verifyPluginProjectConfiguration
 ```
 
-一键全量:`npm run test:all`(= npm test + test:idea-web + `./gradlew intellijCheck`)。
-
-- **lint 基线:恰好 1 个错误**——`src/options/options.test.ts` 的 `no-unnecessary-type-assertion`。不要修它,也不要新增任何错误。
+- **lint 基线:恰好 1 个错误**——`chrome-plugin/src/options/options.test.ts` 的 `no-unnecessary-type-assertion`。不要修它,也不要新增任何错误。
 - 提交信息用中文主题。
 
 ## IntelliJ 插件的三条硬不变量
@@ -59,8 +57,8 @@ npm run test:idea-web \
 
 `docs/architecture/` 要跟着代码走。两道防线:
 
-1. **`src/shared/architecture-docs.test.ts`**(随 `npm test` 跑)钉住**能机器判定**的部分:枚举/错误码/消息类型/storage 键/调度优先级/相位全覆盖、关键常量数值一致、新增源文件必须进模块地图。它红了就去改文档,**不要放宽断言**。
-2. **`npm run docs:drift`**(改完代码、提交前跑一次)按本次改动的文件反查该核对哪几份文档。上面那条测试只认「名字与数字」,改现有文件的内部逻辑它一条都不会红——而「新增功能」多半正是这一类,这个脚本补的就是那一段。它只判断「相关文档有没有被碰过」,改得对不对仍然靠你;确实没有新说法要记(改 typo、纯重构)就忽略。
+1. **`chrome-plugin/src/shared/architecture-docs.test.ts`**(随 chrome-plugin 的 `npm test` 跑)钉住**能机器判定**的部分:枚举/错误码/消息类型/storage 键/调度优先级/相位全覆盖、关键常量数值一致、新增源文件必须进模块地图。它红了就去改文档,**不要放宽断言**。
+2. **`npm run docs:drift`**(在 `chrome-plugin/` 里,改完代码、提交前跑一次)按本次改动的文件反查该核对哪几份文档。上面那条测试只认「名字与数字」,改现有文件的内部逻辑它一条都不会红——而「新增功能」多半正是这一类,这个脚本补的就是那一段。它只判断「相关文档有没有被碰过」,改得对不对仍然靠你;确实没有新说法要记(改 typo、纯重构)就忽略。
 
 **两个工具都管不到、只能靠你的**——命中下列任一条就顺手改对应文档:
 

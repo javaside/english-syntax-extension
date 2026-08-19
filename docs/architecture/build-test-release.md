@@ -2,21 +2,21 @@
 
 ## 1. 门禁
 
-提交前**全部**要过(与 `AGENTS.md` 一致):
+提交前**全部**要过(与 `AGENTS.md` 一致)。Chrome 侧命令都在 `chrome-plugin/` 里跑:
 
 ```bash
-npm test && npx playwright test && npm run lint && npm run format:check && npm run build
+cd chrome-plugin && npm test && npx playwright test && npm run lint && npm run format:check && npm run build
 ```
 
-- **lint 基线:恰好 1 个错误、0 个警告。** 那一个是 `src/options/options.test.ts` 的 `no-unnecessary-type-assertion`。不要修它,也不要新增任何错误。`npm run lint:baseline` 与 CI 用同一套判定——**直接看 `eslint .` 末尾那行会误读**,它报的是"可自动修复"的计数,不是总数。
+- **lint 基线:恰好 1 个错误、0 个警告。** 那一个是 `chrome-plugin/src/options/options.test.ts` 的 `no-unnecessary-type-assertion`。不要修它,也不要新增任何错误。`npm run lint:baseline` 与 CI 用同一套判定——**直接看 `eslint .` 末尾那行会误读**,它报的是"可自动修复"的计数,不是总数。
 - 提交信息用中文主题。
 - **验证退出码别用管道**(`cmd | tail` 会吞掉真实退出码)。
 
-门禁之外还有一条**提醒**(不阻断):`npm run docs:drift` 按本次改动的文件反查该核对哪几份架构文档。它不在上面那条命令链里,因为"改了代码就必须改文档"并非总成立(改 typo、纯重构都不必),硬阻断只会教人学会绕过。详见 [`README.md` 的「维护这套文档」](./README.md#维护这套文档)。
+门禁之外还有一条**提醒**(不阻断):`chrome-plugin/` 里的 `npm run docs:drift`(脚本按仓库根的 git 状态反查,从子目录跑即可) 按本次改动的文件反查该核对哪几份架构文档。它不在上面那条命令链里,因为"改了代码就必须改文档"并非总成立(改 typo、纯重构都不必),硬阻断只会教人学会绕过。详见 [`README.md` 的「维护这套文档」](./README.md#维护这套文档)。
 
 ## 2. 构建
 
-`npm run build` = `tsc --noEmit` + **两次 Vite 构建**:
+`npm run build`(在 `chrome-plugin/`) = `tsc --noEmit` + **两次 Vite 构建**:
 
 | 配置                                          | 产出                               | 为什么分开                                                                   |
 | --------------------------------------------- | ---------------------------------- | ---------------------------------------------------------------------------- |
@@ -34,12 +34,12 @@ npm test && npx playwright test && npm run lint && npm run format:check && npm r
 
 | 层   | 工具                                                    | 范围                                         | 命令                              |
 | ---- | ------------------------------------------------------- | -------------------------------------------- | --------------------------------- |
-| 单测 | Vitest(happy-dom / fake-indexeddb,`restoreMocks: true`) | `src/**/*.test.ts` + `scripts/**/*.test.mjs` | `npm test` / `npm run test:watch` |
-| E2E  | Playwright + 真实 Chromium + 真实构建产物               | `tests/e2e/*.spec.ts`                        | `npm run test:e2e`                |
+| 单测 | Vitest(happy-dom / fake-indexeddb,`restoreMocks: true`) | `chrome-plugin/src/**/*.test.ts` + `chrome-plugin/scripts/**/*.test.mjs` | `chrome-plugin/` 里 `npm test` / `npm run test:watch` |
+| E2E  | Playwright + 真实 Chromium + 真实构建产物               | `chrome-plugin/tests/e2e/*.spec.ts`          | `chrome-plugin/` 里 `npm run test:e2e` |
 
 E2E 配置:`fullyParallel: false`、`workers: 1`(共享持久化 profile 的权限与存储状态)、单例 30s / 断言 10s 超时、CI 上重试 1 次。**不碰外网**——只有本地假模型与固定页服务器。
 
-### E2E harness(`tests/e2e/fixtures.ts`)
+### E2E harness(`chrome-plugin/tests/e2e/fixtures.ts`)
 
 worker 级 fixture 做一次构建,然后:
 
@@ -51,7 +51,7 @@ harness 提供三个口子:`seedProfiles()`(直接写 `chrome.storage.local`)、
 
 > `seedProfiles` 是**逐字段映射**的——给 `ModelProfile` 加了新字段却忘了在这里映射,会被静默丢弃,表现为"配了却不生效",很难查。
 
-### 假 OpenAI 服务器(`tests/support/fake-openai-server.ts`)
+### 假 OpenAI 服务器(`chrome-plugin/tests/support/fake-openai-server.ts`)
 
 两条契约,破了就是一连串莫名其妙的 E2E 失败:
 
@@ -63,11 +63,11 @@ harness 提供三个口子:`seedProfiles()`(直接写 `chrome.storage.local`)、
 ### 断言纪律
 
 - **用探针,不用墙钟。** 判"是否真调了模型"用 fetch 计数 / 请求记录;判"预载成功"断言 `detailReady === detailTotal && detailFailed === 0`,不能只断言"结束了"。
-- 教学语料(`tests/fixtures/teaching-sentences.json`)的测试**只校验结构不变量**(分句、无损分词、声明的词元数),**永不断言某个唯一的模型答案**——不同模型对成分的切分本就可以不同。
+- 教学语料(`chrome-plugin/tests/fixtures/teaching-sentences.json`)的测试**只校验结构不变量**(分句、无损分词、声明的词元数),**永不断言某个唯一的模型答案**——不同模型对成分的切分本就可以不同。
 
 ### 商店截图
 
-`STORE_SHOTS=1 npm run screenshots` 跑 `tests/e2e/screenshots.spec.ts`,产物进 `store-assets/`(已 gitignore)。
+`chrome-plugin/` 里 `STORE_SHOTS=1 npm run screenshots` 跑 `tests/e2e/screenshots.spec.ts`,产物进 `chrome-plugin/store-assets/`(已 gitignore)。
 
 ## 4. 真机验收
 
@@ -77,13 +77,13 @@ harness 提供三个口子:`seedProfiles()`(直接写 `chrome.storage.local`)、
 
 ## 5. CI(`.github/workflows/ci.yml`)
 
-push 到 main 与所有 PR 触发,单个 `gate` job,Node 22:
+push 到 main 与所有 PR 触发,三个 job:`chrome`(Node 22,`chrome-plugin/` 里跑全部前端门禁)、`intellij`(JDK21 + Gradle,先在 `intellij-plugin/` 里 `npm ci && npm test` 跑 web 测试)、`contracts`(契约向量)。chrome job 主链:
 
 ```
 npm ci → playwright install chromium → npm test → playwright test
 → lint 基线校验(恰好 1 error / 0 warning,偏离即失败)
 → format:check → build
-失败时上传 playwright-report/(保留 7 天)
+失败时上传 chrome-plugin/playwright-report/(保留 7 天)
 ```
 
 ## 6. 发布
@@ -91,13 +91,14 @@ npm ci → playwright install chromium → npm test → playwright test
 ### 本地一条命令
 
 ```bash
+cd chrome-plugin
 npm run release -- 1.2.0          # 改版本 → 全套门禁 → 打包 → 提交 → 打 tag → 推送
 npm run release -- 1.2.0 --dry-run
 ```
 
-`scripts/release.mjs` 存在的理由很具体:这套流程手工做了五次栽了三次——两次改完版本忘了 `npm run package`(本地 `release/` 里躺着上一版的包),一次 `format:check` 报错却没看结果就 commit + push,把红 CI 推了出去。
+`chrome-plugin/scripts/release.mjs` 存在的理由很具体:这套流程手工做了五次栽了三次——两次改完版本忘了 `npm run package`(本地 `release/` 里躺着上一版的包),一次 `format:check` 报错却没看结果就 commit + push,把红 CI 推了出去。
 
-它会校验:semver 递增(**新功能升 minor**)、工作树干净、CHANGELOG 有对应小节、商店文档版本一致。版本号同时写进 `manifest.json` / `package.json` / `package-lock.json`。
+它会校验:semver 递增(**新功能升 minor**)、工作树干净、CHANGELOG 有对应小节、商店文档版本一致。版本号同时写进 `chrome-plugin/manifest.json` / `chrome-plugin/package.json` / `chrome-plugin/package-lock.json`;CHANGELOG 在仓库根,git 操作也从仓库根执行。
 
 ### CI(`.github/workflows/release.yml`)
 
@@ -107,7 +108,7 @@ tag `v*` 触发,`permissions: contents: write`:
 校验 tag == manifest.version == package.version(不一致直接终止)
 → npm test → npm run package
 → scripts/release-notes.mjs 切出本版本那一节 + 补安装说明
-→ softprops/action-gh-release 建 draft release,附 release/*.zip
+→ softprops/action-gh-release 建 draft release,附 chrome-plugin/release/*.zip
 ```
 
 只取当前版本那一节:整个 CHANGELOG 当正文会把所有历史版本一起贴出去。
@@ -122,7 +123,7 @@ tag `v*` 触发,`permissions: contents: write`:
 | ------------ | -------------------------------------------------------------------------------------------------------------------------- |
 | 新功能流程   | 先 brainstorming 出方案确认 → 写 spec(`docs/superpowers/specs/`)与实现计划(`docs/superpowers/plans/`)→ 编码(TDD)           |
 | git 远端     | 走 `gh` HTTPS(本环境 SSH 被墙)                                                                                             |
-| npm registry | `.npmrc` 固定 `registry.npmjs.org`。**公开仓库的 lockfile 不应固化任何镜像地址**;需要镜像请用 `npm install --registry=...` |
+| npm registry | 两个子工程的 `.npmrc` 均固定 `registry.npmjs.org`。**公开仓库的 lockfile 不应固化任何镜像地址**;需要镜像请用 `npm install --registry=...` |
 | ESLint       | `recommendedTypeChecked` 全开;`*.js`/`*.mjs` 关类型感知(不在 tsconfig include 里);两个绘图脚本单独放行浏览器全局           |
 | Prettier     | `.prettierrc.json`;`npm run format:check` 是门禁的一环                                                                     |
 | TypeScript   | `strict` + `noUncheckedIndexedAccess` + `noImplicitOverride` + `isolatedModules`,`noEmit`(Vite 负责产出)                   |
@@ -131,8 +132,8 @@ tag `v*` 触发,`permissions: contents: write`:
 
 ## IntelliJ 插件的构建、测试与发布
 
-- **门禁**:`./gradlew :intellij-plugin:test :intellij-plugin:buildPlugin :intellij-plugin:verifyPluginProjectConfiguration`;聚合任务 `intellijCheck` 供 `npm run test:all` 与 CI 调用。桥协议的 TS 侧测试走 `npm run test:idea-web`(vitest 已包含 `intellij-plugin/src/main/resources/web/`)。
-- **测试分层**:Kotlin 单测(JUnit5,154 例)覆盖模型/调度/缓存/会话;集成测试(`integration/`)用 FakeOpenAiServer + 真实 AnalysisService 走全链路,断言用探针(请求计数、发送记录)不用墙钟;`SecretIsolationTest` 钉密钥隔离。跨端契约由 `shared-fixtures/` 双端消费(`npm run test:contracts`)。
+- **门禁**:仓库根 `./gradlew :intellij-plugin:test :intellij-plugin:buildPlugin :intellij-plugin:verifyPluginProjectConfiguration`;桥协议的 TS 侧测试在 `intellij-plugin/` 里 `npm ci && npm test`(该子目录有自己的 package.json / vitest.config.ts,不再挂在 Chrome 侧的 npm 工程下)。
+- **测试分层**:Kotlin 单测(JUnit5,154 例)覆盖模型/调度/缓存/会话;集成测试(`integration/`)用 FakeOpenAiServer + 真实 AnalysisService 走全链路,断言用探针(请求计数、发送记录)不用墙钟;`SecretIsolationTest` 钉密钥隔离。跨端契约由仓库根 `shared-fixtures/` 双端消费(chrome-plugin 里 `npm run test:contracts`)。
 - **假模型服务器**:Kotlin 侧复用 `testsupport/FakeOpenAiServer`(本地 HTTP,FIFO 响应队列);并发分块用例的响应内容做成"任意配对都合法",不依赖 HTTP 到达顺序。
-- **CI**:三个 job——Chrome(gate)、IntelliJ(intellij:JDK21 + Gradle 缓存 + 插件 zip 产物)、contracts(契约 + 预览 web)。不上传 PasswordSafe/沙箱目录。
+- **CI**:三个 job——chrome(chrome-plugin 全部前端门禁)、intellij(JDK21 + Gradle 缓存 + 插件 zip 产物,web 测试也在这个 job 里)、contracts(契约向量)。不上传 PasswordSafe/沙箱目录。
 - **发版**:`buildPlugin` 产出带版本 zip;Plugin Verifier 对 IC 2025.1+ 校验。JCEF 不可用的运行时里 Provider 报 UNAVAILABLE,Action 引导切换 JetBrains Runtime。

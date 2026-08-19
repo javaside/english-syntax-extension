@@ -1,6 +1,6 @@
 # 页面渲染链路
 
-content script 世界里发生的一切:怎么认出段落、怎么切句、什么时候发请求、卡片长什么样、怎么可逆地换回去。
+content script 世界里发生的一切:怎么认出段落、怎么切句、什么时候发请求、卡片长什么样、怎么可逆地换回去。涉及文件都在 `chrome-plugin/src/content/` 与 `chrome-plugin/src/language/`(文件名不再逐个带前缀)。
 
 ## 1. 认段落(`document-scanner.ts`)
 

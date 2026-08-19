@@ -11,6 +11,9 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: chrome-plugin
     steps:
       - uses: actions/checkout@v7
 
@@ -18,6 +21,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: chrome-plugin/package-lock.json
 
       - run: npm ci
 
@@ -45,7 +49,7 @@ jobs:
       - name: 创建 Release
         uses: softprops/action-gh-release@v3
         with:
-          files: release/*.zip
-          body_path: RELEASE_NOTES.md
+          files: chrome-plugin/release/*.zip
+          body_path: chrome-plugin/RELEASE_NOTES.md
           draft: true
           fail_on_unmatched_files: true

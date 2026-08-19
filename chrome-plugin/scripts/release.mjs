@@ -18,8 +18,15 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const VERSION_FILES = ["manifest.json", "package.json", "package-lock.json"];
-/** 发版这一步允许自己改动的文件，其余一律要求先提交。 */
-const RELEASE_FILES = [...VERSION_FILES, "CHANGELOG.md", "docs/chrome-web-store.md"];
+/**
+ * 发版这一步允许自己改动的文件（仓库相对路径），其余一律要求先提交。
+ * 版本文件与商店手册在 chrome-plugin/ 内,CHANGELOG 在仓库根。
+ */
+const RELEASE_FILES = [
+  ...VERSION_FILES.map((name) => `chrome-plugin/${name}`),
+  "CHANGELOG.md",
+  "chrome-plugin/docs/chrome-web-store.md",
+];
 
 export function parseVersion(raw) {
   const value = String(raw ?? "").replace(/^v/u, "");
@@ -138,7 +145,7 @@ export function assertStoreDocVersion(doc, next) {
   const mentioned = doc.match(/english-syntax-extension-v(\d+\.\d+\.\d+)\.zip/u);
   if (mentioned === null || mentioned[1] !== next) {
     throw new Error(
-      `docs/chrome-web-store.md 的上传物还写着 ${mentioned?.[1] ?? "(未标注)"},` +
+      `chrome-plugin/docs/chrome-web-store.md 的上传物还写着 ${mentioned?.[1] ?? "(未标注)"},` +
         `本次要发 ${next}。先更新它,免得照着手册传错版本。`,
     );
   }
@@ -160,13 +167,17 @@ export function releaseSteps(version) {
 }
 
 function main() {
-  const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+  // 脚本在 chrome-plugin/scripts/ 下:版本文件与商店手册在 chrome-plugin 内,
+  // CHANGELOG 与 git 操作在仓库根。git status 必须从仓库根跑,porcelain 输出
+  // 才是仓库相对路径,与 RELEASE_FILES 的匹配逻辑一致。
+  const root = resolve(dirname(fileURLToPath(import.meta.url)), ".."); // chrome-plugin
+  const repoRoot = resolve(root, "..");
   const args = process.argv.slice(2).filter((a) => a !== "--");
   const dryRun = args.includes("--dry-run");
   const version = parseVersion(args.find((a) => !a.startsWith("--")));
 
   assertReleasableTree(
-    execFileSync("git", ["status", "--porcelain"], { cwd: root, encoding: "utf8" }),
+    execFileSync("git", ["status", "--porcelain"], { cwd: repoRoot, encoding: "utf8" }),
   );
 
   const files = Object.fromEntries(
@@ -186,7 +197,7 @@ function main() {
   }
 
   for (const [name, text] of Object.entries(bumped)) writeFileSync(join(root, name), text);
-  const changelogPath = join(root, "CHANGELOG.md");
+  const changelogPath = join(repoRoot, "CHANGELOG.md");
   const today = new Date().toISOString().slice(0, 10);
   writeFileSync(
     changelogPath,
@@ -194,10 +205,12 @@ function main() {
   );
   // JSON.stringify 的换行策略与 prettier 不同（短数组它会拆成多行），改完直接
   // 交给 prettier 定稿，免得后面的格式检查因为脚本自己的输出而失败。
-  execFileSync("npx", ["prettier", "--write", ...VERSION_FILES, "CHANGELOG.md"], {
-    cwd: root,
-    stdio: "ignore",
-  });
+  // CHANGELOG 在仓库根,对它单独用绝对路径跑 prettier。
+  execFileSync(
+    "npx",
+    ["prettier", "--write", ...VERSION_FILES.map((f) => join(root, f)), changelogPath],
+    { cwd: root, stdio: "ignore" },
+  );
 
   // 「准备就绪再交给人确认」的三道闸。以前这里只打印一句提醒就继续往下跑,
   // 于是「_待补充_」的说明、错版本的商店手册、不合 semver 的版本号都能发出去。
@@ -208,7 +221,7 @@ function main() {
     );
   }
   assertSemverBump(changelog, version, from);
-  assertStoreDocVersion(readFileSync(join(root, "docs/chrome-web-store.md"), "utf8"), version);
+  assertStoreDocVersion(readFileSync(join(root, "docs", "chrome-web-store.md"), "utf8"), version);
   console.log(`已改版本到 ${version}，说明与商店手册均已就位。`);
 
   for (const step of steps) {
@@ -216,10 +229,12 @@ function main() {
     // 提交前把改动加进暂存区——版本文件与 CHANGELOG 都是这一步产生的
     // 只暂存发版自己改的文件——add -A 会把未跟踪文件顺手带走。
     if (step.name === "提交") {
-      execFileSync("git", ["add", ...RELEASE_FILES], { cwd: root, stdio: "inherit" });
+      execFileSync("git", ["add", ...RELEASE_FILES], { cwd: repoRoot, stdio: "inherit" });
     }
     console.log(`\n=== ${step.name} ===`);
-    execFileSync(bin, argv, { cwd: root, stdio: "inherit" });
+    // npm/npx 步骤在 chrome-plugin 里跑;git 从仓库根跑,git add 的路径才对得上。
+    const cwd = bin === "git" ? repoRoot : root;
+    execFileSync(bin, argv, { cwd, stdio: "inherit" });
   }
   console.log(
     [
@@ -231,7 +246,7 @@ function main() {
       `剩下两步只能由人做:`,
       `  1. 正式发布 GitHub Release:gh release edit v${version} --draft=false`,
       `     (先核对说明与附件:gh release view v${version})`,
-      `  2. 上传 Chrome 网上应用店:按 docs/chrome-web-store.md 传 release/english-syntax-extension-v${version}.zip`,
+      `  2. 上传 Chrome 网上应用店:按 chrome-plugin/docs/chrome-web-store.md 传 release/english-syntax-extension-v${version}.zip`,
       `     仓库里没有商店凭据,这一步不会被自动化。`,
     ].join("\n"),
   );

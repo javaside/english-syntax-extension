@@ -36,10 +36,12 @@ export function buildReleaseBody(changelog, version) {
 }
 
 // 作为 CLI 运行时才读写文件，便于上面的纯函数被测试直接引用。
+// CHANGELOG 在仓库根（../CHANGELOG.md），版本文件在 chrome-plugin/ 内。
 if (import.meta.url === `file://${process.argv[1]}`) {
   const { readFileSync, writeFileSync } = await import("node:fs");
+  const { resolve } = await import("node:path");
   const version = process.argv[2] ?? JSON.parse(readFileSync("package.json", "utf8")).version;
-  const body = buildReleaseBody(readFileSync("CHANGELOG.md", "utf8"), version);
+  const body = buildReleaseBody(readFileSync(resolve("../CHANGELOG.md"), "utf8"), version);
   const out = process.argv[3] ?? "RELEASE_NOTES.md";
   writeFileSync(out, body);
   console.log(`${out}: ${body.length} 字符（版本 ${version}）`);

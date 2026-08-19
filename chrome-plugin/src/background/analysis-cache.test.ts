@@ -1,5 +1,5 @@
 import "fake-indexeddb/auto";
-import vectors from "../../shared-fixtures/cache-key-vectors.json";
+import vectors from "../../../shared-fixtures/cache-key-vectors.json";
 import { describe, expect, it, vi } from "vitest";
 import { AnalysisCache, createCoreCacheKey, createCorrectionCacheKey } from "./analysis-cache";
 

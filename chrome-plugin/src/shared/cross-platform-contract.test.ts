@@ -1,4 +1,4 @@
-import contracts from "../../shared-fixtures/contracts.json";
+import contracts from "../../../shared-fixtures/contracts.json";
 import { expect, it } from "vitest";
 import { CLOUD_SENTENCES_PER_REQUEST_FOR_CONTRACT } from "../background/analysis-service";
 import { CORE_OUTPUT_SHAPE, PROMPT_FIRST_LINES } from "../background/prompts";

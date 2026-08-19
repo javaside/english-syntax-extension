@@ -9,7 +9,7 @@ import {
   importCacheFile,
   type CacheTransferPort,
 } from "./cache-transfer";
-import sharedTransferFile from "../../shared-fixtures/cache-transfer-v1.json";
+import sharedTransferFile from "../../../shared-fixtures/cache-transfer-v1.json";
 
 const KEY_A = "a".repeat(64);
 const KEY_B = "b".repeat(64);

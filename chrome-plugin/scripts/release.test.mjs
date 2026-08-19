@@ -111,13 +111,20 @@ describe("assertReleasableTree", () => {
   });
 
   it("只有发版会改的文件时放行", () => {
-    const status = [" M manifest.json", " M package.json", " M CHANGELOG.md"].join("\n");
+    const status = [
+      " M chrome-plugin/manifest.json",
+      " M chrome-plugin/package.json",
+      " M CHANGELOG.md",
+    ].join("\n");
 
     expect(() => assertReleasableTree(status)).not.toThrow();
   });
 
   it("存在无关改动时拒绝，并指出是哪些文件", () => {
-    const status = [" M manifest.json", " M src/content/session-controller.ts"].join("\n");
+    const status = [
+      " M chrome-plugin/manifest.json",
+      " M chrome-plugin/src/content/session-controller.ts",
+    ].join("\n");
 
     expect(() => assertReleasableTree(status)).toThrow(/session-controller\.ts/u);
   });

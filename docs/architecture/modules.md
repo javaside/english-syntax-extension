@@ -2,9 +2,9 @@
 
 每个源文件一行职责。**绝大多数 `*.ts` 旁边都有同名 `*.test.ts`**(下表不重复列出),想知道某模块的确切行为,读它的测试比读实现快。
 
-三个例外:`shared/errors.ts` 与 `shared/versions.ts` 是纯常量,没有测试;`content/content-script.ts` 的测试在 `content/session-controller.test.ts` 里(`ContentScriptRouter` 与 `isRuntimeResponse` 两组)。反过来,`shared/manifest.test.ts` 与 `language/teaching-sentences.test.ts` 没有对应的实现文件——它们钉的是仓库里的 JSON。
+以下各表的路径都相对于 `chrome-plugin/`(intellij-plugin 一节除外)。三个例外:`shared/errors.ts` 与 `shared/versions.ts` 是纯常量,没有测试;`content/content-script.ts` 的测试在 `content/session-controller.test.ts` 里(`ContentScriptRouter` 与 `isRuntimeResponse` 两组)。反过来,`shared/manifest.test.ts` 与 `language/teaching-sentences.test.ts` 没有对应的实现文件——它们钉的是仓库里的 JSON。
 
-## src/shared —— 两侧共用的契约
+## chrome-plugin/src/shared —— 两侧共用的契约
 
 | 文件               | 职责                                               | 关键导出                                                                                                                                                                                                                                |
 | ------------------ | -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -14,15 +14,15 @@
 | `versions.ts`      | 四个版本常量                                       | `MESSAGE_VERSION` / `CORE_SCHEMA_VERSION` / `CORE_PROMPT_VERSION` / `DETAIL_PROMPT_VERSION`                                                                                                                                             |
 | `manifest.test.ts` | 钉住 manifest 的权限形态、快捷键、图标、版本一致性 | —                                                                                                                                                                                                                                       |
 
-## src/language —— 纯函数,无 DOM、无 chrome API
+## chrome-plugin/src/language —— 纯函数,无 DOM、无 chrome API
 
 | 文件                         | 职责                                                                                                                                                                                                                 |
 | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `segmenter.ts`               | `segmentBlock()` 用 `Intl.Segmenter` 分句(带 `Mr.`/`e.g.` 等缩写合并);`tokenize()` 切词并标注 `punctuation`;`rebuildTokens()` 无损还原;`createSentenceId()` = SHA-256(sessionId+blockId+order+归一化文本) 取前 24 位 |
 | `analysis-validator.ts`      | `validateCoreBatch()` / `validateDetail()`——模型输出的最终裁判:字段白名单、区间在句内、成分有序不重叠、**非标点 token 恰好被覆盖一次**、译文长度上限、危险文本拦截                                                   |
-| `teaching-sentences.test.ts` | 校验 `tests/fixtures/teaching-sentences.json` 教学语料的结构不变量(12 类 × 3 句、分句、无损分词、词元数)。**刻意不断言任何模型答案**                                                                                 |
+| `teaching-sentences.test.ts` | 校验 `tests/fixtures/teaching-sentences.json`(chrome-plugin 内)教学语料的结构不变量(12 类 × 3 句、分句、无损分词、词元数)。**刻意不断言任何模型答案**                                                                                 |
 
-## src/background —— Service Worker 世界
+## chrome-plugin/src/background —— Service Worker 世界
 
 | 文件                           | 职责                                                                                                                                                                    |
 | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -38,7 +38,7 @@
 | `core-stream-parser.ts`        | 从**还在流式中的** core 信封里逐个抠出闭合的 component,并归属到正确的 `sentenceId`                                                                                      |
 | `detail-stream-parser.ts`      | 同上,但针对 detail 信封的 `structures[]`(信封是扁的,不需要归属;`focus` 对象在 `structures` 之前,所以必须按 key 判定而非数括号深度)                                      |
 
-## src/content —— 页面世界
+## chrome-plugin/src/content —— 页面世界
 
 | 文件                       | 职责                                                                                                                                                   |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -52,7 +52,7 @@
 | `detail-prefetcher.ts`     | 详解预载队列:按句去重、并发 2、暂停 / 恢复、块失效时丢弃、成分级计数(total / ready / failed)                                                           |
 | `progress-pill.ts`         | 页面右下角进度胶囊。纯展示,从不发命令                                                                                                                  |
 
-## src/popup / src/options —— 扩展 UI
+## chrome-plugin/src/popup / src/options —— 扩展 UI
 
 | 文件                          | 职责                                                                                                                                        |
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -100,7 +100,7 @@
 | `resources/web/preview.ts`                   | 预览 DOM 扫描:候选/排除选择器、英文占比、可见性观察                                                 |
 | `resources/web/render.ts`                    | 句法卡片渲染:可逆替换、流式暂定卡、详解面板,XSS 安全 textContent                                    |
 
-## tests / scripts
+## chrome-plugin/tests / chrome-plugin/scripts
 
 | 路径                                     | 职责                                                                                                                                                    |
 | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |

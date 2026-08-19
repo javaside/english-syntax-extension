@@ -1,5 +1,5 @@
 {
-  "name": "english-syntax-extension",
+  "name": "english-syntax-chrome-plugin",
   "version": "1.1.0",
   "private": true,
   "description": "Chrome MV3 扩展：把网页英文段落替换为逐句句法拆解卡片，由任意 OpenAI 兼容模型驱动。",
@@ -40,9 +40,7 @@
     "lint:baseline": "node scripts/check-lint-baseline.mjs",
     "docs:drift": "node scripts/check-docs-drift.mjs",
     "format:check": "prettier --check .",
-    "test:idea-web": "vitest run intellij-plugin/src/main/resources/web",
-    "test:contracts": "vitest run src/shared/cross-platform-contract.test.ts src/background/analysis-cache.test.ts src/options/cache-transfer.test.ts src/language/segmenter.test.ts",
-    "test:all": "npm test && npm run test:idea-web && ./gradlew intellijCheck"
+    "test:contracts": "vitest run src/shared/cross-platform-contract.test.ts src/background/analysis-cache.test.ts src/options/cache-transfer.test.ts src/language/segmenter.test.ts"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

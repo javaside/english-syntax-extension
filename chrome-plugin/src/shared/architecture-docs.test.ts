@@ -17,8 +17,11 @@ import { CORE_SCHEMA_VERSION, MESSAGE_VERSION } from "./versions";
  * 断言失败时的正确反应是去改文档,不是来放宽这里的规则。
  */
 
-const root = resolve(import.meta.dirname, "../..");
-const docsDir = join(root, "docs", "architecture");
+// 本测试在 chrome-plugin/ 里,但钉的是**仓库级**的架构文档与双端清单:
+// 文档在仓库根 docs/architecture/,IntelliJ 实现在 ../intellij-plugin/。
+const root = resolve(import.meta.dirname, "../.."); // chrome-plugin
+const repoRoot = resolve(root, "..");
+const docsDir = join(repoRoot, "docs", "architecture");
 const srcDir = join(root, "src");
 
 const docFileNames = readdirSync(docsDir).filter((name) => name.endsWith(".md"));
@@ -69,13 +72,13 @@ function implementationFiles(): string[] {
 
 /** IntelliJ 插件侧实现文件：Kotlin 主源集 + web 资源里的实现 ts（测试文件豁免）。 */
 function intellijImplementationFiles(): string[] {
-  const kotlinRoot = join(root, "intellij-plugin", "src", "main", "kotlin");
+  const kotlinRoot = join(repoRoot, "intellij-plugin", "src", "main", "kotlin");
   const walk = (dir: string): string[] =>
     readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
       const child = join(dir, entry.name);
       return entry.isDirectory() ? walk(child) : entry.name.endsWith(".kt") ? [child] : [];
     });
-  const webRoot = join(root, "intellij-plugin", "src", "main", "resources", "web");
+  const webRoot = join(repoRoot, "intellij-plugin", "src", "main", "resources", "web");
   const webFiles = readdirSync(webRoot)
     .filter((name) => name.endsWith(".ts") && !name.endsWith(".test.ts"))
     .map((name) => join(webRoot, name));

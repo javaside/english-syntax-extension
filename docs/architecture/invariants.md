@@ -14,13 +14,13 @@
 
 **症状** content 层漏 case → SW 的成功响应被守卫静默替换成 `ERROR`。**缓存写对了但计数全错**,一直到真机验收才暴露。
 
-**测试** `src/shared/protocol.test.ts`、`src/content/session-controller.test.ts` 的 `ContentScriptRouter` 组。
+**测试** `chrome-plugin/src/shared/protocol.test.ts`、`chrome-plugin/src/content/session-controller.test.ts` 的 `ContentScriptRouter` 组。
 
 ### I-2 流式推送另有一套守卫
 
 **规则** `CORE_STREAM` / `DETAIL_STREAM` 走 `syntax-learning:<documentId>` 端口 `postMessage`,content 侧用 `isCoreStreamPush` / `isDetailStreamPush` 单独把关——`isRuntimeResponse` 的 switch 对它们不适用。但"类型 / SW 侧构造 / content 侧守卫"三处同步的要求照旧。
 
-**测试** `src/background/service-worker.test.ts` 的 `provisional core stream push` 组。
+**测试** `chrome-plugin/src/background/service-worker.test.ts` 的 `provisional core stream push` 组。
 
 ### I-3 content script 读不到 `chrome.storage`
 
@@ -28,7 +28,7 @@
 
 **症状** 直接读会拿到 undefined 或抛错;更糟的是本地开发时看似能用,打包后失效。
 
-**测试** `tests/e2e/extension.spec.ts` 的 "content scripts cannot read the extension's trusted storage"。
+**测试** `chrome-plugin/tests/e2e/extension.spec.ts` 的 "content scripts cannot read the extension's trusted storage"。
 
 ### I-4 SW 的会话状态必须持久化到 `storage.session`
 
@@ -38,7 +38,7 @@
 
 **症状** 下一次操作生成全新 `documentId`,而页面上已渲染的卡片还攥着旧的——旧 controller 发出的详解 / 纠正请求被判成过期文档拒成 `REQUEST_CANCELLED`,表现为**"点成分报错、点重新解析毫无反应"**。
 
-**测试** `src/background/service-worker.test.ts` 的 `documentId 熬过 service worker 重启` 组。
+**测试** `chrome-plugin/src/background/service-worker.test.ts` 的 `documentId 熬过 service worker 重启` 组。
 
 ### I-5 SPA 换页必须通知页面
 
@@ -48,7 +48,7 @@
 
 **症状** 只清 SW 侧状态的话,页面里的 `MutationObserver` 会自顾自去解析新页面内容。
 
-**测试** `src/background/service-worker.test.ts` 的 `SPA 导航结束会话` 组。
+**测试** `chrome-plugin/src/background/service-worker.test.ts` 的 `SPA 导航结束会话` 组。
 
 ## 模型输出与流式
 
@@ -60,7 +60,7 @@
 
 **症状** 若让分片改相位,会话会被 `isSessionComplete` 误判为已完成,主按钮提前变成"恢复网页原文"。
 
-**测试** `src/background/analysis-service.test.ts` 的 `provisional components while a core request streams`、`src/content/session-controller.test.ts` 的 `SessionController provisional streaming`。
+**测试** `chrome-plugin/src/background/analysis-service.test.ts` 的 `provisional components while a core request streams`、`chrome-plugin/src/content/session-controller.test.ts` 的 `SessionController provisional streaming`。
 
 ### I-7 分片也必须脱敏
 
@@ -74,7 +74,7 @@
 
 **症状** 用总时长超时 → 长响应必然被误判超时;不自己盯信号 → 卡死的流永远掐不断。
 
-**测试** `src/background/openai-compatible-adapter.test.ts` 的 `streaming core completions` 组。
+**测试** `chrome-plugin/src/background/openai-compatible-adapter.test.ts` 的 `streaming core completions` 组。
 
 ### I-9 默认关模型思考,被拒再降级
 
@@ -86,7 +86,7 @@
 
 **注意** 曾经的约定是"绝不能默认下发,靠用户在选项页勾选",**已废弃**:DeepSeek 现存的两个模型全是思考模型,靠用户自己发现并勾选并不可靠,而降级路径已让默认下发变得安全。`disableReasoning` 字段仅为兼容旧 profile 保留,不再影响请求。Ollama 只认这个参数,`think: false` 与 `chat_template_kwargs.enable_thinking` 都被兼容层忽略。
 
-**测试** `src/background/openai-compatible-adapter.test.ts` 的 `默认关闭模型思考` 组。
+**测试** `chrome-plugin/src/background/openai-compatible-adapter.test.ts` 的 `默认关闭模型思考` 组。
 
 ### I-10 能力位只持久化否定态,且三个写入器都要接线
 
@@ -94,7 +94,7 @@
 
 **症状** 漏掉任一个 → 每次请求都重复交同一笔学费(被拒的 `response_format` 或 `stream` 各要白费一趟 4xx)。
 
-**测试** `src/background/service-worker.test.ts` 的 `profile capability writers` 组。
+**测试** `chrome-plugin/src/background/service-worker.test.ts` 的 `profile capability writers` 组。
 
 ## 提示词与 token 预算
 
@@ -108,7 +108,7 @@
 
 ### I-12 别改 prompt 首行措辞
 
-**规则** 假模型服务器按 prompt 首行前缀识别请求类型(`tests/support/fake-openai-server.ts` 的 `detectKind`)。
+**规则** 假模型服务器按 prompt 首行前缀识别请求类型(`chrome-plugin/tests/support/fake-openai-server.ts` 的 `detectKind`)。
 
 **症状** 改了首行 → 该类请求落进 `unknown` 分支 → 一片 E2E 失败,而错误信息完全指不到这里。
 
@@ -126,7 +126,7 @@
 
 **症状** 跨优先级抬高 → prefetch 的修复会插到读者正在看的段落前面。
 
-**测试** `src/background/request-scheduler.test.ts`、`src/background/analysis-service.test.ts` 的 `repair requests jump their own priority queue`。
+**测试** `chrome-plugin/src/background/request-scheduler.test.ts`、`chrome-plugin/src/background/analysis-service.test.ts` 的 `repair requests jump their own priority queue`。
 
 ### I-15 1 请求 = 1 槽位
 
@@ -146,7 +146,7 @@
 
 **规则** content 依视口判定并置位 `ANALYZE_CORE.offscreen`,SW 据此降为 `prefetch-core`。**用户显式发起的解析(选中 / 悬停 / 右键 / 重新解析)一律不置位**——选区锚点这类元素可能压根不在视口里。
 
-**测试** `src/content/session-controller.test.ts` 的 `SessionController offscreen marking`。
+**测试** `chrome-plugin/src/content/session-controller.test.ts` 的 `SessionController offscreen marking`。
 
 ## 缓存
 
@@ -158,7 +158,7 @@
 
 **做法** 改完必须**用对方路径读回验证**。
 
-**测试** `tests/e2e/extension.spec.ts` 的 "enabling detail prefetch caches every component and a click needs no model call"。
+**测试** `chrome-plugin/tests/e2e/extension.spec.ts` 的 "enabling detail prefetch caches every component and a click needs no model call"。
 
 ### I-19 缓存值仍要过校验
 
@@ -174,7 +174,7 @@
 
 **症状** ① `BlockReplacement` 靠"原文本来有没有 class 属性"决定还原时删不删空 `class`,标记先一步加 class 会让它误判,在页面上留下 `<p class="">`(而此时标记已迁到卡片上,清理不到原文)——曾一次弄红三条 E2E;② `border-left` 参与布局计算会让文字位移,推翻折行布局 E2E;③ `reconnectAndResume` 用尽重试后直接返回,相位停在 `requesting`,竖条会常亮。
 
-**测试** `src/content/block-activity-marker.test.ts`、`src/content/session-controller.test.ts` 的 `段落解析中标记`、`tests/e2e/layout.spec.ts`。
+**测试** `chrome-plugin/src/content/block-activity-marker.test.ts`、`chrome-plugin/src/content/session-controller.test.ts` 的 `段落解析中标记`、`chrome-plugin/tests/e2e/layout.spec.ts`。
 
 ### I-21 显式手势不套用自动扫描的取舍
 
@@ -186,7 +186,7 @@
 
 **注意** happy-dom 里内联元素的 computed display 是**空串**而非 `"inline"`,判据要把空串算作非块。
 
-**测试** `src/content/document-scanner.test.ts` 的 `nearestSafeBlock on an explicit gesture`、`scanDocument 对 CSS 排版的正文`、`自动扫描放宽后仍有的克制`。
+**测试** `chrome-plugin/src/content/document-scanner.test.ts` 的 `nearestSafeBlock on an explicit gesture`、`scanDocument 对 CSS 排版的正文`、`自动扫描放宽后仍有的克制`。
 
 ### I-22 合批分桶与定时器顺序
 
@@ -194,7 +194,7 @@
 
 **症状** 不分桶 → `bypassCache` 波及同批别的块;顺序反了 → 同步触发的定时器在条目写入前就跑 `flushBatch`,找不到东西直接返回,这一批**永远发不出去**。
 
-**测试** `src/content/session-controller.test.ts` 的 `SessionController 跨段落合并请求`。
+**测试** `chrome-plugin/src/content/session-controller.test.ts` 的 `SessionController 跨段落合并请求`。
 
 ### I-23 详解面板的行判定需要真实布局
 
@@ -202,7 +202,7 @@
 
 **症状** happy-dom 等零尺寸环境里所有矩形都是 0,数值比较会误判成"下面还有成分"而选错插入分支。
 
-**测试** `tests/e2e/layout.spec.ts` 的"长句折行时,详解面板出现在被点成分那一行的下方"。
+**测试** `chrome-plugin/tests/e2e/layout.spec.ts` 的"长句折行时,详解面板出现在被点成分那一行的下方"。
 
 ## 测试与验收
 
@@ -212,11 +212,11 @@
 
 ### I-25 教学语料只断言结构不变量
 
-**规则** `tests/fixtures/teaching-sentences.json` 的测试只校验分句、无损分词、声明的词元数,**永不断言唯一的模型答案**——不同模型对成分的切分本就可以不同。
+**规则** `chrome-plugin/tests/fixtures/teaching-sentences.json` 的测试只校验分句、无损分词、声明的词元数,**永不断言唯一的模型答案**——不同模型对成分的切分本就可以不同。
 
 ### I-26 lint 基线是恰好 1 个错误
 
-**规则** 那一个是 `src/options/options.test.ts` 的 `no-unnecessary-type-assertion`。不修它,也不新增。用 `npm run lint:baseline` 判定,别看 `eslint .` 末尾那行(它报的是"可自动修复"的计数)。
+**规则** 那一个是 `chrome-plugin/src/options/options.test.ts` 的 `no-unnecessary-type-assertion`。不修它,也不新增。在 `chrome-plugin/` 里用 `npm run lint:baseline` 判定,别看 `eslint .` 末尾那行(它报的是"可自动修复"的计数)。
 
 ### I-27 验收脚本永不提交
 

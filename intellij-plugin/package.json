@@ -1,0 +1,21 @@
+{
+  "name": "english-syntax-intellij-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "description": "IntelliJ 插件内置 Web 预览的 TypeScript 测试（Kotlin 构建由 Gradle 负责，这里只跑 web 侧 vitest）",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22.20.0"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@types/node": "26.1.1",
+    "happy-dom": "20.11.1",
+    "typescript": "6.0.3",
+    "vitest": "4.1.10"
+  }
+}

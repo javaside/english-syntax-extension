@@ -26,9 +26,11 @@
 
 ## 从源码构建
 
+仓库根下有两个平级子模块：`chrome-plugin/`（本扩展，完整 npm 工程）与 `intellij-plugin/`（IDEA Markdown 预览插件，Gradle 工程）。
+
 ```bash
 git clone https://github.com/javaside/english-syntax-extension.git
-cd english-syntax-extension
+cd english-syntax-extension/chrome-plugin
 npm ci          # 安装依赖
 npm run build   # 类型检查 + 产出 dist/
 ```
@@ -108,17 +110,22 @@ npm run build   # 类型检查 + 产出 dist/
 
 ## 开发与测试
 
+Chrome 扩展（在 `chrome-plugin/` 里）：
+
 ```bash
-npm test              # 单元测试（vitest，278+ 用例）
+cd chrome-plugin
+npm test              # 单元测试（vitest，746+ 用例，含架构文档同步断言）
 npm run test:e2e      # 端到端测试（Playwright + 真实 Chromium 加载 dist/，本地模型伪服务，无外网依赖）
 npm run build         # 类型检查 + 构建
 npm run lint          # ESLint（typescript-eslint typeChecked）
 npm run format:check  # Prettier
 ```
 
+IntelliJ 插件：仓库根 `./gradlew :intellij-plugin:test :intellij-plugin:buildPlugin`；web 侧 TS 测试在 `intellij-plugin/` 里 `npm ci && npm test`。
+
 首次跑 E2E 需要 `npx playwright install chromium`。
 
-E2E 说明：MV3 可选主机权限的授权框是**原生对话框**，无法在无头环境自动点击，因此 E2E 构建会把 dist 复制到临时目录并把两个回环地址提升为必需 `host_permissions`；正式 `dist/manifest.json` 保持可选授权不变，且有专门用例断言这一点。测试语料见 `tests/fixtures/teaching-sentences.json`（12 类句型 × 3 句），CI 只校验分词与覆盖不变量，从不断言某个模型的唯一正确拆分。
+E2E 说明：MV3 可选主机权限的授权框是**原生对话框**，无法在无头环境自动点击，因此 E2E 构建会把 dist 复制到临时目录并把两个回环地址提升为必需 `host_permissions`；正式 `dist/manifest.json` 保持可选授权不变，且有专门用例断言这一点。测试语料见 `chrome-plugin/tests/fixtures/teaching-sentences.json`（12 类句型 × 3 句），CI 只校验分词与覆盖不变量，从不断言某个模型的唯一正确拆分。
 
 ## 故障排查
 
@@ -136,18 +143,18 @@ E2E 说明：MV3 可选主机权限的授权框是**原生对话框**，无法�
 
 ```
 english-syntax-extension
-├── manifest.json           # MV3 清单（构建期生成 dist/manifest.json）
-├── src
-│   ├── background/         # Service Worker：消息路由、分析服务、缓存、调度、OpenAI 兼容适配器
-│   ├── content/            # 内容脚本：扫描、视口观察、学习卡片（Shadow DOM）、原文替换/还原
-│   ├── language/           # 分句、分词、模型输出校验
-│   ├── options/ popup/     # 选项页与弹窗
-│   └── shared/             # 协议、错误码、语法角色等共享类型
-├── docs/architecture/      # 架构文档：总览、模块地图、协议、两条主链路、不变量
-└── tests
-    ├── e2e/                # Playwright 端到端（真实 Chromium）
-    ├── support/            # 本地 OpenAI 兼容伪服务
-    └── fixtures/           # 固定页面与教学语料
+├── chrome-plugin/             # Chrome MV3 扩展（完整 npm 工程）
+│   ├── manifest.json          # MV3 清单（构建期生成 dist/manifest.json）
+│   ├── src
+│   │   ├── background/        # Service Worker：消息路由、分析服务、缓存、调度、OpenAI 兼容适配器
+│   │   ├── content/           # 内容脚本：扫描、视口观察、学习卡片（Shadow DOM）、原文替换/还原
+│   │   ├── language/          # 分句、分词、模型输出校验
+│   │   ├── options/ popup/    # 选项页与弹窗
+│   │   └── shared/            # 协议、错误码、语法角色等共享类型
+│   └── tests                  # Playwright E2E、伪模型服务、固定页面与教学语料
+├── intellij-plugin/           # IntelliJ IDEA Markdown 预览插件（Gradle 工程）
+├── shared-fixtures/           # 双端共享的契约与测试向量（TS/Kotlin 同时消费）
+└── docs/architecture/         # 架构文档：总览、模块地图、协议、两条主链路、不变量
 ```
 
 想深入代码，先读 **[架构文档](docs/architecture/README.md)**：一页概览 + 「要改 X 就去 Y」索引 + 已踩过的坑清单，比通读源码快得多。日常开发的门禁与工程约定见 [`AGENTS.md`](AGENTS.md)。

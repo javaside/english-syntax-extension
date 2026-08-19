@@ -1,6 +1,6 @@
 # 后台模型链路
 
-从"content 发来一条 `ANALYZE_CORE`"到"结果进缓存"之间发生的一切。涉及 `analysis-service.ts`、`prompts.ts`、`request-scheduler.ts`、`openai-compatible-adapter.ts`、`sse.ts`、两个 stream parser、`analysis-cache.ts`。
+从"content 发来一条 `ANALYZE_CORE`"到"结果进缓存"之间发生的一切。涉及 `analysis-service.ts`、`prompts.ts`、`request-scheduler.ts`、`openai-compatible-adapter.ts`、`sse.ts`、两个 stream parser、`analysis-cache.ts`——都在 `chrome-plugin/src/background/`(文件名就不再逐个带前缀)。
 
 ## 1. 全景
 

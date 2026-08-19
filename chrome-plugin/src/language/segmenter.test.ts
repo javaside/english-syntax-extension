@@ -1,4 +1,4 @@
-import vectors from "../../shared-fixtures/segmenter-vectors.json";
+import vectors from "../../../shared-fixtures/segmenter-vectors.json";
 import { describe, expect, it } from "vitest";
 import { createSentenceId, rebuildTokens, segmentBlock, tokenize } from "./segmenter";
 

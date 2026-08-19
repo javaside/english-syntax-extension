@@ -4,15 +4,18 @@
 
 ## 环境
 
-- Node.js ≥ 22.20（`package.json` 的 `engines` 是硬要求）
+- Node.js ≥ 22.20（`chrome-plugin/package.json` 的 `engines` 是硬要求）
 - Chrome / Chromium ≥ 120
 
 ```bash
+cd chrome-plugin
 npm ci
 npm run build            # 产出 dist/，用于「加载已解压的扩展程序」
 ```
 
 ## 提交前必须全过的门禁
+
+在 `chrome-plugin/` 里（IntelliJ 侧改动另见 AGENTS.md 的 Gradle 门禁）：
 
 ```bash
 npm test && npx playwright test && npm run lint:baseline && npm run format:check && npm run build
@@ -45,4 +48,4 @@ npm test && npx playwright test && npm run lint:baseline && npm run format:check
 
 ## 发布
 
-维护者操作：更新 `CHANGELOG.md` → 同步 `manifest.json` / `package.json` / `package-lock.json` 的版本 → 打 `v*` tag 并推送。流水线会校验 tag 与两处版本一致、跑单测、打包、建**草稿** Release，需人工确认后公开。
+维护者操作：更新根 `CHANGELOG.md` → 同步 `chrome-plugin/manifest.json` / `chrome-plugin/package.json` / `chrome-plugin/package-lock.json` 的版本（在 `chrome-plugin/` 里 `npm run release -- x.y.z` 一条龙）→ 打 `v*` tag 并推送。流水线会校验 tag 与两处版本一致、跑单测、打包、建**草稿** Release，需人工确认后公开。

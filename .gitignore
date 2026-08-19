@@ -13,6 +13,7 @@ release/
 RELEASE_NOTES.md
 store-assets/
 .gradle/
+.kotlin/
 **/build/
 intellij-plugin/.intellijPlatform/
 intellij-plugin/.sandbox/
