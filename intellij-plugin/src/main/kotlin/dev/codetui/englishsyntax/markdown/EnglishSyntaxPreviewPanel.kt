@@ -17,7 +17,6 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import org.intellij.plugins.markdown.ui.preview.MarkdownHtmlPanel
-import org.intellij.plugins.markdown.ui.preview.MarkdownHtmlPanelEx
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -42,7 +41,7 @@ class EnglishSyntaxPreviewPanel(
   private val virtualFileRef: VirtualFile?,
   private val transport: HostMessageTransport = HostMessageTransport { },
   parentDisposable: Disposable? = null,
-) : MarkdownHtmlPanelEx, UserDataHolderBase() {
+) : MarkdownHtmlPanel, UserDataHolderBase() {
 
   override fun getProject(): Project? = projectRef
 
@@ -103,11 +102,6 @@ class EnglishSyntaxPreviewPanel(
   override fun scrollToMarkdownSrcOffset(offset: Int, smooth: Boolean) {
     if (disposed) return
     transport.post("window.__englishSyntaxScrollTo($offset, $smooth);")
-  }
-
-  override fun scrollBy(horizontal: Int, vertical: Int) {
-    if (disposed) return
-    transport.post("window.__englishSyntaxScrollBy($horizontal, $vertical);")
   }
 
   override fun addScrollListener(listener: MarkdownHtmlPanel.ScrollListener) {
