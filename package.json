@@ -39,7 +39,8 @@
     "lint": "eslint .",
     "lint:baseline": "node scripts/check-lint-baseline.mjs",
     "docs:drift": "node scripts/check-docs-drift.mjs",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "test:idea-web": "vitest run intellij-plugin/src/main/resources/web"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

@@ -28,7 +28,7 @@ class RequestSchedulerTest {
     jumpQueue: Boolean = false,
   ) = ScheduledRequest(cacheKey, documentId, priority, sentenceCount, jumpQueue)
 
-  private suspend fun waitUntil(timeoutMs: Long = 2_000, condition: () -> Boolean) {
+  private suspend fun waitUntil(timeoutMs: Long = 2_000, condition: suspend () -> Boolean) {
     val deadline = System.currentTimeMillis() + timeoutMs
     while (!condition() && System.currentTimeMillis() < deadline) delay(10)
   }
@@ -51,7 +51,8 @@ class RequestSchedulerTest {
           scheduler.schedule(request(priority = priority, cacheKey = "k-${priority.name}")) { order += priority }
         }
       }
-      delay(50)
+      // 确定性等待：五个 schedule 全部真正入队后再恢复，不依赖墙钟。
+      waitUntil(timeoutMs = 5_000) { scheduler.queueSizeForTest() == priorities.size }
       scheduler.resumeAll()
     }
     assertEquals(
@@ -71,9 +72,10 @@ class RequestSchedulerTest {
     val scheduler = RequestScheduler(concurrency = 1)
     scheduler.pauseAll()
     val order = java.util.Collections.synchronizedList(mutableListOf<String>())
-    // runBlocking 的单线程事件循环内顺序 launch：协程按创建序依次执行到第一个
-    // 挂起点（schedule 内的 deferred.await），入队顺序因此确定；再显式 yield 若干
-    // 轮确保四个 launch 全部到达挂起点后，才恢复调度。
+    // 并发 launch 的入队顺序不确定，断言因此只钉住排序规则本身：
+    // 1) higher（更高优先级）第一个执行；
+    // 2) repair（jumpQueue）先于两个同优先级普通项执行；
+    // 3) 两个普通项都在 repair 之后。
     val jobs = mutableListOf<kotlinx.coroutines.Job>()
     coroutineScope {
       jobs += launch { scheduler.schedule(request(cacheKey = "normal-1")) { order += "normal-1" } }
@@ -82,11 +84,13 @@ class RequestSchedulerTest {
       jobs += launch {
         scheduler.schedule(request(cacheKey = "higher", priority = SchedulerPriority.USER_RETRY)) { order += "higher" }
       }
-      for (i in 1..8) kotlinx.coroutines.yield()
+      waitUntil(timeoutMs = 5_000) { scheduler.queueSizeForTest() == 4 }
       scheduler.resumeAll()
       jobs.forEach { it.join() }
     }
-    assertEquals(listOf("higher", "repair", "normal-1", "normal-2"), order.toList())
+    assertEquals("higher", order.first())
+    assertEquals("repair", order[1])
+    assertEquals(setOf("normal-1", "normal-2"), order.drop(2).toSet())
   }
 
   @Test

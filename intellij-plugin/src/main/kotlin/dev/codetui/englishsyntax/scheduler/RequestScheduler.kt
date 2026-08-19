@@ -92,6 +92,9 @@ class RequestScheduler(
     return deferred.await()
   }
 
+  /** 测试可见的排队深度（不含在飞）；用于确定性等待入队完成。 */
+  suspend fun queueSizeForTest(): Int = mutex.withLock { queue.size }
+
   suspend fun cancelDocument(documentId: String) {
     mutex.withLock {
       val rejected = queue.filter { it.request.documentId == documentId }
