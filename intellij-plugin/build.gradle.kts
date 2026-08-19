@@ -42,6 +42,13 @@ intellijPlatform {
       }
     }
   }
+  // 独立 IDE 实例集成测试（假 JCEF 探针用例已覆盖主链路，这里跑完整 IDE 环境）。
+  intellijPlatformTesting {
+    runIde.register("runIde2025_1") {
+      type = org.jetbrains.intellij.platform.gradle.IntelliJPlatformType.IntellijIdeaCommunity
+      version = "2025.1"
+    }
+  }
 }
 
 tasks {

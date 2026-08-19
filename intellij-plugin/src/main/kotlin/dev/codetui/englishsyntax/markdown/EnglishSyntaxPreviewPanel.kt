@@ -71,10 +71,15 @@ class EnglishSyntaxPreviewPanel(
     pageHandlers += handler
   }
 
-  /** 桥接入口：JS 侧 JSON 文本进入（生产环境由 JBCefJSQuery 调用）。 */
+  /**
+   * 桥接入口：JS 侧 JSON 文本进入（生产环境由 JBCefJSQuery 调用）。
+   * 每条消息先经 BridgeProtocol 键白名单严格校验——含 apiKey/headers/baseUrl
+   * 或任何未知键的消息整体丢弃，绝不透传到会话层。
+   */
   fun onPageMessage(text: String) {
     if (disposed) return
     val parsed = runCatching { json.parseToJsonElement(text).jsonObject }.getOrNull() ?: return
+    if (dev.codetui.englishsyntax.bridge.BridgeProtocol.parsePageMessage(parsed) == null) return
     pageHandlers.forEach { it.onMessage(parsed) }
   }
 
