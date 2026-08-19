@@ -7,6 +7,7 @@
 ### 变更
 
 - **仓库重组为双子模块结构**：Chrome 扩展的全部源码、测试、脚本与配置迁入 `chrome-plugin/`（完整自治 npm 工程），与 `intellij-plugin/` 平级；仓库根只保留双端共享的东西——`shared-fixtures/` 契约向量、`docs/architecture/` 架构文档、`CHANGELOG.md` 与各根文档。对使用者无任何影响（构建产物、功能、发布流程均不变），源码路径全部前移一层。开发者注意：Chrome 侧 npm 命令现在在 `chrome-plugin/` 里跑；`intellij-plugin/` 有了自己的 `package.json`，web 桥测试改在子目录里独立运行。
+- **隐私政策与安全策略覆盖 IntelliJ 插件**：`PRIVACY.md` / `SECURITY.md` 原本只描述 Chrome 扩展，现补充 IntelliJ 侧的数据流（API Key 存 PasswordSafe、SQLite 缓存、与 Chrome 扩展的缓存互通）。不改变任何实际行为，只是把已存在的实现如实写进文档。
 
 ## 1.1.0 — 2026-08-01
 

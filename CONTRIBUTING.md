@@ -4,18 +4,19 @@
 
 ## 环境
 
-- Node.js ≥ 22.20（`chrome-plugin/package.json` 的 `engines` 是硬要求）
-- Chrome / Chromium ≥ 120
+- Chrome 扩展开发：Node.js ≥ 22.20（`chrome-plugin/package.json` 的 `engines` 是硬要求）、Chrome / Chromium ≥ 120
+- IntelliJ 插件开发：JDK 21 + Gradle（仓库根 `./gradlew ...`），web 桥测试另需在 `intellij-plugin/` 里 `npm ci`
 
 ```bash
-cd chrome-plugin
+git clone https://github.com/javaside/english-syntax-extension.git
+cd english-syntax-extension/chrome-plugin
 npm ci
 npm run build            # 产出 dist/，用于「加载已解压的扩展程序」
 ```
 
 ## 提交前必须全过的门禁
 
-在 `chrome-plugin/` 里（IntelliJ 侧改动另见 AGENTS.md 的 Gradle 门禁）：
+Chrome 侧在 `chrome-plugin/` 里跑（IntelliJ 侧改动另见 AGENTS.md 的 Gradle + web 测试门禁）：
 
 ```bash
 npm test && npx playwright test && npm run lint:baseline && npm run format:check && npm run build

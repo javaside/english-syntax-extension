@@ -1,4 +1,4 @@
-# English Syntax Learning —— Chrome 英语句法学习扩展
+# English Syntax Learning —— 英语句法学习（双平台）
 
 [![CI](https://github.com/javaside/english-syntax-extension/actions/workflows/ci.yml/badge.svg)](https://github.com/javaside/english-syntax-extension/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/javaside/english-syntax-extension)](https://github.com/javaside/english-syntax-extension/releases/latest)
@@ -6,13 +6,18 @@
 
 **[⬇️ 下载最新版](https://github.com/javaside/english-syntax-extension/releases/latest)** · [更新日志](CHANGELOG.md) · [参与贡献](CONTRIBUTING.md)
 
-一个 Manifest V3 Chrome 扩展：把网页中的英文段落替换为**逐句句法拆解卡片**（成分角色 / 英文原文 / 成分中文释义三行对照），点击任意成分再懒加载该成分的详细语法解析。分析由你自己配置的 OpenAI 兼容模型完成（DeepSeek、本地 Ollama、任何兼容 `/chat/completions` 的服务）。
+同一套「英语句法伴读」的两个平台实现，仓库根下两个平级子模块：
+
+- **`chrome-plugin/`** —— Manifest V3 Chrome 扩展：把网页中的英文段落替换为**逐句句法拆解卡片**（成分角色 / 英文原文 / 成分中文释义三行对照），点击任意成分再懒加载该成分的详细语法解析。分析由你自己配置的 OpenAI 兼容模型完成（DeepSeek、本地 Ollama、任何兼容 `/chat/completions` 的服务）。**[↓ 直接往下读]**
+- **`intellij-plugin/`** —— IntelliJ IDEA Markdown 预览插件：在 IDEA 自带的 Markdown 预览里做同样的句法拆解，SQLite 缓存与 Chrome 扩展互通（可导入导出），API Key 存 PasswordSafe。构建与使用见[架构文档](docs/architecture/README.md)。
+
+两个运行时不共享运行代码，只共享契约（分句/缓存键向量由 `shared-fixtures/` 双端测试同时钉住）。本文其余部分针对 Chrome 扩展。
 
 ## 环境要求
 
-- Node.js ≥ 20（本项目在 Node 22 上开发验证）
-- npm ≥ 10
-- Chrome / Chromium ≥ 120（Manifest V3、`storage.setAccessLevel`）
+- Chrome 扩展开发：Node.js ≥ 22.20（`chrome-plugin/package.json` 的 `engines` 是硬要求）、npm ≥ 10、Chrome / Chromium ≥ 120（Manifest V3、`storage.setAccessLevel`）
+- IntelliJ 插件开发：JDK 21 + Gradle（仓库根 `./gradlew :intellij-plugin:test`），web 桥测试另需在 `intellij-plugin/` 里 `npm ci`
+- 普通使用（装 Chrome 扩展）：不需要 Node
 
 ## 安装
 
@@ -58,7 +63,7 @@ npm run build   # 类型检查 + 产出 dist/
 | 模型名     | `deepseek-v4-flash`           |
 | 超时（秒） | 120                           |
 
-> 模型名以 [DeepSeek 官方文档](https://api-docs.deepseek.com/zh-cn/) 为准：当前推荐 `deepseek-v4-flash`（更强但更贵可选 `deepseek-v4-pro`）；旧模型名 `deepseek-chat`、`deepseek-reasoner` 将于 2026-07-24 弃用。测试连接若提示「已自动采用兼容模式」属正常现象（DeepSeek 不提供 JSON Schema 严格模式），不影响任何功能。推理类模型每段分析需要先输出思维链，耗时约 20–60 秒，建议超时设 120 秒。
+> 模型名以 [DeepSeek 官方文档](https://api-docs.deepseek.com/zh-cn/) 为准：当前推荐 `deepseek-v4-flash`（更强但更贵可选 `deepseek-v4-pro`）；旧模型名 `deepseek-chat`、`deepseek-reasoner` 已于 2026-07-24 弃用。测试连接若提示「已自动采用兼容模式」属正常现象（DeepSeek 不提供 JSON Schema 严格模式），不影响任何功能。思考模型（Qwen3、DeepSeek v4 等）会为一句话先生成上万 token 推理——扩展默认已要求模型不做思考，端点不接受该参数时会自动去掉并重发，**无需任何设置**，一般 2 秒内返回。
 
 **示例二：本地 Ollama**
 
@@ -102,7 +107,7 @@ npm run build   # 类型检查 + 产出 dist/
 
 ## 缓存
 
-分析结果缓存在扩展的 IndexedDB 中（核心/详解/纠错三类，键含模型地址、模型名、提示词版本），同一句子换页重读**零模型调用**。选项页可设置缓存上限（10–200 MB）并一键「清空缓存」（不会删除模型配置）。
+分析结果缓存在扩展的 IndexedDB 中（核心/详解/纠错三类）。**缓存键只含规范化句文本、schema 版本与（详解的）成分区间——刻意不含模型地址、模型名与提示词版本**，所以换模型、换配置后同一句话仍命中缓存，换页重读**零模型调用**。选项页可设置缓存上限（10–200 MB）并一键「清空缓存」（不会删除模型配置），还能把缓存导出成文件（与 IntelliJ 插件互通导入）。
 
 ## 不支持的页面
 
@@ -152,7 +157,10 @@ english-syntax-extension
 │   │   ├── options/ popup/    # 选项页与弹窗
 │   │   └── shared/            # 协议、错误码、语法角色等共享类型
 │   └── tests                  # Playwright E2E、伪模型服务、固定页面与教学语料
-├── intellij-plugin/           # IntelliJ IDEA Markdown 预览插件（Gradle 工程）
+├── intellij-plugin/           # IntelliJ IDEA Markdown 预览插件
+│   ├── src/main/kotlin/       # Kotlin：领域模型、调度、SQLite 缓存、JCEF 桥、会话与 Action
+│   ├── src/main/resources/web # 预览页 TS（扫描/渲染/桥），测试在子目录 npm 独立跑
+│   └── build.gradle.kts       # Gradle IntelliJ Platform 构建
 ├── shared-fixtures/           # 双端共享的契约与测试向量（TS/Kotlin 同时消费）
 └── docs/architecture/         # 架构文档：总览、模块地图、协议、两条主链路、不变量
 ```

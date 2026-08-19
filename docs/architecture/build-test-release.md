@@ -16,6 +16,8 @@ cd chrome-plugin && npm test && npx playwright test && npm run lint && npm run f
 
 ## 2. 构建
 
+以下配置与产物路径都在 `chrome-plugin/` 下。
+
 `npm run build`(在 `chrome-plugin/`) = `tsc --noEmit` + **两次 Vite 构建**:
 
 | 配置                                          | 产出                               | 为什么分开                                                                   |

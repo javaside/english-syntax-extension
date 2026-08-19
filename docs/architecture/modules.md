@@ -64,6 +64,8 @@
 
 ## intellij-plugin —— IntelliJ IDEA Markdown 预览插件(第二运行时)
 
+本节路径相对于 `intellij-plugin/`。除 Kotlin/Gradle 工程外,该子目录还有**自己的 npm 工程**(`package.json` / `vitest.config.ts` / `tsconfig.json`):`resources/web/` 的 TS 测试在 `intellij-plugin/` 里 `npm ci && npm test` 独立跑,不依赖 chrome-plugin 的依赖。
+
 | 路径                                         | 职责                                                                                                |
 | -------------------------------------------- | --------------------------------------------------------------------------------------------------- |
 | `domain/Domain.kt`                           | Kotlin 领域模型:Token/SentenceInput/CoreAnalysis/DetailAnalysis/错误码,与 TS 契约同构               |
@@ -99,6 +101,7 @@
 | `resources/web/bridge.ts`                    | JS 侧桥协议镜像:hasOnlyKeys + generation 复检,旧代次丢弃                                            |
 | `resources/web/preview.ts`                   | 预览 DOM 扫描:候选/排除选择器、英文占比、可见性观察                                                 |
 | `resources/web/render.ts`                    | 句法卡片渲染:可逆替换、流式暂定卡、详解面板,XSS 安全 textContent                                    |
+| `package.json` / `vitest.config.ts` / `tsconfig.json` | 子工程 npm 工程:web TS 测试(`npm ci && npm test`)独立运行,不挂在 chrome-plugin 依赖下      |
 
 ## chrome-plugin/tests / chrome-plugin/scripts
 
