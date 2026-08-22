@@ -472,9 +472,34 @@
 		requestDetail(sentenceId, focusStart, focusEnd) {
 			this.#onDetailRequest(sentenceId, focusStart, focusEnd);
 		}
+		/**
+		* 点击成分后立即显示「加载中」占位面板（不等模型返回）。
+		* 行锚定在模型返回后由 renderDetailStream / renderDetailResult 的精确锚定替换；
+		* 占位先插在被点句子之后，让点击有即时反馈，消除「卡一下才显示」。
+		*/
+		#showDetailLoading(sentenceId, focusStart, focusEnd) {
+			const entry = this.#sentences.get(sentenceId);
+			if (entry == null) return;
+			this.#closeAllDetailPanels();
+			this.#currentDetail = {
+				sentenceId,
+				focusStart,
+				focusEnd
+			};
+			const card = this.#blocks.get(entry.blockId)?.card;
+			if (card == null) return;
+			const sentence = card.querySelector(`.english-syntax-sentence[data-sentence-id="${sentenceId}"]`);
+			if (sentence == null) return;
+			const panel = createElement(sentence.ownerDocument, "div", "english-syntax-detail english-syntax-detail-loading");
+			panel.dataset.sentenceId = sentenceId;
+			panel.textContent = "正在加载详解…";
+			sentence.classList.add("english-syntax-has-detail");
+			sentence.after(panel);
+		}
 		#showDetailPanel(sentenceId, structures, focusStart, focusEnd, detail) {
 			const entry = this.#sentences.get(sentenceId);
 			if (entry == null) return;
+			this.#closeAllDetailPanels();
 			this.#currentDetail = {
 				sentenceId,
 				focusStart: focusStart ?? detail?.focus.startToken ?? 0,
@@ -484,6 +509,10 @@
 				detailStructures: structures,
 				detail
 			});
+		}
+		/** 关闭预览页里所有已打开的详解面板（含加载占位）。 */
+		#closeAllDetailPanels() {
+			for (const panel of document.querySelectorAll(".english-syntax-detail")) panel.remove();
 		}
 		closeDetail() {
 			if (this.#currentDetail === null) return;
@@ -551,6 +580,7 @@
 							this.closeDetail();
 							return;
 						}
+						this.#showDetailLoading(sentenceId, component.startToken, component.endToken);
 						this.requestDetail(sentenceId, component.startToken, component.endToken);
 					});
 					section.append(button);

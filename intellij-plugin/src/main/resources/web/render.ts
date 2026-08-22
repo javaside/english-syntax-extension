@@ -233,6 +233,30 @@ export class PreviewRenderer {
     this.#onDetailRequest(sentenceId, focusStart, focusEnd);
   }
 
+  /**
+   * 点击成分后立即显示「加载中」占位面板（不等模型返回）。
+   * 行锚定在模型返回后由 renderDetailStream / renderDetailResult 的精确锚定替换；
+   * 占位先插在被点句子之后，让点击有即时反馈，消除「卡一下才显示」。
+   */
+  #showDetailLoading(sentenceId: string, focusStart: number, focusEnd: number): void {
+    const entry = this.#sentences.get(sentenceId);
+    if (entry == null) return;
+    this.#closeAllDetailPanels();
+    this.#currentDetail = { sentenceId, focusStart, focusEnd };
+    const record = this.#blocks.get(entry.blockId);
+    const card = record?.card;
+    if (card == null) return;
+    const sentence = card.querySelector<HTMLElement>(
+      `.english-syntax-sentence[data-sentence-id="${sentenceId}"]`,
+    );
+    if (sentence == null) return;
+    const panel = createElement(sentence.ownerDocument, "div", "english-syntax-detail english-syntax-detail-loading");
+    panel.dataset.sentenceId = sentenceId;
+    panel.textContent = "正在加载详解…";
+    sentence.classList.add("english-syntax-has-detail");
+    sentence.after(panel);
+  }
+
   #showDetailPanel(
     sentenceId: string,
     structures: DetailPayload["structures"],
@@ -242,12 +266,23 @@ export class PreviewRenderer {
   ): void {
     const entry = this.#sentences.get(sentenceId);
     if (entry == null) return;
+    // 同时只保留一个详解面板：打开新的前先关掉所有已显示的（含加载占位），
+    // 否则点击其他成分时旧面板不收起、页面越积越多（Chrome 端 setDetailLoading
+    // 开头 closeDetails 同款语义）。
+    this.#closeAllDetailPanels();
     this.#currentDetail = {
       sentenceId,
       focusStart: focusStart ?? detail?.focus.startToken ?? 0,
       focusEnd: focusEnd ?? detail?.focus.endToken ?? 0,
     };
     this.#repaintBlock(entry.blockId, { detailStructures: structures, detail });
+  }
+
+  /** 关闭预览页里所有已打开的详解面板（含加载占位）。 */
+  #closeAllDetailPanels(): void {
+    for (const panel of document.querySelectorAll(".english-syntax-detail")) {
+      panel.remove();
+    }
   }
 
   closeDetail(): void {
@@ -351,6 +386,9 @@ export class PreviewRenderer {
             this.closeDetail();
             return;
           }
+          // 点击立即显示「加载中」占位（不等模型返回），消除「卡一下才显示」；
+          // 后续 renderDetailStream / renderDetailResult 会精确锚定替换。
+          this.#showDetailLoading(sentenceId, component.startToken, component.endToken);
           this.requestDetail(sentenceId, component.startToken, component.endToken);
         });
         section.append(button);

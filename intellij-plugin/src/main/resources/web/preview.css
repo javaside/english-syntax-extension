@@ -136,6 +136,13 @@
   padding: 1em 1.125em;
 }
 
+/* 点击成分后的加载占位：等模型返回详解前先给即时反馈，避免「卡一下才显示」。 */
+.english-syntax-detail-loading {
+  border-inline-start-color: #9ca3af;
+  color: #6b7280;
+  opacity: 0.75;
+}
+
 .english-syntax-sentence-failure {
   inline-size: 100%;
   max-inline-size: 100%;

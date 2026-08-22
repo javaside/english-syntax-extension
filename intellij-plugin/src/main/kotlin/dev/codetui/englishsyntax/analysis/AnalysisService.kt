@@ -496,6 +496,7 @@ class AnalysisService(
   ).joinToString("\n\n")
 
   companion object {
+    private val LOGGER = com.intellij.openapi.diagnostic.Logger.getInstance(AnalysisService::class.java)
     private val promptJson = Json { prettyPrint = false; encodeDefaults = true }
     private const val CACHE_ONLY_PROFILE_ID = "cached"
 
@@ -518,6 +519,7 @@ class AnalysisService(
 
     private fun invalidOutput(errors: List<ValidationError>): ExtensionFailure {
       val summary = errors.joinToString("; ") { "${it.path.ifEmpty { "output" }}: ${it.message}" }
+      LOGGER.warn("Model output remained invalid after repair: $summary")
       return ExtensionFailure(
         ErrorCode.INVALID_MODEL_OUTPUT,
         "Model output remained invalid after one repair${if (summary.isEmpty()) "" else ": $summary"}",
