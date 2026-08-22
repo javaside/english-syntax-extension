@@ -371,6 +371,29 @@ class PreviewSessionTest {
   }
 
   @Test
+  fun `apply outcome emits session state with ready counts`() = runBlocking {
+    // 进度回推：每批结果落地后要发 SESSION_STATE（ready/discovered/failed），
+    // JS 侧浮层据此显示「X/Y 句」，而不是只有「已处理 N 句」。
+    val session = session()
+    session.start()
+    session.onVisibleBlocks(listOf("b1" to "The service validates every response carefully today."))
+    val firstSentence = session.sentences.values.firstOrNull()?.input ?: error("no sentence")
+    val analysis = CoreAnalysis(
+      sentenceId = firstSentence.sentenceId,
+      components = listOf(CoreComponent(0, 1, GrammarRole.SUBJECT, "该服务")),
+      modelProfileId = "p1",
+    )
+    session.applyOutcome(CoreBatchOutcome(listOf(analysis), emptyList(), cacheHit = false))
+
+    val states = sender.of("SESSION_STATE")
+    assertTrue(states.isNotEmpty(), "applyOutcome 后必须回推 SESSION_STATE")
+    val state = states.last()
+    assertEquals("running", state["state"]?.jsonPrimitive?.contentOrNull)
+    assertEquals(1, state["ready"]?.jsonPrimitive?.content?.toInt())
+    assertTrue((state["discovered"]?.jsonPrimitive?.content?.toInt() ?: 0) >= 1)
+  }
+
+  @Test
   fun `failures are forwarded as core error`() {
     val session = session()
     session.start()

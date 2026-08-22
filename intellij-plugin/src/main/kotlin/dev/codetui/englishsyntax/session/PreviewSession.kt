@@ -324,6 +324,19 @@ class PreviewSession(
         put("message", failure.error.message ?: "failed")
       })
     }
+    // 进度回推：每批结果落地后同步一句 SESSION_STATE，让预览页浮层能显示
+    // ready/discovered（翻译到哪段）。此前只在 cacheOnly 分支发过，正常翻译路径
+    // 从不发，导致 JS 侧只有「已处理 N 句」没有整体进度。
+    sender.send(buildJsonObject {
+      put("version", 1)
+      put("type", "SESSION_STATE")
+      put("previewId", previewId)
+      put("generation", generation)
+      put("state", state.name.lowercase())
+      put("ready", counts.ready)
+      put("discovered", counts.discovered)
+      put("failed", counts.failed)
+    })
   }
 
   /** 详解点击：detail 优先级由 AnalysisService 内部固定。 */

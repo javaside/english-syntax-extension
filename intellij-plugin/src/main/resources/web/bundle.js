@@ -24,7 +24,8 @@
 			"generation",
 			"state",
 			"ready",
-			"discovered"
+			"discovered",
+			"failed"
 		],
 		CORE_STREAM: [
 			"version",
@@ -93,6 +94,7 @@
 			case "SESSION_STATE":
 				if (!isNonEmptyString(value.state)) return null;
 				if (!isNonNegativeInt(value.ready) || !isNonNegativeInt(value.discovered)) return null;
+				if (value.failed !== void 0 && !isNonNegativeInt(value.failed)) return null;
 				return {
 					version: 1,
 					type: "SESSION_STATE",
@@ -100,7 +102,8 @@
 					generation: value.generation,
 					state: value.state,
 					ready: value.ready,
-					discovered: value.discovered
+					discovered: value.discovered,
+					failed: value.failed ?? 0
 				};
 			case "CORE_STREAM":
 			case "CORE_RESULT":
@@ -226,82 +229,6 @@
 				text: (element.textContent ?? "").trim()
 			};
 		});
-	}
-	/** 与视口（上下各扩一屏）求交的几何判定；不依赖 IntersectionObserver 的回调时机。 */
-	function geometricallyVisible(root, block) {
-		const view = root.ownerDocument?.defaultView;
-		if (!view) return false;
-		const rect = block.element.getBoundingClientRect();
-		const viewportTop = -view.innerHeight;
-		const viewportBottom = view.innerHeight * 2;
-		return rect.bottom >= viewportTop && rect.top <= viewportBottom;
-	}
-	/**
-	* IntersectionObserver（rootMargin 上下各一屏）；环境不支持时退化为
-	* rAF 节流的 scroll/resize 检查。
-	*
-	* **start() 必先用几何判定播种可见集**：JCEF 环境里 IntersectionObserver
-	* 的初始回调不可靠（observe 后可能不产生 entries），只重发当前 Set 会是
-	* 空集——VISIBLE_BLOCKS 永远不发出，页面点开始后毫无反应。IO 只负责
-	* 之后的滚动增量更新。
-	*/
-	function observeBlocks(root, blocks, callback) {
-		const visible = /* @__PURE__ */ new Set();
-		const emit = () => callback(Array.from(visible));
-		if (typeof IntersectionObserver !== "undefined") {
-			const observer = new IntersectionObserver((entries) => {
-				for (const entry of entries) {
-					const block = blocks.find((candidate) => candidate.element === entry.target);
-					if (!block) continue;
-					if (entry.isIntersecting) visible.add(block);
-					else visible.delete(block);
-				}
-				emit();
-			}, { rootMargin: "100% 0px 100% 0px" });
-			blocks.forEach(({ element }) => observer.observe(element));
-			return {
-				start() {
-					visible.clear();
-					for (const block of blocks) if (geometricallyVisible(root, block)) visible.add(block);
-					emit();
-				},
-				stop() {
-					observer.disconnect();
-				}
-			};
-		}
-		let raf = 0;
-		const check = () => {
-			raf = 0;
-			const view = root.ownerDocument?.defaultView;
-			if (!view) return;
-			const viewportTop = -view.innerHeight;
-			const viewportBottom = view.innerHeight * 2;
-			visible.clear();
-			for (const block of blocks) {
-				const rect = block.element.getBoundingClientRect();
-				if (rect.bottom >= viewportTop && rect.top <= viewportBottom) visible.add(block);
-			}
-			emit();
-		};
-		const schedule = () => {
-			if (raf === 0) raf = requestAnimationFrame(check);
-		};
-		return {
-			start() {
-				viewOf(root)?.addEventListener("scroll", schedule, { passive: true });
-				viewOf(root)?.addEventListener("resize", schedule, { passive: true });
-				schedule();
-			},
-			stop() {
-				viewOf(root)?.removeEventListener("scroll", schedule);
-				viewOf(root)?.removeEventListener("resize", schedule);
-				if (raf !== 0) cancelAnimationFrame(raf);
-			}
-		};
-	}
-	function viewOf(root) {
-		return root.ownerDocument?.defaultView ?? null;
 	}
 	//#endregion
 	//#region src/main/resources/web/roles.ts
@@ -762,9 +689,8 @@
 	function hideStatus() {
 		if (statusEl !== null) statusEl.hidden = true;
 	}
-	function bumpReturned() {
-		returnedCount += 1;
-		setStatus(`句法学习：解析中…（已处理 ${returnedCount} 句）`, "running");
+	function bumpReturned(sentenceCount) {
+		returnedCount += sentenceCount;
 	}
 	function postToHost(message) {
 		const host = window.EnglishSyntaxHost;
@@ -773,31 +699,31 @@
 	function rescan() {
 		const s = state;
 		if (s === null) return;
-		const blocks = scanMarkdownBlocks(document.body);
-		for (const block of blocks) s.renderer.registerBlock(block.blockId, block.element);
+		const fresh = scanMarkdownBlocks(document.body);
+		for (const block of fresh) {
+			allBlocks.set(block.blockId, block);
+			s.renderer.registerBlock(block.blockId, block.element);
+		}
 		if (s.visibility !== null) s.visibility.stop();
-		s.visibility = observeBlocks(document.body, blocks, (visible) => {
-			if (visible.length === 0) return;
-			const fingerprint = visible.map((block) => block.blockId).sort().join("\0");
-			if (fingerprint === lastVisibleFingerprint) return;
-			lastVisibleFingerprint = fingerprint;
-			postToHost({
-				version: 1,
-				type: "VISIBLE_BLOCKS",
-				previewId: s.previewId,
-				generation: s.generation,
-				blocks: visible.map((block) => ({
-					blockId: block.blockId,
-					text: block.text
-				}))
-			});
-			for (const block of visible) markBlockActive(block.blockId);
-			reportedBlockCount = visible.length;
-			settledBlocks.clear();
-			failedBlocks.clear();
-			if (statusEl === null || statusEl.hidden) setStatus(`句法学习：正在解析 ${visible.length} 段…`, "running");
+		s.visibility = null;
+		if (allBlocks.size === 0) return;
+		const fingerprint = [...allBlocks.keys()].sort().join("\0");
+		if (fingerprint === lastVisibleFingerprint) return;
+		lastVisibleFingerprint = fingerprint;
+		const blocks = [...allBlocks.values()];
+		postToHost({
+			version: 1,
+			type: "VISIBLE_BLOCKS",
+			previewId: s.previewId,
+			generation: s.generation,
+			blocks: blocks.map((block) => ({
+				blockId: block.blockId,
+				text: block.text
+			}))
 		});
-		s.visibility.start();
+		for (const block of blocks) if (!settledBlocks.has(block.blockId)) markBlockActive(block.blockId);
+		reportedBlockCount = allBlocks.size;
+		if (statusEl === null || statusEl.hidden) setStatus(`句法学习：正在解析 ${reportedBlockCount} 段…`, "running");
 	}
 	const ACTIVE_ATTRIBUTE = "data-english-syntax-active";
 	/** blockId → 标记所在元素。卡片流式出现后标记要跟着移到卡片上。 */
@@ -806,6 +732,8 @@
 	const settledBlocks = /* @__PURE__ */ new Set();
 	const failedBlocks = /* @__PURE__ */ new Set();
 	let reportedBlockCount = 0;
+	/** 本次会话累计发现的全部块（blockId → 块信息）。re-scan 时只增不减，保证进度分母稳定。 */
+	const allBlocks = /* @__PURE__ */ new Map();
 	/** 完成浮层淡出定时器。 */
 	let completeTimer;
 	function markBlockActive(blockId) {
@@ -829,6 +757,7 @@
 		settledBlocks.clear();
 		failedBlocks.clear();
 		reportedBlockCount = 0;
+		allBlocks.clear();
 	}
 	/** 一个块的结果回来了：撤标记；全部可见块都出结果 → 完成反馈。 */
 	function settleBlock(blockId, failed) {
@@ -936,17 +865,20 @@
 		switch (message.type) {
 			case "SESSION_STATE":
 				if (message.state === "paused") setStatus(`⏸ 已暂停（${message.ready}/${message.discovered}）`, "paused", false);
-				else setStatus(`句法学习：${message.ready}/${message.discovered}`, "running");
+				else if (settledBlocks.size >= reportedBlockCount && reportedBlockCount > 0) {} else {
+					const failedText = message.failed > 0 ? `，${message.failed} 句失败` : "";
+					setStatus(`句法学习：${message.ready}/${message.discovered} 句${failedText}`, "running");
+				}
 				return;
 			case "CORE_STREAM":
 				markBlockActive(message.blockId);
 				break;
 			case "CORE_RESULT":
-				bumpReturned();
+				bumpReturned(1);
 				settleBlock(message.blockId, false);
 				break;
 			case "CORE_ERROR":
-				bumpReturned();
+				bumpReturned(1);
 				settleBlock(message.blockId, true);
 				break;
 			case "RESTORE_ALL":

@@ -47,7 +47,7 @@ export interface PreviewRendered extends PageMessageBase {
 export type PageMessage = PreviewReady | VisibleBlocks | DetailRequest | RetrySentence | PreviewRendered;
 
 export type HostMessage =
-  | ({ type: "SESSION_STATE"; state: string; ready: number; discovered: number } & PageMessageBase)
+  | ({ type: "SESSION_STATE"; state: string; ready: number; discovered: number; failed: number } & PageMessageBase)
   | ({ type: "CORE_STREAM"; sentenceId: string; blockId: string; componentsJson: string } & PageMessageBase)
   | ({ type: "CORE_RESULT"; sentenceId: string; blockId: string; analysisJson: string } & PageMessageBase)
   | ({ type: "CORE_ERROR"; sentenceId: string; blockId: string; code: string; message: string } & PageMessageBase)
@@ -166,7 +166,7 @@ export function parsePageMessage(value: unknown): PageMessage | null {
 }
 
 const HOST_KEYS_BY_TYPE: Readonly<Record<string, readonly string[]>> = {
-  SESSION_STATE: ["version", "type", "previewId", "generation", "state", "ready", "discovered"],
+  SESSION_STATE: ["version", "type", "previewId", "generation", "state", "ready", "discovered", "failed"],
   CORE_STREAM: ["version", "type", "previewId", "generation", "sentenceId", "blockId", "componentsJson"],
   CORE_RESULT: ["version", "type", "previewId", "generation", "sentenceId", "blockId", "analysisJson"],
   CORE_ERROR: ["version", "type", "previewId", "generation", "sentenceId", "blockId", "code", "message"],
@@ -192,6 +192,8 @@ export function parseHostMessage(value: unknown, currentGeneration: number): Hos
     case "SESSION_STATE":
       if (!isNonEmptyString(value.state)) return null;
       if (!isNonNegativeInt(value.ready) || !isNonNegativeInt(value.discovered)) return null;
+      // failed 为可选（旧版本消息不带），兼容。
+      if (value.failed !== undefined && !isNonNegativeInt(value.failed)) return null;
       return {
         version: BRIDGE_VERSION,
         type: "SESSION_STATE",
@@ -200,6 +202,7 @@ export function parseHostMessage(value: unknown, currentGeneration: number): Hos
         state: value.state,
         ready: value.ready,
         discovered: value.discovered,
+        failed: value.failed ?? 0,
       };
     case "CORE_STREAM":
     case "CORE_RESULT":

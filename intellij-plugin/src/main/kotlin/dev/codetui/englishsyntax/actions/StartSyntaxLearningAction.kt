@@ -27,10 +27,12 @@ class StartSyntaxLearningAction(
     val project = event.project
     val file = event.getData(CommonDataKeys.VIRTUAL_FILE)
     val presentation = event.presentation
-    presentation.isEnabledAndVisible = project != null &&
-      file != null &&
-      file.fileType.name.equals("Markdown", ignoreCase = true) &&
-      jcefSupported()
+    val fileOk = project != null && file != null && file.fileType.name.equals("Markdown", ignoreCase = true) && jcefSupported()
+    // 会话进行中（RUNNING/PAUSED）时不展示「开始句法学习」，避免与暂停/停止状态冲突。
+    val manager = project?.let { runCatching { managerProvider(it) }.getOrNull() }
+    val session = manager?.activePreviewId?.let { manager.session(it) }
+    val startEnabled = PreviewActionSupport.availability(session).startEnabled
+    presentation.isEnabledAndVisible = fileOk && startEnabled
   }
 
   override fun actionPerformed(event: AnActionEvent) {
