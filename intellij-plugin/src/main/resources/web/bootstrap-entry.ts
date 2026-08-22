@@ -6,7 +6,7 @@
  * 由构建(rolldown)打包成单文件 IIFE 注入预览页。
  */
 import { BRIDGE_VERSION, parseHostMessage } from "./bridge";
-import { scanMarkdownBlocks } from "./preview";
+import { observeBlocks, scanMarkdownBlocks } from "./preview";
 import { PreviewRenderer } from "./render";
 import { setDarkMode } from "./roles";
 
@@ -69,36 +69,35 @@ function postToHost(message: Record<string, unknown>): void {
 function rescan(): void {
   const s = state;
   if (s === null) return;
-  const fresh = scanMarkdownBlocks(document.body);
-  for (const block of fresh) {
-    allBlocks.set(block.blockId, block);
-    s.renderer.registerBlock(block.blockId, block.element);
-  }
+  const blocks = scanMarkdownBlocks(document.body);
+  for (const block of blocks) s.renderer.registerBlock(block.blockId, block.element);
   if (s.visibility !== null) s.visibility.stop();
-  s.visibility = null;
-  // 整页全部翻译：一次扫描即上报全文所有英文段（不按视口过滤），Kotlin 侧全量翻译。
-  // 分母用累计 allBlocks：已翻译块（原文被隐藏）不因 re-scan 缩小集合，进度稳定。
-  if (allBlocks.size === 0) return;
-  const fingerprint = [...allBlocks.keys()].sort().join("\u0000");
-  if (fingerprint === lastVisibleFingerprint) return;
-  lastVisibleFingerprint = fingerprint;
-  const blocks = [...allBlocks.values()];
-  postToHost({
-    version: BRIDGE_VERSION,
-    type: "VISIBLE_BLOCKS",
-    previewId: s.previewId,
-    generation: s.generation,
-    blocks: blocks.map((block) => ({ blockId: block.blockId, text: block.text })),
+  s.visibility = observeBlocks(document.body, blocks, (visible) => {
+    if (visible.length === 0) return;
+    // 防环与防抖：卡片渲染也是 DOM 变更，会再次触发 MutationObserver → rescan →
+    // 这里的回调。相同可见集合（blockId 拼接指纹）不重复上报——否则 Kotlin 侧反复
+    // 收到同一批块，缓存命中 → CORE_RESULT → 再触发渲染 → 循环不止（CPU 狂转）。
+    const fingerprint = visible.map((block) => block.blockId).sort().join("\u0000");
+    if (fingerprint === lastVisibleFingerprint) return;
+    lastVisibleFingerprint = fingerprint;
+    postToHost({
+      version: BRIDGE_VERSION,
+      type: "VISIBLE_BLOCKS",
+      previewId: s.previewId,
+      generation: s.generation,
+      blocks: visible.map((block) => ({ blockId: block.blockId, text: block.text })),
+    });
+    // 首批反馈：可见块打「解析中」标记（段落左侧竖条呼吸动画），结果回来再撤。
+    for (const block of visible) markBlockActive(block.blockId);
+    reportedBlockCount = visible.length;
+    settledBlocks.clear();
+    failedBlocks.clear();
+    // 开始后的第一反馈：扫描完成、请求已发出（首次模型调用可能较慢）。
+    if (statusEl === null || statusEl.hidden) {
+      setStatus(`句法学习：正在解析 ${visible.length} 段…`, "running");
+    }
   });
-  // 只给「尚未结算」的块打「解析中」标记：已翻译块不必重新闪动。
-  for (const block of blocks) {
-    if (!settledBlocks.has(block.blockId)) markBlockActive(block.blockId);
-  }
-  reportedBlockCount = allBlocks.size;
-  // 开始后的第一反馈：扫描完成、请求已发出（首次模型调用可能较慢）。
-  if (statusEl === null || statusEl.hidden) {
-    setStatus(`句法学习：正在解析 ${reportedBlockCount} 段…`, "running");
-  }
+  s.visibility.start();
 }
 
 // —— 段落级「解析中」标记：data 属性 + inset box-shadow（Chrome 端同款，不参与布局）。 ——
@@ -109,8 +108,6 @@ const activeMarkers = new Map<string, HTMLElement>();
 const settledBlocks = new Set<string>();
 const failedBlocks = new Set<string>();
 let reportedBlockCount = 0;
-/** 本次会话累计发现的全部块（blockId → 块信息）。re-scan 时只增不减，保证进度分母稳定。 */
-const allBlocks = new Map<string, { blockId: string; element: HTMLElement; text: string }>();
 /** 完成浮层淡出定时器。 */
 let completeTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -138,7 +135,6 @@ function clearAllActive(): void {
   settledBlocks.clear();
   failedBlocks.clear();
   reportedBlockCount = 0;
-  allBlocks.clear();
 }
 
 /** 一个块的结果回来了：撤标记；全部可见块都出结果 → 完成反馈。 */
