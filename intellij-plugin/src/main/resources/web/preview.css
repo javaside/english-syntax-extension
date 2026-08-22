@@ -72,6 +72,12 @@
   transition: opacity 120ms ease;
 }
 
+/* 再强化一层：button.english-syntax-component 特异性更高（元素+类），
+   即便 IDEA 官方预览页有更高特异性的 button cursor 规则也能压过。 */
+button.english-syntax-component {
+  cursor: pointer !important;
+}
+
 .english-syntax-component:hover {
   opacity: 0.72;
 }
