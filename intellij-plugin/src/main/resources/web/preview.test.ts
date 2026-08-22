@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 
-import { beforeEach, describe, expect, it } from "vitest";
-import { scanMarkdownBlocks } from "./preview";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { observeBlocks, scanMarkdownBlocks } from "./preview";
 
 function fixture(): HTMLElement {
   const container = document.createElement("div");
@@ -83,6 +83,57 @@ describe("scanMarkdownBlocks", () => {
     for (const block of blocks) {
       expect(block.blockId).toMatch(/^english-syntax-block-\d+$/);
       expect(block.element.getAttribute("data-english-syntax-block")).toBe(block.blockId);
+    }
+  });
+});
+
+describe("observeBlocks", () => {
+  beforeEach(() => {
+    document.body.replaceChildren();
+  });
+
+  it("reports geometrically visible blocks immediately even if IntersectionObserver never fires its initial callback", () => {
+    // 真机踩坑：JCEF 的 IntersectionObserver 初始回调不可靠（observe 后不产生 entries），
+    // start() 只重发当前 Set（空集）→ VISIBLE_BLOCKS 永远不发出 → 点开始后毫无翻译。
+    // 守卫：start() 必须用几何判定（getBoundingClientRect 与视口求交）播种可见集合，
+    // IntersectionObserver 只负责之后的增量更新。
+    const container = fixture();
+    const blocks = scanMarkdownBlocks(container);
+    expect(blocks.length).toBeGreaterThan(0);
+
+    // 模拟一个「永不回调」的 IntersectionObserver。
+    const observe = vi.fn();
+    vi.stubGlobal(
+      "IntersectionObserver",
+      class {
+        constructor(_callback: IntersectionObserverCallback) {
+          void _callback;
+        }
+        observe = observe;
+        disconnect(): void {}
+        unobserve(): void {}
+        takeRecords(): IntersectionObserverEntry[] {
+          return [];
+        }
+        readonly root = null;
+        readonly rootMargin = "";
+        readonly thresholds = [];
+      },
+    );
+
+    try {
+      const reported: number[] = [];
+      const visibility = observeBlocks(container, blocks, (visible) => {
+        reported.push(visible.length);
+      });
+      visibility.start();
+
+      // 立即同步回调一次，且含几何可见的块（happy-dom 中 rect 全 0，仍在 ±一屏窗口内）。
+      expect(reported.length).toBeGreaterThan(0);
+      expect(reported[0]).toBeGreaterThan(0);
+      visibility.stop();
+    } finally {
+      vi.unstubAllGlobals();
     }
   });
 });

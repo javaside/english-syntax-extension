@@ -135,7 +135,7 @@ tag `v*` 触发,`permissions: contents: write`:
 ## IntelliJ 插件的构建、测试与发布
 
 - **门禁**:仓库根 `./gradlew :intellij-plugin:test :intellij-plugin:buildPlugin :intellij-plugin:verifyPluginProjectConfiguration`;桥协议的 TS 侧测试在 `intellij-plugin/` 里跑(`npm run test:idea-web`,即该子目录的 `vitest run src/main/resources/web`,有自己的 package.json / vitest.config.ts,不再挂在 Chrome 侧的 npm 工程下)。一键全量走仓库根 `npm run test:all`(= chrome-plugin 的 `npm test` + intellij-plugin 的 `test:idea-web` + `./gradlew intellijCheck`,见根 `package.json`)。
-- **测试分层**:Kotlin 单测(JUnit5,165 例)覆盖模型/调度/缓存/会话;集成测试(`integration/`)用 FakeOpenAiServer + 真实 AnalysisService 走全链路,断言用探针(请求计数、发送记录)不用墙钟;`SecretIsolationTest` 钉密钥隔离。跨端契约由仓库根 `shared-fixtures/` 双端消费(chrome-plugin 里 `npm run test:contracts`)。
+- **测试分层**:Kotlin 单测(JUnit5,167 例)覆盖模型/调度/缓存/会话;集成测试(`integration/`)用 FakeOpenAiServer + 真实 AnalysisService 走全链路,断言用探针(请求计数、发送记录)不用墙钟;`SecretIsolationTest` 钉密钥隔离;`PageMessageWiringTest` 钉 JS→Kotlin 消息接线(Panel 桥接入口 → 会话)。跨端契约由仓库根 `shared-fixtures/` 双端消费(chrome-plugin 里 `npm run test:contracts`)。
 - **假模型服务器**:Kotlin 侧复用 `testsupport/FakeOpenAiServer`(本地 HTTP,FIFO 响应队列);并发分块用例的响应内容做成"任意配对都合法",不依赖 HTTP 到达顺序。
 - **CI**:三个 job——chrome(chrome-plugin 全部前端门禁)、intellij(JDK21 + Gradle 缓存 + 插件 zip 产物,web 测试也在这个 job 里)、contracts(契约向量)。不上传 PasswordSafe/沙箱目录。
 - **发版**:`buildPlugin` 产出带版本 zip;Plugin Verifier 对 IC 2025.1+ 校验。JCEF 不可用的运行时里「开始句法学习」Action 不可用并提示切换 JetBrains Runtime。

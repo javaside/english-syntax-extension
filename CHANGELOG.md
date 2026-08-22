@@ -2,7 +2,22 @@
 
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## 未发布（仓库重组）
+## 未发布
+
+### 新增
+
+- **IntelliJ IDEA Markdown 预览插件（`intellij-plugin/`）**：本仓库第二个运行时。在 IDEA 自带的 Markdown 预览里做与 Chrome 扩展一致的句法拆解——`Tools → 句法学习` 开始后，预览中可见及附近的英文段落替换为三层对齐卡片，点击成分看详解，停止即完整恢复原文。要点：
+  - **不自建预览**：复用 IDEA 官方 JCEF 预览（`MarkdownJCEFHtmlPanel`），不注册 provider、不反射访问其内部，用户无需切换任何设置；
+  - **API Key 存 PasswordSafe**：不进插件状态文件、预览页脚本、桥消息、缓存或日志；发往预览页的消息在入口做键白名单过滤，含 `apiKey`/`headers`/`baseUrl` 的消息整体拒绝（`SecretIsolationTest` 钉住）；
+  - **SQLite 缓存与 Chrome 扩展互通**：缓存键与交换格式跨端一致（`shared-fixtures/` 契约向量双端测试钉住），两端阅读同一批文档零重复请求；
+  - **模型链路同骨架重实现**（Kotlin）：prompt 序列化、输出校验、一次修复、能力降级（JSON Schema / 流式 / 思考控制只持久化否定态）、五档优先级调度、按句缓存，与 Chrome 端行为对齐；
+  - Markdown 预览重渲染（编辑保存后）自动换代重扫，旧响应不污染新 DOM（Kotlin/JS 双端 generation 守卫）。
+
+### 修复（IntelliJ 插件）
+
+- **点「开始句法学习」后预览毫无变化、也无报错**。「移除自建预览面板」重构时把 JS→Kotlin 的消息接线整体丢掉了：`VISIBLE_BLOCKS`/`DETAIL_REQUEST`/`RETRY_SENTENCE` 无任何消费者，每层单测全绿但端到端无一条页面消息到达会话。现由 `PreviewSessionConnector` 统一收口接线（先接线后启动会话，顺序不可拆），并新增 `PageMessageWiringTest` 走 Panel 桥接入口钉住这条链路。
+- **卡片永不渲染**：`CORE_*` 消息携带 `blockId`，JS 侧按消息惰性注册句子（此前生产路径从不注册，渲染器查不到句子直接 return）。
+- 设置页保存异常不再冒泡成 IDE 错误弹窗；SQLite 驱动未注册导致的 Action 静默失败；预览面板定位改为经 `MarkdownPreviewFileEditor.PREVIEW_BROWSER` UserData（面板不是 FileEditor 本身，直接强转永远 null）。
 
 ### 变更
 
@@ -108,7 +123,7 @@
 
 ### 新增（面向维护者，不影响使用）
 
-- 隐私政策 [PRIVACY.md](PRIVACY.md) 与应用商店上架资料 [docs/chrome-web-store.md](docs/chrome-web-store.md)。
+- 隐私政策 [PRIVACY.md](PRIVACY.md) 与应用商店上架资料 [chrome-plugin/docs/chrome-web-store.md](chrome-plugin/docs/chrome-web-store.md)。
 - `npm run screenshots`：用本机真实模型生成商店截图。
 
 ## 1.0.0 — 2026-07-26

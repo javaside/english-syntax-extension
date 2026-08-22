@@ -88,6 +88,8 @@ sealed interface HostMessage {
     override val previewId: String,
     override val generation: Int,
     val sentenceId: String,
+    val focusStart: Int,
+    val focusEnd: Int,
     val structuresJson: String,
   ) : HostMessage
 
@@ -204,9 +206,12 @@ object BridgeProtocol {
         HostMessage.DetailResult(previewId, generation, sentenceId, value.string("analysisJson") ?: return null)
       }
       "DETAIL_STREAM" -> {
-        if (!hasOnlyKeys(value, "version", "type", "previewId", "generation", "sentenceId", "structuresJson")) return null
+        if (!hasOnlyKeys(value, "version", "type", "previewId", "generation", "sentenceId", "focusStart", "focusEnd", "structuresJson")) return null
         val sentenceId = value.string("sentenceId")?.takeIf { it.isNotEmpty() } ?: return null
-        HostMessage.DetailStream(previewId, generation, sentenceId, value.string("structuresJson") ?: return null)
+        val focusStart = value.int("focusStart") ?: return null
+        val focusEnd = value.int("focusEnd") ?: return null
+        if (focusStart < 0 || focusEnd < focusStart) return null
+        HostMessage.DetailStream(previewId, generation, sentenceId, focusStart, focusEnd, value.string("structuresJson") ?: return null)
       }
       "CORE_ERROR" -> {
         if (!hasOnlyKeys(value, "version", "type", "previewId", "generation", "sentenceId", "blockId", "code", "message")) return null

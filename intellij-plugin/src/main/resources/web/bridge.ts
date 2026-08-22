@@ -51,7 +51,7 @@ export type HostMessage =
   | ({ type: "CORE_STREAM"; sentenceId: string; blockId: string; componentsJson: string } & PageMessageBase)
   | ({ type: "CORE_RESULT"; sentenceId: string; blockId: string; analysisJson: string } & PageMessageBase)
   | ({ type: "CORE_ERROR"; sentenceId: string; blockId: string; code: string; message: string } & PageMessageBase)
-  | ({ type: "DETAIL_STREAM"; sentenceId: string; structuresJson: string } & PageMessageBase)
+  | ({ type: "DETAIL_STREAM"; sentenceId: string; focusStart: number; focusEnd: number; structuresJson: string } & PageMessageBase)
   | ({ type: "DETAIL_RESULT"; sentenceId: string; analysisJson: string } & PageMessageBase)
   | ({ type: "RESTORE_ALL" } & PageMessageBase);
 
@@ -170,7 +170,7 @@ const HOST_KEYS_BY_TYPE: Readonly<Record<string, readonly string[]>> = {
   CORE_STREAM: ["version", "type", "previewId", "generation", "sentenceId", "blockId", "componentsJson"],
   CORE_RESULT: ["version", "type", "previewId", "generation", "sentenceId", "blockId", "analysisJson"],
   CORE_ERROR: ["version", "type", "previewId", "generation", "sentenceId", "blockId", "code", "message"],
-  DETAIL_STREAM: ["version", "type", "previewId", "generation", "sentenceId", "structuresJson"],
+  DETAIL_STREAM: ["version", "type", "previewId", "generation", "sentenceId", "focusStart", "focusEnd", "structuresJson"],
   DETAIL_RESULT: ["version", "type", "previewId", "generation", "sentenceId", "analysisJson"],
   RESTORE_ALL: ["version", "type", "previewId", "generation"],
 };
@@ -239,12 +239,16 @@ export function parseHostMessage(value: unknown, currentGeneration: number): Hos
     case "DETAIL_STREAM":
       if (!isNonEmptyString(value.sentenceId) || typeof value.structuresJson !== "string")
         return null;
+      if (!isNonNegativeInt(value.focusStart) || !isNonNegativeInt(value.focusEnd)) return null;
+      if (value.focusEnd < value.focusStart) return null;
       return {
         version: BRIDGE_VERSION,
         type: "DETAIL_STREAM",
         previewId: value.previewId,
         generation: value.generation,
         sentenceId: value.sentenceId,
+        focusStart: value.focusStart,
+        focusEnd: value.focusEnd,
         structuresJson: value.structuresJson,
       };
     case "CORE_ERROR":

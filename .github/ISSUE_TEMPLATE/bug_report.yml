@@ -1,30 +1,32 @@
 name: 问题报告
-description: 扩展没有按预期工作
+description: Chrome 扩展或 IntelliJ 插件没有按预期工作
 labels: ["bug"]
 body:
-  - type: markdown
+  - type: dropdown
+    id: runtime
     attributes:
-      value: |
-        **先看这里可能省你一小时**：如果症状是「整页一条译文都没有」，而你用的是本地思考模型
-        （Qwen3、DeepSeek-R1 等），请先到选项页勾选「关闭模型思考」。这类模型默认会为
-        单句生成上万字符推理，必然超时。
+      label: 哪个运行时出的问题
+      options:
+        - Chrome 扩展
+        - IntelliJ 插件（IDEA Markdown 预览）
+    validations:
+      required: true
 
   - type: input
     id: version
     attributes:
-      label: 扩展版本
-      description: 见 chrome://extensions 或 manifest 的 version
+      label: 版本
+      description: Chrome 扩展见 chrome://extensions；IntelliJ 插件见 Settings → Plugins
       placeholder: "1.0.0"
     validations:
       required: true
 
   - type: input
-    id: chrome
+    id: platform
     attributes:
-      label: Chrome 版本
-      placeholder: "chrome://version 第一行"
-    validations:
-      required: true
+      label: 运行环境
+      description: Chrome 扩展填 Chrome 版本（chrome://version 第一行）；IntelliJ 插件填 IDEA 版本（Help → About）
+      placeholder: "Chrome 138 / IDEA 2025.1.1"
 
   - type: dropdown
     id: endpoint
@@ -43,7 +45,7 @@ body:
     id: model
     attributes:
       label: 模型名
-      placeholder: "qwen3.5:9b / deepseek-chat / ..."
+      placeholder: "qwen3.5:9b / deepseek-v4-flash / ..."
 
   - type: textarea
     id: error
@@ -58,10 +60,10 @@ body:
     id: steps
     attributes:
       label: 复现步骤
-      description: 尽量给出一个公开可访问的页面地址
+      description: Chrome 扩展尽量给出一个公开可访问的页面地址；IntelliJ 插件给出一小段可复现的 Markdown
       placeholder: |
         1. 打开 ...
-        2. 点击扩展图标
+        2. 点击扩展图标 / Tools → 句法学习
         3. 观察到 ...
     validations:
       required: true
@@ -74,8 +76,9 @@ body:
   - type: textarea
     id: console
     attributes:
-      label: 控制台日志（可选）
+      label: 控制台 / IDE 日志（可选）
       description: |
-        Service Worker 日志见 chrome://extensions →「检查视图 service worker」。
+        Chrome 扩展：Service Worker 日志见 chrome://extensions →「检查视图 service worker」。
+        IntelliJ 插件：idea.log 见 Help → Show Log in Finder/Explorer。
         **贴之前请确认里面没有你的 API Key。**
       render: shell

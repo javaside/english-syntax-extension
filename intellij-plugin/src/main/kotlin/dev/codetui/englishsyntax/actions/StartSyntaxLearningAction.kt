@@ -7,7 +7,7 @@ import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.project.Project
 import com.intellij.ui.jcef.JBCefApp
 import dev.codetui.englishsyntax.markdown.EnglishSyntaxPreviewPanel
-import dev.codetui.englishsyntax.session.HostSender
+import dev.codetui.englishsyntax.session.PreviewSessionConnector
 import dev.codetui.englishsyntax.session.PreviewSessionManager
 
 /**
@@ -37,6 +37,7 @@ class StartSyntaxLearningAction(
     val project = event.project ?: return
     val panel = currentPanel(project)
     if (panel == null) {
+      LOGGER.warn("start: no preview panel found for project")
       ActionNotifier.warn(
         project,
         "未找到 Markdown 预览面板：请先打开一个 .md 文件的 Markdown 预览（IDEA 默认 JCEF 预览即可）",
@@ -45,15 +46,14 @@ class StartSyntaxLearningAction(
     }
     val manager = runCatching { managerProvider(project) }.getOrNull()
     if (manager == null) {
+      LOGGER.warn("start: manager unavailable (SQLite cache init failure lands here too)")
       ActionNotifier.warn(project, "句法学习服务不可用：请检查设置页配置（SQLite 缓存初始化失败时也会走到这里）")
       return
     }
-    // 官方预览整体重渲染（内容更新）时换代：取消旧请求、清空记录，避免旧响应污染新 DOM。
-    panel.onGenerationChanged = { generation -> manager.onGenerationChanged(panel.previewId, generation) }
-    manager.start(panel.previewId, HostSender { panel.send(it) }) {
-      // JS 侧扫描入口：setHtml 后的 initialize 脚本驱动 scanMarkdownBlocks → VISIBLE_BLOCKS。
-      panel.onPageMessage("""{"version":1,"type":"PREVIEW_READY","previewId":"${panel.previewId}","generation":${panel.generation}}""")
-    }
+    // JS→Kotlin 消息接线：VISIBLE_BLOCKS/DETAIL_REQUEST/RETRY_SENTENCE 派发进会话。
+    // 曾在移除自建预览面板的重构中丢失此接线，页面消息无消费者，翻译毫无变化。
+    PreviewSessionConnector.start(panel, manager)
+    LOGGER.info("start: session wired for previewId=${panel.previewId} generation=${panel.generation}")
     // 即时反馈：点击生效 + 首次模型请求可能较慢（尤其云端端点），预览页右下角有进度浮层。
     ActionNotifier.info(project, "句法学习已开始，正在解析可见段落…（进度见预览页右下角）")
   }
@@ -61,4 +61,8 @@ class StartSyntaxLearningAction(
   /** 经 Markdown 插件的 PREVIEW_BROWSER UserData 定位当前预览面板（面板不是 FileEditor 本身）。 */
   internal fun currentPanel(project: Project): EnglishSyntaxPreviewPanel? =
     EnglishSyntaxPreviewPanel.findPanel(project)
+
+  private companion object {
+    private val LOGGER = com.intellij.openapi.diagnostic.Logger.getInstance(StartSyntaxLearningAction::class.java)
+  }
 }

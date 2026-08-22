@@ -8,6 +8,7 @@
 import { BRIDGE_VERSION, parseHostMessage } from "./bridge";
 import { observeBlocks, scanMarkdownBlocks } from "./preview";
 import { PreviewRenderer } from "./render";
+import { setDarkMode } from "./roles";
 
 interface RuntimeState {
   renderer: PreviewRenderer;
@@ -29,15 +30,22 @@ function ensureStatusElement(): HTMLElement {
   statusEl = document.createElement("div");
   statusEl.id = STATUS_ID;
   statusEl.hidden = true;
+  const spinner = document.createElement("span");
+  spinner.className = "english-syntax-status-spinner";
+  const label = document.createElement("span");
+  label.className = "english-syntax-status-label";
+  statusEl.append(spinner, label);
   document.body.appendChild(statusEl);
   return statusEl;
 }
 
-function setStatus(text: string, kind: "running" | "paused" | "error"): void {
+function setStatus(text: string, kind: "running" | "paused" | "error", spinning = true): void {
   const el = ensureStatusElement();
-  el.textContent = text;
+  el.querySelector(".english-syntax-status-label")!.textContent = text;
   el.dataset.kind = kind;
   el.hidden = false;
+  const spinner = el.querySelector<HTMLElement>(".english-syntax-status-spinner")!;
+  spinner.style.display = spinning ? "" : "none";
 }
 
 function hideStatus(): void {
@@ -66,6 +74,12 @@ function rescan(): void {
   if (s.visibility !== null) s.visibility.stop();
   s.visibility = observeBlocks(document.body, blocks, (visible) => {
     if (visible.length === 0) return;
+    // 防环与防抖：我们的卡片渲染也是 DOM 变更，会再次触发 MutationObserver → rescan →
+    // 这里的回调。相同可见集合（blockId 拼接指纹）不重复上报——否则 Kotlin 侧反复
+    // 收到同一批块，缓存命中 → CORE_RESULT → 再触发渲染 → 循环不止（CPU 狂转）。
+    const fingerprint = visible.map((block) => block.blockId).sort().join("\u0000");
+    if (fingerprint === lastVisibleFingerprint) return;
+    lastVisibleFingerprint = fingerprint;
     postToHost({
       version: BRIDGE_VERSION,
       type: "VISIBLE_BLOCKS",
@@ -73,6 +87,11 @@ function rescan(): void {
       generation: s.generation,
       blocks: visible.map((block) => ({ blockId: block.blockId, text: block.text })),
     });
+    // 首批反馈：可见块打「解析中」标记（段落左侧竖条呼吸动画），结果回来再撤。
+    for (const block of visible) markBlockActive(block.blockId);
+    reportedBlockCount = visible.length;
+    settledBlocks.clear();
+    failedBlocks.clear();
     // 开始后的第一反馈：扫描完成、请求已发出（首次模型调用可能较慢）。
     if (statusEl === null || statusEl.hidden) {
       setStatus(`句法学习：正在解析 ${visible.length} 段…`, "running");
@@ -80,6 +99,59 @@ function rescan(): void {
   });
   s.visibility.start();
 }
+
+// —— 段落级「解析中」标记：data 属性 + inset box-shadow（Chrome 端同款，不参与布局）。 ——
+const ACTIVE_ATTRIBUTE = "data-english-syntax-active";
+/** blockId → 标记所在元素。卡片流式出现后标记要跟着移到卡片上。 */
+const activeMarkers = new Map<string, HTMLElement>();
+/** 已收到结果的 blockId 集合（按块判完成）。 */
+const settledBlocks = new Set<string>();
+const failedBlocks = new Set<string>();
+let reportedBlockCount = 0;
+/** 完成浮层淡出定时器。 */
+let completeTimer: ReturnType<typeof setTimeout> | undefined;
+
+function markBlockActive(blockId: string): void {
+  const s = state;
+  if (s === null) return;
+  const element = s.renderer.markActive(blockId);
+  if (element === null) return;
+  const previous = activeMarkers.get(blockId);
+  if (previous === element) return;
+  previous?.removeAttribute(ACTIVE_ATTRIBUTE);
+  element.setAttribute(ACTIVE_ATTRIBUTE, "");
+  activeMarkers.set(blockId, element);
+}
+
+function unmarkBlockActive(blockId: string): void {
+  const element = activeMarkers.get(blockId);
+  element?.removeAttribute(ACTIVE_ATTRIBUTE);
+  activeMarkers.delete(blockId);
+}
+
+function clearAllActive(): void {
+  for (const element of activeMarkers.values()) element.removeAttribute(ACTIVE_ATTRIBUTE);
+  activeMarkers.clear();
+  settledBlocks.clear();
+  failedBlocks.clear();
+  reportedBlockCount = 0;
+}
+
+/** 一个块的结果回来了：撤标记；全部可见块都出结果 → 完成反馈。 */
+function settleBlock(blockId: string, failed: boolean): void {
+  settledBlocks.add(blockId);
+  if (failed) failedBlocks.add(blockId);
+  unmarkBlockActive(blockId);
+  if (reportedBlockCount > 0 && settledBlocks.size >= reportedBlockCount) {
+    clearTimeout(completeTimer);
+    const failedText = failedBlocks.size > 0 ? `，${failedBlocks.size} 段失败` : "";
+    setStatus(`✓ 句法解析完成${failedText}`, "running");
+    completeTimer = setTimeout(hideStatus, 2500);
+  }
+}
+
+/** 上次上报的可见块指纹；跨代次（initialize）时重置。 */
+let lastVisibleFingerprint = "";
 
 let previewHadCards = false;
 
@@ -128,6 +200,8 @@ function initialize(previewId: string, generation: number): void {
   s.previewId = previewId;
   s.generation = generation;
   returnedCount = 0;
+  lastVisibleFingerprint = ""; // 新代次重新上报可见块
+  clearAllActive();
   ensureStatusElement(); // 官方 updateDom 重写 body 会清掉浮层，换代后重建。
   if (s.observer !== null) s.observer.disconnect();
   s.observer = new MutationObserver(() => {
@@ -165,20 +239,27 @@ function handleHostMessage(hostJson: unknown): void {
     case "SESSION_STATE": {
       // 暂停/继续等状态变化：浮层同步（renderer 不消费此消息）。
       if (message.state === "paused") {
-        setStatus(`句法学习：已暂停（${message.ready}/${message.discovered}）`, "paused");
+        setStatus(`⏸ 已暂停（${message.ready}/${message.discovered}）`, "paused", false);
       } else {
         setStatus(`句法学习：${message.ready}/${message.discovered}`, "running");
       }
       return;
     }
     case "CORE_STREAM":
-      break; // 流式分片不计数，交给 renderer 渲染暂定卡。
+      // 流式分片：不计数；卡片已出现，把「解析中」标记从原文块移到卡片上。
+      markBlockActive(message.blockId);
+      break;
     case "CORE_RESULT":
+      bumpReturned();
+      settleBlock(message.blockId, false);
+      break;
     case "CORE_ERROR":
       bumpReturned();
+      settleBlock(message.blockId, true);
       break;
     case "RESTORE_ALL":
       returnedCount = 0;
+      clearAllActive();
       hideStatus();
       break;
     default:
@@ -210,3 +291,5 @@ w.__englishSyntaxInitialize = initialize;
 w.__englishSyntaxReload = reload;
 w.__englishSyntaxScrollTo = scrollTo;
 w.__englishSyntaxMessage = handleHostMessage;
+// 深色主题开关：Kotlin 检测当前 IDEA 主题明暗后注入，角色字色据此选浅/深色板。
+w.__englishSyntaxSetTheme = setDarkMode;

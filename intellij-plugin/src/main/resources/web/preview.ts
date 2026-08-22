@@ -94,9 +94,24 @@ export interface BlockVisibility {
   stop(): void;
 }
 
+/** 与视口（上下各扩一屏）求交的几何判定；不依赖 IntersectionObserver 的回调时机。 */
+function geometricallyVisible(root: ParentNode, block: PreviewBlock): boolean {
+  const view = root.ownerDocument?.defaultView;
+  if (!view) return false;
+  const rect = block.element.getBoundingClientRect();
+  const viewportTop = -view.innerHeight;
+  const viewportBottom = view.innerHeight * 2;
+  return rect.bottom >= viewportTop && rect.top <= viewportBottom;
+}
+
 /**
  * IntersectionObserver（rootMargin 上下各一屏）；环境不支持时退化为
  * rAF 节流的 scroll/resize 检查。
+ *
+ * **start() 必先用几何判定播种可见集**：JCEF 环境里 IntersectionObserver
+ * 的初始回调不可靠（observe 后可能不产生 entries），只重发当前 Set 会是
+ * 空集——VISIBLE_BLOCKS 永远不发出，页面点开始后毫无反应。IO 只负责
+ * 之后的滚动增量更新。
  */
 export function observeBlocks(
   root: ParentNode,
@@ -122,7 +137,11 @@ export function observeBlocks(
     blocks.forEach(({ element }) => observer.observe(element));
     return {
       start() {
-        // 观察已在构造时挂上；这里立即汇报一次当前可见集合。
+        // 几何播种：不依赖 IO 的初始回调时机，立即得到首批可见块。
+        visible.clear();
+        for (const block of blocks) {
+          if (geometricallyVisible(root, block)) visible.add(block);
+        }
         emit();
       },
       stop() {

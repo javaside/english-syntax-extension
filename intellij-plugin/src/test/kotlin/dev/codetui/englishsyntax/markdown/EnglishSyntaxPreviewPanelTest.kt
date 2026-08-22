@@ -92,4 +92,37 @@ class EnglishSyntaxPreviewPanelTest {
     panel.dispose()
     assertTrue(panel.isDisposed())
   }
+
+  @Test
+  fun `injection never evaluates strings because the official preview CSP has no unsafe-eval`() {
+    // 官方 MarkdownJCEFHtmlPanel 的页面 CSP: script-src 只允许官方静态资源, 不含 'unsafe-eval'。
+    // 页面上下文里的 eval(...) / new Function(...) / 动态 <script> 内联都会被 CSP 静默拦截,
+    // bundle 一行都执行不了——表现为「点了开始毫无变化」。唯一可靠路径是把 bundle 直接
+    // 作为顶层脚本经 executeJavaScript 执行(浏览器 API 级注入, 官方 updateDom 同款)。
+    val scripts = mutableListOf<String>()
+    val panel = EnglishSyntaxPreviewPanel(transportOverride = HostMessageTransport { scripts += it })
+    panel.injectForTest()
+
+    val bootstrap = scripts.joinToString("\n")
+    assertTrue(!bootstrap.contains("eval("), "注入脚本不得用 eval(): CSP 会拦, bootstrap=$bootstrap")
+    assertTrue(!bootstrap.contains("new Function"), "注入脚本不得用 new Function(): CSP 会拦")
+    assertTrue(!bootstrap.contains("<script"), "CSP 无 nonce/unsafe-inline, 动态内联 script 也会被拦")
+    assertTrue(bootstrap.contains("__englishSyntaxInitialize"), "bootstrap 后必须触发 initialize")
+
+    panel.dispose()
+  }
+
+  @Test
+  fun `injection sets the theme flag for role palette selection`() {
+    // 角色字色深/浅由 IDEA 主题决定：Kotlin 注入 __englishSyntaxSetTheme 与根 data 属性。
+    // 纯协议测试无可用的 UI 上下文，isBright 回退浅色（false），但仍须注入主题设置脚本。
+    val scripts = mutableListOf<String>()
+    val panel = EnglishSyntaxPreviewPanel(transportOverride = HostMessageTransport { scripts += it })
+    panel.injectForTest()
+
+    val all = scripts.joinToString("\n")
+    assertTrue(all.contains("__englishSyntaxSetTheme"), "须注入角色色板主题开关: $all")
+
+    panel.dispose()
+  }
 }

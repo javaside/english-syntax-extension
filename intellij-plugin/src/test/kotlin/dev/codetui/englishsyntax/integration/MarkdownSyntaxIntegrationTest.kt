@@ -74,6 +74,9 @@ class MarkdownSyntaxIntegrationTest {
     headerNames = emptySet(),
     timeoutMs = 30_000,
     jsonSchemaSupport = JsonSchemaSupport.UNKNOWN,
+    // 集成测试的响应队列只给 JSON 体：声明不支持流式，避免客户端流式解析失败后回落重发
+    // 把请求计数翻倍（流式接线本身由 PreviewSessionTest 的 CORE_STREAM 用例覆盖）。
+    streamSupport = dev.codetui.englishsyntax.settings.CapabilityState.UNSUPPORTED,
   )
 
   @Test

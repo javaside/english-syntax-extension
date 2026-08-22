@@ -1,11 +1,15 @@
 /**
  * 预览页句法卡片渲染：可逆替换、流式暂定卡、详解面板。
  *
- * 模型文本一律走 textContent；卡片 Shadow DOM 隔离预览样式；
- * 旧 generation 的消息在入口处丢弃。
+ * 结构与视觉对齐 Chrome 端 `learning-block.ts`：
+ * 三行组件（角色标签/英文原文/中文译文，居中网格 + baseline 组对齐）、
+ * 按角色着色的细下划线、标点沉入行底、详解面板为「标注行 + ①角色：解释列表 +
+ * 语法点 + 整体说明」、失败句保留原文 + 重试按钮。
+ * 模型文本一律 textContent；旧 generation 的消息在入口处丢弃。
  */
 
 import type { HostMessage } from "./bridge";
+import { circledNumber, roleColor, roleLabel, structureColor } from "./roles";
 
 const HIDDEN_ATTRIBUTE = "data-english-syntax-hidden";
 const CARD_TAG = "div";
@@ -34,7 +38,7 @@ interface ComponentPayload {
   endToken: number;
   role: string;
   translation: string;
-  /** 可选英文原文（Kotlin 侧分词后回填；缺失时渲染层不显示英文行）。 */
+  /** Kotlin 侧按 token 区间回填的英文原文；缺失时英文行为空。 */
   text?: string;
 }
 
@@ -57,6 +61,36 @@ export type DetailRequestHandler = (
   focusStart: number,
   focusEnd: number,
 ) => void;
+
+// 16em 封顶按译文字号约等于 16 个汉字；超过则改用铺开模式（Chrome 端同款）。
+const WIDE_TRANSLATION_MIN_CHARS = 17;
+
+// 小参数本地模型偶尔把英文原文回填进 translation 字段。与英文等值的「译文」
+// 没有信息量，视为无译文，退回两行展示（Chrome 端同款）。
+function isEchoTranslation(translation: string, english: string): boolean {
+  const normalize = (value: string) => value.toLowerCase().replace(/\s+/gu, " ").trim();
+  return normalize(translation) === normalize(english);
+}
+
+function createElement<K extends keyof HTMLElementTagNameMap>(
+  owner: Document,
+  name: K,
+  className?: string,
+  text?: string,
+): HTMLElementTagNameMap[K] {
+  const element = owner.createElement(name);
+  if (className !== undefined) element.className = className;
+  if (text !== undefined) element.textContent = text;
+  return element;
+}
+
+function translationElement(owner: Document, className: string, text: string): HTMLSpanElement {
+  const element = createElement(owner, "span", className, text);
+  if ([...text].length >= WIDE_TRANSLATION_MIN_CHARS) {
+    element.classList.add("english-syntax-translation-wide");
+  }
+  return element;
+}
 
 export class PreviewRenderer {
   readonly #blocks = new Map<string, BlockRecord>();
@@ -98,7 +132,12 @@ export class PreviewRenderer {
         if (message.type === "DETAIL_RESULT") {
           this.renderDetailResult(payload as DetailPayload);
         } else {
-          this.renderDetailStream(message.sentenceId, payload as DetailPayload["structures"]);
+          this.renderDetailStream(
+            message.sentenceId,
+            message.focusStart,
+            message.focusEnd,
+            payload as DetailPayload["structures"],
+          );
         }
         break;
       }
@@ -137,14 +176,13 @@ export class PreviewRenderer {
   }
 
   renderCoreError(sentenceId: string, blockId: string, code: string, message: string): void {
-    void code;
     this.#ensureSentence(blockId, sentenceId);
     const entry = this.#sentences.get(sentenceId);
     if (entry === undefined) return;
     entry.record.failed = true;
     entry.record.analysis = null;
     entry.record.provisional = null;
-    this.#repaintBlock(entry.blockId, { errorSentenceId: sentenceId, message });
+    this.#repaintBlock(entry.blockId, { errorSentenceId: sentenceId, message: `${code}：${message}` });
   }
 
   /**
@@ -160,12 +198,12 @@ export class PreviewRenderer {
     this.#sentences.set(sentenceId, { blockId, record: record.sentences.get(sentenceId)! });
   }
 
-  renderDetailStream(sentenceId: string, structures: DetailPayload["structures"]): void {
-    this.#showDetailPanel(sentenceId, structures);
+  renderDetailStream(sentenceId: string, focusStart: number, focusEnd: number, structures: DetailPayload["structures"]): void {
+    this.#showDetailPanel(sentenceId, structures, focusStart, focusEnd);
   }
 
   renderDetailResult(detail: DetailPayload): void {
-    this.#showDetailPanel(detail.sentenceId, detail.structures, detail);
+    this.#showDetailPanel(detail.sentenceId, detail.structures, detail.focus.startToken, detail.focus.endToken, detail);
   }
 
   requestDetail(sentenceId: string, focusStart: number, focusEnd: number): void {
@@ -175,14 +213,16 @@ export class PreviewRenderer {
   #showDetailPanel(
     sentenceId: string,
     structures: DetailPayload["structures"],
+    focusStart?: number,
+    focusEnd?: number,
     detail?: DetailPayload,
   ): void {
     const entry = this.#sentences.get(sentenceId);
     if (entry == null) return;
     this.#currentDetail = {
       sentenceId,
-      focusStart: detail?.focus.startToken ?? 0,
-      focusEnd: detail?.focus.endToken ?? 0,
+      focusStart: focusStart ?? detail?.focus.startToken ?? 0,
+      focusEnd: focusEnd ?? detail?.focus.endToken ?? 0,
     };
     this.#repaintBlock(entry.blockId, { detailStructures: structures, detail });
   }
@@ -243,34 +283,46 @@ export class PreviewRenderer {
     const owner = record.element.ownerDocument;
     // 整卡重建：流式分片给的是累积列表，全量重画语义最简单。
     card.replaceChildren();
-    const container = owner.createElement("div");
-    container.className = "english-syntax-sentences";
+    const container = createElement(owner, "div", "english-syntax-sentences");
     for (const sentenceId of order) {
       const sentence = record.sentences.get(sentenceId);
       if (sentence === undefined) continue;
-      const section = owner.createElement("section");
-      section.className = "english-syntax-sentence";
+      const section = createElement(owner, "section", "english-syntax-sentence");
       section.dataset.sentenceId = sentenceId;
       const components = sentence.analysis?.components ?? sentence.provisional ?? [];
       if (sentenceId === options.errorSentenceId) {
-        const error = owner.createElement("div");
-        error.className = "english-syntax-error";
-        error.textContent = options.message ?? "解析失败";
-        const retry = owner.createElement("button");
-        retry.className = "english-syntax-retry";
-        retry.type = "button";
-        retry.textContent = "重试";
-        retry.addEventListener("click", () => this.requestDetail(sentenceId, 0, 0));
-        section.append(error, retry);
-        container.append(section);
+        // 失败句：原文 + 错误 + 重试（Chrome 端 sentence-failure 同款）。
+        const failure = createElement(owner, "div", "english-syntax-sentence-failure");
+        failure.append(
+          createElement(owner, "span", "english-syntax-original", this.#originalText(sentenceId)),
+          createElement(owner, "span", "english-syntax-error", options.message ?? "解析失败"),
+        );
+        failure.append(this.#createRetry(owner, sentenceId));
+        container.append(failure);
         continue;
       }
+      const coordinateClauseTotal = components.filter(
+        (component) => component.role === "COORDINATE_CLAUSE",
+      ).length;
+      let coordinateClauseIndex = 0;
       for (const component of components) {
-        const button = owner.createElement("button");
+        let label = roleLabel(component.role);
+        if (component.role === "COORDINATE_CLAUSE" && coordinateClauseTotal >= 2) {
+          coordinateClauseIndex += 1;
+          label = `${label}${circledNumber(coordinateClauseIndex)}`;
+        }
+        const button = createElement(owner, "button", "english-syntax-component");
         button.type = "button";
-        button.className = "english-syntax-component";
         button.dataset.startToken = String(component.startToken);
         button.dataset.endToken = String(component.endToken);
+        button.style.setProperty("--english-syntax-role-color", roleColor(component.role));
+        const role = createElement(owner, "span", "english-syntax-role", label);
+        const english = createElement(owner, "span", "english-syntax-english");
+        english.textContent = component.text ?? "";
+        button.append(role, english);
+        if (!isEchoTranslation(component.translation, english.textContent ?? "")) {
+          button.append(translationElement(owner, "english-syntax-translation", component.translation));
+        }
         button.addEventListener("click", () => {
           if (this.#currentDetail?.sentenceId === sentenceId) {
             this.closeDetail();
@@ -278,16 +330,6 @@ export class PreviewRenderer {
           }
           this.requestDetail(sentenceId, component.startToken, component.endToken);
         });
-        const role = owner.createElement("span");
-        role.className = "english-syntax-role";
-        role.textContent = component.role;
-        const english = owner.createElement("span");
-        english.className = "english-syntax-english";
-        english.textContent = this.#componentText(record, sentenceId, component);
-        const translation = owner.createElement("span");
-        translation.className = "english-syntax-translation";
-        translation.textContent = component.translation;
-        button.append(role, english, translation);
         section.append(button);
       }
       if (sentence.analysis === null && sentence.provisional !== null) {
@@ -295,61 +337,161 @@ export class PreviewRenderer {
       }
       container.append(section);
     }
-    if (options.detailStructures !== undefined || options.detail !== undefined) {
-      const panel = owner.createElement("div");
-      panel.className = "english-syntax-detail";
-      const structures = options.detailStructures ?? options.detail?.structures ?? [];
-      for (const structure of structures) {
-        const row = owner.createElement("div");
-        row.className = "english-syntax-detail-row";
-        const role = owner.createElement("span");
-        role.className = "english-syntax-detail-role";
-        role.textContent = structure.role;
-        const english = owner.createElement("span");
-        english.className = "english-syntax-detail-english";
-        english.textContent = this.#componentText(
-          record,
-          this.#currentDetail?.sentenceId ?? "",
-          structure,
-        );
-        const translation = owner.createElement("span");
-        translation.className = "english-syntax-detail-translation";
-        translation.textContent = structure.translation ?? "";
-        row.append(role, english, translation);
-        panel.append(row);
-      }
-      if (options.detail?.grammarPoints?.length) {
-        const points = owner.createElement("div");
-        points.className = "english-syntax-grammar-points";
-        points.textContent = options.detail.grammarPoints.join("；");
-        panel.append(points);
-      }
-      if (options.detail?.explanation) {
-        const explanation = owner.createElement("div");
-        explanation.className = "english-syntax-explanation";
-        explanation.textContent = options.detail.explanation;
-        panel.append(explanation);
-      }
-      container.append(panel);
-    }
     card.append(container);
+    // 详解面板锚定：DOM 挂载后才有真实布局，行判定（Chrome 端 setDetailLoading 同款）
+    // 需要 getBoundingClientRect——被点成分若不在视觉行末，面板插到该行末尾；
+    // 否则插到句子之后。
+    if (
+      this.#currentDetail !== null &&
+      (options.detailStructures !== undefined || options.detail !== undefined)
+    ) {
+      this.#placeDetailPanel(
+        card,
+        options.detailStructures ?? options.detail?.structures ?? [],
+        options.detail,
+      );
+    }
   }
 
-  #componentText(
-    record: BlockRecord,
-    sentenceId: string,
-    component: { startToken: number; endToken: number; text?: string },
-  ): string {
-    // 预览层优先使用 Kotlin 侧回填的 text；缺失时留空（后续由会话层补 token 文本）。
-    void record;
+  /**
+   * 详解面板行锚定（移植 Chrome 端 `setDetailLoading` 的行判定）：
+   * 面板落在**被点成分所在视觉行**的正下方。
+   *  * 被点成分下面还有同句成分（长句折行）：插在句内、该行最后一个成分之后；
+   *  * 是最后一行：插到句子之后（短句常与邻句共行，放句内会逼句子变块级挤走邻居）。
+   * 行判定依赖真实布局，零尺寸环境（单测）退化为插在句子之后。
+   */
+  #placeDetailPanel(
+    card: HTMLElement,
+    structures: DetailPayload["structures"],
+    detail?: DetailPayload,
+  ): void {
+    const current = this.#currentDetail;
+    if (current === null) return;
+    const sentence = card.querySelector<HTMLElement>(
+      `.english-syntax-sentence[data-sentence-id="${current.sentenceId}"]`,
+    );
+    if (sentence === null) return;
+    const panel = this.#renderDetailPanel(sentence.ownerDocument, structures, detail);
+    sentence.classList.add("english-syntax-has-detail");
+
+    const component = sentence.querySelector<HTMLElement>(
+      `.english-syntax-component[data-start-token="${current.focusStart}"][data-end-token="${current.focusEnd}"]`,
+    );
+    const clickedRect = component?.getBoundingClientRect();
+    // 显式判断有没有真实布局：happy-dom 等零尺寸环境里所有矩形都是 0，靠数值比较
+    // 会误判成「下面还有成分」而选错分支（Chrome 端同款守卫）。
+    const hasLayout = clickedRect !== undefined && clickedRect.height > 0;
+    const hasComponentBelow =
+      hasLayout &&
+      [...sentence.querySelectorAll<HTMLElement>(".english-syntax-component")].some(
+        (other) => other.getBoundingClientRect().top >= clickedRect.bottom,
+      );
+
+    if (component !== null && hasComponentBelow) {
+      const clickedBottom = clickedRect.bottom;
+      let anchor: Element = component;
+      for (let next = anchor.nextElementSibling; next !== null; next = next.nextElementSibling) {
+        if (next.getBoundingClientRect().top >= clickedBottom) break;
+        anchor = next;
+      }
+      anchor.after(panel);
+      return;
+    }
+    sentence.after(panel);
+  }
+
+  /** 详解面板：标注行（①角色 + 英文摘录）+ 解释列表 + 语法点 + 整体说明。 */
+  #renderDetailPanel(
+    owner: Document,
+    structures: DetailPayload["structures"],
+    detail?: DetailPayload,
+  ): HTMLElement {
+    const panel = createElement(owner, "div", "english-syntax-detail");
+    const annotations = createElement(owner, "div", "english-syntax-detail-annotations");
+    for (const [index, structure] of structures.entries()) {
+      const label = `${circledNumber(index + 1)} ${structure.role}`;
+      const annotation = createElement(owner, "span", "english-syntax-annotation");
+      annotation.style.setProperty("--english-syntax-role-color", structureColor(structure.role));
+      annotation.append(
+        createElement(owner, "span", "english-syntax-annotation-role", label),
+        createElement(owner, "span", "english-syntax-annotation-english", this.#structureText(structure)),
+      );
+      if (
+        structure.translation !== undefined &&
+        structure.translation.trim().length > 0
+      ) {
+        annotation.append(
+          translationElement(owner, "english-syntax-annotation-translation", structure.translation),
+        );
+      }
+      annotations.append(annotation);
+    }
+    panel.append(annotations);
+    for (const [index, structure] of structures.entries()) {
+      const row = createElement(owner, "div", "english-syntax-detail-structure");
+      const strong = createElement(owner, "strong", "english-syntax-detail-role");
+      strong.textContent = `${circledNumber(index + 1)} ${structure.role}`;
+      row.append(
+        strong,
+        owner.createTextNode("："),
+        createElement(owner, "span", "english-syntax-detail-explanation", structure.explanation),
+      );
+      panel.append(row);
+    }
+    if (detail?.grammarPoints?.length) {
+      panel.append(
+        createElement(owner, "div", "english-syntax-grammar-points", detail.grammarPoints.join("、")),
+      );
+    }
+    if (detail?.explanation) {
+      panel.append(createElement(owner, "div", "english-syntax-detail-summary", detail.explanation));
+    }
+    return panel;
+  }
+
+  #createRetry(owner: Document, sentenceId: string): HTMLButtonElement {
+    const retry = createElement(owner, "button", "english-syntax-retry", "重新解析");
+    retry.type = "button";
+    retry.dataset.sentenceId = sentenceId;
+    retry.dataset.englishSyntaxRetry = "";
+    retry.addEventListener("click", () => {
+      if (retry.disabled) return;
+      retry.disabled = true;
+      retry.textContent = "解析中…";
+      // 失败句的重新解析走 RETRY_SENTENCE 通道（bootstrap-entry 的全局监听接手）。
+    });
+    return retry;
+  }
+
+  #originalText(sentenceId: string): string {
+    // 失败句保留原文：从该块已注册的句子文本兜底（Kotlin 侧未提供原文时退化为空串）。
     void sentenceId;
-    return typeof component.text === "string" ? component.text : "";
+    return "";
+  }
+
+  #structureText(structure: { startToken: number; endToken: number; text?: string }): string {
+    return typeof structure.text === "string" ? structure.text : "";
   }
 
   #restoreBlock(record: BlockRecord): void {
     record.element.removeAttribute(HIDDEN_ATTRIBUTE);
     record.card?.remove();
     record.card = null;
+  }
+
+  /**
+   * 当前呈现元素：已替换为卡片时是卡片，否则是原文块。解析中标记打在它上面，
+   * 流式换卡片后标记跟着走（Chrome 端 BlockReplacement.currentElement 同款语义）。
+   */
+  currentElement(blockId: string): HTMLElement | null {
+    const record = this.#blocks.get(blockId);
+    if (record === undefined) return null;
+    return record.card ?? record.element;
+  }
+
+  /** 供 bootstrap 在 VISIBLE_BLOCKS 后对可见块打「解析中」标记。 */
+  markActive(blockId: string): HTMLElement | null {
+    return this.currentElement(blockId);
   }
 
   restoreAll(): void {

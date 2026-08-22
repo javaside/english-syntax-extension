@@ -91,6 +91,7 @@
 | `markdown/EnglishSyntaxPreviewPanel.kt`      | 官方 MarkdownJCEFHtmlPanel 的能力层包装:复用官方 JCEF 预览(不注册自建 provider),注入 web 资源、previewId/generation、PREVIEW_RENDERED 换代、桥接入口、dispose 语义 |
 | `session/PreviewSession.kt`                  | 单预览会话状态机:start/pause/resume/stop、可见块合批、优先级映射、generation 守卫                   |
 | `session/PreviewSessionManager.kt`           | 项目级会话管理:每 preview 一个 child Job、活跃预览、Profile 快照刷新                                |
+| `session/PreviewSessionConnector.kt`         | JS→Kotlin 消息接线:把 Panel 的页面消息(VISIBLE_BLOCKS/DETAIL_REQUEST/RETRY_SENTENCE)派发进会话,并收口 start 顺序(先接线后启动,STOPPED 会丢块) |
 | `actions/PreviewActionSupport.kt`            | Action 启用条件与进度文案(纯函数)                                                                   |
 | `actions/ActionNotifier.kt`                  | Action 的用户可见反馈:BALLOON 通知(未找到面板/服务不可用/无会话),避免静默失败                       |
 | `actions/StartSyntaxLearningAction.kt`       | 开始句法学习(经 FileEditorManager 定位面板,不扫 Swing)                                              |
@@ -102,7 +103,8 @@
 | `resources/web/bridge.ts`                    | JS 侧桥协议镜像:hasOnlyKeys + generation 复检,旧代次丢弃                                            |
 | `resources/web/bootstrap-entry.ts`           | JCEF 页面入口:接 bridge/preview/render 到 window 全局(`__englishSyntaxInitialize` 等),由 rolldown 打包成 bundle.js 注入 |
 | `resources/web/preview.ts`                   | 预览 DOM 扫描:候选/排除选择器、英文占比、可见性观察                                                 |
-| `resources/web/render.ts`                    | 句法卡片渲染:可逆替换、流式暂定卡、详解面板,XSS 安全 textContent                                    |
+| `resources/web/render.ts`                    | 句法卡片渲染:可逆替换、流式暂定卡、详解面板,XSS 安全 textContent;结构与视觉对齐 Chrome 端 learning-block.ts |
+| `resources/web/roles.ts`                     | 语法角色颜色与中文标签映射(与 Chrome 端 grammar.ts/ROLE_COLORS 逐值同源,两端视觉必须一致)              |
 | `package.json` / `vitest.config.ts` / `tsconfig.json` | 子工程 npm 工程:web TS 测试(`npm ci && npm test`)独立运行,不挂在 chrome-plugin 依赖下      |
 
 ## chrome-plugin/tests / chrome-plugin/scripts

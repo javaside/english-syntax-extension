@@ -14,13 +14,27 @@ npm ci
 npm run build            # 产出 dist/，用于「加载已解压的扩展程序」
 ```
 
+改 IntelliJ 插件时在 IDE 里打开仓库根（Gradle 项目自动导入），或在命令行用 `./gradlew`。
+
 ## 提交前必须全过的门禁
 
-Chrome 侧在 `chrome-plugin/` 里跑（IntelliJ 侧改动另见 AGENTS.md 的 Gradle + web 测试门禁）：
+### Chrome 扩展（在 `chrome-plugin/` 里跑）
 
 ```bash
 npm test && npx playwright test && npm run lint:baseline && npm run format:check && npm run build
 ```
+
+### IntelliJ 插件（动了 `intellij-plugin/`、`shared-fixtures/` 或桥协议时跑）
+
+```bash
+# web 侧 TS 测试
+cd intellij-plugin && npm ci && npm test
+
+# Kotlin 测试 + 构建 + 插件校验（仓库根跑）
+./gradlew :intellij-plugin:test :intellij-plugin:buildPlugin :intellij-plugin:verifyPluginProjectConfiguration
+```
+
+两个运行时都改了就都跑；`npm run test:all`（仓库根）可一键全量。
 
 ### lint 基线是「恰好 1 个错误」，不是 0
 
@@ -33,20 +47,34 @@ npm test && npx playwright test && npm run lint:baseline && npm run format:check
 违反这些不会被类型系统拦住，但会造成难查的线上问题：
 
 - **协议三层校验必须同步**。新增 `ResponseMessage` 成员时，`src/shared/protocol.ts` 的类型、SW 侧校验与路由、content 侧 `isRuntimeResponse` 的 switch case，三处缺一不可。content 层漏 case 会把 SW 的成功响应静默替换成 ERROR。
+- **IntelliJ 桥消息同理**：Kotlin `BridgeProtocol.kt`、TS `bridge.ts`、消息构造处三处同步；`PreviewSessionConnector.start` 是页面消息的唯一接线入口（先接线后启动会话，顺序不可拆）。
 - **流式分片走端口推送**，用 `isCoreStreamPush` 单独把关（`isRuntimeResponse` 对它不适用），但三处同步的要求照旧。分片是未校验输出，只用于渲染，不写缓存、不改句子相位。
 - **prompt 里的句子一律走 `serializeSentences` / `serializeSentence`**。模型只按 Token ID 定位，`start`/`end`/`leadingWhitespace` 是死重量——曾把 prompt 撑到原文的 35 倍。
 - **content script 读不到 `chrome.storage`**（TRUSTED_CONTEXTS）。设置必须由 SW 在 START_SESSION 页面命令上快照下发。
+- **API key 永不进 JCEF**（IntelliJ 侧）：只存 PasswordSafe，不进 panel 外发脚本、桥消息、缓存或日志——`SecretIsolationTest` 钉住。
 - **假模型服务器的所有「模型内容」都必须经 `writeContent` 出去**。直接 `response.end(completion(...))` 会让流式请求收到 JSON 体，客户端判定不支持流式后回落重发，依赖 fetch 计数的用例随之错乱。
 - **E2E 断言用探针，不用墙钟**。判「是否真调了模型」用 fetch 计数；判「预载成功」断言 `detailReady === detailTotal && detailFailed === 0`。
 
-完整清单见 [`AGENTS.md`](AGENTS.md)。
+完整清单见 [`AGENTS.md`](AGENTS.md) 与 [`docs/architecture/invariants.md`](docs/architecture/invariants.md)（每条坑都有守护测试索引）。
+
+## 文档同步
+
+改代码时架构文档要跟着走，三道防线见 [`docs/architecture/README.md`](docs/architecture/README.md)：`npm test` 里的文档同步断言（红了就改文档，不要放宽断言）、`npm run docs:drift`（按改动文件反查该核对哪几份）、以及你自己的判断。
 
 ## 开发流程
 
 - 先写测试再写实现。修 bug 时，先写一个能复现该 bug 的失败测试。
 - 提交信息**用中文主题**，正文说清「为什么」，尤其是当改动的理由不能从代码本身读出来时。
-- 不要提交 `dist/`、`release/`、`.superpowers/`（均已 gitignore）。
+- 不要提交 `dist/`、`release/`、`.superpowers/`、`build/`（均已 gitignore）。
+
+## 打包与本地验证
+
+Chrome 扩展：`chrome-plugin/` 里 `npm run package` → `release/english-syntax-extension-vX.Y.Z.zip`（解压后按「加载已解压的扩展程序」验证）。
+
+IntelliJ 插件：仓库根 `./gradlew :intellij-plugin:buildPlugin` → `intellij-plugin/build/distributions/*.zip`（IDEA 里 `Install Plugin from Disk…` 安装验证）。
 
 ## 发布
 
 维护者操作：更新根 `CHANGELOG.md` → 同步 `chrome-plugin/manifest.json` / `chrome-plugin/package.json` / `chrome-plugin/package-lock.json` 的版本（在 `chrome-plugin/` 里 `npm run release -- x.y.z` 一条龙）→ 打 `v*` tag 并推送。流水线会校验 tag 与两处版本一致、跑单测、打包、建**草稿** Release，需人工确认后公开。
+
+IntelliJ 插件目前经同一仓库 Release 分发 zip（CI 的 intellij job 每次构建都会上传插件 zip 产物）。

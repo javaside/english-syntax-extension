@@ -253,3 +253,43 @@
 **症状**:IDEA 版本升级后随机位置编译红。
 
 **守护测试**:无自动化(包依赖约定);`check-docs-drift.mjs` 会把 `markdown/` 的改动路由到 rendering/overview 提醒核对。
+
+### 页面消息必须有消费者,接线只有一处
+
+**规则**:JS→Kotlin 的 `VISIBLE_BLOCKS`/`DETAIL_REQUEST`/`RETRY_SENTENCE` 必须经 `PreviewSessionConnector`(Start Action 调 `PreviewSessionConnector.start`)派发进会话;接线顺序不可拆——先 `connect` 再 `manager.start`,会话初始为 `STOPPED`,先于 start 到达的 `VISIBLE_BLOCKS` 会被 `onVisibleBlocks` 直接丢弃。
+
+**为什么**:Panel 的 `onPageMessage` 只做协议校验与转发,自己不认识会话;「移除自建预览面板」重构(ca8b93c)曾把接线整体丢掉,协议、会话、渲染每一层单测全绿,但端到端没有任何一条页面消息到达会话。
+
+**症状**:点「开始句法学习」弹正常提示,预览页毫无变化、无任何报错——每层都以为别的层在消费。另:合成 `PREVIEW_READY` 喂回 `onPageMessage` 只是 Kotlin 侧自言自语,驱动 JS 重扫必须执行 `window.__englishSyntaxInitialize`(经 `panel.requestScan()`)。
+
+**守护测试**:`intellij-plugin/src/test/kotlin/.../session/PageMessageWiringTest.kt`(走 Panel 桥接入口断言 VISIBLE_BLOCKS 真正注册进会话)。
+
+### 预览页 CSP 没有不安全 eval——bundle 必须走顶层注入
+
+**规则**:向官方预览页注入的脚本里**禁止** `eval('代码')`、`new Function(...)` 与动态 `<script>` 内联(含 `textContent = code` 的 script 元素)。要执行大段 JS(`web/bundle.js`),把它**原样**作为一次独立的 `executeJavaScript` 调用发出(浏览器 API 级注入,不经过页面 CSP);需要字符串拼进脚本的只有小段字面量(CSS、JSQuery 回调),走 `escapeJsString`。
+
+**为什么**:官方 `MarkdownJCEFHtmlPanel` 的页面带 CSP(`PreviewStaticServer.createCSP`):`script-src` 只允许官方静态服务器 URL、`connect-src 'none'`,**没有 `'unsafe-eval'`**。页面上下文里的字符串求值会被 CSP 静默拦截——bootstrap 那句 `eval('$injectJs')` 使整个 bundle 一行都没执行过,`window.__englishSyntaxInitialize` 从未定义。CEF 的 `executeJavaScript` 与 DevTools 控制台同级,不受页面 CSP 约束(官方 `updateDom` 自己就这么执行 JS)。
+
+**症状**:与前一条接线丢失完全同相——点开始后毫无变化、无报错。两个 bug 叠在一起先后修过,排查时先确认 bundle 是否执行(页面上 `window.__englishSyntaxInitialize` 是否为函数),再看消息是否被消费。
+
+**守护测试**:`EnglishSyntaxPreviewPanelTest` 的 `injection never evaluates strings because the official preview CSP has no unsafe-eval`(断言注入输出里没有 `eval(`/`new Function`/`<script`,且会触发 initialize)。
+
+### 首屏可见性不能依赖 IntersectionObserver 的初始回调
+
+**规则**:`observeBlocks(...).start()` 必须**先用几何判定**(`getBoundingClientRect` 与视口±一屏求交)播种可见集合并立即上报,IntersectionObserver 只负责之后的滚动增量。fallback 分支(rAF/scroll)本来就是几何判定,不受影响。
+
+**为什么**:JCEF 里 IntersectionObserver 的初始回调不可靠——`observe()` 之后可能不产生任何 entries。而 start() 若只重发「当前 Set」,那是个空集,`rescan` 的回调里 `visible.length === 0 → return`,**`VISIBLE_BLOCKS` 永远不会发出**。真机日志证据:注入成功、双向通道正常(`PREVIEW_READY` 两次到达)、然后一片寂静——卡在这一环。
+
+**症状**:与 CSP/接线丢失同相:点开始后毫无翻译、无报错。三层 bug 叠着修过;排查顺序:先看 `onPageMessage: PreviewReady` 有没有(没有=JS 没跑/通道死),再看 `onVisibleBlocks`(没有=本条坑)。
+
+**守护测试**:`preview.test.ts` 的 `reports geometrically visible blocks immediately even if IntersectionObserver never fires its initial callback`(stub 一个永不回调的 IO,断言 start() 仍同步上报非空可见集)。
+
+### 渲染的 DOM 变更会回流成新的 VISIBLE_BLOCKS——两端都要防环
+
+**规则**:Kotlin 侧 `onVisibleBlocks` 只对「首次到达或 FAILED/STALE」的句子注册/入队,**READY 句绝不重置重派**;JS 侧 `rescan` 的可见性回调对「相同可见集合(blockId 指纹)」不重复上报,指纹在 `initialize`(新代次)时重置。
+
+**为什么**:插件自己的卡片渲染也是 DOM 变更,而 MutationObserver 监听整个 document——`CORE_RESULT → 渲染卡片 → mutation → rescan → 再次 VISIBLE_BLOCKS(同一批块)`。若 Kotlin 无条件把句子重置为 DISCOVERED,链路闭合成环:缓存命中 → 再发 CORE_RESULT → 再渲染 → 循环不止。真机症状:**CPU 狂转、请求风暴、卡片反复重建**(实测一轮 10 块 24 句,13 秒一循环)。单端防不够——Kotlin 防环保住模型请求不发,JS 指纹去重保住桥消息不刷屏,两层各自独立生效。
+
+**症状**:开始后翻译出现,但 CPU 持续高占用、日志里 `onVisibleBlocks → dispatch → outcome(cacheHit=true)` 无限重复。
+
+**守护测试**:`PreviewSessionTest` 的 `repeated visible blocks after ready do not redispatch`(同一批块重复上报三次,断言 `analyzeCalls` 恒为 1、相位保持 READY)。

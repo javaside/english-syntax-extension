@@ -1,99 +1,223 @@
-/* 预览句法卡片样式：注入 Shadow DOM 内部，不污染 Markdown 主题。 */
+/* 预览句法卡片样式：与 Chrome 端 learning-block.ts 的 Shadow DOM 样式逐条对齐。
+   预览页是非 Shadow DOM 环境，类名带 english-syntax- 前缀隔离，避免污染官方主题。 */
 
 .english-syntax-sentences {
+  max-inline-size: 100%;
+}
+
+.english-syntax-sentence,
+.english-syntax-detail-annotations {
   display: flex;
-  flex-direction: column;
-  gap: 0.75em;
+  flex-wrap: wrap;
+  /* 卡片按首行（角色标签）基线对齐：角色行等高，因此英文行必然齐平。
+     不能用 end——译文折行的高卡会把英文行顶上去（同行高低不平）。 */
+  align-items: baseline;
+  column-gap: 0.5em;
+  row-gap: 0.55em;
+  max-inline-size: 100%;
+  overflow-wrap: anywhere;
 }
 
 .english-syntax-sentence {
+  display: inline-flex;
+  vertical-align: baseline;
+  margin-inline-end: 0.75em;
+  margin-block-end: 0.55em;
+}
+
+/* 带详解面板的句子变块级：面板插在句后需要栏宽（Chrome 端 :has(.detail) 同款，
+   预览页不支持 :has 时用类名替代）。 */
+.english-syntax-has-detail {
   display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.5em 0.75em;
+  margin-inline-end: 0;
+}
+
+/* 「解析中」段落标记：data 属性 + inset box-shadow，不参与布局（Chrome 端同款，
+   竖条用 box-shadow 而非 border-left——border 会位移文字，曾推翻折行布局测试）。 */
+[data-english-syntax-active] {
+  box-shadow: inset 3px 0 0 rgba(10, 132, 255, 0.9);
+  background-color: rgba(10, 132, 255, 0.06);
+  animation: english-syntax-active 1.6s ease-in-out infinite;
+}
+
+@keyframes english-syntax-active {
+  50% {
+    box-shadow: inset 3px 0 0 rgba(10, 132, 255, 0.35);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-english-syntax-active] {
+    animation: none;
+  }
 }
 
 .english-syntax-component {
+  appearance: none;
   display: inline-grid;
-  grid-template-areas:
-    "role"
-    "english"
-    "translation";
-  justify-items: start;
-  gap: 0.1em;
+  grid-template-rows: repeat(3, auto);
+  justify-items: center;
+  min-inline-size: 0;
+  max-inline-size: 100%;
   padding: 0;
-  border: none;
-  background: none;
-  cursor: pointer;
-  text-align: left;
+  border: 0;
+  background: transparent;
   font: inherit;
+  color: inherit;
+  text-align: center;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+  transition: opacity 120ms ease;
 }
 
-.english-syntax-component > .english-syntax-role {
-  grid-area: role;
-  font-size: 0.72em;
-  opacity: 0.66;
+.english-syntax-component:hover {
+  opacity: 0.72;
 }
 
-.english-syntax-component > .english-syntax-english {
-  grid-area: english;
-  text-decoration: underline;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 0.22em;
+.english-syntax-role,
+.english-syntax-english,
+.english-syntax-translation,
+.english-syntax-annotation-role,
+.english-syntax-annotation-english,
+.english-syntax-annotation-translation {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
-.english-syntax-component > .english-syntax-translation {
-  grid-area: translation;
-  font-size: 0.82em;
+.english-syntax-role,
+.english-syntax-annotation-role {
+  font-size: max(11px, 0.68em);
+  color: var(--english-syntax-role-color, currentColor);
   opacity: 0.85;
+}
+
+.english-syntax-english,
+.english-syntax-annotation-english {
+  border-bottom: 1.5px solid
+    color-mix(in srgb, var(--english-syntax-role-color, currentColor) 60%, transparent);
+  justify-self: stretch;
+  text-align: center;
+}
+
+.english-syntax-translation,
+.english-syntax-annotation-translation {
+  font-size: max(12px, 0.8em);
+  opacity: 0.78;
+  max-inline-size: 16em;
+}
+
+/* 超过 16 字的译文：不参与卡片内涵宽度，展示时铺满卡宽（Chrome 端同款）。 */
+.english-syntax-translation-wide {
+  inline-size: 0;
+  min-inline-size: max(100%, 16em);
+  max-inline-size: none;
+}
+
+.english-syntax-component:focus-visible,
+.english-syntax-retry:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
+.english-syntax-detail {
+  display: block;
+  inline-size: 100%;
+  max-inline-size: 100%;
+  margin-block: 0.75em;
+  overflow-wrap: anywhere;
+  border: 1px solid #e2e5e9;
+  border-inline-start: 3px solid #0d9488;
+  border-radius: 8px;
+  background: #fafbfc;
+  padding: 1em 1.125em;
+}
+
+.english-syntax-sentence-failure {
+  inline-size: 100%;
+  max-inline-size: 100%;
+  margin-block: 0.35em;
+  overflow-wrap: anywhere;
+}
+
+.english-syntax-detail-annotations {
+  margin-block-end: 0.45em;
+}
+
+.english-syntax-annotation {
+  display: inline-grid;
+  grid-auto-rows: auto;
+  justify-items: center;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  overflow-wrap: anywhere;
+}
+
+.english-syntax-detail-structure {
+  margin-block: 0.2em;
+}
+
+.english-syntax-grammar-points,
+.english-syntax-detail-summary {
+  margin-block-start: 0.875em;
+  padding-block-start: 0.625em;
+  border-block-start: 1px dashed #e2e5e9;
+  font-size: 0.8125rem;
+  line-height: 1.7;
+}
+
+.english-syntax-error {
+  color: #dc2626;
+}
+
+.english-syntax-retry {
+  margin-inline-start: 0.5em;
+  border: 1px solid currentColor;
+  border-radius: 0.25em;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    transform 80ms ease;
+}
+
+.english-syntax-retry:hover:enabled {
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.english-syntax-retry:active:enabled {
+  transform: translateY(1px);
+}
+
+.english-syntax-retry:disabled {
+  cursor: default;
+  opacity: 0.6;
 }
 
 .english-syntax-provisional {
   opacity: 0.75;
 }
 
-.english-syntax-detail {
-  margin-top: 0.5em;
-  padding: 0.6em 0.8em;
-  border-inline-start: 2px solid currentColor;
-  display: flex;
-  flex-direction: column;
-  gap: 0.4em;
+@media (prefers-reduced-motion: reduce) {
+  .english-syntax-component,
+  .english-syntax-retry {
+    transition: none;
+  }
 }
 
-.english-syntax-detail-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.4em 0.7em;
+/* IDEA 深色主题（由 Kotlin 注入根 data 属性，跟随 IDEA 主题而非 macOS prefers-color-scheme）。
+   角色字色由 roles.ts 按主题选提亮色板，这里只需调面板背景/边框。 */
+:root[data-english-syntax-dark="true"] .english-syntax-detail {
+  border-color: #374151;
+  border-inline-start-color: #2dd4bf;
+  background: #1f2937;
 }
-
-.english-syntax-detail-role {
-  font-size: 0.72em;
-  opacity: 0.66;
-}
-
-.english-syntax-detail-translation {
-  font-size: 0.82em;
-  opacity: 0.85;
-}
-
-.english-syntax-grammar-points {
-  font-size: 0.85em;
-  opacity: 0.8;
-}
-
-.english-syntax-explanation {
-  font-size: 0.9em;
-}
-
-.english-syntax-error {
-  color: #c0392b;
-}
-
-.english-syntax-retry {
-  font: inherit;
-  font-size: 0.85em;
+:root[data-english-syntax-dark="true"] .english-syntax-grammar-points,
+:root[data-english-syntax-dark="true"] .english-syntax-detail-summary {
+  border-block-start-color: #374151;
 }
 
 /* 预览页右下角状态浮层：开始后立即可见，区分「解析中」与「没反应」。 */
@@ -112,6 +236,37 @@
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
   pointer-events: none;
   user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* hidden 属性的 display:none 会被上面的 display:flex 覆盖，必须显式补齐——
+   否则停止并恢复原文后浮层永远不隐藏（Bug 曾表现为「一直显示解析中」）。 */
+#english-syntax-status[hidden] {
+  display: none;
+}
+
+#english-syntax-status .english-syntax-status-spinner {
+  inline-size: 11px;
+  block-size: 11px;
+  flex: none;
+  border: 2px solid #fff;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: english-syntax-status-spin 0.9s linear infinite;
+}
+
+@keyframes english-syntax-status-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #english-syntax-status .english-syntax-status-spinner {
+    animation: none;
+  }
 }
 
 #english-syntax-status[data-kind="paused"] {
