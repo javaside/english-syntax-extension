@@ -381,6 +381,13 @@ export class PreviewRenderer {
         if (!isEchoTranslation(component.translation, english.textContent ?? "")) {
           button.append(translationElement(owner, "english-syntax-translation", component.translation));
         }
+        // cursor 逐元素生效：官方 Markdown 预览页对 span/body 有 cursor:text/default 之类
+        // 的全局规则，stylesheet 的 cursor:pointer 无论如何都会被压过（连 !important 也不行）。
+        // 唯有 JS 内联样式 + !important 是优先级最高、任何 stylesheet 都压不过的。
+        button.style.setProperty("cursor", "pointer", "important");
+        for (const child of button.querySelectorAll("*")) {
+          child.style.setProperty("cursor", "pointer", "important");
+        }
         button.addEventListener("click", () => {
           if (this.#currentDetail?.sentenceId === sentenceId) {
             this.closeDetail();

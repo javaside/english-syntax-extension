@@ -575,6 +575,8 @@
 					english.textContent = component.text ?? "";
 					button.append(role, english);
 					if (!isEchoTranslation(component.translation, english.textContent ?? "")) button.append(translationElement(owner, "english-syntax-translation", component.translation));
+					button.style.setProperty("cursor", "pointer", "important");
+					for (const child of button.querySelectorAll("*")) child.style.setProperty("cursor", "pointer", "important");
 					button.addEventListener("click", () => {
 						if (this.#currentDetail?.sentenceId === sentenceId) {
 							this.closeDetail();
