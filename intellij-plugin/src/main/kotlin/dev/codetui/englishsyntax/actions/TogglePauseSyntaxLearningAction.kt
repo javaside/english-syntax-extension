@@ -21,7 +21,8 @@ class TogglePauseSyntaxLearningAction(
   override fun update(event: AnActionEvent) {
     val project = event.project
     val manager = project?.let { runCatching { managerProvider(it) }.getOrNull() }
-    val session = manager?.activePreviewId?.let { manager.session(it) }
+    // 只看当前文件自己的会话，不受其它文件会话影响——多文件可并行翻译。
+    val session = project?.let { panel(it) }?.let { panel -> manager?.session(panel.previewId) }
     event.presentation.isEnabled = session?.state == SessionState.RUNNING || session?.state == SessionState.PAUSED
     session?.let { event.presentation.text = PreviewActionSupport.togglePauseText(it.state) }
   }
@@ -33,32 +34,37 @@ class TogglePauseSyntaxLearningAction(
       ActionNotifier.warn(project, "句法学习服务不可用：请检查设置页配置")
       return
     }
-    val previewId = manager.activePreviewId
-    if (previewId == null) {
-      ActionNotifier.warn(project, "当前没有进行中的句法学习会话")
+    val panel = panel(project)
+    if (panel == null) {
+      ActionNotifier.warn(project, "当前没有可用的 Markdown 预览面板")
       return
     }
-    val session = manager.session(previewId) ?: return
+    val previewId = panel.previewId
+    val session = manager.session(previewId) ?: run {
+      ActionNotifier.warn(project, "当前文件尚未开始句法学习")
+      return
+    }
     when (session.state) {
       SessionState.RUNNING -> manager.pause(previewId)
       SessionState.PAUSED -> manager.resume(previewId)
       else -> return
     }
     // 让预览页状态浮层反映暂停/继续。
-    val panel = EnglishSyntaxPreviewPanel.findPanel(project)
-    if (panel != null) {
-      val counts = session.counts
-      panel.send(
-        buildJsonObject {
-          put("version", 1)
-          put("type", "SESSION_STATE")
-          put("previewId", previewId)
-          put("generation", panel.generation)
-          put("state", session.state.name.lowercase())
-          put("ready", counts.ready)
-          put("discovered", counts.discovered)
-        },
-      )
-    }
+    val counts = session.counts
+    panel.send(
+      buildJsonObject {
+        put("version", 1)
+        put("type", "SESSION_STATE")
+        put("previewId", previewId)
+        put("generation", panel.generation)
+        put("state", session.state.name.lowercase())
+        put("ready", counts.ready)
+        put("discovered", counts.discovered)
+      },
+    )
   }
+
+  /** 当前文件面板：与 Start 共用 findPanel 定位逻辑。 */
+  private fun panel(project: com.intellij.openapi.project.Project): EnglishSyntaxPreviewPanel? =
+    EnglishSyntaxPreviewPanel.findPanel(project)
 }

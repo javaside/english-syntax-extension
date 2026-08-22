@@ -455,4 +455,25 @@ class PreviewSessionTest {
     assertEquals(null, manager.session("pv-x"))
     assertEquals(null, manager.activePreviewId)
   }
+
+  @Test
+  fun `two previews run independently in parallel`() {
+    // 多文件并行翻译的根基：不同 previewId 各自持有独立 session，start/pause/stop 互不影响。
+    val s1 = RecordingSender()
+    val s2 = RecordingSender()
+    manager.obtain("pv-a", s1) { }
+    manager.obtain("pv-b", s2) { }
+    manager.start("pv-a", s1) { }
+    manager.start("pv-b", s2) { }
+    assertEquals(SessionState.RUNNING, manager.session("pv-a")?.state)
+    assertEquals(SessionState.RUNNING, manager.session("pv-b")?.state)
+    // 暂停 a 不影响 b
+    manager.pause("pv-a")
+    assertEquals(SessionState.PAUSED, manager.session("pv-a")?.state)
+    assertEquals(SessionState.RUNNING, manager.session("pv-b")?.state)
+    // 停止 b 不影响 a
+    manager.stop("pv-b")
+    assertEquals(SessionState.PAUSED, manager.session("pv-a")?.state)
+    assertEquals(SessionState.STOPPED, manager.session("pv-b")?.state)
+  }
 }

@@ -90,7 +90,7 @@
 | `bridge/BridgeProtocol.kt`                   | JCEF 桥协议:键白名单严格校验,apiKey/headers/baseUrl 一律拒绝                                        |
 | `markdown/EnglishSyntaxPreviewPanel.kt`      | 官方 MarkdownJCEFHtmlPanel 的能力层包装:复用官方 JCEF 预览(不注册自建 provider),注入 web 资源、previewId/generation、PREVIEW_RENDERED 换代、桥接入口、dispose 语义 |
 | `session/PreviewSession.kt`                  | 单预览会话状态机:start/pause/resume/stop、可见块合批、优先级映射、generation 守卫                   |
-| `session/PreviewSessionManager.kt`           | 项目级会话管理:每 preview 一个 child Job、活跃预览、Profile 快照刷新                                |
+| `session/PreviewSessionManager.kt`           | 项目级会话管理:每 preview 一个 child Job、多 preview 可并行(各文件独立会话,互不阻塞)、Profile 快照刷新 |
 | `session/PreviewSessionConnector.kt`         | JS→Kotlin 消息接线:把 Panel 的页面消息(VISIBLE_BLOCKS/DETAIL_REQUEST/RETRY_SENTENCE)派发进会话,并收口 start 顺序(先接线后启动,STOPPED 会丢块) |
 | `actions/PreviewActionSupport.kt`            | Action 启用条件与进度文案(纯函数)                                                                   |
 | `actions/ActionNotifier.kt`                  | Action 的用户可见反馈:BALLOON 通知(未找到面板/服务不可用/无会话),避免静默失败                       |

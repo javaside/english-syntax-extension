@@ -28,10 +28,13 @@ class StartSyntaxLearningAction(
     val file = event.getData(CommonDataKeys.VIRTUAL_FILE)
     val presentation = event.presentation
     val fileOk = project != null && file != null && file.fileType.name.equals("Markdown", ignoreCase = true) && jcefSupported()
-    // 会话进行中（RUNNING/PAUSED）时不展示「开始句法学习」，避免与暂停/停止状态冲突。
+    // 每个 markdown 文件独立会话：只看「当前文件自己的面板」是否已在进行中，
+    // 不再被其它文件的会话（activePreviewId）阻塞——多文件可并行翻译。
     val manager = project?.let { runCatching { managerProvider(it) }.getOrNull() }
-    val session = manager?.activePreviewId?.let { manager.session(it) }
-    val startEnabled = PreviewActionSupport.availability(session).startEnabled
+    val currentSession = project?.let {
+      runCatching { currentPanel(it) }.getOrNull()?.let { panel -> manager?.session(panel.previewId) }
+    }
+    val startEnabled = PreviewActionSupport.availability(currentSession).startEnabled
     presentation.isEnabledAndVisible = fileOk && startEnabled
   }
 
