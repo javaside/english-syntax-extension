@@ -22,7 +22,9 @@ class TogglePauseSyntaxLearningAction(
     val project = event.project
     val manager = project?.let { runCatching { managerProvider(it) }.getOrNull() }
     // 只看当前文件自己的会话，不受其它文件会话影响——多文件可并行翻译。
-    val session = project?.let { panel(it) }?.let { panel -> manager?.session(panel.previewId) }
+    // update() 用只读的 findWrappedPanel：findPanel 会 wrap + 注入 JCEF，放这里会
+    // 让「点开工具菜单」就自动初始化 JS、扫描全文（假翻译回归）。
+    val session = project?.let { wrappedPanel(it) }?.let { panel -> manager?.session(panel.previewId) }
     event.presentation.isEnabled = session?.state == SessionState.RUNNING || session?.state == SessionState.PAUSED
     session?.let { event.presentation.text = PreviewActionSupport.togglePauseText(it.state) }
   }
@@ -64,7 +66,11 @@ class TogglePauseSyntaxLearningAction(
     )
   }
 
-  /** 当前文件面板：与 Start 共用 findPanel 定位逻辑。 */
+  /** 当前文件面板：actionPerformed 用，会 wrap/attach（真正定位可 send 的面板）。 */
   private fun panel(project: com.intellij.openapi.project.Project): EnglishSyntaxPreviewPanel? =
     EnglishSyntaxPreviewPanel.findPanel(project)
+
+  /** update() 专用：只读定位已 wrap 的面板，无注入副作用。 */
+  private fun wrappedPanel(project: com.intellij.openapi.project.Project): EnglishSyntaxPreviewPanel? =
+    EnglishSyntaxPreviewPanel.findWrappedPanel(project)
 }

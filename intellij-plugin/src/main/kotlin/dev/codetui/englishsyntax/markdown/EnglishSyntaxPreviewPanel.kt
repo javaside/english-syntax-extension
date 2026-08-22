@@ -113,6 +113,30 @@ class EnglishSyntaxPreviewPanel(
         }
     }
 
+    /**
+     * **无副作用**的当前文件面板定位：只读已有的 wrapper，不 `wrap`/`attach`/注入。
+     *
+     * 供 Action 的 `update()` 使用——IDEA 展开 Tools 菜单等高频率事件会对子 action
+     * 跑 `update()`；若在这里走 `findPanel`（含 `wrap` → 注入 JCEF），会导致「点开
+     * 工具菜单就自动初始化 JS、扫描全文、打解析中标记」的假翻译现象。只有真正点按钮
+     * 的 `actionPerformed` 才应调用 `findPanel`（它会触发 wrap/attach）。
+     */
+    fun findWrappedPanel(project: Project): EnglishSyntaxPreviewPanel? {
+      val manager = FileEditorManager.getInstance(project)
+      val file = manager.selectedFiles.firstOrNull() ?: return null
+      return manager.getAllEditors(file)
+        .asSequence()
+        .flatMap { editor ->
+          if (editor is TextEditorWithPreview) sequenceOf(editor, editor.previewEditor)
+          else sequenceOf(editor)
+        }
+        .filterIsInstance<MarkdownPreviewFileEditor>()
+        .firstNotNullOfOrNull { previewEditor ->
+          val panel = previewEditor.getUserData(MarkdownPreviewFileEditor.PREVIEW_BROWSER)?.get()
+          (panel as? MarkdownJCEFHtmlPanel)?.getUserData(WRAPPER_KEY)
+        }
+    }
+
     /** 包装（或复用已有包装）：挂 UserData 保证 previewId 稳定，官方面板 dispose 时释放。 */
     fun wrap(hostPanel: MarkdownJCEFHtmlPanel): EnglishSyntaxPreviewPanel {
       hostPanel.getUserData(WRAPPER_KEY)?.let { return it }

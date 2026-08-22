@@ -30,9 +30,11 @@ class StartSyntaxLearningAction(
     val fileOk = project != null && file != null && file.fileType.name.equals("Markdown", ignoreCase = true) && jcefSupported()
     // 每个 markdown 文件独立会话：只看「当前文件自己的面板」是否已在进行中，
     // 不再被其它文件的会话（activePreviewId）阻塞——多文件可并行翻译。
+    // update() 用只读的 findWrappedPanel（无副作用）：findPanel 会 wrap + 注入 JCEF，
+    // 放在高频调用的 update() 里会让「点开工具菜单」就自动初始化 JS、扫描全文，见假翻译回归。
     val manager = project?.let { runCatching { managerProvider(it) }.getOrNull() }
     val currentSession = project?.let {
-      runCatching { currentPanel(it) }.getOrNull()?.let { panel -> manager?.session(panel.previewId) }
+      runCatching { currentWrappedPanel(it) }.getOrNull()?.let { panel -> manager?.session(panel.previewId) }
     }
     val startEnabled = PreviewActionSupport.availability(currentSession).startEnabled
     presentation.isEnabledAndVisible = fileOk && startEnabled
@@ -66,6 +68,10 @@ class StartSyntaxLearningAction(
   /** 经 Markdown 插件的 PREVIEW_BROWSER UserData 定位当前预览面板（面板不是 FileEditor 本身）。 */
   internal fun currentPanel(project: Project): EnglishSyntaxPreviewPanel? =
     EnglishSyntaxPreviewPanel.findPanel(project)
+
+  /** update() 专用：只读定位已 wrap 的面板，无注入副作用。 */
+  internal fun currentWrappedPanel(project: Project): EnglishSyntaxPreviewPanel? =
+    EnglishSyntaxPreviewPanel.findWrappedPanel(project)
 
   private companion object {
     private val LOGGER = com.intellij.openapi.diagnostic.Logger.getInstance(StartSyntaxLearningAction::class.java)

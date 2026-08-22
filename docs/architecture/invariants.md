@@ -293,3 +293,13 @@
 **症状**:开始后翻译出现,但 CPU 持续高占用、日志里 `onVisibleBlocks → dispatch → outcome(cacheHit=true)` 无限重复。
 
 **守护测试**:`PreviewSessionTest` 的 `repeated visible blocks after ready do not redispatch`(同一批块重复上报三次,断言 `analyzeCalls` 恒为 1、相位保持 READY)。
+
+### Action 的 `update()` 绝不能触发 JCEF 注入
+
+**规则**:三个句法学习 Action(`Start`/`TogglePause`/`Stop`)的 `update()` 只允许**只读定位**已存在的面板 wrapper(`EnglishSyntaxPreviewPanel.findWrappedPanel`,内部只 `getUserData(WRAPPER_KEY)`),**禁止**调用会 `wrap`/`attach`/注入的 `findPanel`。`findPanel` 只在用户真正点按钮的 `actionPerformed` 里用。
+
+**为什么**:IDEA 展开 Tools 菜单、刷新工具栏等高频事件会对菜单内每个子 action 跑一次 `update()`。若 `update()` 里调用 `findPanel`(内部 `wrap → attach → 注入 bundle + __englishSyntaxInitialize`),会导致「点开工具菜单就自动初始化 JS、扫描全文、给每段打解析中标记、显示状态浮层」的**假翻译**——页面看起来像自动翻译了,但 Kotlin 侧从未有过 RUNNING 会话,也就没有真实模型请求,「翻译不出来」,且暂停/停止因无会话而灰色。曾因把定位改成按当前文件面板而在 `update()` 里调用 `findPanel` 触发此回归。
+
+**症状**:点「工具」菜单即出现解析中竖条 + 右下角状态浮层,但无翻译结果;暂停/停止按钮灰色(无会话)。
+
+**守护测试**:依赖设计约定,`findWrappedPanel` 只读 `getUserData`、不创建 wrapper(结构上无法注入);三个 Action 的 `update()` 一律走 `findWrappedPanel`。
