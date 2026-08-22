@@ -230,82 +230,6 @@
 			};
 		});
 	}
-	/** 与视口（上下各扩一屏）求交的几何判定；不依赖 IntersectionObserver 的回调时机。 */
-	function geometricallyVisible(root, block) {
-		const view = root.ownerDocument?.defaultView;
-		if (!view) return false;
-		const rect = block.element.getBoundingClientRect();
-		const viewportTop = -view.innerHeight;
-		const viewportBottom = view.innerHeight * 2;
-		return rect.bottom >= viewportTop && rect.top <= viewportBottom;
-	}
-	/**
-	* IntersectionObserver（rootMargin 上下各一屏）；环境不支持时退化为
-	* rAF 节流的 scroll/resize 检查。
-	*
-	* **start() 必先用几何判定播种可见集**：JCEF 环境里 IntersectionObserver
-	* 的初始回调不可靠（observe 后可能不产生 entries），只重发当前 Set 会是
-	* 空集——VISIBLE_BLOCKS 永远不发出，页面点开始后毫无反应。IO 只负责
-	* 之后的滚动增量更新。
-	*/
-	function observeBlocks(root, blocks, callback) {
-		const visible = /* @__PURE__ */ new Set();
-		const emit = () => callback(Array.from(visible));
-		if (typeof IntersectionObserver !== "undefined") {
-			const observer = new IntersectionObserver((entries) => {
-				for (const entry of entries) {
-					const block = blocks.find((candidate) => candidate.element === entry.target);
-					if (!block) continue;
-					if (entry.isIntersecting) visible.add(block);
-					else visible.delete(block);
-				}
-				emit();
-			}, { rootMargin: "100% 0px 100% 0px" });
-			blocks.forEach(({ element }) => observer.observe(element));
-			return {
-				start() {
-					visible.clear();
-					for (const block of blocks) if (geometricallyVisible(root, block)) visible.add(block);
-					emit();
-				},
-				stop() {
-					observer.disconnect();
-				}
-			};
-		}
-		let raf = 0;
-		const check = () => {
-			raf = 0;
-			const view = root.ownerDocument?.defaultView;
-			if (!view) return;
-			const viewportTop = -view.innerHeight;
-			const viewportBottom = view.innerHeight * 2;
-			visible.clear();
-			for (const block of blocks) {
-				const rect = block.element.getBoundingClientRect();
-				if (rect.bottom >= viewportTop && rect.top <= viewportBottom) visible.add(block);
-			}
-			emit();
-		};
-		const schedule = () => {
-			if (raf === 0) raf = requestAnimationFrame(check);
-		};
-		return {
-			start() {
-				viewOf(root)?.addEventListener("scroll", schedule, { passive: true });
-				viewOf(root)?.addEventListener("resize", schedule, { passive: true });
-				schedule();
-			},
-			stop() {
-				viewOf(root)?.removeEventListener("scroll", schedule);
-				viewOf(root)?.removeEventListener("resize", schedule);
-				if (raf !== 0) cancelAnimationFrame(raf);
-			}
-		};
-	}
-	function viewOf(root) {
-		return root.ownerDocument?.defaultView ?? null;
-	}
 	//#endregion
 	//#region src/main/resources/web/roles.ts
 	/**
@@ -778,28 +702,26 @@
 		const blocks = scanMarkdownBlocks(document.body);
 		for (const block of blocks) s.renderer.registerBlock(block.blockId, block.element);
 		if (s.visibility !== null) s.visibility.stop();
-		s.visibility = observeBlocks(document.body, blocks, (visible) => {
-			if (visible.length === 0) return;
-			const fingerprint = visible.map((block) => block.blockId).sort().join("\0");
-			if (fingerprint === lastVisibleFingerprint) return;
-			lastVisibleFingerprint = fingerprint;
-			postToHost({
-				version: 1,
-				type: "VISIBLE_BLOCKS",
-				previewId: s.previewId,
-				generation: s.generation,
-				blocks: visible.map((block) => ({
-					blockId: block.blockId,
-					text: block.text
-				}))
-			});
-			for (const block of visible) markBlockActive(block.blockId);
-			reportedBlockCount = visible.length;
-			settledBlocks.clear();
-			failedBlocks.clear();
-			if (statusEl === null || statusEl.hidden) setStatus(`句法学习：正在解析 ${visible.length} 段…`, "running");
+		s.visibility = null;
+		if (blocks.length === 0) return;
+		const fingerprint = blocks.map((block) => block.blockId).sort().join("\0");
+		if (fingerprint === lastVisibleFingerprint) return;
+		lastVisibleFingerprint = fingerprint;
+		postToHost({
+			version: 1,
+			type: "VISIBLE_BLOCKS",
+			previewId: s.previewId,
+			generation: s.generation,
+			blocks: blocks.map((block) => ({
+				blockId: block.blockId,
+				text: block.text
+			}))
 		});
-		s.visibility.start();
+		for (const block of blocks) markBlockActive(block.blockId);
+		reportedBlockCount = blocks.length;
+		settledBlocks.clear();
+		failedBlocks.clear();
+		if (statusEl === null || statusEl.hidden) setStatus(`句法学习：正在解析 ${blocks.length} 段…`, "running");
 	}
 	const ACTIVE_ATTRIBUTE = "data-english-syntax-active";
 	/** blockId → 标记所在元素。卡片流式出现后标记要跟着移到卡片上。 */

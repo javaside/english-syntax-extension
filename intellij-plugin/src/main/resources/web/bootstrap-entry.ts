@@ -72,32 +72,30 @@ function rescan(): void {
   const blocks = scanMarkdownBlocks(document.body);
   for (const block of blocks) s.renderer.registerBlock(block.blockId, block.element);
   if (s.visibility !== null) s.visibility.stop();
-  s.visibility = observeBlocks(document.body, blocks, (visible) => {
-    if (visible.length === 0) return;
-    // 防环与防抖：卡片渲染也是 DOM 变更，会再次触发 MutationObserver → rescan →
-    // 这里的回调。相同可见集合（blockId 拼接指纹）不重复上报——否则 Kotlin 侧反复
-    // 收到同一批块，缓存命中 → CORE_RESULT → 再触发渲染 → 循环不止（CPU 狂转）。
-    const fingerprint = visible.map((block) => block.blockId).sort().join("\u0000");
-    if (fingerprint === lastVisibleFingerprint) return;
-    lastVisibleFingerprint = fingerprint;
-    postToHost({
-      version: BRIDGE_VERSION,
-      type: "VISIBLE_BLOCKS",
-      previewId: s.previewId,
-      generation: s.generation,
-      blocks: visible.map((block) => ({ blockId: block.blockId, text: block.text })),
-    });
-    // 首批反馈：可见块打「解析中」标记（段落左侧竖条呼吸动画），结果回来再撤。
-    for (const block of visible) markBlockActive(block.blockId);
-    reportedBlockCount = visible.length;
-    settledBlocks.clear();
-    failedBlocks.clear();
-    // 开始后的第一反馈：扫描完成、请求已发出（首次模型调用可能较慢）。
-    if (statusEl === null || statusEl.hidden) {
-      setStatus(`句法学习：正在解析 ${visible.length} 段…`, "running");
-    }
+  s.visibility = null;
+  // 一次扫描即上报全文所有英文段（不按视口过滤）。此前 observeBlocks 按几何可见
+  // 上报，JCEF 里 innerHeight 小/滚动增量失效 → 只报首屏若干块，其余段永不翻译
+  // （真机日志：onVisibleBlocks 11 blocks，dispatch 只跑一次 cacheHit=true）。
+  if (blocks.length === 0) return;
+  const fingerprint = blocks.map((block) => block.blockId).sort().join("\u0000");
+  if (fingerprint === lastVisibleFingerprint) return;
+  lastVisibleFingerprint = fingerprint;
+  postToHost({
+    version: BRIDGE_VERSION,
+    type: "VISIBLE_BLOCKS",
+    previewId: s.previewId,
+    generation: s.generation,
+    blocks: blocks.map((block) => ({ blockId: block.blockId, text: block.text })),
   });
-  s.visibility.start();
+  // 首批反馈：全部段打「解析中」标记（段落左侧竖条呼吸动画），结果回来再撤。
+  for (const block of blocks) markBlockActive(block.blockId);
+  reportedBlockCount = blocks.length;
+  settledBlocks.clear();
+  failedBlocks.clear();
+  // 开始后的第一反馈：扫描完成、请求已发出（首次模型调用可能较慢）。
+  if (statusEl === null || statusEl.hidden) {
+    setStatus(`句法学习：正在解析 ${blocks.length} 段…`, "running");
+  }
 }
 
 // —— 段落级「解析中」标记：data 属性 + inset box-shadow（Chrome 端同款，不参与布局）。 ——
