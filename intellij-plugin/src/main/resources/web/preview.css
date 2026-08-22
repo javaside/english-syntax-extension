@@ -65,7 +65,9 @@
   font: inherit;
   color: inherit;
   text-align: center;
-  cursor: pointer;
+  /* !important：IDEA 官方 Markdown 预览的全局 button 样式可能覆盖 cursor:default，
+     导致可点击的成分鼠标不变手型。必须用 important 压过官方样式。 */
+  cursor: pointer !important;
   overflow-wrap: anywhere;
   transition: opacity 120ms ease;
 }
