@@ -23,7 +23,16 @@ const ENGLISH_RATIO = 0.6;
 const BLOCK_SELECTOR_PREFIX = "english-syntax-block-";
 
 let nextBlockId = 0;
-const registeredElements = new WeakSet<HTMLElement>();
+// 用 let：resetScanRegistry() 会重新赋值为空 WeakSet 实现清空注册表。
+let registeredElements = new WeakSet<HTMLElement>();
+
+/** 清空已扫描注册表：用户手动重新点「开始」（初始化）时调用，
+ *  让 rescan 能重新扫描并上报全部段（否则 WeakSet 防重扫描会让二次
+ *  scanMarkdownBlocks 返回空，失败句永远无法重派——真机「失败后再点开始不动」）。 */
+export function resetScanRegistry(): void {
+  // WeakSet 不可枚举，直接替换为空集合实现清空。
+  registeredElements = new WeakSet<HTMLElement>();
+}
 
 function isExcluded(element: Element): boolean {
   return element.closest(EXCLUDED_SELECTOR) !== null;

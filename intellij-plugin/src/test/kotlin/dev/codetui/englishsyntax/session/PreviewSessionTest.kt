@@ -154,6 +154,18 @@ class PreviewSessionTest {
   }
 
   @Test
+  fun `start again while running still rescans so failed sentences can be retried`() {
+    val session = session()
+    session.start()
+    assertEquals(1, scanRequests)
+    // 失败句处于 RUNNING 但未全部成功：再点「开始」应重新触发扫描，让失败句可重派，
+    // 而不是静默 return（此前表现为「失败后再点开始，页面不动」）。
+    session.start()
+    assertEquals(2, scanRequests)
+    assertEquals(SessionState.RUNNING, session.state)
+  }
+
+  @Test
   fun `visible blocks are batched and dispatched once`() = runBlocking {
     val session = session()
     session.start()

@@ -72,6 +72,26 @@ function isEchoTranslation(translation: string, english: string): boolean {
   return normalize(translation) === normalize(english);
 }
 
+// 模型错误码 → 用户可读文案。Kotlin 侧 error.message 可能带着模型原始 JSON
+// （如余额不足 `{"error":{"message":"Insufficient Balance",...}}`），
+// 直接上屏既看不懂又泄露内部信息——这里按 code 出友好文案，原始 message 只留日志。
+const ERROR_TEXT: Readonly<Record<string, string>> = {
+  AUTH_FAILED: "模型配置鉴权失败，请检查 API Key 或账户状态",
+  MODEL_NOT_FOUND: "找不到配置的模型，请检查模型名/服务地址",
+  RATE_LIMITED: "模型服务限流，请稍后重试",
+  NETWORK_ERROR: "模型请求失败，请检查网络或模型地址",
+  REQUEST_TIMEOUT: "模型请求超时",
+  INVALID_MODEL_OUTPUT: "模型返回结果无法解析",
+  SENTENCE_TOO_LONG: "句子过长，超出单次解析长度上限",
+  REQUEST_CANCELLED: "请求已取消",
+  CONFIG_MISSING: "尚未配置可用的模型",
+  DETAIL_FAILED: "详解解析失败",
+};
+
+function friendlyErrorMessage(code: string, fallback: string): string {
+  return ERROR_TEXT[code] ?? `${code}：${fallback}`;
+}
+
 function createElement<K extends keyof HTMLElementTagNameMap>(
   owner: Document,
   name: K,
@@ -182,7 +202,10 @@ export class PreviewRenderer {
     entry.record.failed = true;
     entry.record.analysis = null;
     entry.record.provisional = null;
-    this.#repaintBlock(entry.blockId, { errorSentenceId: sentenceId, message: `${code}：${message}` });
+    this.#repaintBlock(entry.blockId, {
+      errorSentenceId: sentenceId,
+      message: friendlyErrorMessage(code, message),
+    });
   }
 
   /**

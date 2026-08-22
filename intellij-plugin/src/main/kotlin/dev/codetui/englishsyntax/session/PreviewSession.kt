@@ -86,7 +86,12 @@ class PreviewSession(
   )
 
   fun start() {
-    if (state == SessionState.RUNNING) return
+    // 已在 RUNNING（翻译过但失败句仍在）：点「开始」仍应重新触发一次扫描上报，
+    // 让失败句（phase=FAILED）有机会重派，而不是静默 return、页面无反应。
+    if (state == SessionState.RUNNING) {
+      blockRequester.requestScan()
+      return
+    }
     state = SessionState.RUNNING
     blockRequester.requestScan()
   }

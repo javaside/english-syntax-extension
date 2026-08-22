@@ -6,7 +6,7 @@
  * 由构建(rolldown)打包成单文件 IIFE 注入预览页。
  */
 import { BRIDGE_VERSION, parseHostMessage } from "./bridge";
-import { observeBlocks, scanMarkdownBlocks } from "./preview";
+import { resetScanRegistry, scanMarkdownBlocks } from "./preview";
 import { PreviewRenderer } from "./render";
 import { setDarkMode } from "./roles";
 
@@ -200,6 +200,7 @@ function initialize(previewId: string, generation: number): void {
   returnedCount = 0;
   lastVisibleFingerprint = ""; // 新代次重新上报可见块
   clearAllActive();
+  resetScanRegistry(); // 重新扫描全文：清空防重扫描注册表，否则二次 scan 返回空、失败句无法重派
   ensureStatusElement(); // 官方 updateDom 重写 body 会清掉浮层，换代后重建。
   if (s.observer !== null) s.observer.disconnect();
   s.observer = new MutationObserver(() => {
@@ -236,12 +237,20 @@ function handleHostMessage(hostJson: unknown): void {
   switch (message.type) {
     case "SESSION_STATE": {
       // 暂停/继续等状态变化：浮层同步（renderer 不消费此消息）。
-      // 进度数字以 Kotlin 侧 ready/discovered 为准；已全部结算（settleBlock 显示过完成）
-      // 时不再覆盖，避免「完成」被「X/Y」盖回。
+      // 进度数字以 Kotlin 侧 ready/discovered/failed 为准（句级权威计数）。
+      // 当 ready + failed >= discovered 说明全部句子都有终态 → 显示完成并隐藏，
+      // 而不是一直停在「X/Y 句」——否则接口失败时浮层永远转圈。
       if (message.state === "paused") {
         setStatus(`⏸ 已暂停（${message.ready}/${message.discovered}）`, "paused", false);
-      } else if (settledBlocks.size >= reportedBlockCount && reportedBlockCount > 0) {
-        // 已显示完成，不再更新
+        return;
+      }
+      const allSettled =
+        message.discovered > 0 && message.ready + message.failed >= message.discovered;
+      if (allSettled) {
+        clearTimeout(completeTimer);
+        const failedText = message.failed > 0 ? `，${message.failed} 句失败` : "";
+        setStatus(`✓ 句法解析完成${failedText}`, "running");
+        completeTimer = setTimeout(hideStatus, 2500);
       } else {
         const failedText = message.failed > 0 ? `，${message.failed} 句失败` : "";
         setStatus(`句法学习：${message.ready}/${message.discovered} 句${failedText}`, "running");

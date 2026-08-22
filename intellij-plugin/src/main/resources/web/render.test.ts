@@ -102,11 +102,13 @@ describe("PreviewRenderer", () => {
         { startToken: 0, endToken: 1, role: "SUBJECT", translation: "该服务", text: "The service" },
       ]),
     );
-    renderer.renderCoreError("s1", "b1", "INVALID_MODEL_OUTPUT", "解析失败");
+    renderer.renderCoreError("s1", "b1", "INVALID_MODEL_OUTPUT", "原始 JSON 不该上屏");
 
     const retry = document.querySelector(".english-syntax-retry") as HTMLButtonElement;
     expect(retry).not.toBeNull();
-    expect(document.querySelector(".english-syntax-error")?.textContent).toContain("解析失败");
+    // 错误文案按 code 出友好提示，不再透传模型原始 JSON
+    expect(document.querySelector(".english-syntax-error")?.textContent).toContain("模型返回结果无法解析");
+    expect(document.querySelector(".english-syntax-error")?.textContent).not.toContain("原始 JSON");
     // 失败句保留原文
     expect(document.querySelector(".english-syntax-sentence-failure")).not.toBeNull();
 

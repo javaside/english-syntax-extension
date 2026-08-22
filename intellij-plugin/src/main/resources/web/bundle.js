@@ -186,7 +186,13 @@
 	const ENGLISH_RATIO = .6;
 	const BLOCK_SELECTOR_PREFIX = "english-syntax-block-";
 	let nextBlockId = 0;
-	const registeredElements = /* @__PURE__ */ new WeakSet();
+	let registeredElements = /* @__PURE__ */ new WeakSet();
+	/** 清空已扫描注册表：用户手动重新点「开始」（初始化）时调用，
+	*  让 rescan 能重新扫描并上报全部段（否则 WeakSet 防重扫描会让二次
+	*  scanMarkdownBlocks 返回空，失败句永远无法重派——真机「失败后再点开始不动」）。 */
+	function resetScanRegistry() {
+		registeredElements = /* @__PURE__ */ new WeakSet();
+	}
 	function isExcluded(element) {
 		return element.closest(EXCLUDED_SELECTOR) !== null;
 	}
@@ -337,6 +343,21 @@
 		const normalize = (value) => value.toLowerCase().replace(/\s+/gu, " ").trim();
 		return normalize(translation) === normalize(english);
 	}
+	const ERROR_TEXT = {
+		AUTH_FAILED: "模型配置鉴权失败，请检查 API Key 或账户状态",
+		MODEL_NOT_FOUND: "找不到配置的模型，请检查模型名/服务地址",
+		RATE_LIMITED: "模型服务限流，请稍后重试",
+		NETWORK_ERROR: "模型请求失败，请检查网络或模型地址",
+		REQUEST_TIMEOUT: "模型请求超时",
+		INVALID_MODEL_OUTPUT: "模型返回结果无法解析",
+		SENTENCE_TOO_LONG: "句子过长，超出单次解析长度上限",
+		REQUEST_CANCELLED: "请求已取消",
+		CONFIG_MISSING: "尚未配置可用的模型",
+		DETAIL_FAILED: "详解解析失败"
+	};
+	function friendlyErrorMessage(code, fallback) {
+		return ERROR_TEXT[code] ?? `${code}：${fallback}`;
+	}
 	function createElement(owner, name, className, text) {
 		const element = owner.createElement(name);
 		if (className !== void 0) element.className = className;
@@ -420,7 +441,7 @@
 			entry.record.provisional = null;
 			this.#repaintBlock(entry.blockId, {
 				errorSentenceId: sentenceId,
-				message: `${code}：${message}`
+				message: friendlyErrorMessage(code, message)
 			});
 		}
 		/**
@@ -819,6 +840,7 @@
 		returnedCount = 0;
 		lastVisibleFingerprint = "";
 		clearAllActive();
+		resetScanRegistry();
 		ensureStatusElement();
 		if (s.observer !== null) s.observer.disconnect();
 		s.observer = new MutationObserver(() => {
@@ -859,8 +881,15 @@
 		if (message === null) return;
 		switch (message.type) {
 			case "SESSION_STATE":
-				if (message.state === "paused") setStatus(`⏸ 已暂停（${message.ready}/${message.discovered}）`, "paused", false);
-				else if (settledBlocks.size >= reportedBlockCount && reportedBlockCount > 0) {} else {
+				if (message.state === "paused") {
+					setStatus(`⏸ 已暂停（${message.ready}/${message.discovered}）`, "paused", false);
+					return;
+				}
+				if (message.discovered > 0 && message.ready + message.failed >= message.discovered) {
+					clearTimeout(completeTimer);
+					setStatus(`✓ 句法解析完成${message.failed > 0 ? `，${message.failed} 句失败` : ""}`, "running");
+					completeTimer = setTimeout(hideStatus, 2500);
+				} else {
 					const failedText = message.failed > 0 ? `，${message.failed} 句失败` : "";
 					setStatus(`句法学习：${message.ready}/${message.discovered} 句${failedText}`, "running");
 				}

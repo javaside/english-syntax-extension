@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { observeBlocks, scanMarkdownBlocks } from "./preview";
+import { observeBlocks, resetScanRegistry, scanMarkdownBlocks } from "./preview";
 
 function fixture(): HTMLElement {
   const container = document.createElement("div");
@@ -74,6 +74,18 @@ describe("scanMarkdownBlocks", () => {
 
     expect(second).toHaveLength(0);
     expect(first.length).toBeGreaterThan(0);
+  });
+
+  it("resetScanRegistry lets rescan rediscover all blocks after reinitialize", () => {
+    const container = fixture();
+    const first = scanMarkdownBlocks(container);
+    expect(first.length).toBeGreaterThan(0);
+
+    // 再次点开始（重新 initialize）：清空注册表后应能重新扫描出全部块，
+    // 否则失败句永远无法重派（真机「失败后再点开始不动」）。
+    resetScanRegistry();
+    const rediscovered = scanMarkdownBlocks(container);
+    expect(rediscovered.length).toBeGreaterThan(0);
   });
 
   it("assigns stable block ids and marks elements", () => {
