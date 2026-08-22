@@ -21,11 +21,11 @@ class BridgeProtocolTest {
 
   @Test
   fun `accepts visible blocks within limits`() {
-    val blocks = (1..50).joinToString(",") { """{"blockId":"b$it","text":"Block $it text"}""" }
+    val blocks = (1..2000).joinToString(",") { """{"blockId":"b$it","text":"Block $it text"}""" }
     val message = parse(
       """{"version":1,"type":"VISIBLE_BLOCKS","previewId":"p1","generation":1,"blocks":[$blocks]}""",
     ) as PageMessage.VisibleBlocks
-    assertEquals(50, message.blocks.size)
+    assertEquals(2000, message.blocks.size)
   }
 
   @Test
@@ -68,8 +68,8 @@ class BridgeProtocolTest {
   }
 
   @Test
-  fun `rejects more than fifty blocks`() {
-    val blocks = (1..51).joinToString(",") { """{"blockId":"b$it","text":"x"}""" }
+  fun `rejects more than max blocks`() {
+    val blocks = (1..2001).joinToString(",") { """{"blockId":"b$it","text":"x"}""" }
     assertNull(
       parse("""{"version":1,"type":"VISIBLE_BLOCKS","previewId":"p1","generation":0,"blocks":[$blocks]}"""),
     )

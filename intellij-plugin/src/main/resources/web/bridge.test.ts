@@ -13,7 +13,7 @@ describe("parsePageMessage", () => {
   });
 
   it("accepts visible blocks within limits", () => {
-    const blocks = Array.from({ length: 50 }, (_, i) => ({ blockId: `b${i}`, text: `Block ${i}` }));
+    const blocks = Array.from({ length: 2000 }, (_, i) => ({ blockId: `b${i}`, text: `Block ${i}` }));
     const message = parsePageMessage({
       version: 1,
       type: "VISIBLE_BLOCKS",
@@ -22,11 +22,11 @@ describe("parsePageMessage", () => {
       blocks,
     });
     expect(message?.type).toBe("VISIBLE_BLOCKS");
-    expect(message && message.type === "VISIBLE_BLOCKS" ? message.blocks.length : 0).toBe(50);
+    expect(message && message.type === "VISIBLE_BLOCKS" ? message.blocks.length : 0).toBe(2000);
   });
 
-  it("rejects more than fifty blocks", () => {
-    const blocks = Array.from({ length: 51 }, (_, i) => ({ blockId: `b${i}`, text: "x" }));
+  it("rejects more than max blocks", () => {
+    const blocks = Array.from({ length: 2001 }, (_, i) => ({ blockId: `b${i}`, text: "x" }));
     expect(
       parsePageMessage({
         version: 1,

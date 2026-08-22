@@ -112,7 +112,10 @@ sealed interface HostMessage {
  */
 object BridgeProtocol {
   const val VERSION = 1
-  const val MAX_BLOCKS = 50
+  // 一次扫描即上报全文所有英文段（整页翻译）。长文档可达上百段，50 上限会丢弃
+  // 整条 VISIBLE_BLOCKS（真机症状：转圈显示「正在解析 N 段」但一张卡片都不出）。
+  // 提到 2000 容纳整页全量，同时保留对异常超长消息的防护。
+  const val MAX_BLOCKS = 2000
   const val MAX_BLOCK_TEXT = 20_000
 
   private val forbiddenKeys = setOf("apiKey", "headers", "baseUrl")

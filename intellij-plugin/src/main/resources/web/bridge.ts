@@ -6,7 +6,8 @@
  */
 
 export const BRIDGE_VERSION = 1;
-export const MAX_BLOCKS = 50;
+// 整页翻译一次上报全文所有段，长文档可达上百段；与 Kotlin BridgeProtocol.MAX_BLOCKS 同步。
+export const MAX_BLOCKS = 2000;
 export const MAX_BLOCK_TEXT = 20_000;
 
 export interface PageMessageBase {
