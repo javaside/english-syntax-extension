@@ -273,6 +273,12 @@ function handleHostMessage(hostJson: unknown): void {
       returnedCount = 0;
       clearAllActive();
       hideStatus();
+      // 清卡是「我方主动 restore」，不是官方 updateDom 重渲染：把「有卡片」基线复位，
+      // 否则 renderer.restoreAll() 删除卡片这个 DOM 变更会让 MutationObserver 的
+      // trackPreviewRendered() 看到「卡片从有到无」误判成 PREVIEW_RENDERED → Kotlin
+      // 换代重扫 → rescan() 又亮出「正在解析」进度浮层（停止后进度重现的回归）。
+      // 复位要赶在 MutationObserver 微任务回调之前（同步、同一 JS task 内即可满足）。
+      previewHadCards = false;
       break;
     default:
       break;

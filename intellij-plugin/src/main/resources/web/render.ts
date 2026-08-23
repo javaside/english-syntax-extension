@@ -15,6 +15,23 @@ const HIDDEN_ATTRIBUTE = "data-english-syntax-hidden";
 const CARD_TAG = "div";
 const CARD_ATTRIBUTE = "data-english-syntax-card";
 
+/**
+ * 句子在卡片里的排列顺序 = 原文出现顺序（源序），而不是消息到达顺序。
+ * sentenceId 由 Kotlin 权威生成，形如 `s-{blockId}-{index}`，index（最后一个连字符之后
+ * 的数字）就是该句在块内的源序下标。流式分片按模型输出到达，可能先吐后半句——
+ * #blockSentenceOrder 若按到达顺序累积，final 卡片就会照此错排（英文和原文对不上）。
+ * 渲染前按 index 数值升序重排，无论分片/结果乱序与否都恢复源序（chrome 端
+ * setExpectedSentenceIds 同语义，这里直接从 sentenceId 推断，无需宿主额外传序）。
+ */
+function bySourceOrder(sentenceIdA: string, sentenceIdB: string): number {
+  const indexOf = (id: string) => {
+    // 生产：s-{blockId}-{index} → 末尾 index；也兼容 s1/s2（测试）这类裸编号。
+    const match = /(\d+)$/.exec(id);
+    return match === null ? Number.MAX_SAFE_INTEGER : Number(match[1]!);
+  };
+  return indexOf(sentenceIdA) - indexOf(sentenceIdB);
+}
+
 interface BlockRecord {
   blockId: string;
   element: HTMLElement;
@@ -303,7 +320,7 @@ export class PreviewRenderer {
   ): void {
     const record = this.#blocks.get(blockId);
     if (record === undefined) return;
-    const order = this.#blockSentenceOrder.get(blockId) ?? [];
+    const order = (this.#blockSentenceOrder.get(blockId) ?? []).slice().sort(bySourceOrder);
     const hasContent = order.some((id) => {
       const sentence = record.sentences.get(id);
       return (

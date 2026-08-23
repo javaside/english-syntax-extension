@@ -15,6 +15,8 @@
 
 ### 修复（IntelliJ 插件）
 
+- **翻译卡片的英文行顺序与原文不一致**。卡片句子排列此前按「消息到达顺序」累积（`#blockSentenceOrder`），流式分片按模型输出到达、可能先吐后半句，final 卡片就按乱序排。现渲染前按 `sentenceId` 末尾的 `index`（源序）数值升序重排，无论分片/结果乱序与否都恢复原文顺序。新增 `render.test.ts` 用例钉住。
+- **点「停止并恢复原文」后，预览页右下角又亮起「正在解析」进度浮层**。清卡（`RESTORE_ALL` → `renderer.restoreAll()`）也是 DOM 变更，会被 MutationObserver 的「卡片从有到无」边沿误判成官方 `updateDom` 重渲染，上报 `PREVIEW_RENDERED` → Kotlin 换代重扫 → `rescan()` 又 `setStatus("正在解析…")`。现于 `RESTORE_ALL` 分支同步把「有卡片」基线复位为 false，让我方清卡不构成重渲染边沿。新增 `bootstrap-lifecycle.test.ts` 钉住。
 - **点「开始句法学习」后预览毫无变化、也无报错**。「移除自建预览面板」重构时把 JS→Kotlin 的消息接线整体丢掉了：`VISIBLE_BLOCKS`/`DETAIL_REQUEST`/`RETRY_SENTENCE` 无任何消费者，每层单测全绿但端到端无一条页面消息到达会话。现由 `PreviewSessionConnector` 统一收口接线（先接线后启动会话，顺序不可拆），并新增 `PageMessageWiringTest` 走 Panel 桥接入口钉住这条链路。
 - **卡片永不渲染**：`CORE_*` 消息携带 `blockId`，JS 侧按消息惰性注册句子（此前生产路径从不注册，渲染器查不到句子直接 return）。
 - 设置页保存异常不再冒泡成 IDE 错误弹窗；SQLite 驱动未注册导致的 Action 静默失败；预览面板定位改为经 `MarkdownPreviewFileEditor.PREVIEW_BROWSER` UserData（面板不是 FileEditor 本身，直接强转永远 null）。

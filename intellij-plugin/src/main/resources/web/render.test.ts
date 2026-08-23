@@ -495,4 +495,37 @@ describe("PreviewRenderer", () => {
       vi.restoreAllMocks();
     }
   });
+
+  it("renders sentences in source order even when streamed messages arrive out of order", () => {
+    // 回归：卡片里句子顺序 = 原文源序，而不是消息到达顺序。
+    // 流式分片按模型输出到达，可能先吐后半句（s2 先来）。#blockSentenceOrder 若按到达
+    // 累积，final 卡片就会把 s2 排在 s1 前面（英文与原文对不上）。此处乱序喂入 s2、s1 的
+    // CORE_RESULT，最终卡片仍应按 s1、s2（源序）排列。
+    const { renderer } = setup(); // registerSentence(b1, s1)
+    renderer.registerSentence("b1", "s2");
+
+    // 先到 s2（语法上常先想到后半句），再到 s1。
+    renderer.renderCoreResult(
+      "s2",
+      "b1",
+      corePayload("s2", [
+        { startToken: 0, endToken: 1, role: "PREDICATE", translation: "校验", text: "validates" },
+      ]),
+    );
+    renderer.renderCoreResult(
+      "s1",
+      "b1",
+      corePayload("s1", [
+        { startToken: 0, endToken: 1, role: "SUBJECT", translation: "该服务", text: "The service" },
+      ]),
+    );
+
+    const sections = document.querySelectorAll<HTMLElement>(".english-syntax-sentence");
+    expect(sections.length).toBe(2);
+    // 卡片内句子按源序 s1 → s2 排列。
+    expect(sections[0]!.dataset.sentenceId).toBe("s1");
+    expect(sections[1]!.dataset.sentenceId).toBe("s2");
+    // s1（源序靠前）的英文原文行在前。
+    expect(sections[0]!.querySelector(".english-syntax-english")?.textContent).toBe("The service");
+  });
 });

@@ -244,6 +244,26 @@
 
 **守护测试**:`PreviewSessionTest`(`generation change bumps and clears sentences`)+ `bridge.test.ts`(`drops messages from stale generations`)。
 
+### 渲染换代边沿必须排除「我方主动清卡」
+
+**规则**:MutationObserver 用「卡片从有到无」(trackPreviewRendered)判官方 `updateDom` 重渲染、上报 `PREVIEW_RENDERED`。**我方主动清卡(`RESTORE_ALL` 触发 `renderer.restoreAll()` 删卡)必须在 RESTORE_ALL 分支同步把「有卡片」基线 `previewHadCards` 复位为 false**,让它不构成 true→false 边沿。
+
+**为什么**:清卡也是 DOM 变更,同样会触发 MutationObserver。若不清基线,「停止并恢复原文」把自己删的卡误判成官方重渲染,Kotlin 换代重扫后 `rescan()` 又会 `setStatus("正在解析 N 段…")`——表现为点完停止进度浮层反而重现。
+
+**症状**:点「停止并恢复原文」后,预览页右下角又亮起「正在解析」进度浮层(看似又开始翻译)。
+
+**守护测试**:`intellij-plugin/src/main/resources/web/bootstrap-lifecycle.test.ts`(`RESTORE_ALL 清卡后不再把清卡误判成官方重渲染、也不重新亮出进度浮层`)。
+
+### 卡片句子必须按源序排列
+
+**规则**:`#blockSentenceOrder` 只按消息到达顺序累积句子 ID,但 `#repaintBlock` 渲染前**必须**按 sentenceId 末尾的 `index` 数值升序重排(`bySourceOrder`),让卡片里句子顺序等于原文出现顺序。
+
+**为什么**:流式分片按模型输出到达,可能先吐后半句(s2 先于 s1 到)。若不重排,`#blockSentenceOrder` 里就是乱序,最终卡片英文会和原文顺序对不上。Chrome 端用 `setExpectedSentenceIds` 从宿主拿源序;IntelliJ 端 sentenceId 是 `s-{blockId}-{index}`,index 即源序,可直接从 ID 推断。
+
+**症状**:翻译卡片的英文行顺序与原文不一致(常见于一句分多次流式、或多个句子乱序到达)。
+
+**守护测试**:`render.test.ts`(`renders sentences in source order even when streamed messages arrive out of order`)。
+
 ### Markdown 内部 API 不出 `markdown/` 包
 
 **规则**:`org.intellij.plugins.markdown.*` 类型只允许出现在 `markdown/` 包与 `plugin.xml`;不反射访问官方 `MarkdownJCEFHtmlPanel` 私有字段。
