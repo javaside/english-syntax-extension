@@ -1,7 +1,13 @@
 // @vitest-environment happy-dom
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { observeBlocks, resetScanRegistry, scanMarkdownBlocks } from "./preview";
+import {
+  ensureBlockId,
+  nearestPreviewBlock,
+  observeBlocks,
+  resetScanRegistry,
+  scanMarkdownBlocks,
+} from "./preview";
 
 function fixture(): HTMLElement {
   const container = document.createElement("div");
@@ -147,5 +153,129 @@ describe("observeBlocks", () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+});
+
+function el(
+  tag: string,
+  id: string,
+  text: string,
+  attrs: Record<string, string> = {},
+): HTMLElement {
+  const node = document.createElement(tag);
+  node.id = id;
+  node.textContent = text;
+  for (const [name, value] of Object.entries(attrs)) node.setAttribute(name, value);
+  return node;
+}
+
+describe("nearestPreviewBlock", () => {
+  beforeEach(() => {
+    document.body.replaceChildren();
+  });
+
+  function hoverFixture(): void {
+    const container = document.createElement("div");
+    container.append(el("p", "para", "The service validates every response before returning it."));
+    container.append(el("p", "short", "Too short."));
+    container.append(el("p", "chinese", "这一段几乎没有英文单词，只有少量 API 术语。"));
+
+    const inlineHost = el("p", "inline-host", "Wrapped ");
+    inlineHost.append(el("em", "em", "emphasis"));
+    container.append(inlineHost);
+
+    // Mintlify 一类文档站整篇正文都是 <span>，外层 div 才是渲染盒子。
+    const spanBlock = el("div", "span-block", "");
+    spanBlock.append(el("span", "span-inner", "Docs sites render body text as spans."));
+    container.append(spanBlock);
+    const pre = document.createElement("pre");
+    pre.append(el("code", "code", "const answer = theService.validates(everyResponse);"));
+    container.append(pre);
+
+    const table = document.createElement("table");
+    const row = document.createElement("tr");
+    row.append(el("td", "cell", "The table cell text is long enough here."));
+    table.append(row);
+    container.append(table);
+
+    const card = el("div", "card", "", { "data-english-syntax-card": "true" });
+    card.append(el("span", "in-card", "Rendered card text."));
+    container.append(card);
+
+    container.append(el("textarea", "editor", "Some text"));
+
+    const editableHost = el("div", "editable-host", "", { contenteditable: "true" });
+    editableHost.append(el("p", "editable", "Editable paragraph text here."));
+    container.append(editableHost);
+
+    document.body.append(container);
+  }
+
+  const at = (id: string): HTMLElement => document.getElementById(id)!;
+
+  it("returns the hovered leaf block itself", () => {
+    hoverFixture();
+    expect(nearestPreviewBlock(at("para"))?.id).toBe("para");
+  });
+
+  it("walks up from an inline descendant to its block", () => {
+    hoverFixture();
+    expect(nearestPreviewBlock(at("em"))?.id).toBe("inline-host");
+  });
+
+  it("accepts a div whose only children are inline", () => {
+    hoverFixture();
+    expect(nearestPreviewBlock(at("span-inner"))?.id).toBe("span-block");
+  });
+  it("accepts short and non-english blocks that the auto scanner would skip", () => {
+    // 显式手势不套用自动扫描的 20 字符 / 英文占比门槛。
+    hoverFixture();
+    expect(nearestPreviewBlock(at("short"))?.id).toBe("short");
+    expect(nearestPreviewBlock(at("chinese"))?.id).toBe("chinese");
+  });
+
+  it("refuses code, tables, our own cards, and editable regions", () => {
+    hoverFixture();
+    expect(nearestPreviewBlock(at("code"))).toBeNull();
+    expect(nearestPreviewBlock(at("cell"))).toBeNull();
+    expect(nearestPreviewBlock(at("in-card"))).toBeNull();
+    expect(nearestPreviewBlock(at("editor"))).toBeNull();
+    expect(nearestPreviewBlock(at("editable"))).toBeNull();
+  });
+
+  it("handles null and text nodes", () => {
+    hoverFixture();
+    expect(nearestPreviewBlock(null)).toBeNull();
+    expect(nearestPreviewBlock(at("para").firstChild)?.id).toBe("para");
+  });
+});
+
+describe("ensureBlockId", () => {
+  beforeEach(() => {
+    document.body.replaceChildren();
+  });
+
+  it("assigns and persists a block id", () => {
+    const element = el("p", "solo", "Anything.");
+    document.body.append(element);
+
+    const blockId = ensureBlockId(element);
+    expect(blockId).toMatch(/^english-syntax-block-\d+$/);
+    expect(element.getAttribute("data-english-syntax-block")).toBe(blockId);
+    expect(ensureBlockId(element)).toBe(blockId);
+  });
+
+  it("shares the id counter with scanMarkdownBlocks so ids never collide", () => {
+    const container = document.createElement("div");
+    container.append(el("p", "a", "Alpha paragraph long enough for the scanner to accept it."));
+    container.append(el("p", "b", "Beta paragraph long enough for the scanner to accept it."));
+    document.body.append(container);
+
+    // 显式路径先给 #a 分配 id，随后自动扫描应沿用它、并给 #b 一个不同的新 id。
+    const manual = ensureBlockId(document.getElementById("a")!);
+    const ids = scanMarkdownBlocks(container).map((block) => block.blockId);
+
+    expect(ids).toContain(manual);
+    expect(new Set(ids).size).toBe(ids.length);
   });
 });

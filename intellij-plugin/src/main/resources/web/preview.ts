@@ -34,6 +34,46 @@ export function resetScanRegistry(): void {
   registeredElements = new WeakSet<HTMLElement>();
 }
 
+/**
+ * 取或分配 blockId。与 [scanMarkdownBlocks] 共用 `nextBlockId` 计数器——显式路径先给
+ * 某元素分配过 id，之后自动扫描会沿用它，不会出现双 id。
+ */
+export function ensureBlockId(element: HTMLElement): string {
+  const existing = element.getAttribute(BLOCK_ID_ATTRIBUTE);
+  if (existing !== null) return existing;
+  const blockId = `${BLOCK_SELECTOR_PREFIX}${nextBlockId++}`;
+  element.setAttribute(BLOCK_ID_ATTRIBUTE, blockId);
+  return blockId;
+}
+
+/**
+ * 显式手势（快捷键悬停解析）的块定位：从悬停元素逐级向上找最近的可解析块。
+ *
+ * **刻意不套用自动扫描的取舍**：不要求 20 字符、不要求英文占比、不限定候选标签。
+ * `scanMarkdownBlocks` 要在整篇里躲开边栏与样板文字，这里只服务用户指到的那一处——
+ * 套用后的症状是「鼠标明明停在段落上，快捷键却报『未找到可解析的段落』」（短段落、
+ * 术语行、中英混排行全中招）。保留的判据只有四条：排除区、渲染盒子、叶子块、文本非空。
+ *
+ * 按渲染盒子而非标签名认块：Mintlify 一类文档站整篇正文都是 `<span>`，只按标签名
+ * 认块会把这类站点整页判成「未找到」。只认叶子块，否则往上会撞到包着整篇正文的容器。
+ */
+export function nearestPreviewBlock(target: EventTarget | null): HTMLElement | null {
+  const start =
+    target instanceof Element ? target : target instanceof Node ? target.parentElement : null;
+  if (start === null) return null;
+  if (start.closest("input,textarea,[contenteditable]") !== null) return null;
+
+  for (let current: Element | null = start; current !== null; current = current.parentElement) {
+    if (!(current instanceof HTMLElement)) continue;
+    if (isExcluded(current)) continue;
+    if (!isRendered(current)) continue;
+    if (!isLeafBlock(current)) continue;
+    if ((current.textContent ?? "").trim().length === 0) continue;
+    return current;
+  }
+  return null;
+}
+
 function isExcluded(element: Element): boolean {
   return element.closest(EXCLUDED_SELECTOR) !== null;
 }
@@ -82,11 +122,7 @@ export function scanMarkdownBlocks(root: ParentNode): PreviewBlock[] {
     )
     .map((element) => {
       registeredElements.add(element);
-      // 已带 block 标记的元素沿用旧 id（防重复扫描产生双 id）。
-      const existing = element.getAttribute("data-english-syntax-block");
-      const blockId = existing ?? `${BLOCK_SELECTOR_PREFIX}${nextBlockId++}`;
-      if (existing === null) element.setAttribute(BLOCK_ID_ATTRIBUTE, blockId);
-      return { blockId, element, text: (element.textContent ?? "").trim() };
+      return { blockId: ensureBlockId(element), element, text: (element.textContent ?? "").trim() };
     });
 }
 
