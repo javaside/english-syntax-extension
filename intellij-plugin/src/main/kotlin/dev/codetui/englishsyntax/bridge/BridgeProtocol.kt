@@ -44,6 +44,18 @@ sealed interface PageMessage {
     override val previewId: String,
     override val generation: Int,
   ) : PageMessage
+
+  /**
+   * 显式手势：JS 已经把段落定位好了，只解析这一段（快捷键悬停解析）。
+   * 与 [VisibleBlocks] 分开是有意的——后者是自动扫描的批量上报，前者是用户手势，
+   * 优先级、合批与暂停语义都不同。
+   */
+  data class ParseBlock(
+    override val previewId: String,
+    override val generation: Int,
+    val blockId: String,
+    val text: String,
+  ) : PageMessage
 }
 
 /** Kotlin → JS 的封闭消息集合。 */
@@ -156,6 +168,14 @@ object BridgeProtocol {
       "PREVIEW_RENDERED" -> {
         if (!hasOnlyKeys(value, "version", "type", "previewId", "generation")) return null
         PageMessage.PreviewRendered(previewId, generation)
+      }
+
+      "PARSE_BLOCK" -> {
+        if (!hasOnlyKeys(value, "version", "type", "previewId", "generation", "blockId", "text")) return null
+        val blockId = value.string("blockId")?.takeIf { it.isNotEmpty() } ?: return null
+        val text = value.string("text") ?: return null
+        if (text.length > MAX_BLOCK_TEXT) return null
+        PageMessage.ParseBlock(previewId, generation, blockId, text)
       }
 
       else -> null

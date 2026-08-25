@@ -162,4 +162,45 @@ class BridgeProtocolTest {
     )
     assertNotNull(message as HostMessage.DetailResult)
   }
+
+  @Test
+  fun `accepts parse block for the hotkey path`() {
+    val message = parse(
+      """{"version":1,"type":"PARSE_BLOCK","previewId":"p1","generation":2,"blockId":"b7","text":"Short line."}""",
+    ) as PageMessage.ParseBlock
+    assertEquals("p1", message.previewId)
+    assertEquals(2, message.generation)
+    assertEquals("b7", message.blockId)
+    assertEquals("Short line.", message.text)
+  }
+
+  @Test
+  fun `rejects parse block with extra or missing fields`() {
+    // 多余键
+    assertNull(
+      parse(
+        """{"version":1,"type":"PARSE_BLOCK","previewId":"p1","generation":0,"blockId":"b1","text":"t","target":"body"}""",
+      ),
+    )
+    // 空 blockId
+    assertNull(
+      parse("""{"version":1,"type":"PARSE_BLOCK","previewId":"p1","generation":0,"blockId":"","text":"t"}"""),
+    )
+    // 缺 text
+    assertNull(parse("""{"version":1,"type":"PARSE_BLOCK","previewId":"p1","generation":0,"blockId":"b1"}"""))
+    // 夹带凭据
+    assertNull(
+      parse(
+        """{"version":1,"type":"PARSE_BLOCK","previewId":"p1","generation":0,"blockId":"b1","text":"t","apiKey":"leak"}""",
+      ),
+    )
+  }
+
+  @Test
+  fun `rejects parse block whose text exceeds the block limit`() {
+    val huge = "a".repeat(BridgeProtocol.MAX_BLOCK_TEXT + 1)
+    assertNull(
+      parse("""{"version":1,"type":"PARSE_BLOCK","previewId":"p1","generation":0,"blockId":"b1","text":"$huge"}"""),
+    )
+  }
 }

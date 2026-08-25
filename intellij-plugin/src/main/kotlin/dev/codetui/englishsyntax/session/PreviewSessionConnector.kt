@@ -38,6 +38,9 @@ object PreviewSessionConnector {
       if (message.previewId != panel.previewId) return@attachPageMessageDispatcher
       when (message) {
         is PageMessage.VisibleBlocks -> session.onVisibleBlocks(message.blocks.map { it.blockId to it.text })
+        // 临时占位：PARSE_BLOCK 的真实分发（单块显式解析）在快捷键接线任务里补，
+        // 这里先让 when 穷尽以便协议改动独立编译通过——不是有意忽略这条消息。
+        is PageMessage.ParseBlock -> Unit
         is PageMessage.DetailRequest ->
           session.launchDetailRequest(message.sentenceId, message.focusStart, message.focusEnd)
         is PageMessage.RetrySentence -> session.retrySentence(message.sentenceId)
