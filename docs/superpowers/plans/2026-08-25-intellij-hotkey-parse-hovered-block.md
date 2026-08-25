@@ -652,7 +652,7 @@ git commit -m "feat: 会话层支持单块显式派发（轻量启动、穿透�
     assertEquals(1, pushed.size, "须下发一次兼底键位: $scripts")
     assertTrue(
       pushed[0].contains("\"code\":\"KeyT\""),
-      "无 IDE keymap 上下文时回退默认 Alt+T: ${pushed[0]}",
+      "读不到 keymap（纯协议测试无 IDE 上下文）时回退 plugin.xml 声明的默认值: ${pushed[0]}",
     )
 
     panel.dispose()
@@ -734,7 +734,10 @@ Expected: 编译失败，`Unresolved reference: autoScan` / `requestParseHovered
 
 ```kotlin
     // 兼底 keydown 的键位跟 IDEA keymap 走：用户改键后页面通道同步改。
-    val hotkey = dev.codetui.englishsyntax.bridge.HotkeyDescriptor.fromKeymap().toJson()
+    // fromKeymap() 返回 null = keymap 里没有可下发的「单段 + 字母数字」绑定（两段式 chord、
+    // F7 之类，或用户清了绑定）→ 明确下发 null 让页面**关掉**兼底监听。留一个用户没绑的
+    // 幻影键位比没有更糟：它还会 preventDefault 吃掉按键。
+    val hotkey = dev.codetui.englishsyntax.bridge.HotkeyDescriptor.fromKeymap()?.toJson() ?: "null"
     execute("window.__englishSyntaxSetHotkey&&window.__englishSyntaxSetHotkey($hotkey);")
 ```
 
@@ -1651,6 +1654,17 @@ describe("bootstrap-entry 按段解析", () => {
     await flush();
     expect(label()).toContain("未找到");
 
+    // 显式 null = keymap 里没有可下发的绑定（两段式 chord / F7 之类）→ 关掉兼底监听。
+    // 不能退回默认 Alt+T：那是用户没绑的幻影键位，按下去还会 preventDefault。
+    setHotkey(null);
+    clearLabel();
+    press({ code: "KeyJ", ctrlKey: true });
+    await flush();
+    expect(label()).toBe("");
+    press({ code: "KeyT", altKey: true });
+    await flush();
+    expect(label()).toBe("");
+
     // 复位：hotkey 是模块级状态，跨用例共享。
     setHotkey({ code: "KeyT", altKey: true, ctrlKey: false, shiftKey: false, metaKey: false });
   });
@@ -1766,8 +1780,11 @@ interface PageHotkey {
   metaKey: boolean;
 }
 
-/** 兼底通道键位。由 Kotlin 从 IDEA keymap 读实际绑定后下发；默认与 Chrome 扩展一致。 */
-let hotkey: PageHotkey = {
+/**
+ * 兼底通道键位。由 Kotlin 从 IDEA keymap 读实际绑定后下发；默认与 plugin.xml 声明的一致。
+ * `null` = 不装兼底监听（keymap 里没有可下发的单段字母数字绑定）。
+ */
+let hotkey: PageHotkey | null = {
   code: "KeyT",
   altKey: true,
   ctrlKey: false,
@@ -1776,7 +1793,13 @@ let hotkey: PageHotkey = {
 };
 
 function setHotkey(descriptor: unknown): void {
-  if (descriptor === null || typeof descriptor !== "object") return;
+  // 显式 null：keymap 里绑的是两段式 chord、F7 之类的非字母数字键，或用户清了绑定。
+  // 关掉监听，而不是保留一个用户根本没绑的幻影键位——它还会 preventDefault 吃掉按键。
+  if (descriptor === null) {
+    hotkey = null;
+    return;
+  }
+  if (typeof descriptor !== "object") return;
   const candidate = descriptor as Partial<PageHotkey>;
   if (typeof candidate.code !== "string" || candidate.code === "") return;
   hotkey = {
@@ -1795,12 +1818,14 @@ function setHotkey(descriptor: unknown): void {
 // 焦点在 JCEF 预览里时 IDEA Action 可能收不到按键（取决于 JCEF 是否跑在离屏渲染模式），
 // 预览页自己兜住。修饰键逐位相等，避免 Alt+Shift+T 误触发绑定为 Alt+T 的入口。
 document.addEventListener("keydown", (event) => {
+  const bound = hotkey;
+  if (bound === null) return;
   if (
-    event.code !== hotkey.code ||
-    event.altKey !== hotkey.altKey ||
-    event.ctrlKey !== hotkey.ctrlKey ||
-    event.shiftKey !== hotkey.shiftKey ||
-    event.metaKey !== hotkey.metaKey
+    event.code !== bound.code ||
+    event.altKey !== bound.altKey ||
+    event.ctrlKey !== bound.ctrlKey ||
+    event.shiftKey !== bound.shiftKey ||
+    event.metaKey !== bound.metaKey
   ) {
     return;
   }
@@ -2022,6 +2047,7 @@ Expected：那一段也变成卡片。若这一步无反应，说明两条通道
 - [ ] 鼠标停在**已翻译的卡片**上按 `Alt+T` → 浮层提示「该段已解析」，无请求。
 - [ ] 同一段连按三次 → 只发一次请求（IDE 日志里 `parseExplicitBlock` 只出现一次带 `sentences=N` 的记录）。
 - [ ] `Tools → 暂停句法学习` 后再按 `Alt+T` → 那一段照样翻译出来（显式手势穿透暂停）。
+- [ ] **改键跟随**：`Settings → Keymap` 搜「解析鼠标悬停的段落」，改绑成 `Ctrl+Alt+J`，**重开预览**（键位在注入时下发），按新键 → 生效；按旧的 `Alt+T` → 无反应。这是 `HotkeyDescriptor.fromKeymap()` 唯一的 happy-path 验证——单测只能覆盖它「无 IDE 上下文时回退 DEFAULT」的分支，真的读到 keymap 绑定这条路没有任何自动化测试。验完把键位改回 `Alt+T`。
 
 - [ ] **Step 5: 不污染整篇**
 
