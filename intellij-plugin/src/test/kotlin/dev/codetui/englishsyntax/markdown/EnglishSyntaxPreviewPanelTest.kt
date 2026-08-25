@@ -26,7 +26,7 @@ class EnglishSyntaxPreviewPanelTest {
     assertEquals(1, bumpedTo)
     assertEquals(1, scripts.size)
     assertTrue(scripts[0].startsWith("window.__englishSyntaxInitialize("))
-    assertTrue(scripts[0].contains(", 1)"), "initialize 应带新 generation: ${scripts[0]}")
+    assertTrue(scripts[0].contains(", 1, "), "initialize 应带新 generation: ${scripts[0]}")
 
     panel.dispose()
   }
@@ -122,6 +122,76 @@ class EnglishSyntaxPreviewPanelTest {
 
     val all = scripts.joinToString("\n")
     assertTrue(all.contains("__englishSyntaxSetTheme"), "须注入角色色板主题开关: $all")
+
+    panel.dispose()
+  }
+
+  @Test
+  fun `initialize carries the auto scan flag so manual mode never reports the whole document`() {
+    // 默认手动模式：只要 findPanel 走过 wrap，注入末尾就会 notifyInitialize——默认自动扫描
+    // 会让「点开工具菜单」或按一次快捷键就把整篇文档送去翻译。
+    val scripts = mutableListOf<String>()
+    val panel = EnglishSyntaxPreviewPanel(transportOverride = HostMessageTransport { scripts += it })
+
+    panel.injectForTest()
+    assertTrue(
+      scripts.any { it.startsWith("window.__englishSyntaxInitialize(") && it.endsWith(", false);") },
+      "默认 autoScan 应为 false: $scripts",
+    )
+
+    scripts.clear()
+    panel.autoScan = true
+    panel.requestScan()
+    assertTrue(
+      scripts.any { it.startsWith("window.__englishSyntaxInitialize(") && it.endsWith(", true);") },
+      "整篇会话应下发 autoScan=true: $scripts",
+    )
+
+    panel.dispose()
+  }
+
+  @Test
+  fun `parse hovered request before injection is deferred and flushed exactly once`() {
+    // 冷启动第一次按键：bundle 还没注入，window.__englishSyntaxParseHoveredBlock 不存在，
+    // 直接外发会静默丢失这一次按键。
+    val scripts = mutableListOf<String>()
+    val panel = EnglishSyntaxPreviewPanel(transportOverride = HostMessageTransport { scripts += it })
+
+    panel.requestParseHoveredBlock()
+    assertEquals(0, scripts.size, "未注入时不得外发: $scripts")
+
+    panel.injectForTest()
+    assertEquals(
+      1,
+      scripts.count { it.startsWith("window.__englishSyntaxParseHoveredBlock&&") },
+      "注入后应补发一次: $scripts",
+    )
+
+    scripts.clear()
+    panel.injectForTest()
+    assertEquals(
+      0,
+      scripts.count { it.startsWith("window.__englishSyntaxParseHoveredBlock&&") },
+      "标记已清，不得重复补发: $scripts",
+    )
+
+    panel.dispose()
+  }
+
+  @Test
+  fun `injection pushes the fallback hotkey descriptor to the page`() {
+    // 焦点在 JCEF 里时 IDEA Action 可能收不到按键，页面自带 keydown 兼底——键位要跟 keymap。
+    val scripts = mutableListOf<String>()
+    val panel = EnglishSyntaxPreviewPanel(transportOverride = HostMessageTransport { scripts += it })
+
+    panel.injectForTest()
+
+    val pushed = scripts.filter { it.startsWith("window.__englishSyntaxSetHotkey&&") }
+    assertEquals(1, pushed.size, "须下发一次兼底键位: $scripts")
+    assertTrue(
+      pushed[0].contains("\"code\":\"KeyT\""),
+      "读不到 keymap（纯协议测试无 IDE 上下文）时回退 plugin.xml 声明的默认值: ${pushed[0]}",
+    )
 
     panel.dispose()
   }

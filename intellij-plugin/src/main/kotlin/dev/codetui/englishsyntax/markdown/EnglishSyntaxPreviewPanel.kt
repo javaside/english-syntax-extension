@@ -68,6 +68,25 @@ class EnglishSyntaxPreviewPanel(
   @Volatile
   private var disposed = false
 
+  /**
+   * JS 侧 `rescan()` 是否自动上报全文块。
+   *
+   * **默认 false（手动模式）**：只要 `findPanel` 走过一次 `wrap`，注入末尾的
+   * [notifyInitialize] 就会驱动 JS 扫描；默认 true 会让「按一次快捷键」或「点开工具菜单」
+   * 把整篇文档送去翻译。整篇会话由 `PreviewSessionConnector.start` 置 true，
+   * 停止时由 Stop Action 复位。
+   */
+  @Volatile
+  var autoScan: Boolean = false
+
+  /** bundle 是否已注入（全局入口是否存在）。 */
+  @Volatile
+  private var injected = false
+
+  /** 注入完成前收到的按段解析请求，注入末尾补发一次。 */
+  @Volatile
+  private var pendingParseHovered = false
+
   private val json = Json { ignoreUnknownKeys = true }
 
   /** JS→Kotlin 通道：JBCefJSQuery 挂在官方面板的 JBCefBrowser 上（公开 API，不反射）。 */
@@ -216,9 +235,21 @@ class EnglishSyntaxPreviewPanel(
     // 根 data 属性供 CSS 消费面板背景/字色；__englishSyntaxSetTheme 供 roles.ts 选色板。
     execute("window.__englishSyntaxSetTheme&&window.__englishSyntaxSetTheme($isDark);")
     execute("document.documentElement.setAttribute('data-english-syntax-dark', String($isDark));")
+    // 兼底 keydown 的键位跟 IDEA keymap 走：用户改键后页面通道同步改。
+    // fromKeymap() 返回 null = keymap 里没有可下发的「单段 + 字母数字」绑定（两段式 chord、
+    // F7 之类，或用户清了绑定）→ 明确下发 null 让页面**关掉**兼底监听。留一个用户没绑的
+    // 幻影键位比没有更糟：它还会 preventDefault 吃掉按键。
+    val hotkey = dev.codetui.englishsyntax.bridge.HotkeyDescriptor.fromKeymap()?.toJson() ?: "null"
+    execute("window.__englishSyntaxSetHotkey&&window.__englishSyntaxSetHotkey($hotkey);")
     // 注入完成后页面才有全局入口，再通知初始化扫描。
     LOGGER.info("inject: bootstrap + bundle executed, notifying initialize (generation=$generation)")
     notifyInitialize()
+    injected = true
+    if (pendingParseHovered) {
+      pendingParseHovered = false
+      LOGGER.info("inject: flushing deferred parse-hovered request")
+      requestParseHoveredBlock()
+    }
   }
 
   /** 测试辅助：直接触发注入流程（无需 JCEF）。 */
@@ -228,7 +259,7 @@ class EnglishSyntaxPreviewPanel(
 
   private fun notifyInitialize() {
     val previewIdLiteral = Json.encodeToString(JsonElement.serializer(), JsonPrimitive(previewId))
-    execute("window.__englishSyntaxInitialize($previewIdLiteral, $generation);")
+    execute("window.__englishSyntaxInitialize($previewIdLiteral, $generation, $autoScan);")
   }
 
   /**
@@ -238,6 +269,22 @@ class EnglishSyntaxPreviewPanel(
   fun requestScan() {
     if (disposed) return
     notifyInitialize()
+  }
+
+  /**
+   * 快捷键入口：让页面定位鼠标悬停的段落并回传 `PARSE_BLOCK`。
+   *
+   * bundle 尚未注入时（冷启动第一次按键）先记下意图，由 [injectWebResources] 末尾补发一次
+   * ——否则 `window.__englishSyntaxParseHoveredBlock` 还不存在，这一次按键静默丢失。
+   */
+  fun requestParseHoveredBlock() {
+    if (disposed) return
+    if (!injected) {
+      pendingParseHovered = true
+      LOGGER.info("requestParseHoveredBlock: bundle not injected yet, deferring")
+      return
+    }
+    execute("window.__englishSyntaxParseHoveredBlock&&window.__englishSyntaxParseHoveredBlock();")
   }
 
   private fun execute(script: String) {
