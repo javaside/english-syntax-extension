@@ -14,6 +14,8 @@ interface RuntimeState {
   renderer: PreviewRenderer;
   previewId: string;
   generation: number;
+  /** 是否自动上报全文块。false = 手动模式（只有快捷键按段解析驱动）。 */
+  autoScan: boolean;
   visibility: { start(): void; stop(): void } | null;
   observer: MutationObserver | null;
 }
@@ -77,6 +79,10 @@ function rescan(): void {
   // 上报，JCEF 里 innerHeight 小/滚动增量失效 → 只报首屏若干块，其余段永不翻译
   // （真机日志：onVisibleBlocks 11 blocks，dispatch 只跑一次 cacheHit=true）。
   if (blocks.length === 0) return;
+  // 手动模式（快捷键按段解析）：注册照旧（渲染器需要 blockId → element 映射），但绝不
+  // 上报全量块。否则我们插入卡片引发的 mutation、以及官方重渲染后的 initialize
+  // （会 resetScanRegistry + 清空指纹），都会把整篇文档送去翻译。
+  if (!s.autoScan) return;
   const fingerprint = blocks.map((block) => block.blockId).sort().join("\u0000");
   if (fingerprint === lastVisibleFingerprint) return;
   lastVisibleFingerprint = fingerprint;
@@ -89,7 +95,8 @@ function rescan(): void {
   });
   // 首批反馈：全部段打「解析中」标记（段落左侧竖条呼吸动画），结果回来再撤。
   for (const block of blocks) markBlockActive(block.blockId);
-  reportedBlockCount = blocks.length;
+  requestedBlocks.clear();
+  for (const block of blocks) requestedBlocks.add(block.blockId);
   settledBlocks.clear();
   failedBlocks.clear();
   // 开始后的第一反馈：扫描完成、请求已发出（首次模型调用可能较慢）。
@@ -105,7 +112,11 @@ const activeMarkers = new Map<string, HTMLElement>();
 /** 已收到结果的 blockId 集合（按块判完成）。 */
 const settledBlocks = new Set<string>();
 const failedBlocks = new Set<string>();
-let reportedBlockCount = 0;
+/**
+ * 已请求解析的块。按段解析是逐次累加，用计数器会让 settleBlock 的完成判定算错
+ * （第二次按快捷键时 settledBlocks.size 已经 ≥ 1）。整篇路径整体替换、显式路径 add。
+ */
+const requestedBlocks = new Set<string>();
 /** 完成浮层淡出定时器。 */
 let completeTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -132,7 +143,7 @@ function clearAllActive(): void {
   activeMarkers.clear();
   settledBlocks.clear();
   failedBlocks.clear();
-  reportedBlockCount = 0;
+  requestedBlocks.clear();
 }
 
 /** 一个块的结果回来了：撤标记；全部可见块都出结果 → 完成反馈。 */
@@ -140,7 +151,7 @@ function settleBlock(blockId: string, failed: boolean): void {
   settledBlocks.add(blockId);
   if (failed) failedBlocks.add(blockId);
   unmarkBlockActive(blockId);
-  if (reportedBlockCount > 0 && settledBlocks.size >= reportedBlockCount) {
+  if (requestedBlocks.size > 0 && settledBlocks.size >= requestedBlocks.size) {
     clearTimeout(completeTimer);
     const failedText = failedBlocks.size > 0 ? `，${failedBlocks.size} 段失败` : "";
     setStatus(`✓ 句法解析完成${failedText}`, "running");
@@ -189,14 +200,16 @@ function ensureState(): RuntimeState {
       focus: { startToken: focusStart, endToken: focusEnd },
     });
   });
-  state = { renderer, previewId: "", generation: 0, visibility: null, observer: null };
+  state = { renderer, previewId: "", generation: 0, autoScan: true, visibility: null, observer: null };
   return state;
 }
 
-function initialize(previewId: string, generation: number): void {
+function initialize(previewId: string, generation: number, autoScan = true): void {
   const s = ensureState();
   s.previewId = previewId;
   s.generation = generation;
+  // 默认 true 兼容既有调用方；Kotlin 侧总是显式下发（EnglishSyntaxPreviewPanel.autoScan）。
+  s.autoScan = autoScan;
   returnedCount = 0;
   lastVisibleFingerprint = ""; // 新代次重新上报可见块
   clearAllActive();

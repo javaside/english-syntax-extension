@@ -1,5 +1,7 @@
 // @vitest-environment happy-dom
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // 导入即执行 IIFE，把 __englishSyntaxInitialize / __englishSyntaxMessage 挂到 window。
@@ -31,6 +33,10 @@ function coreResultMessage(previewId: string, generation: number, blockId: strin
         { startToken: 0, endToken: 1, role: "SUBJECT", translation: "该服务", text: "The service" },
       ],
     }),
+    tokensJson: JSON.stringify([
+      { id: 0, text: "The", leadingWhitespace: "", punctuation: false },
+      { id: 1, text: "service", leadingWhitespace: " ", punctuation: false },
+    ]),
   };
 }
 
@@ -50,6 +56,14 @@ afterEach(() => {
 });
 
 describe("bootstrap-entry 停止回归", () => {
+  it("committed JCEF bundle contains the current core token protocol", () => {
+    const bundlePath = join(process.cwd(), "src/main/resources/web/bundle.js");
+    const bundle = readFileSync(bundlePath, "utf8");
+
+    expect(bundle).toContain("tokensJson");
+    expect(bundle).toContain("english-syntax-punctuation");
+  });
+
   it("RESTORE_ALL 清卡后不再把清卡误判成官方重渲染、也不重新亮出进度浮层", async () => {
     // 预置一个可被扫描的英文段。
     const el = document.createElement("p");
@@ -95,5 +109,64 @@ describe("bootstrap-entry 停止回归", () => {
 
     const status = document.getElementById("english-syntax-status");
     expect(status?.hidden ?? true).toBe(true);
+  });
+});
+
+describe("bootstrap-entry 手动扫描模式", () => {
+  it("autoScan=false 时只注册不上报，浮层也不亮", async () => {
+    const el = document.createElement("p");
+    el.textContent = "The service validates every response before returning anything.";
+    document.body.append(el);
+
+    const initialize = (window as unknown as Record<string, unknown>)
+      .__englishSyntaxInitialize as (previewId: string, generation: number, autoScan?: boolean) => void;
+
+    initialize("pv-manual", 0, false);
+    await flush();
+
+    expect(posted.some((m) => m.type === "VISIBLE_BLOCKS")).toBe(false);
+    const status = document.getElementById("english-syntax-status");
+    expect(status?.hidden ?? true).toBe(true);
+  });
+
+  it("autoScan 省略时仍按整篇模式上报（既有调用方不受影响）", async () => {
+    const el = document.createElement("p");
+    el.textContent = "The service validates every response before returning anything.";
+    document.body.append(el);
+
+    const initialize = (window as unknown as Record<string, unknown>)
+      .__englishSyntaxInitialize as (previewId: string, generation: number, autoScan?: boolean) => void;
+
+    initialize("pv-default", 0);
+    await flush();
+
+    expect(posted.some((m) => m.type === "VISIBLE_BLOCKS")).toBe(true);
+  });
+
+  it("上报的块全部出结果后浮层显示完成", async () => {
+    // requestedBlocks 集合替换 reportedBlockCount 的回归：完成判定不能因为
+    // settledBlocks 里残留上一轮的块而提前或永不满足。
+    const el = document.createElement("p");
+    el.textContent = "The service validates every response before returning anything.";
+    document.body.append(el);
+
+    const initialize = (window as unknown as Record<string, unknown>)
+      .__englishSyntaxInitialize as (previewId: string, generation: number, autoScan?: boolean) => void;
+    const hostMessage = (window as unknown as Record<string, unknown>)
+      .__englishSyntaxMessage as (message: Record<string, unknown>) => void;
+
+    initialize("pv-complete", 0, true);
+    await flush();
+
+    const blocksMessage = posted.find((m) => m.type === "VISIBLE_BLOCKS");
+    expect(blocksMessage).toBeDefined();
+    const blocks = (blocksMessage as { blocks?: Array<{ blockId: string }> }).blocks ?? [];
+    expect(blocks).toHaveLength(1);
+
+    hostMessage(coreResultMessage("pv-complete", 0, blocks[0]!.blockId));
+    await flush();
+
+    const label = document.querySelector(".english-syntax-status-label")?.textContent ?? "";
+    expect(label).toContain("完成");
   });
 });
