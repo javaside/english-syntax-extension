@@ -34,7 +34,8 @@
 			"generation",
 			"sentenceId",
 			"blockId",
-			"componentsJson"
+			"componentsJson",
+			"tokensJson"
 		],
 		CORE_RESULT: [
 			"version",
@@ -43,7 +44,8 @@
 			"generation",
 			"sentenceId",
 			"blockId",
-			"analysisJson"
+			"analysisJson",
+			"tokensJson"
 		],
 		CORE_ERROR: [
 			"version",
@@ -108,6 +110,7 @@
 			case "CORE_STREAM":
 			case "CORE_RESULT":
 				if (!isNonEmptyString(value.sentenceId) || !isNonEmptyString(value.blockId)) return null;
+				if (typeof value.tokensJson !== "string") return null;
 				if (value.type === "CORE_STREAM") {
 					if (typeof value.componentsJson !== "string") return null;
 					return {
@@ -117,7 +120,8 @@
 						generation: value.generation,
 						sentenceId: value.sentenceId,
 						blockId: value.blockId,
-						componentsJson: value.componentsJson
+						componentsJson: value.componentsJson,
+						tokensJson: value.tokensJson
 					};
 				}
 				if (typeof value.analysisJson !== "string") return null;
@@ -128,7 +132,8 @@
 					generation: value.generation,
 					sentenceId: value.sentenceId,
 					blockId: value.blockId,
-					analysisJson: value.analysisJson
+					analysisJson: value.analysisJson,
+					tokensJson: value.tokensJson
 				};
 			case "DETAIL_RESULT":
 				if (!isNonEmptyString(value.sentenceId) || typeof value.analysisJson !== "string") return null;
@@ -193,6 +198,42 @@
 	function resetScanRegistry() {
 		registeredElements = /* @__PURE__ */ new WeakSet();
 	}
+	/**
+	* 取或分配 blockId。与 [scanMarkdownBlocks] 共用 `nextBlockId` 计数器——显式路径先给
+	* 某元素分配过 id，之后自动扫描会沿用它，不会出现双 id。
+	*/
+	function ensureBlockId(element) {
+		const existing = element.getAttribute(BLOCK_ID_ATTRIBUTE);
+		if (existing !== null) return existing;
+		const blockId = `${BLOCK_SELECTOR_PREFIX}${nextBlockId++}`;
+		element.setAttribute(BLOCK_ID_ATTRIBUTE, blockId);
+		return blockId;
+	}
+	/**
+	* 显式手势（快捷键悬停解析）的块定位：从悬停元素逐级向上找最近的可解析块。
+	*
+	* **刻意不套用自动扫描的取舍**：不要求 20 字符、不要求英文占比、不限定候选标签。
+	* `scanMarkdownBlocks` 要在整篇里躲开边栏与样板文字，这里只服务用户指到的那一处——
+	* 套用后的症状是「鼠标明明停在段落上，快捷键却报『未找到可解析的段落』」（短段落、
+	* 术语行、中英混排行全中招）。保留的判据只有四条：排除区、渲染盒子、叶子块、文本非空。
+	*
+	* 按渲染盒子而非标签名认块：Mintlify 一类文档站整篇正文都是 `<span>`，只按标签名
+	* 认块会把这类站点整页判成「未找到」。只认叶子块，否则往上会撞到包着整篇正文的容器。
+	*/
+	function nearestPreviewBlock(target) {
+		const start = target instanceof Element ? target : target instanceof Node ? target.parentElement : null;
+		if (start === null) return null;
+		if (start.closest("input,textarea,[contenteditable]") !== null) return null;
+		for (let current = start; current !== null; current = current.parentElement) {
+			if (!(current instanceof HTMLElement)) continue;
+			if (isExcluded(current)) continue;
+			if (!isRendered(current)) continue;
+			if (!isLeafBlock(current)) continue;
+			if ((current.textContent ?? "").trim().length === 0) continue;
+			return current;
+		}
+		return null;
+	}
 	function isExcluded(element) {
 		return element.closest(EXCLUDED_SELECTOR) !== null;
 	}
@@ -226,11 +267,8 @@
 		for (const element of root.querySelectorAll(CANDIDATE_SELECTOR)) collectCandidates(element, elements);
 		return elements.filter((element) => !registeredElements.has(element) && !element.hasAttribute(HIDDEN_ATTRIBUTE$1)).map((element) => {
 			registeredElements.add(element);
-			const existing = element.getAttribute("data-english-syntax-block");
-			const blockId = existing ?? `${BLOCK_SELECTOR_PREFIX}${nextBlockId++}`;
-			if (existing === null) element.setAttribute(BLOCK_ID_ATTRIBUTE, blockId);
 			return {
-				blockId,
+				blockId: ensureBlockId(element),
 				element,
 				text: (element.textContent ?? "").trim()
 			};
@@ -393,7 +431,20 @@
 		constructor(onDetailRequest) {
 			this.#onDetailRequest = onDetailRequest;
 		}
+		/**
+		* 注册（或重新注册）一个块。**重新注册必须连旧句子一起丢掉**：`#sentences` 是
+		* 全局映射，`#blocks` 里换了新 BlockRecord 而它还留着旧条目时，`#ensureSentence`
+		* 会因「这句已存在」提前返回，新记录的 `sentences` 永远拿不到这一句——`#repaintBlock`
+		* 于是算出 `hasContent=false` 并走 `#restoreBlock`，卡片一张都画不出来。
+		*
+		* 「停止并恢复原文 → 再点开始」正是这条路径：`initialize` 清空防重扫描注册表后
+		* 重扫同一批元素，blockId 由元素上的 `data-english-syntax-block` 属性沿用，
+		* sentenceId（`s-{blockId}-{index}`）也照旧复用，于是新旧条目精确相撞。
+		* （官方 updateDom 重渲染不会撞：整个 body 被换掉，blockId 全部重新分配。）
+		*/
 		registerBlock(blockId, element) {
+			const previous = this.#blocks.get(blockId);
+			if (previous !== void 0) for (const sentenceId of previous.sentences.keys()) this.#sentences.delete(sentenceId);
 			this.#blocks.set(blockId, {
 				blockId,
 				element,
@@ -406,10 +457,10 @@
 		handleHostMessage(message) {
 			switch (message.type) {
 				case "CORE_STREAM":
-					this.renderCoreStream(message.sentenceId, message.blockId, JSON.parse(message.componentsJson));
+					this.renderCoreStream(message.sentenceId, message.blockId, JSON.parse(message.componentsJson), JSON.parse(message.tokensJson ?? "[]"));
 					break;
 				case "CORE_RESULT":
-					this.renderCoreResult(message.sentenceId, message.blockId, JSON.parse(message.analysisJson));
+					this.renderCoreResult(message.sentenceId, message.blockId, JSON.parse(message.analysisJson), JSON.parse(message.tokensJson ?? "[]"));
 					break;
 				case "CORE_ERROR":
 					this.renderCoreError(message.sentenceId, message.blockId, message.code, message.message);
@@ -424,21 +475,23 @@
 				case "RESTORE_ALL": this.restoreAll();
 			}
 		}
-		renderCoreStream(sentenceId, blockId, components) {
+		renderCoreStream(sentenceId, blockId, components, tokens = []) {
 			this.#ensureSentence(blockId, sentenceId);
 			const entry = this.#sentences.get(sentenceId);
 			if (entry === void 0) return;
 			entry.record.provisional = components;
+			if (tokens.length > 0) entry.record.tokens = tokens;
 			const order = this.#blockSentenceOrder.get(entry.blockId) ?? [];
 			if (!order.includes(sentenceId)) order.push(sentenceId);
 			this.#blockSentenceOrder.set(entry.blockId, order);
 			this.#repaintBlock(entry.blockId);
 		}
-		renderCoreResult(sentenceId, blockId, analysis) {
+		renderCoreResult(sentenceId, blockId, analysis, tokens = []) {
 			this.#ensureSentence(blockId, sentenceId);
 			const entry = this.#sentences.get(sentenceId);
 			if (entry === void 0) return;
 			entry.record.analysis = analysis;
+			if (tokens.length > 0) entry.record.tokens = tokens;
 			entry.record.provisional = null;
 			entry.record.failed = false;
 			this.#sentences.set(sentenceId, entry);
@@ -471,6 +524,7 @@
 			record.sentences.set(sentenceId, {
 				analysis: null,
 				provisional: null,
+				tokens: [],
 				failed: false
 			});
 			this.#sentences.set(sentenceId, {
@@ -574,7 +628,10 @@
 				}
 				const coordinateClauseTotal = components.filter((component) => component.role === "COORDINATE_CLAUSE").length;
 				let coordinateClauseIndex = 0;
+				let nextToken = 0;
+				let lastEnglish = null;
 				for (const component of components) {
+					this.#appendPunctuation(lastEnglish ?? section, sentence.tokens, nextToken, component.startToken - 1);
 					let label = roleLabel(component.role);
 					if (component.role === "COORDINATE_CLAUSE" && coordinateClauseTotal >= 2) {
 						coordinateClauseIndex += 1;
@@ -601,7 +658,10 @@
 						this.requestDetail(sentenceId, component.startToken, component.endToken);
 					});
 					section.append(button);
+					lastEnglish = english;
+					nextToken = component.endToken + 1;
 				}
+				this.#appendPunctuation(lastEnglish ?? section, sentence.tokens, nextToken, sentence.tokens.length - 1);
 				if (sentence.analysis === null && sentence.provisional !== null) section.classList.add("english-syntax-provisional");
 				container.append(section);
 			}
@@ -679,6 +739,12 @@
 		#structureText(structure) {
 			return typeof structure.text === "string" ? structure.text : "";
 		}
+		#appendPunctuation(target, tokens, startToken, endToken) {
+			for (let index = startToken; index <= endToken; index += 1) {
+				const token = tokens[index];
+				if (token?.punctuation === true) target.append(createElement(target.ownerDocument, "span", "english-syntax-punctuation", token.leadingWhitespace + token.text));
+			}
+		}
 		#restoreBlock(record) {
 			record.element.removeAttribute(HIDDEN_ATTRIBUTE);
 			record.card?.remove();
@@ -707,6 +773,7 @@
 			record.sentences.set(sentenceId, {
 				analysis: null,
 				provisional: null,
+				tokens: [],
 				failed: false
 			});
 			this.#sentences.set(sentenceId, {
@@ -757,6 +824,16 @@
 	function hideStatus() {
 		if (statusEl !== null) statusEl.hidden = true;
 	}
+	/**
+	* 短提示（2.5 秒自动隐藏）。快捷键路径没有菜单反馈，静默失败会让用户以为键坏了。
+	* 用独立计时器，避免与「解析完成」的淡出互相取消。
+	*/
+	let flashTimer;
+	function flashStatus(text) {
+		clearTimeout(flashTimer);
+		setStatus(text, "error", false);
+		flashTimer = setTimeout(hideStatus, 2500);
+	}
 	function bumpReturned(sentenceCount) {
 		returnedCount += sentenceCount;
 	}
@@ -772,6 +849,7 @@
 		if (s.visibility !== null) s.visibility.stop();
 		s.visibility = null;
 		if (blocks.length === 0) return;
+		if (!s.autoScan) return;
 		const fingerprint = blocks.map((block) => block.blockId).sort().join("\0");
 		if (fingerprint === lastVisibleFingerprint) return;
 		lastVisibleFingerprint = fingerprint;
@@ -786,7 +864,8 @@
 			}))
 		});
 		for (const block of blocks) markBlockActive(block.blockId);
-		reportedBlockCount = blocks.length;
+		requestedBlocks.clear();
+		for (const block of blocks) requestedBlocks.add(block.blockId);
 		settledBlocks.clear();
 		failedBlocks.clear();
 		if (statusEl === null || statusEl.hidden) setStatus(`句法学习：正在解析 ${blocks.length} 段…`, "running");
@@ -797,7 +876,11 @@
 	/** 已收到结果的 blockId 集合（按块判完成）。 */
 	const settledBlocks = /* @__PURE__ */ new Set();
 	const failedBlocks = /* @__PURE__ */ new Set();
-	let reportedBlockCount = 0;
+	/**
+	* 已请求解析的块。按段解析是逐次累加，用计数器会让 settleBlock 的完成判定算错
+	* （第二次按快捷键时 settledBlocks.size 已经 ≥ 1）。整篇路径整体替换、显式路径 add。
+	*/
+	const requestedBlocks = /* @__PURE__ */ new Set();
 	/** 完成浮层淡出定时器。 */
 	let completeTimer;
 	function markBlockActive(blockId) {
@@ -820,14 +903,14 @@
 		activeMarkers.clear();
 		settledBlocks.clear();
 		failedBlocks.clear();
-		reportedBlockCount = 0;
+		requestedBlocks.clear();
 	}
 	/** 一个块的结果回来了：撤标记；全部可见块都出结果 → 完成反馈。 */
 	function settleBlock(blockId, failed) {
 		settledBlocks.add(blockId);
 		if (failed) failedBlocks.add(blockId);
 		unmarkBlockActive(blockId);
-		if (reportedBlockCount > 0 && settledBlocks.size >= reportedBlockCount) {
+		if (requestedBlocks.size > 0 && settledBlocks.size >= requestedBlocks.size) {
 			clearTimeout(completeTimer);
 			setStatus(`✓ 句法解析完成${failedBlocks.size > 0 ? `，${failedBlocks.size} 段失败` : ""}`, "running");
 			completeTimer = setTimeout(hideStatus, 2500);
@@ -875,15 +958,98 @@
 			}),
 			previewId: "",
 			generation: 0,
+			autoScan: true,
 			visibility: null,
 			observer: null
 		};
 		return state;
 	}
-	function initialize(previewId, generation) {
+	/** CSS `:hover` 链的最深元素。happy-dom 等环境不实现该伪类，查询可能抛错，兜住返回 null。 */
+	function deepestHovered() {
+		let chain = null;
+		try {
+			chain = document.querySelectorAll(":hover");
+		} catch {
+			chain = null;
+		}
+		if (chain === null || chain.length === 0) return null;
+		return chain[chain.length - 1] ?? null;
+	}
+	/** 同一块的重复触发去抖：两条快捷键通道（IDEA Action + 本页 keydown）可能同时到达。 */
+	const PARSE_DEBOUNCE_MS = 400;
+	let lastParsedBlockId = "";
+	let lastParsedAt = 0;
+	/**
+	* 解析一段并上报 `PARSE_BLOCK`。
+	*
+	* `target` 省略时查 CSS `:hover` 取最深元素——这是 Kotlin 的调用方式（`executeJavaScript`
+	* 里不传参）。测试与将来可能的右键路径可以显式传入目标元素。
+	*/
+	function parseHoveredBlock(target) {
+		const s = state;
+		if (s === null || s.previewId === "") return;
+		const hovered = target === void 0 ? deepestHovered() : target;
+		if (hovered !== null && hovered.closest("[data-english-syntax-card]") !== null) {
+			flashStatus("该段已解析");
+			return;
+		}
+		const element = nearestPreviewBlock(hovered);
+		if (element === null) {
+			flashStatus("未找到可解析的段落");
+			return;
+		}
+		const blockId = ensureBlockId(element);
+		const now = Date.now();
+		if (blockId === lastParsedBlockId && now - lastParsedAt < PARSE_DEBOUNCE_MS) return;
+		lastParsedBlockId = blockId;
+		lastParsedAt = now;
+		s.renderer.registerBlock(blockId, element);
+		requestedBlocks.add(blockId);
+		settledBlocks.delete(blockId);
+		failedBlocks.delete(blockId);
+		postToHost({
+			version: 1,
+			type: "PARSE_BLOCK",
+			previewId: s.previewId,
+			generation: s.generation,
+			blockId,
+			text: (element.textContent ?? "").trim()
+		});
+		markBlockActive(blockId);
+		setStatus("句法学习：正在解析 1 段…", "running");
+	}
+	/**
+	* 兼底通道键位。由 Kotlin 从 IDEA keymap 读实际绑定后下发；默认与 plugin.xml 声明的一致。
+	* `null` = 不装兼底监听（keymap 里没有可下发的单段字母数字绑定）。
+	*/
+	let hotkey = {
+		code: "KeyT",
+		altKey: true,
+		ctrlKey: false,
+		shiftKey: false,
+		metaKey: false
+	};
+	function setHotkey(descriptor) {
+		if (descriptor === null) {
+			hotkey = null;
+			return;
+		}
+		if (typeof descriptor !== "object") return;
+		const candidate = descriptor;
+		if (typeof candidate.code !== "string" || candidate.code === "") return;
+		hotkey = {
+			code: candidate.code,
+			altKey: candidate.altKey === true,
+			ctrlKey: candidate.ctrlKey === true,
+			shiftKey: candidate.shiftKey === true,
+			metaKey: candidate.metaKey === true
+		};
+	}
+	function initialize(previewId, generation, autoScan = true) {
 		const s = ensureState();
 		s.previewId = previewId;
 		s.generation = generation;
+		s.autoScan = autoScan;
 		returnedCount = 0;
 		lastVisibleFingerprint = "";
 		clearAllActive();
@@ -975,11 +1141,20 @@
 			sentenceId
 		});
 	});
+	document.addEventListener("keydown", (event) => {
+		const bound = hotkey;
+		if (bound === null) return;
+		if (event.code !== bound.code || event.altKey !== bound.altKey || event.ctrlKey !== bound.ctrlKey || event.shiftKey !== bound.shiftKey || event.metaKey !== bound.metaKey) return;
+		event.preventDefault();
+		parseHoveredBlock();
+	});
 	const w = window;
 	w.__englishSyntaxInitialize = initialize;
 	w.__englishSyntaxReload = reload;
 	w.__englishSyntaxScrollTo = scrollTo;
 	w.__englishSyntaxMessage = handleHostMessage;
 	w.__englishSyntaxSetTheme = setDarkMode;
+	w.__englishSyntaxParseHoveredBlock = parseHoveredBlock;
+	w.__englishSyntaxSetHotkey = setHotkey;
 	//#endregion
 })();

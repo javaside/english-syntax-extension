@@ -62,6 +62,9 @@ describe("bootstrap-entry 停止回归", () => {
 
     expect(bundle).toContain("tokensJson");
     expect(bundle).toContain("english-syntax-punctuation");
+    // 忘了 npm run bundle-web 的症状是「Kotlin 侧全绿、真机按快捷键毫无反应」。
+    expect(bundle).toContain("PARSE_BLOCK");
+    expect(bundle).toContain("__englishSyntaxParseHoveredBlock");
   });
 
   it("RESTORE_ALL 清卡后不再把清卡误判成官方重渲染、也不重新亮出进度浮层", async () => {
