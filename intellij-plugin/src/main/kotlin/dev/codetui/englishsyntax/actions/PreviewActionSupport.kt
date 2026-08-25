@@ -24,6 +24,16 @@ object PreviewActionSupport {
     )
   }
 
+  /**
+   * 按段解析（快捷键）的可用性：**只看文件类型与运行时**，不看会话状态、不查面板。
+   *
+   * 冷启动时快捷键自己会轻量启动会话，所以 STOPPED 也要可按。签名里刻意没有
+   * panel/session 参数——`update()` 一旦调 `findPanel` 就会 wrap + 注入 JCEF，
+   * 展开 Tools 菜单这类高频事件就会触发「点开工具菜单即假翻译」。
+   */
+  fun hoverParseEnabled(isMarkdownFile: Boolean, jcefSupported: Boolean): Boolean =
+    isMarkdownFile && jcefSupported
+
   /** Toggle 按钮文案：running → 暂停；paused → 继续；否则 → 暂停（不可用）。 */
   fun togglePauseText(state: SessionState): String = when (state) {
     SessionState.PAUSED -> "继续"

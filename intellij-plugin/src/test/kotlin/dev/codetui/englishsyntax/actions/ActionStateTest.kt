@@ -3,6 +3,7 @@ package dev.codetui.englishsyntax.actions
 import dev.codetui.englishsyntax.analysis.AnalysisServicePort
 import dev.codetui.englishsyntax.analysis.CoreBatchOutcome
 import dev.codetui.englishsyntax.analysis.DetailOutcome
+import dev.codetui.englishsyntax.bridge.HotkeyDescriptor
 import dev.codetui.englishsyntax.domain.CoreAnalysis
 import dev.codetui.englishsyntax.domain.DetailAnalysis
 import dev.codetui.englishsyntax.domain.SentenceInput
@@ -135,5 +136,29 @@ class ActionStateTest {
     manager.disposePreview("pv2")
     assertNull(manager.activePreviewId)
     assertNull(manager.session("pv2"))
+  }
+
+  @Test
+  fun `hover parse availability only depends on file type and runtime`() {
+    // 冷启动、RUNNING、PAUSED 都应可按——所以签名里刻意没有 session/panel 参数：
+    // Action 的 update() 一旦去 findPanel 就会 wrap + 注入 JCEF，那正是「点开工具菜单
+    // 即假翻译」的成因。
+    assertTrue(PreviewActionSupport.hoverParseEnabled(isMarkdownFile = true, jcefSupported = true))
+    assertFalse(PreviewActionSupport.hoverParseEnabled(isMarkdownFile = false, jcefSupported = true))
+    assertFalse(PreviewActionSupport.hoverParseEnabled(isMarkdownFile = true, jcefSupported = false))
+  }
+
+  @Test
+  fun `plugin xml registers the hover parse action with the default alt T shortcut`() {
+    // 兼底通道靠这个 id 去 keymap 读实际绑定；id 写歪了就永远拿不到用户改的键位。
+    val xml = ActionStateTest::class.java.classLoader
+      .getResourceAsStream("META-INF/plugin.xml")!!
+      .use { it.readBytes().toString(Charsets.UTF_8) }
+
+    assertTrue(
+      xml.contains("id=\"${HotkeyDescriptor.PARSE_HOVERED_BLOCK_ACTION_ID}\""),
+      "plugin.xml 的 action id 必须与 HotkeyDescriptor 用来读 keymap 的 id 一致",
+    )
+    assertTrue(xml.contains("first-keystroke=\"alt T\""), "默认键位应为 Alt+T")
   }
 }

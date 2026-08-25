@@ -45,6 +45,8 @@ class StopSyntaxLearningAction(
       return
     }
     manager.stop(previewId)
+    // 复位手动模式：停止后再按快捷键应只翻一段，而不是又把整篇送去翻译。
+    panel.autoScan = false
   }
 
   /** 当前文件面板：actionPerformed 用，会 wrap/attach（真正定位可 send 的面板）。 */

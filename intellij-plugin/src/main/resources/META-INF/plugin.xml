@@ -18,6 +18,12 @@
       <action id="EnglishSyntax.Start"
               class="dev.codetui.englishsyntax.actions.StartSyntaxLearningAction"
               text="开始句法学习"/>
+      <action id="EnglishSyntax.ParseHoveredBlock"
+              class="dev.codetui.englishsyntax.actions.ParseHoveredBlockAction"
+              text="解析鼠标悬停的段落"
+              description="只解析鼠标悬停的那一段；会话未启动时自动轻量启动，不翻译整篇">
+        <keyboard-shortcut first-keystroke="alt T" keymap="$default"/>
+      </action>
       <action id="EnglishSyntax.TogglePause"
               class="dev.codetui.englishsyntax.actions.TogglePauseSyntaxLearningAction"
               text="暂停句法学习"/>
