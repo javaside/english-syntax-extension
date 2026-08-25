@@ -276,13 +276,13 @@
 
 ### 页面消息必须有消费者,接线只有一处
 
-**规则**:JS→Kotlin 的 `VISIBLE_BLOCKS`/`DETAIL_REQUEST`/`RETRY_SENTENCE` 必须经 `PreviewSessionConnector`(Start Action 调 `PreviewSessionConnector.start`)派发进会话;接线顺序不可拆——先 `connect` 再 `manager.start`,会话初始为 `STOPPED`,先于 start 到达的 `VISIBLE_BLOCKS` 会被 `onVisibleBlocks` 直接丢弃。
+**规则**:JS→Kotlin 的 `VISIBLE_BLOCKS`/`DETAIL_REQUEST`/`RETRY_SENTENCE`/`PARSE_BLOCK` 必须经 `PreviewSessionConnector`(Start Action 调 `PreviewSessionConnector.start`,按段解析走同文件的 `parseHovered`)派发进会话;接线顺序不可拆——先 `connect` 再 `manager.start`,会话初始为 `STOPPED`,先于 start 到达的 `VISIBLE_BLOCKS` 会被 `onVisibleBlocks` 直接丢弃。`PARSE_BLOCK` 是唯一不需要「后启动会话」的一条:`parseExplicitBlock` 在 STOPPED 时自己置 RUNNING,所以 `parseHovered` 只接线、不调 `manager.start`,也不置 `autoScan`。
 
 **为什么**:Panel 的 `onPageMessage` 只做协议校验与转发,自己不认识会话;「移除自建预览面板」重构(ca8b93c)曾把接线整体丢掉,协议、会话、渲染每一层单测全绿,但端到端没有任何一条页面消息到达会话。
 
 **症状**:点「开始句法学习」弹正常提示,预览页毫无变化、无任何报错——每层都以为别的层在消费。另:合成 `PREVIEW_READY` 喂回 `onPageMessage` 只是 Kotlin 侧自言自语,驱动 JS 重扫必须执行 `window.__englishSyntaxInitialize`(经 `panel.requestScan()`)。
 
-**守护测试**:`intellij-plugin/src/test/kotlin/.../session/PageMessageWiringTest.kt`(走 Panel 桥接入口断言 VISIBLE_BLOCKS 真正注册进会话)。
+**守护测试**:`intellij-plugin/src/test/kotlin/.../session/PageMessageWiringTest.kt`(走 Panel 桥接入口断言 VISIBLE_BLOCKS 真正注册进会话;同文件另有一例走 `PARSE_BLOCK` 断言按段解析同样到达会话)。
 
 ### 预览页 CSP 没有不安全 eval——bundle 必须走顶层注入
 
@@ -316,10 +316,40 @@
 
 ### Action 的 `update()` 绝不能触发 JCEF 注入
 
-**规则**:三个句法学习 Action(`Start`/`TogglePause`/`Stop`)的 `update()` 只允许**只读定位**已存在的面板 wrapper(`EnglishSyntaxPreviewPanel.findWrappedPanel`,内部只 `getUserData(WRAPPER_KEY)`),**禁止**调用会 `wrap`/`attach`/注入的 `findPanel`。`findPanel` 只在用户真正点按钮的 `actionPerformed` 里用。
+**规则**:三个句法学习 Action(`Start`/`TogglePause`/`Stop`)的 `update()` 只允许**只读定位**已存在的面板 wrapper(`EnglishSyntaxPreviewPanel.findWrappedPanel`,内部只 `getUserData(WRAPPER_KEY)`),**禁止**调用会 `wrap`/`attach`/注入的 `findPanel`。`findPanel` 只在用户真正点按钮的 `actionPerformed` 里用。第四个 Action `ParseHoveredBlock` 把这条推得更彻底:它的 `update()` **连面板都不查**,只看「当前文件是 Markdown」与 JCEF 是否可用(`PreviewActionSupport.hoverParseEnabled`)——它挂着快捷键,IDEA 在按键分发与菜单刷新时都会跑 `update()`,查面板的代价比只从菜单进入更高。
 
 **为什么**:IDEA 展开 Tools 菜单、刷新工具栏等高频事件会对菜单内每个子 action 跑一次 `update()`。若 `update()` 里调用 `findPanel`(内部 `wrap → attach → 注入 bundle + __englishSyntaxInitialize`),会导致「点开工具菜单就自动初始化 JS、扫描全文、给每段打解析中标记、显示状态浮层」的**假翻译**——页面看起来像自动翻译了,但 Kotlin 侧从未有过 RUNNING 会话,也就没有真实模型请求,「翻译不出来」,且暂停/停止因无会话而灰色。曾因把定位改成按当前文件面板而在 `update()` 里调用 `findPanel` 触发此回归。
 
 **症状**:点「工具」菜单即出现解析中竖条 + 右下角状态浮层,但无翻译结果;暂停/停止按钮灰色(无会话)。
 
-**守护测试**:依赖设计约定,`findWrappedPanel` 只读 `getUserData`、不创建 wrapper(结构上无法注入);三个 Action 的 `update()` 一律走 `findWrappedPanel`。
+**守护测试**:依赖设计约定,`findWrappedPanel` 只读 `getUserData`、不创建 wrapper(结构上无法注入);三个会话 Action 的 `update()` 一律走 `findWrappedPanel`。`ActionStateTest` 的 `hover parse availability only depends on file type and runtime` 钉住第四个 Action 的启用判据里不含面板。
+
+### 新增页面消息要同步五处,其中一处漏了不会变红
+
+**规则**:新增一个 JS→Kotlin 页面消息,五处缺一不可——`bridge/BridgeProtocol.kt` 的 `PageMessage` 成员、`parsePageMessage` 分支、`session/PreviewSessionConnector` 的 `when`、`BridgeProtocolTest`,以及 **`resources/web/bridge.ts` 的联合类型 + `PAGE_KEYS_BY_TYPE` + `parsePageMessage` 分支(含 `bridge.test.ts`)**。
+
+**为什么**:JS 侧那份 `parsePageMessage` **运行时并不生效**——`bootstrap-entry.ts` 直接 `postToHost(...)` 构造消息,不经它校验,它只被 `bridge.test.ts` 调用。它存在的意义是让两侧白名单逐字对齐、供后来人照抄。因为不在运行链路上,漏了它**不会有任何测试变红**,Kotlin 侧全绿、功能也正常。
+
+**症状**:没有即时症状。代价在下一次——后来人照着 `bridge.ts` 加消息时,抄到的是一份缺项的样板;或有人误以为页面消息经过 JS 侧校验而把校验逻辑只加在那一侧。`PARSE_BLOCK` 就是这么漏掉的,实现到一半才发现。
+
+**守护测试**:无自动化(结构性约定)。`bridge.test.ts` 只能钉住已加进去的那些消息,钉不住「有没有漏加」。
+
+### 显式手势不套用自动扫描的取舍(IntelliJ 侧)
+
+**规则**:`nearestPreviewBlock` 只保留四条判据——排除区、渲染盒子、叶子块、文本非空。**不得**加上 `scanMarkdownBlocks` 的 20 字符下限与英文占比 60% 门槛,也不得限定候选标签名。
+
+**为什么**:`scanMarkdownBlocks` 要在整篇里躲开边栏与样板文字,那些门槛是为「自动决定翻什么」服务的;快捷键悬停解析是用户已经指明了目标,再拿统计门槛去否决用户就是纯粹的误判。按渲染盒子而非标签名认块的理由同 Chrome 端:Mintlify 一类文档站整篇正文都是 `<span>`。
+
+**症状**:鼠标明明停在段落上,按快捷键却提示「未找到可解析的段落」——短段落、术语行、中英混排行、span 排版的文档站全中招。
+
+**守护测试**:`preview.test.ts`(`accepts short and non-english blocks that the auto scanner would skip`、`accepts a div whose only children are inline`)。
+
+### 手动扫描模式下 rescan 绝不上报
+
+**规则**:`autoScan=false` 时 `rescan()` 只做 `registerBlock`,**不得** `postToHost(VISIBLE_BLOCKS)`。`EnglishSyntaxPreviewPanel.autoScan` 默认 false,只有 `PreviewSessionConnector.start` 置 true。
+
+**为什么**:我们插入卡片本身就是 DOM 变更,会触发 MutationObserver → rescan;保存后官方 `updateDom` 重渲染还会经 `PREVIEW_RENDERED` 换代重发 `initialize`,那一路会 `resetScanRegistry()` 并清空 `lastVisibleFingerprint`,于是全部块重新变成「未注册」。任一条都会把整篇文档送去翻译。
+
+**症状**:按一次快捷键(或按一次后保存文件),整篇文档全部开始翻译——「按段翻译」变成整篇翻译,长文档瞬间几十上百次模型请求。
+
+**守护测试**:`bootstrap-lifecycle.test.ts`(`autoScan=false 时只注册不上报，浮层也不亮`)、`PageMessageWiringTest`(`parse block from the page lightweight-starts the session and registers only that block`,断言 `panel.autoScan == false`)。

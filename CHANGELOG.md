@@ -11,7 +11,8 @@
   - **API Key 存 PasswordSafe**：不进插件状态文件、预览页脚本、桥消息、缓存或日志；发往预览页的消息在入口做键白名单过滤，含 `apiKey`/`headers`/`baseUrl` 的消息整体拒绝（`SecretIsolationTest` 钉住）；
   - **SQLite 缓存与 Chrome 扩展互通**：缓存键与交换格式跨端一致（`shared-fixtures/` 契约向量双端测试钉住），两端阅读同一批文档零重复请求；
   - **模型链路同骨架重实现**（Kotlin）：prompt 序列化、输出校验、一次修复、能力降级（JSON Schema / 流式 / 思考控制只持久化否定态）、五档优先级调度、按句缓存，与 Chrome 端行为对齐；
-  - Markdown 预览重渲染（编辑保存后）自动换代重扫，旧响应不污染新 DOM（Kotlin/JS 双端 generation 守卫）。
+  - Markdown 预览重渲染（编辑保存后）自动换代重扫，旧响应不污染新 DOM（Kotlin/JS 双端 generation 守卫）；
+  - **快捷键按段翻译**（默认 `Alt+T`，可在 IDEA Keymap 改键）：鼠标停在预览的某一段上按下即只解析那一段，会话未启动时自动轻量启动——不再只有「整篇翻译」一种模式，长文档不必为了看一段付出上百次模型请求。焦点在 JCEF 预览里时 IDEA 的按键可能不上交 IDE，预览页自带 keydown 兼底通道且键位跟随 keymap；鼠标不在正文上、或停在已翻译的卡片上，右下角浮层会给出明确提示（快捷键没有菜单反馈，静默失败会让用户以为键坏了）。
 
 ### 修复（IntelliJ 插件）
 

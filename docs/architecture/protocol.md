@@ -252,8 +252,20 @@ correction 键  = SHA-256(["correction", …同上…, pageUrl, sentenceInstance
 
 Chrome 端协议(SW↔content)之外,IntelliJ 端定义 JCEF 页面↔Kotlin 的独立协议,两侧镜像实现(`BridgeProtocol.kt` / `web/bridge.ts`):
 
-- **JS→Kotlin**:`PREVIEW_READY`、`VISIBLE_BLOCKS`(≤50 块,每块 ≤20,000 字符)、`DETAIL_REQUEST`(focus 非负闭区间)、`RETRY_SENTENCE`、`PREVIEW_RENDERED`(官方预览整体重渲染,带 previewId/generation,四键白名单)。
+- **JS→Kotlin**:`PREVIEW_READY`、`VISIBLE_BLOCKS`(≤2000 块,每块 ≤20,000 字符)、`DETAIL_REQUEST`(focus 非负闭区间)、`RETRY_SENTENCE`、`PREVIEW_RENDERED`(官方预览整体重渲染,带 previewId/generation,四键白名单)、`PARSE_BLOCK`(显式手势按段解析)。
+- **`PARSE_BLOCK`**:六键白名单 `version` / `type` / `previewId` / `generation` / `blockId` / `text`,`blockId` 非空、`text` 长度受 `MAX_BLOCK_TEXT`(20,000)限制。由 `PreviewSessionConnector` 的 `when` 派发到 `PreviewSession.parseExplicitBlock(blockId, text)`。**与 `VISIBLE_BLOCKS` 刻意分开**:后者是自动扫描的批量上报(进 120ms 合批窗口、`PAUSED` 时进 `pausedBlocks` 等 resume);前者是用户手势——单块直派不合批、`offscreen = false` 拿 `ACTIVE_VISIBLE_CORE` 最高可见优先级、`allowPaused = true` 穿透暂停、会话 `STOPPED` 时置 `RUNNING` 轻量启动(不触发全文扫描)。两者共用 `registerFresh`,已出结果的句子照旧被过滤掉,所以对同一段连按快捷键不会重复请求。`bypassCache` 不置位:按段解析要的是"翻这一段",不是"重新翻这一段"。
 - **Kotlin→JS**:`SESSION_STATE`、`CORE_STREAM`、`CORE_RESULT`、`CORE_ERROR`、`DETAIL_STREAM`、`DETAIL_RESULT`、`RESTORE_ALL`。`CORE_STREAM`/`CORE_RESULT`/`CORE_ERROR` 必带 `blockId`——JS 侧渲染器靠它**惰性注册句子**(sentenceId 由 Kotlin 权威生成 `s-{blockId}-{index}`,JS 端不做分句),否则 `#sentences` 永远为空、卡片渲染不出来。`DETAIL_*` 不带 blockId(句子在详解前必已注册)。
 - 公共字段:`version=1`、`previewId`、`generation`;句子消息再加 `sentenceId`。
 - **键白名单**:每类型一组允许键,多余键整体拒绝;`apiKey`/`headers`/`baseUrl` 永远禁止。JS 侧对 Kotlin 回调复检 generation,旧代次丢弃。
-- 修改任一侧必须同步另一侧,并让 `bridge.test.ts` 与 `BridgeProtocolTest` 同时红/绿。
+- **新增一条页面消息要同步五处,缺一不可**:① `bridge/BridgeProtocol.kt` 的 `PageMessage` 成员;② 同文件 `parsePageMessage` 的分支(键白名单);③ `session/PreviewSessionConnector` 里 `when (message)` 的分支;④ `BridgeProtocolTest`;⑤ **`resources/web/bridge.ts` 的联合类型 + `PAGE_KEYS_BY_TYPE` + `parsePageMessage` 分支(含 `bridge.test.ts`)**。第⑤处运行时并不生效——`bootstrap-entry.ts` 直接构造消息 `postToHost`,不经它校验——所以漏了**不会有任何测试变红**,Kotlin 侧全绿、功能也正常,代价是两侧白名单就此分叉、后来人照抄的是残缺样板。`PARSE_BLOCK` 就是这么漏掉的,实现到一半才发现(见 [invariants.md](./invariants.md))。
+- **Kotlin → JS 的全局入口**(不走消息信封,由 `executeJavaScript` 直接调,参数一律 JSON 序列化,绝不拼接模型文本):
+
+| 全局入口                                                     | 何时调                        | 说明                                                                                                                                                              |
+| ------------------------------------------------------------ | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `__englishSyntaxInitialize(previewId, generation, autoScan)`  | 注入末尾 / requestScan / 换代 | 第三参数决定 `rescan()` 要不要上报 `VISIBLE_BLOCKS`(手动模式只注册不上报);JS 侧默认 `true` 只为兼容既有调用方,Kotlin 侧总是显式下发 `panel.autoScan`               |
+| `__englishSyntaxReload(offset)`                              | 重新载入                      | 停可见性观察 + 重扫,再恢复滚动位置                                                                                                                                |
+| `__englishSyntaxScrollTo(offset, smooth)`                    | 滚动同步                      | 官方预览滚动联动                                                                                                                                                  |
+| `__englishSyntaxMessage(json)`                               | 每条 Kotlin→JS 消息           | 唯一的 host 消息入口,内部走 `parseHostMessage`                                                                                                                    |
+| `__englishSyntaxSetTheme(isDark)`                            | 注入时与主题变化              | 供 `roles.ts` 选色板                                                                                                                                              |
+| `__englishSyntaxParseHoveredBlock(target?)`                   | 快捷键按段解析                | 省略 `target` 时查 CSS `:hover` 取最深元素(Kotlin 就是这么调的);定位成功即回传 `PARSE_BLOCK`                                                                       |
+| `__englishSyntaxSetHotkey(descriptor)`                       | 注入时(读 keymap 之后)        | 下发页面兼底 keydown 的键位判据;**传 `null` 表示关掉兼底监听**(keymap 里没有可下发的单段字母数字绑定)                                                             |

@@ -88,21 +88,23 @@
 | `cache/CacheTransfer.kt`                     | 与 Chrome 扩展互通的导出/导入(格式头/schema 校验)                                                   |
 | `analysis/AnalysisService.kt`                | 编排:查缓存→分块→调度→校验→一次修复→写缓存;AnalysisServicePort 供测试替换                           |
 | `bridge/BridgeProtocol.kt`                   | JCEF 桥协议:键白名单严格校验,apiKey/headers/baseUrl 一律拒绝                                        |
+| `bridge/HotkeyDescriptor.kt`                 | 兼底 keydown 的键位判据:IDEA keymap 的 KeyStroke → 浏览器 event.code + 四个修饰键;没有可下发的绑定(未绑定 / 只有两段式 chord / 非字母数字键)时返回 null,页面兼底监听整条关掉,不回退 Alt+T 幻影键位 |
 | `markdown/EnglishSyntaxPreviewPanel.kt`      | 官方 MarkdownJCEFHtmlPanel 的能力层包装:复用官方 JCEF 预览(不注册自建 provider),注入 web 资源、previewId/generation、PREVIEW_RENDERED 换代、桥接入口、dispose 语义 |
 | `session/PreviewSession.kt`                  | 单预览会话状态机:start/pause/resume/stop、可见块合批、优先级映射、generation 守卫                   |
 | `session/PreviewSessionManager.kt`           | 项目级会话管理:每 preview 一个 child Job、多 preview 可并行(各文件独立会话,互不阻塞)、Profile 快照刷新 |
-| `session/PreviewSessionConnector.kt`         | JS→Kotlin 消息接线:把 Panel 的页面消息(VISIBLE_BLOCKS/DETAIL_REQUEST/RETRY_SENTENCE)派发进会话,并收口 start 顺序(先接线后启动,STOPPED 会丢块) |
+| `session/PreviewSessionConnector.kt`         | JS→Kotlin 消息接线:把 Panel 的页面消息(VISIBLE_BLOCKS/DETAIL_REQUEST/RETRY_SENTENCE/PARSE_BLOCK)派发进会话,并收口 start 顺序(先接线后启动,STOPPED 会丢块);另有 `parseHovered`(先接线再 `requestParseHoveredBlock`,不碰 autoScan) |
 | `actions/PreviewActionSupport.kt`            | Action 启用条件与进度文案(纯函数)                                                                   |
 | `actions/ActionNotifier.kt`                  | Action 的用户可见反馈:BALLOON 通知(未找到面板/服务不可用/无会话),避免静默失败                       |
 | `actions/StartSyntaxLearningAction.kt`       | 开始句法学习(经 FileEditorManager 定位面板,不扫 Swing)                                              |
 | `actions/TogglePauseSyntaxLearningAction.kt` | 暂停/继续切换                                                                                       |
 | `actions/StopSyntaxLearningAction.kt`        | 停止并恢复原文                                                                                      |
+| `actions/ParseHoveredBlockAction.kt`         | 解析鼠标悬停的段落(默认 Alt+T):冷启动轻量启动会话,只翻这一段,不触发全文扫描;`update()` 只看文件类型与 JCEF 可用性,刻意不查面板(findPanel 会注入) |
 | `EnglishSyntaxBundle.kt`                     | 消息 bundle 接线                                                                                    |
 | `PluginIdentity.kt`                          | 插件身份常量                                                                                        |
 | `PluginServices.kt`                          | 生产装配:应用级服务注册(ModelClientService/AnalysisServiceService/PreviewSessionManagerService),把模型客户端、SQLite 缓存、调度器与会话管理器接进 IntelliJ 服务容器 |
 | `resources/web/bridge.ts`                    | JS 侧桥协议镜像:hasOnlyKeys + generation 复检,旧代次丢弃                                            |
 | `resources/web/bootstrap-entry.ts`           | JCEF 页面入口:接 bridge/preview/render 到 window 全局(`__englishSyntaxInitialize` 等),由 rolldown 打包成 bundle.js 注入 |
-| `resources/web/preview.ts`                   | 预览 DOM 扫描:候选/排除选择器、英文占比、可见性观察                                                 |
+| `resources/web/preview.ts`                   | 预览 DOM 扫描:候选/排除选择器、英文占比、可见性观察;另有显式手势的块定位 `nearestPreviewBlock` 与 `ensureBlockId`(与自动扫描共用 blockId 计数器,判据刻意更松) |
 | `resources/web/render.ts`                    | 句法卡片渲染:可逆替换、流式暂定卡、详解面板,XSS 安全 textContent;结构与视觉对齐 Chrome 端 learning-block.ts |
 | `resources/web/roles.ts`                     | 语法角色颜色与中文标签映射(与 Chrome 端 grammar.ts/ROLE_COLORS 逐值同源,两端视觉必须一致)              |
 | `package.json` / `vitest.config.ts` / `tsconfig.json` | 子工程 npm 工程:web TS 测试(`npm ci && npm test`)独立运行,不挂在 chrome-plugin 依赖下      |

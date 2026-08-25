@@ -12,6 +12,8 @@ cd chrome-plugin && npm test && npx playwright test && npm run lint && npm run f
 - 提交信息用中文主题。
 - **验证退出码别用管道**(`cmd | tail` 会吞掉真实退出码)。
 
+IntelliJ 的 JCEF 真机执行提交的 `intellij-plugin/src/main/resources/web/bundle.js`，不是 `web/*.ts` 源文件。改 Web 源码后必须在 `intellij-plugin/` 运行 `npm run bundle-web` 再测试/构建；`bootstrap-lifecycle.test.ts` 会检查 bundle 是否包含当前核心桥协议标记与按段解析入口（`PARSE_BLOCK`、`__englishSyntaxParseHoveredBlock`），防止 Kotlin 已发送新字段而旧 bundle 的严格白名单把全部结果丢掉，也防止「Kotlin 侧全绿、真机按快捷键毫无反应」。
+
 门禁之外还有一条**提醒**(不阻断):`chrome-plugin/` 里的 `npm run docs:drift`(脚本按仓库根的 git 状态反查,从子目录跑即可) 按本次改动的文件反查该核对哪几份架构文档。它不在上面那条命令链里,因为"改了代码就必须改文档"并非总成立(改 typo、纯重构都不必),硬阻断只会教人学会绕过。详见 [`README.md` 的「维护这套文档」](./README.md#维护这套文档)。
 
 ## 2. 构建
