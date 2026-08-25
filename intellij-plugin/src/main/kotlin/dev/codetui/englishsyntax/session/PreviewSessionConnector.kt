@@ -26,7 +26,22 @@ object PreviewSessionConnector {
    */
   fun start(panel: EnglishSyntaxPreviewPanel, manager: PreviewSessionManager) {
     connect(panel, manager)
+    // 整篇会话：允许 JS 侧 rescan 自动上报全文块（按段解析路径保持 false）。
+    panel.autoScan = true
     manager.start(panel.previewId, HostSender { panel.send(it) }) { kickoff(panel) }
+  }
+
+  /**
+   * 快捷键按段解析的完整接线：先接线（JS 回传的 `PARSE_BLOCK` 必须先有消费者），
+   * 再让页面定位悬停段。
+   *
+   * **不碰 [EnglishSyntaxPreviewPanel.autoScan]**——保持手动模式，除非已有整篇会话把它置过 true。
+   * 会话是否已启动也不用管：[PreviewSession.parseExplicitBlock] 会在 STOPPED 时轻量启动。
+   */
+  fun parseHovered(panel: EnglishSyntaxPreviewPanel, manager: PreviewSessionManager) {
+    connect(panel, manager)
+    panel.requestParseHoveredBlock()
+    LOGGER.info("parseHovered: requested for previewId=${panel.previewId}")
   }
 
   fun connect(panel: EnglishSyntaxPreviewPanel, manager: PreviewSessionManager) {
@@ -38,9 +53,8 @@ object PreviewSessionConnector {
       if (message.previewId != panel.previewId) return@attachPageMessageDispatcher
       when (message) {
         is PageMessage.VisibleBlocks -> session.onVisibleBlocks(message.blocks.map { it.blockId to it.text })
-        // 临时占位：PARSE_BLOCK 的真实分发（单块显式解析）在快捷键接线任务里补，
-        // 这里先让 when 穷尽以便协议改动独立编译通过——不是有意忽略这条消息。
-        is PageMessage.ParseBlock -> Unit
+        // 显式手势：页面已定位好段落，单块派发（轻量启动、穿透暂停、不合批）。
+        is PageMessage.ParseBlock -> session.parseExplicitBlock(message.blockId, message.text)
         is PageMessage.DetailRequest ->
           session.launchDetailRequest(message.sentenceId, message.focusStart, message.focusEnd)
         is PageMessage.RetrySentence -> session.retrySentence(message.sentenceId)

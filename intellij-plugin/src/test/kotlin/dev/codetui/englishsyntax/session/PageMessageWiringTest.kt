@@ -115,4 +115,26 @@ class PageMessageWiringTest {
     delay(100)
     assertTrue(manager.session(panel.previewId) != null)
   }
+
+  @Test
+  fun `parse block from the page lightweight-starts the session and registers only that block`() = runBlocking {
+    PreviewSessionConnector.parseHovered(panel, manager)
+    assertEquals(false, panel.autoScan, "按段解析不得打开自动扫描（否则整篇被翻译）")
+
+    panel.onPageMessage(
+      """{"version":1,"type":"PARSE_BLOCK","previewId":"${panel.previewId}","generation":${panel.generation},"blockId":"b1","text":"The service validates every response today."}""",
+    )
+    delay(150)
+
+    val session = manager.session(panel.previewId)
+    assertNotNull(session, "parseHovered 接线后必须存在会话")
+    assertEquals(SessionState.RUNNING, session.state, "冷启动应轻量启动会话")
+    assertEquals(1, session.counts.discovered, "PARSE_BLOCK 必须注册进会话")
+  }
+
+  @Test
+  fun `start opens auto scan for whole-document sessions`() {
+    PreviewSessionConnector.start(panel, manager)
+    assertEquals(true, panel.autoScan, "整篇会话必须允许 JS 自动上报全文块")
+  }
 }
