@@ -83,6 +83,7 @@ class PreviewSession(
     var phase: SentencePhase,
     val blockId: String,
     val input: SentenceInput,
+    var core: CoreAnalysis? = null,
   )
 
   fun start() {
@@ -145,40 +146,64 @@ class PreviewSession(
       return
     }
     LOGGER.info("onVisibleBlocks: ${blocks.size} blocks, state=$state")
-    val discovered = blocks.flatMap { (blockId, text) ->
-      segmentBlock(text).mapIndexed { index, part ->
-        val tokens = tokenize(part.text)
-        val sentenceId = "s-${blockId}-${index}"
-        SentenceInput(
-          sentenceId = sentenceId,
-          text = part.text,
-          tokens = tokens,
-        )
-      }
-    }
-    // 关键防环：只对「尚未出结果」的句子注册/入队。我们的渲染也是 DOM 变更，
-    // 会触发 JS 侧 MutationObserver → rescan → 再次 VISIBLE_BLOCKS——若这里
-    // 无条件把 READY 句重置为 DISCOVERED，就形成「缓存命中 → 再发 CORE_RESULT →
-    // 再触发 rescan」的无限循环（CPU 狂转、请求风暴）。首次到达的句子才注册记录。
-    val fresh = discovered.filter { input ->
-      when (sentences[input.sentenceId]?.phase) {
-        null -> {
-          sentences[input.sentenceId] = SentenceRecord(SentencePhase.DISCOVERED, blockIdOf(blocks, input.sentenceId), input)
-          true
-        }
-        SentencePhase.FAILED, SentencePhase.STALE -> {
-          // 保留原记录（含 token 供成分回填），允许重新派发
-          true
-        }
-        else -> false
-      }
-    }
+    val fresh = registerFresh(blocks)
     if (fresh.isEmpty()) return
     if (state == SessionState.PAUSED) {
       pausedBlocks += fresh
       return
     }
     enqueueSentences(fresh, offscreen)
+  }
+
+  /**
+   * 分句分词 + 注册 [SentenceRecord]，返回「尚未出结果、需要派发」的句子。
+   *
+   * 关键防环：只对尚未出结果的句子注册/入队。我们的渲染也是 DOM 变更，会触发 JS 侧
+   * MutationObserver → rescan → 再次 VISIBLE_BLOCKS——若这里无条件把 READY 句重置为
+   * DISCOVERED，就形成「缓存命中 → 再发 CORE_RESULT → 再触发 rescan」的无限循环
+   * （CPU 狂转、请求风暴）。首次到达的句子才注册记录。
+   */
+  private fun registerFresh(blocks: List<Pair<String, String>>): List<SentenceInput> {
+    val discovered = blocks.flatMap { (blockId, text) ->
+      segmentBlock(text).mapIndexed { index, part ->
+        SentenceInput(
+          sentenceId = "s-${blockId}-${index}",
+          text = part.text,
+          tokens = tokenize(part.text),
+        )
+      }
+    }
+    return discovered.filter { input ->
+      when (sentences[input.sentenceId]?.phase) {
+        null -> {
+          sentences[input.sentenceId] =
+            SentenceRecord(SentencePhase.DISCOVERED, blockIdOf(blocks, input.sentenceId), input)
+          true
+        }
+        // 保留原记录（含 token 供成分回填），允许重新派发
+        SentencePhase.FAILED, SentencePhase.STALE -> true
+        else -> false
+      }
+    }
+  }
+
+  /**
+   * 显式手势：只解析指定的一段（快捷键悬停解析）。
+   *
+   * 会话未启动时**轻量启动**——置 RUNNING 但不触发全文扫描（JS 侧 `autoScan = false`
+   * 保证 rescan 只注册不上报）。不合批、不绕缓存、穿透暂停，与 Chrome 端
+   * `queueVisibleBlock(id, force = true)` 同构。
+   *
+   * 刻意绕开 [enqueueSentences]：`pendingBatch` 是共享的，`offscreen`/`allowPaused`
+   * 按「最后一次入队者」取值，把显式块混进合批会让同批的普通块也拿到 allowPaused；
+   * 单块派发本来也没有合批收益。
+   */
+  fun parseExplicitBlock(blockId: String, text: String) {
+    if (state == SessionState.STOPPED) state = SessionState.RUNNING
+    val fresh = registerFresh(listOf(blockId to text))
+    if (fresh.isEmpty()) return
+    LOGGER.info("parseExplicitBlock: blockId=$blockId sentences=${fresh.size} state=$state")
+    scope.launch { dispatch(fresh, offscreen = false, allowPaused = true) }
   }
 
   private fun blockIdOf(blocks: List<Pair<String, String>>, sentenceId: String): String {
@@ -233,8 +258,10 @@ class PreviewSession(
     scope.launch { dispatch(batch, offscreen) }
   }
 
-  private suspend fun dispatch(inputs: List<SentenceInput>, offscreen: Boolean) {
-    if (state != SessionState.RUNNING) return
+  private suspend fun dispatch(inputs: List<SentenceInput>, offscreen: Boolean, allowPaused: Boolean = false) {
+    // 普通路径行为不变（PAUSED 直接返回）；只有显式手势传 allowPaused = true 穿透。
+    if (state == SessionState.STOPPED) return
+    if (state == SessionState.PAUSED && !allowPaused) return
     val capturedVersion = operationVersion
     val profile = currentProfile ?: run {
       // 无 Profile：纯缓存查询，未命中句保持原文。
@@ -268,7 +295,9 @@ class PreviewSession(
         sentences = inputs,
         priority = priorityFor(active = true, offscreen = offscreen),
         onStreamedComponent = StreamedComponentSink { sentenceId, components ->
-          if (state == SessionState.RUNNING && capturedVersion == operationVersion) {
+          // 非 STOPPED 即可回推：applyOutcome 本来就不看暂停（在飞请求的最终结果照样
+          // 渲染），分片却被丢掉，表现为「暂停后卡片突然整块冒出来、没有流式过程」。
+          if (state != SessionState.STOPPED && capturedVersion == operationVersion) {
             sender.send(buildJsonObject {
               put("version", 1)
               put("type", "CORE_STREAM")
@@ -277,6 +306,7 @@ class PreviewSession(
               put("sentenceId", sentenceId)
               put("blockId", sentences[sentenceId]?.blockId ?: "")
               put("componentsJson", componentsJson(sentenceId, components))
+              put("tokensJson", tokensJson(sentenceId))
             })
           }
         },
@@ -305,7 +335,10 @@ class PreviewSession(
 
   internal fun applyOutcome(outcome: CoreBatchOutcome) {
     outcome.result.forEach { analysis ->
-      sentences[analysis.sentenceId]?.phase = SentencePhase.READY
+      sentences[analysis.sentenceId]?.let { record ->
+        record.phase = SentencePhase.READY
+        record.core = analysis
+      }
       sender.send(buildJsonObject {
         put("version", 1)
         put("type", "CORE_RESULT")
@@ -314,6 +347,7 @@ class PreviewSession(
         put("sentenceId", analysis.sentenceId)
         put("blockId", sentences[analysis.sentenceId]?.blockId ?: "")
         put("analysisJson", analysisToJson(analysis))
+        put("tokensJson", tokensJson(analysis.sentenceId))
       })
     }
     outcome.failures.forEach { failure: AnalysisFailure ->
@@ -349,12 +383,8 @@ class PreviewSession(
     val record = sentences[sentenceId] ?: return
     if (state == SessionState.STOPPED) return
     val profile = currentProfile ?: return
+    val core = record.core ?: return
     val capturedVersion = operationVersion
-    val core = dev.codetui.englishsyntax.domain.CoreAnalysis(
-      sentenceId = sentenceId,
-      components = emptyList(),
-      modelProfileId = profile.id,
-    )
     val detail = analysis.analyzeDetail(
       profile = profile,
       documentId = documentId,
@@ -423,6 +453,18 @@ class PreviewSession(
     sentences.clear()
     pendingBatch.clear()
   }
+
+  /** 源 Token JSON：JCEF 按覆盖间隙恢复破折号、逗号等未覆盖标点。 */
+  private fun tokensJson(sentenceId: String): String = buildJsonArray {
+    sentences[sentenceId]?.input?.tokens?.forEach { token ->
+      add(buildJsonObject {
+        put("id", token.id)
+        put("text", token.text)
+        put("leadingWhitespace", token.leadingWhitespace)
+        put("punctuation", token.punctuation)
+      })
+    }
+  }.toString()
 
   /** 流式分片 JSON：JS 端 renderCoreStream 直接 parse 为 ComponentPayload[]。 */
   private fun componentsJson(sentenceId: String, components: List<CoreComponent>): String =

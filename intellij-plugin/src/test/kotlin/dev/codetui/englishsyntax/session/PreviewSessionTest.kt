@@ -30,6 +30,7 @@ import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 class PreviewSessionTest {
@@ -38,6 +39,7 @@ class PreviewSessionTest {
     var analyzeCalls = 0
     var lastPriority: SchedulerPriority? = null
     var lastSentences: List<SentenceInput> = emptyList()
+    var lastBypassCache: Boolean? = null
     var cancelledDocuments = mutableListOf<String>()
     var lookupResults: MutableMap<String, CoreAnalysis> = mutableMapOf()
     var outcome: CoreBatchOutcome = CoreBatchOutcome(emptyList(), emptyList(), cacheHit = false)
@@ -46,6 +48,8 @@ class PreviewSessionTest {
     var onStreamOnce: ((dev.codetui.englishsyntax.analysis.StreamedComponentSink) -> Unit)? = null
     /** 测试注入：detail 结果（analyzeDetail 直接返回它）。 */
     var detailOutcome: DetailOutcome? = null
+    var detailCalls = 0
+    var lastDetailCore: CoreAnalysis? = null
     /** 测试注入：analyzeCore 直接抛异常（模拟模型层崩溃，验证会话兜底给终态）。 */
     var throwOnAnalyzeCore = false
 
@@ -60,6 +64,7 @@ class PreviewSessionTest {
       analyzeCalls += 1
       lastPriority = priority
       lastSentences = sentences
+      lastBypassCache = bypassCache
       if (throwOnAnalyzeCore) throw IllegalStateException("model crash")
       onStreamOnce?.let { it(onStreamedComponent!!) }
       onStreamOnce = null
@@ -85,6 +90,8 @@ class PreviewSessionTest {
       focus: TokenRange,
       onStreamedStructure: dev.codetui.englishsyntax.analysis.StreamedStructureSink?,
     ): DetailOutcome {
+      detailCalls += 1
+      lastDetailCore = core
       detailOutcome?.let { return it }
       val detail = DetailAnalysis(
         sentenceId = sentence.sentenceId,
@@ -214,6 +221,47 @@ class PreviewSessionTest {
     assertEquals(SentencePhase.READY, session.sentences["s-b1-0"]?.phase)
   }
 
+  /**
+   * 「停止并恢复原文」→ 再点开始 → 页面重扫上报同一批块：必须重新派发并重新回推
+   * CORE_RESULT。stop() 清空了 sentences，同名 sentenceId 于是作为新句重新注册；
+   * 若哪天 stop 改成保留记录，防环守卫（只放行「尚未出结果」的句子）会把它们当已
+   * 完成而永不派发——真机表现是「恢复原文后再点翻译，整页不动且无报错」。
+   */
+  @Test
+  fun `stop then start dispatches the same blocks again`() = runBlocking {
+    val session = session()
+    val blocks = listOf("b1" to "The service validates every response carefully today.")
+    service.outcome = CoreBatchOutcome(
+      listOf(
+        CoreAnalysis(
+          sentenceId = "s-b1-0",
+          components = listOf(CoreComponent(0, 1, GrammarRole.SUBJECT, "该服务")),
+          modelProfileId = "p1",
+        ),
+      ),
+      emptyList(),
+      cacheHit = false,
+    )
+    session.start()
+    session.onVisibleBlocks(blocks)
+    session.flushBatch(offscreen = false)
+    kotlinx.coroutines.delay(100)
+    assertEquals(1, service.analyzeCalls)
+    assertEquals(SentencePhase.READY, session.sentences["s-b1-0"]?.phase)
+
+    session.stop()
+    assertEquals(SessionState.STOPPED, session.state)
+
+    session.start()
+    session.onVisibleBlocks(blocks)
+    session.flushBatch(offscreen = false)
+    kotlinx.coroutines.delay(100)
+
+    assertEquals(2, service.analyzeCalls)
+    assertEquals(SentencePhase.READY, session.sentences["s-b1-0"]?.phase)
+    assertEquals(2, sender.of("CORE_RESULT").size)
+  }
+
   @Test
   fun `dispatch wires the stream sink and forwards streamed components as CORE_STREAM`() = runBlocking {
     // 流式接线守卫：曾漏传 onStreamedComponent → 全程非流式，等整批返回才渲染
@@ -237,6 +285,8 @@ class PreviewSessionTest {
     val payload = streams.first()["componentsJson"]?.jsonPrimitive?.contentOrNull ?: error("no payload")
     assertTrue(payload.contains("\"role\":\"SUBJECT\""), "分片要带角色枚举, got: $payload")
     assertTrue(payload.contains("\"text\":\"The service\""), "分片要回填英文原文, got: $payload")
+    val tokens = streams.first()["tokensJson"]?.jsonPrimitive?.contentOrNull ?: error("no tokens")
+    assertTrue(tokens.contains("\"leadingWhitespace\""), "分片要带源 Token 供标点还原, got: $tokens")
     assertEquals("b1", streams.first()["blockId"]?.jsonPrimitive?.contentOrNull)
   }
 
@@ -271,6 +321,41 @@ class PreviewSessionTest {
   }
 
   @Test
+  fun `detail request reuses the verified core analysis`() = runBlocking {
+    // 回归：此前点击成分时临时构造 components=[]，详解模型失去已确认的句法边界，
+    // 会重新猜结构并产出与正文错位的局部译文。
+    val session = session()
+    session.start()
+    session.onVisibleBlocks(listOf("b1" to "The service validates every response carefully today."))
+    val first = session.sentences.values.firstOrNull()?.input ?: error("no sentence")
+    val verifiedCore = CoreAnalysis(
+      sentenceId = first.sentenceId,
+      components = listOf(
+        CoreComponent(0, 1, GrammarRole.SUBJECT, "该服务"),
+        CoreComponent(2, 5, GrammarRole.PREDICATE, "仔细验证每个响应"),
+      ),
+      modelProfileId = "p1",
+    )
+    session.applyOutcome(CoreBatchOutcome(listOf(verifiedCore), emptyList(), cacheHit = false))
+
+    session.onDetailRequest(first.sentenceId, 2, 5)
+
+    assertSame(verifiedCore, service.lastDetailCore)
+  }
+
+  @Test
+  fun `detail request is ignored until verified core exists`() = runBlocking {
+    val session = session()
+    session.start()
+    session.onVisibleBlocks(listOf("b1" to "The service validates every response carefully today."))
+    val first = session.sentences.values.firstOrNull()?.input ?: error("no sentence")
+
+    session.onDetailRequest(first.sentenceId, 0, 1)
+
+    assertEquals(0, service.detailCalls)
+  }
+
+  @Test
   fun `detail result backfills english text and grammarPoints`() = runBlocking {
     // 详解最终结果必须回填 structure.text（英文摘录）与 grammarPoints——否则点成分后
     // 完整结果覆盖流式时英文对照与语法点消失（Chrome 端两处都有）。
@@ -301,6 +386,19 @@ class PreviewSessionTest {
     val wired = PreviewSessionManager(scope, service, { profile }).obtain("pv-detail", sender) { }
     wired.start()
     wired.onVisibleBlocks(listOf("b1" to "The service validates every response carefully today."))
+    wired.applyOutcome(
+      CoreBatchOutcome(
+        listOf(
+          CoreAnalysis(
+            sentenceId = first.sentenceId,
+            components = listOf(CoreComponent(0, 1, GrammarRole.SUBJECT, "该服务")),
+            modelProfileId = "p1",
+          ),
+        ),
+        emptyList(),
+        cacheHit = false,
+      ),
+    )
     wired.launchDetailRequest(first.sentenceId, focus.startToken, focus.endToken)
     kotlinx.coroutines.delay(100)
 
@@ -475,5 +573,70 @@ class PreviewSessionTest {
     manager.stop("pv-b")
     assertEquals(SessionState.PAUSED, manager.session("pv-a")?.state)
     assertEquals(SessionState.STOPPED, manager.session("pv-b")?.state)
+  }
+
+  @Test
+  fun `parse explicit block starts a session without scanning the whole document`() = runBlocking {
+    // 快捷键可作为冷启动入口：置 RUNNING 但绝不触发全文扫描，否则「按段翻译」变成整篇翻译。
+    val session = session()
+    session.parseExplicitBlock("b1", "The service validates every response carefully today.")
+    kotlinx.coroutines.delay(100)
+
+    assertEquals(SessionState.RUNNING, session.state)
+    assertEquals(0, scanRequests, "显式按段解析不得请求扫描")
+    assertEquals(1, service.analyzeCalls)
+  }
+
+  @Test
+  fun `parse explicit block dispatches at visible core priority without bypassing cache`() = runBlocking {
+    val session = session()
+    session.start()
+    session.parseExplicitBlock("b1", "The service validates every response carefully today.")
+    kotlinx.coroutines.delay(100)
+
+    assertEquals(1, service.analyzeCalls)
+    assertEquals(SchedulerPriority.ACTIVE_VISIBLE_CORE, service.lastPriority)
+    assertEquals(false, service.lastBypassCache, "按段解析不绕缓存（绕缓存只属于重试）")
+    assertTrue(service.lastSentences.all { it.sentenceId.startsWith("s-b1-") }, "只应派发这一段")
+  }
+  @Test
+  fun `parse explicit block punches through pause`() = runBlocking {
+    // 显式手势穿透暂停：否则 JS 打上的「解析中」竖条会一直亮到用户点继续。
+    val session = session()
+    session.start()
+    session.pause()
+    session.parseExplicitBlock("b1", "The service validates every response carefully today.")
+    kotlinx.coroutines.delay(100)
+
+    assertEquals(1, service.analyzeCalls, "暂停中显式按段解析仍应派发")
+    assertEquals(SessionState.PAUSED, session.state, "显式手势不改变会话状态")
+  }
+
+  @Test
+  fun `parse explicit block is idempotent for the same block`() = runBlocking {
+    // 两条快捷键通道（IDEA Action + 页面 keydown）可能同时到达，重复按键也不能翻倍请求。
+    val session = session()
+    session.start()
+    session.parseExplicitBlock("b1", "The service validates every response carefully today.")
+    session.parseExplicitBlock("b1", "The service validates every response carefully today.")
+    kotlinx.coroutines.delay(100)
+
+    assertEquals(1, service.analyzeCalls)
+  }
+
+  @Test
+  fun `streamed components still reach the page while paused`() = runBlocking {
+    // 暂停穿透的配套：分片守卫从「必须 RUNNING」放宽到「非 STOPPED」。否则显式路径
+    // 在暂停时只能等整批返回，卡片突然整块冒出来、没有流式过程。
+    val session = session()
+    session.start()
+    session.pause()
+    service.onStreamOnce = { sink ->
+      sink.accept("s-b1-0", listOf(CoreComponent(0, 1, GrammarRole.SUBJECT, "该服务")))
+    }
+    session.parseExplicitBlock("b1", "The service validates every response carefully today.")
+    kotlinx.coroutines.delay(100)
+
+    assertTrue(sender.of("CORE_STREAM").isNotEmpty(), "暂停中显式派发的分片也要回推")
   }
 }
