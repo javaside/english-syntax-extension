@@ -170,3 +170,147 @@ describe("bootstrap-entry 手动扫描模式", () => {
     expect(label).toContain("完成");
   });
 });
+
+describe("bootstrap-entry 按段解析", () => {
+  const initialize = () =>
+    (window as unknown as Record<string, unknown>).__englishSyntaxInitialize as (
+      previewId: string,
+      generation: number,
+      autoScan?: boolean,
+    ) => void;
+  const parseHovered = () =>
+    (window as unknown as Record<string, unknown>).__englishSyntaxParseHoveredBlock as (
+      target?: Element | null,
+    ) => void;
+  const label = (): string =>
+    document.querySelector(".english-syntax-status-label")?.textContent ?? "";
+
+  it("只发一条单块 PARSE_BLOCK，且不上报整篇", async () => {
+    const para = document.createElement("p");
+    // 故意很短：显式手势不受自动扫描的 20 字符门槛限制。
+    para.textContent = "Short.";
+    const other = document.createElement("p");
+    other.textContent = "Another paragraph long enough for the auto scanner to pick it up.";
+    document.body.append(para, other);
+
+    initialize()("pv-hover", 0, false);
+    await flush();
+    posted.length = 0;
+
+    parseHovered()(para);
+    await flush();
+
+    const parsed = posted.filter((m) => m.type === "PARSE_BLOCK");
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0]!.text).toBe("Short.");
+    expect(parsed[0]!.blockId).toBe(para.getAttribute("data-english-syntax-block"));
+    expect(posted.some((m) => m.type === "VISIBLE_BLOCKS")).toBe(false);
+  });
+
+  it("同一段 400ms 内重复触发只发一条", async () => {
+    // 离屏渲染模式下同一次按键可能既到 IDE Action 又到 CEF，两条通道都会走到这里。
+    const para = document.createElement("p");
+    para.textContent = "Debounced paragraph text.";
+    document.body.append(para);
+
+    initialize()("pv-debounce", 0, false);
+    await flush();
+    posted.length = 0;
+
+    parseHovered()(para);
+    parseHovered()(para);
+    await flush();
+
+    expect(posted.filter((m) => m.type === "PARSE_BLOCK")).toHaveLength(1);
+  });
+
+  it("悬停不在正文上时提示且不发消息", async () => {
+    const pre = document.createElement("pre");
+    const code = document.createElement("code");
+    code.textContent = "const answer = 1;";
+    pre.append(code);
+    document.body.append(pre);
+
+    initialize()("pv-miss", 0, false);
+    await flush();
+    posted.length = 0;
+
+    parseHovered()(code);
+    await flush();
+
+    expect(posted.some((m) => m.type === "PARSE_BLOCK")).toBe(false);
+    expect(label()).toContain("未找到");
+  });
+
+  it("悬停在已渲染的卡片上时提示该段已解析", async () => {
+    const card = document.createElement("div");
+    card.setAttribute("data-english-syntax-card", "true");
+    const inner = document.createElement("span");
+    inner.textContent = "Rendered card text.";
+    card.append(inner);
+    document.body.append(card);
+
+    initialize()("pv-card", 0, false);
+    await flush();
+    posted.length = 0;
+
+    parseHovered()(inner);
+    await flush();
+
+    expect(posted.some((m) => m.type === "PARSE_BLOCK")).toBe(false);
+    expect(label()).toContain("该段已解析");
+  });
+
+  it("keydown 兼底逐位匹配修饰键，并随 setHotkey 改键", async () => {
+    initialize()("pv-keyboard", 0, false);
+    await flush();
+
+    const setHotkey = (window as unknown as Record<string, unknown>).__englishSyntaxSetHotkey as (
+      descriptor: unknown,
+    ) => void;
+    const clearLabel = (): void => {
+      const node = document.querySelector(".english-syntax-status-label");
+      if (node !== null) node.textContent = "";
+    };
+    const press = (init: KeyboardEventInit): void => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, ...init }));
+    };
+
+    // 修饰键必须逐一相等：Alt+Shift+T 不得触发绑定为 Alt+T 的入口。
+    clearLabel();
+    press({ code: "KeyT", altKey: true, shiftKey: true });
+    await flush();
+    expect(label()).toBe("");
+
+    // 默认 Alt+T 触发。happy-dom 不实现 :hover，悬停查询取空 → 走「未找到」分支，
+    // 这已足以证明入口被调用（用 event.code 而非 event.key：macOS 上 ⌥T 的 key 是 "†"）。
+    press({ code: "KeyT", altKey: true });
+    await flush();
+    expect(label()).toContain("未找到");
+
+    setHotkey({ code: "KeyJ", altKey: false, ctrlKey: true, shiftKey: false, metaKey: false });
+
+    clearLabel();
+    press({ code: "KeyT", altKey: true });
+    await flush();
+    expect(label()).toBe("");
+
+    press({ code: "KeyJ", ctrlKey: true });
+    await flush();
+    expect(label()).toContain("未找到");
+
+    // 显式 null = keymap 里没有可下发的绑定（两段式 chord / F7 之类）→ 关掉兼底监听。
+    // 不能退回默认 Alt+T：那是用户没绑的幻影键位，按下去还会 preventDefault。
+    setHotkey(null);
+    clearLabel();
+    press({ code: "KeyJ", ctrlKey: true });
+    await flush();
+    expect(label()).toBe("");
+    press({ code: "KeyT", altKey: true });
+    await flush();
+    expect(label()).toBe("");
+
+    // 复位：hotkey 是模块级状态，跨用例共享。
+    setHotkey({ code: "KeyT", altKey: true, ctrlKey: false, shiftKey: false, metaKey: false });
+  });
+});
