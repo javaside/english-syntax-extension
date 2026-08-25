@@ -1948,7 +1948,9 @@ git commit -m "build: 重打 JCEF 预览 bundle（含按段解析入口）"
 
 补 `PARSE_BLOCK` 页面消息一条：字段 `version/type/previewId/generation/blockId/text`，`blockId` 非空、`text` 受 `MAX_BLOCK_TEXT` 限制，由 `PreviewSessionConnector` 派发到 `PreviewSession.parseExplicitBlock`；说明它与 `VISIBLE_BLOCKS` 分开的理由（前者是用户手势：不合批、不绕缓存、穿透暂停；后者是自动扫描的批量上报）。
 
-同时更新 Kotlin → JS 全局入口清单：`__englishSyntaxInitialize(previewId, generation, autoScan)` 新增第三参数、新增 `__englishSyntaxParseHoveredBlock(target?)` 与 `__englishSyntaxSetHotkey(descriptor)`。
+**并把「新增一条页面消息要同步几处」从四处改成五处**：除 Kotlin 侧的 `PageMessage` 成员、`parsePageMessage` 分支、Connector 的 `when`、`BridgeProtocolTest`，还有 `web/bridge.ts` 的联合类型 + `PAGE_KEYS_BY_TYPE` + `parsePageMessage` 分支（含 `bridge.test.ts`）。这份 JS 镜像运行时不生效——`bootstrap-entry.ts` 直接构造消息 `postToHost`，不经它校验——所以漏了**不会有任何测试变红**，但两侧白名单就此分叉，后来人照抄的是残缺样板。本次就是实现中途才发现漏了这一处。
+
+同时更新 Kotlin → JS 全局入口清单：`__englishSyntaxInitialize(previewId, generation, autoScan)` 新增第三参数、新增 `__englishSyntaxParseHoveredBlock(target?)` 与 `__englishSyntaxSetHotkey(descriptor)`（传 `null` 表示关掉页面兼底监听）。
 
 - [ ] **Step 3: `rendering.md` 补悬停定位与手动模式**
 
@@ -1957,9 +1959,23 @@ git commit -m "build: 重打 JCEF 预览 bundle（含按段解析入口）"
 1. **显式手势的块定位**：`nearestPreviewBlock` 从悬停元素向上找最近的可解析块，判据只有排除区、渲染盒子（computed display 非空串且非 `inline*`）、叶子块、文本非空；不套用 `scanMarkdownBlocks` 的 20 字符与英文占比 60% 门槛。
 2. **手动扫描模式**：`autoScan=false` 时 `rescan()` 只注册不上报；默认即 false，只有 `PreviewSessionConnector.start`（整篇会话）会置 true，Stop Action 复位。段落级「解析中」标记与完成账目改用 `requestedBlocks` 集合，整篇路径整体替换、按段路径 add。
 
-- [ ] **Step 4: `invariants.md` 加一条**
+- [ ] **Step 4: `invariants.md` 加三条**
 
-按文件既有的四段式（规则 / 为什么 / 症状 / 守护测试）追加：
+按文件既有的四段式（规则 / 为什么 / 症状 / 守护测试）追加。除下面两条外，再补一条记录本次踩到的坑：
+
+```markdown
+### 新增页面消息要同步五处,其中一处漏了不会变红
+
+**规则**:新增一个 JS→Kotlin 页面消息,五处缺一不可——`bridge/BridgeProtocol.kt` 的 `PageMessage` 成员、`parsePageMessage` 分支、`session/PreviewSessionConnector` 的 `when`、`BridgeProtocolTest`,以及 **`resources/web/bridge.ts` 的联合类型 + `PAGE_KEYS_BY_TYPE` + `parsePageMessage` 分支(含 `bridge.test.ts`)**。
+
+**为什么**:JS 侧那份 `parsePageMessage` **运行时并不生效**——`bootstrap-entry.ts` 直接 `postToHost(...)` 构造消息,不经它校验,它只被 `bridge.test.ts` 调用。它存在的意义是让两侧白名单逐字对齐、供后来人照抄。因为不在运行链路上,漏了它**不会有任何测试变红**,Kotlin 侧全绿、功能也正常。
+
+**症状**:没有即时症状。代价在下一次——后来人照着 `bridge.ts` 加消息时,抄到的是一份缺项的样板;或有人误以为页面消息经过 JS 侧校验而把校验逻辑只加在那一侧。`PARSE_BLOCK` 就是这么漏掉的,实现到一半才发现。
+
+**守护测试**:无自动化(结构性约定)。`bridge.test.ts` 只能钉住已加进去的那些消息,钉不住「有没有漏加」。
+```
+
+再追加下面两条：
 
 ```markdown
 ### 显式手势不套用自动扫描的取舍(IntelliJ 侧)

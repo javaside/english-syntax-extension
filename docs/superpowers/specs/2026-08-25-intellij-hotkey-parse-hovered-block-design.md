@@ -56,12 +56,14 @@ data class ParseBlock(
 ) : PageMessage
 ```
 
-按 AGENTS.md 的「协议三层校验必须同步」，四处缺一不可：
+按 AGENTS.md 的「协议三层校验必须同步」，**五处**缺一不可（实现时才发现 JS 侧也镜像了 JS→Kotlin 方向的协议，原稿只列了四处）：
 
 1. `bridge/BridgeProtocol.kt` 的 `PageMessage` 新成员；
 2. `parsePageMessage` 新分支，键白名单 `version/type/previewId/generation/blockId/text`，`blockId` 非空、`text` 长度不超过复用的 `MAX_BLOCK_TEXT`；
 3. `session/PreviewSessionConnector.connect` 的 `when` 新 case → `session.parseExplicitBlock(...)`；
-4. `BridgeProtocolTest` 断言白名单（多余键、缺键、超长文本、含 `apiKey`/`headers`/`baseUrl` 全拒）。
+4. `BridgeProtocolTest` 断言白名单（多余键、缺键、超长文本、含 `apiKey`/`headers`/`baseUrl` 全拒）；
+5. `web/bridge.ts` 的 `PageMessage` 联合类型 + `PAGE_KEYS_BY_TYPE` + `parsePageMessage` 分支，以及 `bridge.test.ts` 的对应用例。这份 JS 镜像在**运行时并不生效**（`bootstrap-entry.ts` 直接 `postToHost` 构造消息，不经它校验），它的唯一作用是让两侧白名单保持逐字对齐、供后来人照抄；漏了不会有任何测试变红，但镜像就不再是镜像了。
+
 
 `EnglishSyntaxPreviewPanel.onPageMessage` 的 `when` 有 `else` 分支，无需改。**不新增 `HostMessage` 类型**，`parseHostMessage` 不动。
 

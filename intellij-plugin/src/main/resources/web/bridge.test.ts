@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseHostMessage, parsePageMessage } from "./bridge";
+import { MAX_BLOCK_TEXT, parseHostMessage, parsePageMessage } from "./bridge";
 
 describe("parsePageMessage", () => {
   it("accepts minimal preview ready", () => {
@@ -165,6 +165,60 @@ describe("parsePageMessage", () => {
       }),
     ).toBeNull();
   });
+
+  it("accepts parse block for the hotkey path", () => {
+    const message = parsePageMessage({
+      version: 1,
+      type: "PARSE_BLOCK",
+      previewId: "p1",
+      generation: 2,
+      blockId: "b7",
+      text: "Short line.",
+    });
+
+    expect(message).toEqual({
+      version: 1,
+      type: "PARSE_BLOCK",
+      previewId: "p1",
+      generation: 2,
+      blockId: "b7",
+      text: "Short line.",
+    });
+  });
+
+  it("rejects parse block with extra keys, empty blockId, or oversized text", () => {
+    expect(
+      parsePageMessage({
+        version: 1,
+        type: "PARSE_BLOCK",
+        previewId: "p1",
+        generation: 0,
+        blockId: "b1",
+        text: "t",
+        target: "body",
+      }),
+    ).toBeNull();
+    expect(
+      parsePageMessage({
+        version: 1,
+        type: "PARSE_BLOCK",
+        previewId: "p1",
+        generation: 0,
+        blockId: "",
+        text: "t",
+      }),
+    ).toBeNull();
+    expect(
+      parsePageMessage({
+        version: 1,
+        type: "PARSE_BLOCK",
+        previewId: "p1",
+        generation: 0,
+        blockId: "b1",
+        text: "a".repeat(MAX_BLOCK_TEXT + 1),
+      }),
+    ).toBeNull();
+  });
 });
 
 describe("parseHostMessage", () => {
@@ -184,7 +238,7 @@ describe("parseHostMessage", () => {
     expect(message && message.type === "SESSION_STATE" ? message.ready : null).toBe(1);
   });
 
-  it("accepts core result with blockId", () => {
+  it("accepts core result with blockId and source tokens", () => {
     const message = parseHostMessage(
       {
         version: 1,
@@ -194,6 +248,7 @@ describe("parseHostMessage", () => {
         sentenceId: "s-b1-0",
         blockId: "b1",
         analysisJson: "{}",
+        tokensJson: '[{"id":0,"text":"—","leadingWhitespace":" ","punctuation":true}]',
       },
       3,
     );
@@ -205,6 +260,7 @@ describe("parseHostMessage", () => {
       sentenceId: "s-b1-0",
       blockId: "b1",
       analysisJson: "{}",
+      tokensJson: '[{"id":0,"text":"—","leadingWhitespace":" ","punctuation":true}]',
     });
   });
 

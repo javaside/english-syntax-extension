@@ -45,12 +45,29 @@ export interface PreviewRendered extends PageMessageBase {
   type: "PREVIEW_RENDERED";
 }
 
-export type PageMessage = PreviewReady | VisibleBlocks | DetailRequest | RetrySentence | PreviewRendered;
+/**
+ * 显式手势：页面已定位好段落，只解析这一段（快捷键悬停解析）。
+ * 与 [VisibleBlocks] 分开是有意的——后者是自动扫描的批量上报，前者是用户手势，
+ * Kotlin 侧的优先级、合批与暂停语义都不同。
+ */
+export interface ParseBlock extends PageMessageBase {
+  type: "PARSE_BLOCK";
+  blockId: string;
+  text: string;
+}
+
+export type PageMessage =
+  | PreviewReady
+  | VisibleBlocks
+  | DetailRequest
+  | RetrySentence
+  | PreviewRendered
+  | ParseBlock;
 
 export type HostMessage =
   | ({ type: "SESSION_STATE"; state: string; ready: number; discovered: number; failed: number } & PageMessageBase)
-  | ({ type: "CORE_STREAM"; sentenceId: string; blockId: string; componentsJson: string } & PageMessageBase)
-  | ({ type: "CORE_RESULT"; sentenceId: string; blockId: string; analysisJson: string } & PageMessageBase)
+  | ({ type: "CORE_STREAM"; sentenceId: string; blockId: string; componentsJson: string; tokensJson: string } & PageMessageBase)
+  | ({ type: "CORE_RESULT"; sentenceId: string; blockId: string; analysisJson: string; tokensJson: string } & PageMessageBase)
   | ({ type: "CORE_ERROR"; sentenceId: string; blockId: string; code: string; message: string } & PageMessageBase)
   | ({ type: "DETAIL_STREAM"; sentenceId: string; focusStart: number; focusEnd: number; structuresJson: string } & PageMessageBase)
   | ({ type: "DETAIL_RESULT"; sentenceId: string; analysisJson: string } & PageMessageBase)
@@ -80,6 +97,7 @@ const PAGE_KEYS_BY_TYPE: Readonly<Record<string, readonly string[]>> = {
   DETAIL_REQUEST: ["version", "type", "previewId", "generation", "sentenceId", "focus"],
   RETRY_SENTENCE: ["version", "type", "previewId", "generation", "sentenceId"],
   PREVIEW_RENDERED: ["version", "type", "previewId", "generation"],
+  PARSE_BLOCK: ["version", "type", "previewId", "generation", "blockId", "text"],
 };
 
 /** JS → Kotlin 方向：白名单校验后返回封闭联合，或 null 表示拒绝。 */
@@ -161,6 +179,19 @@ export function parsePageMessage(value: unknown): PageMessage | null {
         generation: value.generation,
       };
     }
+    case "PARSE_BLOCK": {
+      if (!hasOnlyKeys(value, PAGE_KEYS_BY_TYPE.PARSE_BLOCK!)) return null;
+      if (!isNonEmptyString(value.blockId)) return null;
+      if (typeof value.text !== "string" || value.text.length > MAX_BLOCK_TEXT) return null;
+      return {
+        version: BRIDGE_VERSION,
+        type: "PARSE_BLOCK",
+        previewId: value.previewId,
+        generation: value.generation,
+        blockId: value.blockId,
+        text: value.text,
+      };
+    }
     default:
       return null;
   }
@@ -168,8 +199,8 @@ export function parsePageMessage(value: unknown): PageMessage | null {
 
 const HOST_KEYS_BY_TYPE: Readonly<Record<string, readonly string[]>> = {
   SESSION_STATE: ["version", "type", "previewId", "generation", "state", "ready", "discovered", "failed"],
-  CORE_STREAM: ["version", "type", "previewId", "generation", "sentenceId", "blockId", "componentsJson"],
-  CORE_RESULT: ["version", "type", "previewId", "generation", "sentenceId", "blockId", "analysisJson"],
+  CORE_STREAM: ["version", "type", "previewId", "generation", "sentenceId", "blockId", "componentsJson", "tokensJson"],
+  CORE_RESULT: ["version", "type", "previewId", "generation", "sentenceId", "blockId", "analysisJson", "tokensJson"],
   CORE_ERROR: ["version", "type", "previewId", "generation", "sentenceId", "blockId", "code", "message"],
   DETAIL_STREAM: ["version", "type", "previewId", "generation", "sentenceId", "focusStart", "focusEnd", "structuresJson"],
   DETAIL_RESULT: ["version", "type", "previewId", "generation", "sentenceId", "analysisJson"],
@@ -208,6 +239,7 @@ export function parseHostMessage(value: unknown, currentGeneration: number): Hos
     case "CORE_STREAM":
     case "CORE_RESULT":
       if (!isNonEmptyString(value.sentenceId) || !isNonEmptyString(value.blockId)) return null;
+      if (typeof value.tokensJson !== "string") return null;
       if (value.type === "CORE_STREAM") {
         if (typeof value.componentsJson !== "string") return null;
         return {
@@ -218,6 +250,7 @@ export function parseHostMessage(value: unknown, currentGeneration: number): Hos
           sentenceId: value.sentenceId,
           blockId: value.blockId,
           componentsJson: value.componentsJson,
+          tokensJson: value.tokensJson,
         };
       }
       if (typeof value.analysisJson !== "string") return null;
@@ -229,6 +262,7 @@ export function parseHostMessage(value: unknown, currentGeneration: number): Hos
         sentenceId: value.sentenceId,
         blockId: value.blockId,
         analysisJson: value.analysisJson,
+        tokensJson: value.tokensJson,
       };
     case "DETAIL_RESULT":
       if (!isNonEmptyString(value.sentenceId) || typeof value.analysisJson !== "string") return null;
