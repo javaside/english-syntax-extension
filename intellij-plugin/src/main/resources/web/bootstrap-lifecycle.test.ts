@@ -205,6 +205,16 @@ describe("bootstrap-entry 按段解析", () => {
 
     const parsed = posted.filter((m) => m.type === "PARSE_BLOCK");
     expect(parsed).toHaveLength(1);
+    // 键集必须与 Kotlin 的 hasOnlyKeys 白名单逐字一致：多一个键整条消息就被丢掉，
+    // 表现为「按快捷键毫无反应」而不是报错。
+    expect(Object.keys(parsed[0]!).sort()).toEqual([
+      "blockId",
+      "generation",
+      "previewId",
+      "text",
+      "type",
+      "version",
+    ]);
     expect(parsed[0]!.text).toBe("Short.");
     expect(parsed[0]!.blockId).toBe(para.getAttribute("data-english-syntax-block"));
     expect(posted.some((m) => m.type === "VISIBLE_BLOCKS")).toBe(false);
