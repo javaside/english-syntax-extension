@@ -138,4 +138,20 @@ class HotkeyDescriptorTest {
     assertNull(HotkeyDescriptor.fromShortcuts(emptyArray()))
     assertNull(HotkeyDescriptor.fromShortcuts(arrayOf(KeyboardShortcut(KeyStroke.getKeyStroke(KeyEvent.VK_F7, 0), null))))
   }
+
+  @Test
+  fun `an unreachable keymap falls back to the declared default instead of disabling the fallback`() {
+    // 本测试套件里没有 IDE Application（没有任何平台夹具），所以 KeymapManager.getInstance()
+    // 会抛 —— 正好走到 fromKeymap 的「连 keymap 都读不到」分支。这条分支必须回退 DEFAULT
+    // 而不是 null，与上一条用例的 null 形成刻意的不对称：
+    //   读得到 keymap 但没有可用绑定 → null（确知不是 Alt+T，装监听就是幻影键位）；
+    //   连 keymap 都读不到           → DEFAULT（plugin.xml 的声明值，属于「不知道就用声明值」）。
+    // 两者混为一谈的后果都是静默的：前者错成 DEFAULT 会监听用户没绑的键，后者错成 null
+    // 会让纯协议路径悄悄丢掉兼底通道。
+    //
+    // 「真的读到 keymap 绑定」那条 happy path 仍无自动化覆盖（需要平台夹具），由
+    // Task 12 的改键验收（Keymap 改绑 Ctrl+Alt+J → 重开预览）人工过。哪天给这个套件
+    // 引入了 Application，这条用例会开始读真实 keymap 而变红——那时该把它移到平台测试里。
+    assertEquals(HotkeyDescriptor.DEFAULT, HotkeyDescriptor.fromKeymap())
+  }
 }
