@@ -86,6 +86,59 @@ describe("PreviewRenderer", () => {
     ).toBe(true);
   });
 
+  it("restores uncovered dashes and commas once in source order", () => {
+    const { renderer } = setup();
+    const tokens = [
+      { id: 0, text: "Explore", leadingWhitespace: "", punctuation: false },
+      { id: 1, text: "context", leadingWhitespace: " ", punctuation: false },
+      { id: 2, text: "—", leadingWhitespace: " ", punctuation: true },
+      { id: 3, text: "check", leadingWhitespace: " ", punctuation: false },
+      { id: 4, text: "files", leadingWhitespace: " ", punctuation: false },
+      { id: 5, text: ",", leadingWhitespace: "", punctuation: true },
+      { id: 6, text: "docs", leadingWhitespace: " ", punctuation: false },
+      { id: 7, text: ",", leadingWhitespace: "", punctuation: true },
+      { id: 8, text: "commits", leadingWhitespace: " ", punctuation: false },
+      { id: 9, text: ".", leadingWhitespace: "", punctuation: true },
+    ];
+
+    renderer.renderCoreResult(
+      "s1",
+      "b1",
+      corePayload("s1", [
+        { startToken: 0, endToken: 1, role: "OBJECT", translation: "项目上下文", text: "Explore context" },
+        { startToken: 3, endToken: 3, role: "PREDICATE", translation: "检查", text: " check" },
+        { startToken: 4, endToken: 4, role: "OBJECT", translation: "文件", text: " files" },
+        { startToken: 6, endToken: 6, role: "OBJECT", translation: "文档", text: " docs" },
+        { startToken: 8, endToken: 8, role: "OBJECT", translation: "提交", text: " commits" },
+      ]),
+      tokens,
+    );
+
+    const sentence = document.querySelector(".english-syntax-sentence");
+    expect(sentence?.textContent?.match(/—/gu)).toHaveLength(1);
+    expect(sentence?.textContent?.match(/,/gu)).toHaveLength(2);
+    expect(sentence?.textContent?.match(/\./gu)).toHaveLength(1);
+    expect(
+      [...document.querySelectorAll(".english-syntax-english")].map((node) => node.textContent),
+    ).toEqual(["Explore context —", " check", " files,", " docs,", " commits."]);
+  });
+
+  it("restores uncovered punctuation during streaming", () => {
+    const { renderer } = setup();
+    renderer.renderCoreStream(
+      "s1",
+      "b1",
+      [{ startToken: 0, endToken: 1, role: "OBJECT", translation: "项目上下文", text: "Explore context" }],
+      [
+        { id: 0, text: "Explore", leadingWhitespace: "", punctuation: false },
+        { id: 1, text: "context", leadingWhitespace: " ", punctuation: false },
+        { id: 2, text: "—", leadingWhitespace: " ", punctuation: true },
+      ],
+    );
+
+    expect(document.querySelector(".english-syntax-english")?.textContent).toBe("Explore context —");
+  });
+
   it("replaces the provisional card with the final result", () => {
     const { renderer } = setup();
     renderer.renderCoreStream("s1", "b1", [
@@ -144,6 +197,32 @@ describe("PreviewRenderer", () => {
 
     expect(element.hasAttribute(HIDDEN)).toBe(false);
     expect(document.querySelector("[data-english-syntax-card]")).toBeNull();
+  });
+
+  /**
+   * 「停止并恢复原文」后再点开始：JS 侧 initialize 重扫同一批元素，对同一个 blockId
+   * 再 registerBlock，sentenceId（`s-{blockId}-{index}`）也照旧复用。#sentences 是全局
+   * 映射，旧条目留着会让 #ensureSentence 判「已存在」提前返回，新 BlockRecord 的
+   * sentences 永远拿不到这一句 → #repaintBlock 算出 hasContent=false → 走 #restoreBlock，
+   * 卡片永远画不出来（真机：恢复原文后再点翻译，整页毫无反应且无报错）。
+   */
+  it("renders again after restoreAll when the same block is registered a second time", () => {
+    const { renderer, element } = setup();
+    const result = corePayload("s1", [
+      { startToken: 0, endToken: 1, role: "SUBJECT", translation: "该服务", text: "The service" },
+    ]);
+    renderer.renderCoreResult("s1", "b1", result);
+    renderer.restoreAll();
+    expect(document.querySelector("[data-english-syntax-card]")).toBeNull();
+
+    // 第二轮：同一元素、同一 blockId、同一 sentenceId 重新注册并出结果。
+    renderer.registerBlock("b1", element);
+    renderer.renderCoreResult("s1", "b1", result);
+
+    const card = document.querySelector("[data-english-syntax-card]");
+    expect(card).not.toBeNull();
+    expect(card?.textContent).toContain("The service");
+    expect(element.hasAttribute(HIDDEN)).toBe(true);
   });
 
   it("treats model text as text, never markup", () => {
@@ -257,10 +336,11 @@ describe("PreviewRenderer", () => {
     // 面板紧跟 s2 的 section，在 s3 之前（而不是 append 到容器末尾之后）
     expect(panel?.previousElementSibling?.getAttribute("data-sentence-id")).toBe("s2");
     expect(panel?.nextElementSibling?.getAttribute("data-sentence-id")).toBe("s3");
-    // 被点句子变块级（整卡重建后重新查询）
+    // 面板插在句外这一支:句子绝不能变块级。它一撑满整行,本来与它共行的短句就被压到
+    // 面板下面去了——用户看到的就是「本来一行,点一下变两行」。
     const rebuilt = document.querySelectorAll<HTMLElement>(".english-syntax-sentence");
     const s2Section = [...rebuilt].find((el) => el.dataset.sentenceId === "s2")!;
-    expect(s2Section.classList.contains("english-syntax-has-detail")).toBe(true);
+    expect(s2Section.classList.contains("english-syntax-has-detail")).toBe(false);
   });
 
   it("anchors the detail panel at the end of the clicked component's visual line, not the sentence end", () => {
@@ -326,6 +406,98 @@ describe("PreviewRenderer", () => {
       // 面板插在第一个成分之后（该行末尾），而不是第二个成分之后/句子末尾
       expect(panel?.previousElementSibling).toBe(rebuilt[0]);
       expect(panel?.nextElementSibling).toBe(rebuilt[1]);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("anchors the loading placeholder on the clicked line so the panel never jumps when content arrives", () => {
+    // 回归过一次的老毛病:占位图省事插在整句之后,详解回来才精确锚定,于是面板先出现在
+    // 句尾、内容到了又跳到被点成分那一行。判据就是「占位的落点 = 最终面板的落点」。
+    const { renderer } = setup();
+    renderer.renderCoreResult(
+      "s1",
+      "b1",
+      corePayload("s1", [
+        { startToken: 0, endToken: 1, role: "SUBJECT", translation: "该服务", text: "The service" },
+        { startToken: 2, endToken: 2, role: "PREDICATE", translation: "校验", text: "validates" },
+        { startToken: 3, endToken: 5, role: "OBJECT", translation: "每个响应", text: "every response" },
+      ]),
+    );
+    const original = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      if (this.classList.contains("english-syntax-component")) {
+        const sentence = this.parentElement;
+        const index = sentence === null ? 0 : [...sentence.children].indexOf(this);
+        const top = index === 0 ? 40 : 60; // 第一个成分独占一行,后两个在下一行
+        return { top, bottom: top + 16, height: 16, left: 0, right: 0, width: 0, x: 0, y: 0, toJSON: () => ({}) } as DOMRect;
+      }
+      return original.call(this);
+    });
+    try {
+      document.querySelectorAll<HTMLElement>(".english-syntax-component")[0]!.click();
+      const loading = document.querySelector(".english-syntax-detail-loading");
+      expect(loading).not.toBeNull();
+      // 占位落在句内、被点成分之后——不是句尾
+      expect(loading?.parentElement?.classList.contains("english-syntax-sentence")).toBe(true);
+      expect((loading?.previousElementSibling as HTMLElement | null)?.dataset.startToken).toBe("0");
+      renderer.renderDetailResult({
+        sentenceId: "s1",
+        focus: { startToken: 0, endToken: 1 },
+        structures: [
+          { startToken: 0, endToken: 1, role: "主语", explanation: "名词短语", translation: "该服务" },
+        ],
+        grammarPoints: [],
+        explanation: "整体说明",
+      });
+      const panel = document.querySelector(".english-syntax-detail");
+      expect(panel?.classList.contains("english-syntax-detail-loading")).toBe(false);
+      // 最终面板前面还是同一个成分:占位到成品没挪窝
+      expect((panel?.previousElementSibling as HTMLElement | null)?.dataset.startToken).toBe("0");
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("keeps sentences that share a visual line on that line: the panel goes after the last one", () => {
+    // 用户报的第二个问题:点一下成分,本来一行的变成两行。短句和邻句共行,面板若插在
+    // 「被点句」正后方,同行的后一句就被压到面板下面;句子再被加上块级类,它自己撑满
+    // 整行,邻居照样被挤走。正解:面板插到该视觉行最后一句之后,且不动句子的显示方式。
+    const { renderer } = setup();
+    for (const id of ["s1", "s2", "s3"]) {
+      renderer.renderCoreResult(
+        id,
+        "b1",
+        corePayload(id, [
+          { startToken: 0, endToken: 1, role: "SUBJECT", translation: "该服务", text: "The service" },
+        ]),
+      );
+    }
+    const original = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      // 三句短句同处一行(top 都是 40):句内只有一个成分,所以走「插到句外」那一支。
+      if (
+        this.classList.contains("english-syntax-sentence") ||
+        this.classList.contains("english-syntax-component")
+      ) {
+        return { top: 40, bottom: 56, height: 16, left: 0, right: 0, width: 0, x: 0, y: 0, toJSON: () => ({}) } as DOMRect;
+      }
+      return original.call(this);
+    });
+    try {
+      const sections = document.querySelectorAll<HTMLElement>(".english-syntax-sentence");
+      sections[1]!.querySelector<HTMLButtonElement>(".english-syntax-component")!.click();
+      const loading = document.querySelector(".english-syntax-detail-loading");
+      // 面板落在同行最后一句(s3)之后,s2/s3 仍在面板之前,顺序没被拆开
+      expect((loading?.previousElementSibling as HTMLElement | null)?.dataset.sentenceId).toBe("s3");
+      const marked = [...document.querySelectorAll<HTMLElement>(".english-syntax-sentence")].filter((el) =>
+        el.classList.contains("english-syntax-has-detail"),
+      );
+      expect(marked).toHaveLength(0);
     } finally {
       vi.restoreAllMocks();
     }

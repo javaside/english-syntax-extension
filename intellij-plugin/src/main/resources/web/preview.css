@@ -25,8 +25,10 @@
   margin-block-end: 0.55em;
 }
 
-/* 带详解面板的句子变块级：面板插在句后需要栏宽（Chrome 端 :has(.detail) 同款，
-   预览页不支持 :has 时用类名替代）。 */
+/* 面板插在句内时（长句折行、点的不是最后一行）句子才变块级：面板需要整栏宽度。
+   Chrome 端写成 `.sentence:has(.detail)`——只有面板真在句子里才命中；预览页不敢赖 :has，
+   改由 render.ts 的 #anchorDetail 在同一条件下加/摘这个类。面板插在句外时绝不能加，
+   否则短句自己撑满整行，把本来与它共行的邻句挤到下一行。 */
 .english-syntax-has-detail {
   display: flex;
   margin-inline-end: 0;

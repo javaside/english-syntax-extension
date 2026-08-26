@@ -542,8 +542,9 @@
 		}
 		/**
 		* 点击成分后立即显示「加载中」占位面板（不等模型返回）。
-		* 行锚定在模型返回后由 renderDetailStream / renderDetailResult 的精确锚定替换；
-		* 占位先插在被点句子之后，让点击有即时反馈，消除「卡一下才显示」。
+		* 占位一出生就走 #anchorDetail 的行判定,和模型返回后那次落位用的是同一套规则——
+		* 曾经占位图省事插在句尾(`sentence.after`),详解回来才精确锚定,于是面板先出现在整句
+		* 之后、内容到了又跳到被点成分那一行,回归过一次的老毛病就是这个。
 		*/
 		#showDetailLoading(sentenceId, focusStart, focusEnd) {
 			const entry = this.#sentences.get(sentenceId);
@@ -561,8 +562,7 @@
 			const panel = createElement(sentence.ownerDocument, "div", "english-syntax-detail english-syntax-detail-loading");
 			panel.dataset.sentenceId = sentenceId;
 			panel.textContent = "正在加载详解…";
-			sentence.classList.add("english-syntax-has-detail");
-			sentence.after(panel);
+			this.#anchorDetail(sentence, panel, focusStart, focusEnd);
 		}
 		#showDetailPanel(sentenceId, structures, focusStart, focusEnd, detail) {
 			const entry = this.#sentences.get(sentenceId);
@@ -578,9 +578,10 @@
 				detail
 			});
 		}
-		/** 关闭预览页里所有已打开的详解面板（含加载占位）。 */
+		/** 关闭预览页里所有已打开的详解面板（含加载占位）,并摘掉句子上的块级标记。 */
 		#closeAllDetailPanels() {
 			for (const panel of document.querySelectorAll(".english-syntax-detail")) panel.remove();
+			for (const marked of document.querySelectorAll(".english-syntax-has-detail")) marked.classList.remove("english-syntax-has-detail");
 		}
 		closeDetail() {
 			if (this.#currentDetail === null) return;
@@ -668,11 +669,7 @@
 			if (this.#currentDetail !== null && (options.detailStructures !== void 0 || options.detail !== void 0)) this.#placeDetailPanel(card, options.detailStructures ?? options.detail?.structures ?? [], options.detail);
 		}
 		/**
-		* 详解面板行锚定（移植 Chrome 端 `setDetailLoading` 的行判定）：
-		* 面板落在**被点成分所在视觉行**的正下方。
-		*  * 被点成分下面还有同句成分（长句折行）：插在句内、该行最后一个成分之后；
-		*  * 是最后一行：插到句子之后（短句常与邻句共行，放句内会逼句子变块级挤走邻居）。
-		* 行判定依赖真实布局，零尺寸环境（单测）退化为插在句子之后。
+		* 详解面板落位:模型返回后整卡重建，把面板按行判定放回被点成分那一行下面。
 		*/
 		#placeDetailPanel(card, structures, detail) {
 			const current = this.#currentDetail;
@@ -680,8 +677,20 @@
 			const sentence = card.querySelector(`.english-syntax-sentence[data-sentence-id="${current.sentenceId}"]`);
 			if (sentence === null) return;
 			const panel = this.#renderDetailPanel(sentence.ownerDocument, structures, detail);
-			sentence.classList.add("english-syntax-has-detail");
-			const component = sentence.querySelector(`.english-syntax-component[data-start-token="${current.focusStart}"][data-end-token="${current.focusEnd}"]`);
+			this.#anchorDetail(sentence, panel, current.focusStart, current.focusEnd);
+		}
+		/**
+		* 详解面板行锚定（与 Chrome 端 `learning-block.ts#setDetailLoading` 同一套判定）:
+		* 面板落在**被点成分所在视觉行**的正下方,两种插法取决于那一行是不是整句最后一行:
+		*  * 不是最后一行（长句折行）:插在句内、该行最后一个成分之后。这种句子已经占满栏宽、
+		*    不可能与别的句子共行,所以让它变块级(english-syntax-has-detail)没有视觉代价。
+		*  * 是最后一行:插到句外、**该视觉行最后一句之后**。短句常与邻句共行,只插在被点句正
+		*    后方会把同行的邻句压到面板下面;这一支也绝不能加块级类,否则被点句自己撑满整行,
+		*    同样把邻居挤走——两者的表现都是用户看到的「本来一行,点一下变两行」。
+		* 行判定依赖真实布局,零尺寸环境（单测）退化为插在句子之后。
+		*/
+		#anchorDetail(sentence, panel, focusStart, focusEnd) {
+			const component = sentence.querySelector(`.english-syntax-component[data-start-token="${focusStart}"][data-end-token="${focusEnd}"]`);
 			const clickedRect = component?.getBoundingClientRect();
 			const hasComponentBelow = clickedRect !== void 0 && clickedRect.height > 0 && [...sentence.querySelectorAll(".english-syntax-component")].some((other) => other.getBoundingClientRect().top >= clickedRect.bottom);
 			if (component !== null && hasComponentBelow) {
@@ -691,10 +700,19 @@
 					if (next.getBoundingClientRect().top >= clickedBottom) break;
 					anchor = next;
 				}
+				sentence.classList.add("english-syntax-has-detail");
 				anchor.after(panel);
 				return;
 			}
-			sentence.after(panel);
+			sentence.classList.remove("english-syntax-has-detail");
+			const sentenceBottom = sentence.getBoundingClientRect().bottom;
+			let anchor = sentence;
+			for (let next = anchor.nextElementSibling; next !== null; next = next.nextElementSibling) {
+				if (!next.classList.contains("english-syntax-sentence")) break;
+				if (next.getBoundingClientRect().top >= sentenceBottom) break;
+				anchor = next;
+			}
+			anchor.after(panel);
 		}
 		/** 详解面板：标注行（①角色 + 英文摘录）+ 解释列表 + 语法点 + 整体说明。 */
 		#renderDetailPanel(owner, structures, detail) {

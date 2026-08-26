@@ -214,6 +214,14 @@
 
 **守护测试** `chrome-plugin/src/content/session-controller.test.ts` 的 `同一段落重复触发快捷键幂等`、`同一段在飞时再按快捷键`、`连按两次落在注册句子的 await 窗口里`、`去抖只挡住窗口内的重复`、`鼠标停在已替换的卡片上`、`整块解析失败后再按`。IntelliJ 侧同源规则见「按段解析:页面先自曝「解析中」,Kotlin 侧不得静默返回」。
 
+### I-23.3 详解面板:占位与终态同一落点,且插在句外时不许让句子变块级
+
+**规则** 加载占位面板与最终面板必须调用**同一个**落点函数(IntelliJ 侧 `PreviewRenderer.#anchorDetail`)。只有在「句内还有位于点击行下方的成分」时才插在句内并加 `english-syntax-has-detail`;否则插到与点击行**共行的最后一句之后**,并**摘掉**该类(对齐 Chrome 端 `.sentence:has(.detail)` 仅在面板真在句内时命中的语义);`#closeAllDetailPanels` 也要清残留的类。
+
+**症状** 占位若图省事直接 `sentence.after(panel)`,面板先出现在整句末尾、等模型内容回来才跳回点击行(I-23 的行判定修好后,这条后加的占位路径没跟着走同一判据,老 bug 以「先在句尾、后跳回来」的形式复发)。无条件加 `has-detail` 则让句子撑满整栏,本来与它共行的短句被挤到面板下方——用户看到的是「本来一行,点一下变两行」。
+
+**测试** `intellij-plugin/src/main/resources/web/render.test.ts` 的 "anchors the loading placeholder on the clicked line so the panel never jumps when content arrives" 与 "keeps sentences that share a visual line on that line: the panel goes after the last one"(happy-dom 零布局,靠 mock `getBoundingClientRect` 造行)。
+
 ## 测试与验收
 
 ### I-24 用探针,不用墙钟

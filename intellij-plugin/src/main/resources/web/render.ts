@@ -42,7 +42,15 @@ interface BlockRecord {
 interface SentenceRecord {
   analysis: CorePayload | null;
   provisional: ComponentPayload[] | null;
+  tokens: TokenPayload[];
   failed: boolean;
+}
+
+interface TokenPayload {
+  id: number;
+  text: string;
+  leadingWhitespace: string;
+  punctuation: boolean;
 }
 
 interface CorePayload {
@@ -140,7 +148,22 @@ export class PreviewRenderer {
     this.#onDetailRequest = onDetailRequest;
   }
 
+  /**
+   * 注册（或重新注册）一个块。**重新注册必须连旧句子一起丢掉**：`#sentences` 是
+   * 全局映射，`#blocks` 里换了新 BlockRecord 而它还留着旧条目时，`#ensureSentence`
+   * 会因「这句已存在」提前返回，新记录的 `sentences` 永远拿不到这一句——`#repaintBlock`
+   * 于是算出 `hasContent=false` 并走 `#restoreBlock`，卡片一张都画不出来。
+   *
+   * 「停止并恢复原文 → 再点开始」正是这条路径：`initialize` 清空防重扫描注册表后
+   * 重扫同一批元素，blockId 由元素上的 `data-english-syntax-block` 属性沿用，
+   * sentenceId（`s-{blockId}-{index}`）也照旧复用，于是新旧条目精确相撞。
+   * （官方 updateDom 重渲染不会撞：整个 body 被换掉，blockId 全部重新分配。）
+   */
   registerBlock(blockId: string, element: HTMLElement): void {
+    const previous = this.#blocks.get(blockId);
+    if (previous !== undefined) {
+      for (const sentenceId of previous.sentences.keys()) this.#sentences.delete(sentenceId);
+    }
     this.#blocks.set(blockId, { blockId, element, card: null, sentences: new Map() });
     this.#blockSentenceOrder.set(blockId, []);
   }
@@ -153,10 +176,16 @@ export class PreviewRenderer {
           message.sentenceId,
           message.blockId,
           JSON.parse(message.componentsJson) as ComponentPayload[],
+          JSON.parse(message.tokensJson ?? "[]") as TokenPayload[],
         );
         break;
       case "CORE_RESULT":
-        this.renderCoreResult(message.sentenceId, message.blockId, JSON.parse(message.analysisJson) as CorePayload);
+        this.renderCoreResult(
+          message.sentenceId,
+          message.blockId,
+          JSON.parse(message.analysisJson) as CorePayload,
+          JSON.parse(message.tokensJson ?? "[]") as TokenPayload[],
+        );
         break;
       case "CORE_ERROR":
         this.renderCoreError(message.sentenceId, message.blockId, message.code, message.message);
@@ -186,22 +215,34 @@ export class PreviewRenderer {
     }
   }
 
-  renderCoreStream(sentenceId: string, blockId: string, components: ComponentPayload[]): void {
+  renderCoreStream(
+    sentenceId: string,
+    blockId: string,
+    components: ComponentPayload[],
+    tokens: TokenPayload[] = [],
+  ): void {
     this.#ensureSentence(blockId, sentenceId);
     const entry = this.#sentences.get(sentenceId);
     if (entry === undefined) return;
     entry.record.provisional = components;
+    if (tokens.length > 0) entry.record.tokens = tokens;
     const order = this.#blockSentenceOrder.get(entry.blockId) ?? [];
     if (!order.includes(sentenceId)) order.push(sentenceId);
     this.#blockSentenceOrder.set(entry.blockId, order);
     this.#repaintBlock(entry.blockId);
   }
 
-  renderCoreResult(sentenceId: string, blockId: string, analysis: CorePayload): void {
+  renderCoreResult(
+    sentenceId: string,
+    blockId: string,
+    analysis: CorePayload,
+    tokens: TokenPayload[] = [],
+  ): void {
     this.#ensureSentence(blockId, sentenceId);
     const entry = this.#sentences.get(sentenceId);
     if (entry === undefined) return;
     entry.record.analysis = analysis;
+    if (tokens.length > 0) entry.record.tokens = tokens;
     entry.record.provisional = null;
     entry.record.failed = false;
     this.#sentences.set(sentenceId, entry);
@@ -234,7 +275,7 @@ export class PreviewRenderer {
     if (this.#sentences.has(sentenceId)) return;
     const record = this.#blocks.get(blockId);
     if (record === undefined) return;
-    record.sentences.set(sentenceId, { analysis: null, provisional: null, failed: false });
+    record.sentences.set(sentenceId, { analysis: null, provisional: null, tokens: [], failed: false });
     this.#sentences.set(sentenceId, { blockId, record: record.sentences.get(sentenceId)! });
   }
 
@@ -252,8 +293,9 @@ export class PreviewRenderer {
 
   /**
    * 点击成分后立即显示「加载中」占位面板（不等模型返回）。
-   * 行锚定在模型返回后由 renderDetailStream / renderDetailResult 的精确锚定替换；
-   * 占位先插在被点句子之后，让点击有即时反馈，消除「卡一下才显示」。
+   * 占位一出生就走 #anchorDetail 的行判定,和模型返回后那次落位用的是同一套规则——
+   * 曾经占位图省事插在句尾(`sentence.after`),详解回来才精确锚定,于是面板先出现在整句
+   * 之后、内容到了又跳到被点成分那一行,回归过一次的老毛病就是这个。
    */
   #showDetailLoading(sentenceId: string, focusStart: number, focusEnd: number): void {
     const entry = this.#sentences.get(sentenceId);
@@ -270,8 +312,7 @@ export class PreviewRenderer {
     const panel = createElement(sentence.ownerDocument, "div", "english-syntax-detail english-syntax-detail-loading");
     panel.dataset.sentenceId = sentenceId;
     panel.textContent = "正在加载详解…";
-    sentence.classList.add("english-syntax-has-detail");
-    sentence.after(panel);
+    this.#anchorDetail(sentence, panel, focusStart, focusEnd);
   }
 
   #showDetailPanel(
@@ -295,10 +336,15 @@ export class PreviewRenderer {
     this.#repaintBlock(entry.blockId, { detailStructures: structures, detail });
   }
 
-  /** 关闭预览页里所有已打开的详解面板（含加载占位）。 */
+  /** 关闭预览页里所有已打开的详解面板（含加载占位）,并摘掉句子上的块级标记。 */
   #closeAllDetailPanels(): void {
     for (const panel of document.querySelectorAll(".english-syntax-detail")) {
       panel.remove();
+    }
+    // 块级标记只在「面板插在句内」时才加(见 #anchorDetail)。面板撤了还留着它,句子就一直
+    // 撑满整行,把本该与它共行的短句一直压在下一行。
+    for (const marked of document.querySelectorAll(".english-syntax-has-detail")) {
+      marked.classList.remove("english-syntax-has-detail");
     }
   }
 
@@ -380,7 +426,10 @@ export class PreviewRenderer {
         (component) => component.role === "COORDINATE_CLAUSE",
       ).length;
       let coordinateClauseIndex = 0;
+      let nextToken = 0;
+      let lastEnglish: HTMLElement | null = null;
       for (const component of components) {
+        this.#appendPunctuation(lastEnglish ?? section, sentence.tokens, nextToken, component.startToken - 1);
         let label = roleLabel(component.role);
         if (component.role === "COORDINATE_CLAUSE" && coordinateClauseTotal >= 2) {
           coordinateClauseIndex += 1;
@@ -416,7 +465,10 @@ export class PreviewRenderer {
           this.requestDetail(sentenceId, component.startToken, component.endToken);
         });
         section.append(button);
+        lastEnglish = english;
+        nextToken = component.endToken + 1;
       }
+      this.#appendPunctuation(lastEnglish ?? section, sentence.tokens, nextToken, sentence.tokens.length - 1);
       if (sentence.analysis === null && sentence.provisional !== null) {
         section.classList.add("english-syntax-provisional");
       }
@@ -439,11 +491,7 @@ export class PreviewRenderer {
   }
 
   /**
-   * 详解面板行锚定（移植 Chrome 端 `setDetailLoading` 的行判定）：
-   * 面板落在**被点成分所在视觉行**的正下方。
-   *  * 被点成分下面还有同句成分（长句折行）：插在句内、该行最后一个成分之后；
-   *  * 是最后一行：插到句子之后（短句常与邻句共行，放句内会逼句子变块级挤走邻居）。
-   * 行判定依赖真实布局，零尺寸环境（单测）退化为插在句子之后。
+   * 详解面板落位:模型返回后整卡重建，把面板按行判定放回被点成分那一行下面。
    */
   #placeDetailPanel(
     card: HTMLElement,
@@ -457,10 +505,27 @@ export class PreviewRenderer {
     );
     if (sentence === null) return;
     const panel = this.#renderDetailPanel(sentence.ownerDocument, structures, detail);
-    sentence.classList.add("english-syntax-has-detail");
+    this.#anchorDetail(sentence, panel, current.focusStart, current.focusEnd);
+  }
 
+  /**
+   * 详解面板行锚定（与 Chrome 端 `learning-block.ts#setDetailLoading` 同一套判定）:
+   * 面板落在**被点成分所在视觉行**的正下方,两种插法取决于那一行是不是整句最后一行:
+   *  * 不是最后一行（长句折行）:插在句内、该行最后一个成分之后。这种句子已经占满栏宽、
+   *    不可能与别的句子共行,所以让它变块级(english-syntax-has-detail)没有视觉代价。
+   *  * 是最后一行:插到句外、**该视觉行最后一句之后**。短句常与邻句共行,只插在被点句正
+   *    后方会把同行的邻句压到面板下面;这一支也绝不能加块级类,否则被点句自己撑满整行,
+   *    同样把邻居挤走——两者的表现都是用户看到的「本来一行,点一下变两行」。
+   * 行判定依赖真实布局,零尺寸环境（单测）退化为插在句子之后。
+   */
+  #anchorDetail(
+    sentence: HTMLElement,
+    panel: HTMLElement,
+    focusStart: number,
+    focusEnd: number,
+  ): void {
     const component = sentence.querySelector<HTMLElement>(
-      `.english-syntax-component[data-start-token="${current.focusStart}"][data-end-token="${current.focusEnd}"]`,
+      `.english-syntax-component[data-start-token="${focusStart}"][data-end-token="${focusEnd}"]`,
     );
     const clickedRect = component?.getBoundingClientRect();
     // 显式判断有没有真实布局：happy-dom 等零尺寸环境里所有矩形都是 0，靠数值比较
@@ -479,10 +544,20 @@ export class PreviewRenderer {
         if (next.getBoundingClientRect().top >= clickedBottom) break;
         anchor = next;
       }
+      sentence.classList.add("english-syntax-has-detail");
       anchor.after(panel);
       return;
     }
-    sentence.after(panel);
+
+    sentence.classList.remove("english-syntax-has-detail");
+    const sentenceBottom = sentence.getBoundingClientRect().bottom;
+    let anchor: Element = sentence;
+    for (let next = anchor.nextElementSibling; next !== null; next = next.nextElementSibling) {
+      if (!next.classList.contains("english-syntax-sentence")) break;
+      if (next.getBoundingClientRect().top >= sentenceBottom) break;
+      anchor = next;
+    }
+    anchor.after(panel);
   }
 
   /** 详解面板：标注行（①角色 + 英文摘录）+ 解释列表 + 语法点 + 整体说明。 */
@@ -558,6 +633,27 @@ export class PreviewRenderer {
     return typeof structure.text === "string" ? structure.text : "";
   }
 
+  #appendPunctuation(
+    target: HTMLElement,
+    tokens: readonly TokenPayload[],
+    startToken: number,
+    endToken: number,
+  ): void {
+    for (let index = startToken; index <= endToken; index += 1) {
+      const token = tokens[index];
+      if (token?.punctuation === true) {
+        target.append(
+          createElement(
+            target.ownerDocument,
+            "span",
+            "english-syntax-punctuation",
+            token.leadingWhitespace + token.text,
+          ),
+        );
+      }
+    }
+  }
+
   #restoreBlock(record: BlockRecord): void {
     record.element.removeAttribute(HIDDEN_ATTRIBUTE);
     record.card?.remove();
@@ -587,7 +683,7 @@ export class PreviewRenderer {
   registerSentence(blockId: string, sentenceId: string): void {
     const record = this.#blocks.get(blockId);
     if (record === undefined) return;
-    record.sentences.set(sentenceId, { analysis: null, provisional: null, failed: false });
+    record.sentences.set(sentenceId, { analysis: null, provisional: null, tokens: [], failed: false });
     this.#sentences.set(sentenceId, { blockId, record: record.sentences.get(sentenceId)! });
   }
 
