@@ -929,6 +929,38 @@ test("悬停段落经 PARSE_HOVERED_BLOCK 冷启动解析，其余段落保持�
   await expect(page.locator("p:visible")).toHaveCount(paragraphCount - 1);
 });
 
+// 回归:同一段第二次按快捷键曾报「未找到可解析的段落」——替换后原文已隐藏，鼠标停在的
+// 其实是卡片，而卡片文字在影子根里，nearestSafeBlock 一路向上找不到候选。真实布局与真实
+// :hover 链只有 E2E 才有，单测里的替换是假件。
+test("同一段再按快捷键：提示该段已解析，不多出第二张卡片也不再发请求", async ({
+  harness,
+}) => {
+  await seedLocalProfile(harness);
+  const page = await openArticle(harness, "hover-blocks.html");
+  const tabId = await harness.tabIdFor(`${harness.pagesOrigin}/hover-blocks.html`);
+  // 两次按键共用一个 documentId:换 documentId 会取消上一份文档的在飞请求。
+  const documentId = `e2e-doc-${++requestCounter}`;
+
+  await page.locator("#plain").hover();
+  await harness.dispatchFromUi(uiMessage("PARSE_HOVERED_BLOCK", { tabId, documentId }));
+  await expect(learningBlocks(page)).toHaveCount(1, { timeout: 20_000 });
+  await expect(page.locator("#plain")).toBeHidden();
+  const coreRequests = harness.fakeModel.recordedOfKind("core").length;
+
+  // 卡片插在原文之后:原文已 display:none,此刻鼠标停在的只能是卡片。
+  await learningBlocks(page).first().hover();
+  const response = await harness.dispatchFromUi(
+    uiMessage("PARSE_HOVERED_BLOCK", { tabId, documentId }),
+  );
+
+  // SW 丢弃页面命令的响应、一律回 ACK,提示只在页面里就地出现(content-script 的
+  // pill.notice)——所以这里要钉的是胶囊文案,而不是 dispatch 的返回值。
+  expect(response, JSON.stringify(response)).toMatchObject({ type: "ACK" });
+  await expect(page.locator("[data-syntax-progress-pill] .pill")).toHaveText("该段已解析");
+  await expect(learningBlocks(page)).toHaveCount(1);
+  expect(harness.fakeModel.recordedOfKind("core")).toHaveLength(coreRequests);
+});
+
 // 解析中的段落要能被认出来:标记在飞行期间存在,结束后不残留。
 test("解析中的段落带进度标记，完成后不残留", async ({ harness }) => {
   await seedLocalProfile(harness);

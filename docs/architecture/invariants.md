@@ -204,6 +204,16 @@
 
 **测试** `chrome-plugin/tests/e2e/layout.spec.ts` 的"长句折行时,详解面板出现在被点成分那一行的下方"。
 
+### I-23.2 显式按段解析的每一种「没下发」都必须回一句话
+
+**规则** `parseHoveredBlock` 的返回值是这条路**唯一**的反馈通道(content script 只把 `PARSE_HOVERED_BLOCK` 的 ERROR 交给 `pill.notice()`)。因此:已出卡(悬停命中 `replacement.currentElement()`)或全到终态 → `该段已解析`;任一句处于 `cache-check`/`requesting`/`validating`,或落在同块 `PARSE_DEBOUNCE_MS`(400ms)窗口内 → `该段正在解析中…` **且不下发**;候选被 `registerCandidates` 静默丢掉 → `这一段没有可解析的句子…`。`queued`/`discovered`/`stale` 一律放行(显式手势的本意就是把排队的那段提前发走)。
+
+**为什么** 快捷键没有右键菜单那样的「已触发」反馈,静默返回等于让用户以为键坏了。而放行在飞的第二按会为同一批句子再发一条 `ANALYZE_CORE`,`++operationVersion` 让第一条的响应整条作废——白付一次模型调用、用户从头多等一轮;落在注册句子的 `await`(SHA-256)窗口里的连按更狠:两遍 `registerCandidates` 后一遍整条换掉前一遍的 `BlockRecord`,卡片留在 DOM 上却没人认领(与 `performScan` 过滤已注册 id 防的是同一件事)。
+
+**症状** 第二次按快捷键报「未找到可解析的段落」(卡片宿主在浅 DOM 里没有文本,`nearestSafeBlock` 只会返回 `null`),或什么反馈都没有;连按则同一段被解析两遍。
+
+**守护测试** `chrome-plugin/src/content/session-controller.test.ts` 的 `同一段落重复触发快捷键幂等`、`同一段在飞时再按快捷键`、`连按两次落在注册句子的 await 窗口里`、`去抖只挡住窗口内的重复`、`鼠标停在已替换的卡片上`、`整块解析失败后再按`。IntelliJ 侧同源规则见「按段解析:页面先自曝「解析中」,Kotlin 侧不得静默返回」。
+
 ## 测试与验收
 
 ### I-24 用探针,不用墙钟

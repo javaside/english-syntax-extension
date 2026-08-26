@@ -48,6 +48,8 @@ blockCandidates(principalRoot)             在容器内收候选块
 > **happy-dom 里内联元素的 computed display 是空串而非 `"inline"`**,所以 `INLINE_DISPLAY` 正则把空串也算作非块。
 >
 > 给 `nearestSafeBlock` 加回任何"正文容器 / 最短长度"限制之前,先想清楚它只有显式调用方。
+>
+> 它也**认不出我方卡片**:卡片宿主的文本都在影子根里,浅 DOM 无文本 → 候选判定失败 → 一路向上返回 `null`。所以「这一段是不是已经解析过了」必须在调用方判,见 §3 的显式按段解析守卫。
 
 ## 2. 切句与分词(`language/segmenter.ts`)
 
@@ -89,6 +91,24 @@ queueVisibleBlock(blockId, force?, immediate = force)
 - 「重新解析可见段落」虽然也是用户发起,但它是**整屏批量操作**,合批更快,所以 `force = true, immediate = false`。
 
 `enqueueForBatch` 里有一处顺序敏感:**先把条目写进 `pendingBatches` 再起定时器**。反过来的话,同步触发的定时器会在条目写入前就跑 `flushBatch`,找不到东西直接返回,这一批就永远发不出去。
+
+### 显式按段解析的守卫(`parseHoveredBlock`)
+
+快捷键只有一个反馈通道:返回 `ExtensionError` → content script 把它交给 `pill.notice()`(SW 会丢弃页面命令的响应,快捷键也没有右键菜单那样的「已触发」反馈)。所以**每一种「这一按没有下发」都必须回一句话**,静默返回等于让用户以为键坏了。
+
+| 情形                    | 判据                                                                 | 回给页面                    |
+| ----------------------- | -------------------------------------------------------------------- | --------------------------- |
+| 鼠标停在我方卡片上      | 遍历块记录:`replacement.active` 且 `currentElement()` 命中悬停元素   | `该段已解析`                |
+| 该块已全到终态          | `ready`/`failed`/`skipped`,有失败句时带上句数                        | `该段已解析[,N 句失败…]`    |
+| 该块正在飞              | 任一句处于 `cache-check`/`requesting`/`validating`                    | `该段正在解析中…`           |
+| 同块 400ms 内的重复触发 | `PARSE_DEBOUNCE_MS`,与 IntelliJ 侧同值同语义                         | `该段正在解析中…`           |
+| 候选被静默丢掉          | `registerCandidates` 的两条 `continue`(非 HTMLElement / 切不出句子) | `这一段没有可解析的句子…`   |
+
+- **卡片判据必须排在最前**:替换后原文是 `display:none` 的兄弟节点,`isLayoutVisible` 会跳过它,所以第二次按键落在的一定是卡片;而卡片宿主在浅 DOM 里没有文本(内容都在影子根),`nearestSafeBlock` 一路向上只会返回 `null`——不先认卡片,用户拿到的是与事实相反的「未找到可解析的段落」(IntelliJ 侧判据同源,见本文档末尾的预览页小节)。
+- **在飞也要挡**:`immediate` 路径不进合批窗口、直接 `analyzeBlocks`,而在飞相位**不在** `queueVisibleBlock` 的终态闸门里。放行第二按就是为同一批句子再发一条 `ANALYZE_CORE`,且 `++operationVersion` 让第一条的响应整条作废——白付一次模型调用,用户从头多等一轮。
+- **为什么在飞判据之外还要去抖**:注册句子要 `await`(SHA-256 算 sentenceId)。连按两次会各自跑一遍 `registerCandidates`,后一遍**整条换掉**前一遍的 `BlockRecord`(与 `performScan` 过滤已注册 id 防的是同一件事):卡片留在 DOM 上却没人认领,句子还被发两遍。相位此时尚未翻到在飞,只有去抖挡得住。
+- `queued` / `discovered` / `stale` 一律放行——显式手势的本意就是把合批里排队的那段**提前**发走,块被失效(内容变动)后也要能再按。失败句不在这里重发:终态闸门对视口路径同样生效,放开会招来重发环,卡片里每个失败句自带「重新解析」。
+- 最后一行是安全网:今天两条 `continue` 都到不了显式手势路径(候选文本非空即至少切出一句),但一旦到得了,冷启动刚亮起的胶囊会**永远**停在「句法解析中…」——一个块都没有,此后再没有任何 `emitStatus` 来收尾。
 
 ## 4. 相位与版本守卫(`session-controller.ts`)
 

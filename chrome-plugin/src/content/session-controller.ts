@@ -146,6 +146,29 @@ const HOVER_ERROR: ExtensionError = {
   message: "未找到可解析的段落，请将鼠标悬停在正文段落上",
   retryable: false,
 };
+// 快捷键的一次性提示只能借 ERROR 通道回到页面:content-script 只把 PARSE_HOVERED_BLOCK
+// 的 ERROR 交给 pill.notice()。而 ERROR_CODES 是跨端镜像的闭集,为一句提示新增码要改五处
+// 同步点,故一律沿用 UNSAFE_CONTENT_BLOCK(HOVER_ERROR 同款先例)。
+const ALREADY_PARSED_ERROR: ExtensionError = {
+  code: "UNSAFE_CONTENT_BLOCK",
+  message: "该段已解析",
+  retryable: false,
+};
+const IN_FLIGHT_ERROR: ExtensionError = {
+  code: "UNSAFE_CONTENT_BLOCK",
+  message: "该段正在解析中…",
+  retryable: false,
+};
+const UNSEGMENTABLE_ERROR: ExtensionError = {
+  code: "UNSAFE_CONTENT_BLOCK",
+  message: "这一段没有可解析的句子，请换一段正文",
+  retryable: false,
+};
+/** 同块重复触发的去抖窗口,与 IntelliJ 侧 `PARSE_DEBOUNCE_MS` 同值同语义。 */
+const PARSE_DEBOUNCE_MS = 400;
+/** 真正在飞(已发或即将发出请求)的相位。`queued`/`discovered` 不在内——显式手势要能把它们提前发走。 */
+const IN_FLIGHT_PHASES: readonly SentencePhase[] = ["cache-check", "requesting", "validating"];
+const SETTLED_PHASES: readonly SentencePhase[] = ["ready", "failed", "skipped"];
 const TOO_LONG_MESSAGE = "SENTENCE_TOO_LONG：句子超过 2,000 个规范化字符";
 const MISSING_RESULT_MESSAGE = "INVALID_MODEL_OUTPUT：模型未返回此句的解析结果";
 
@@ -199,6 +222,8 @@ export class SessionController {
   private requestCounter = 0;
   private operationVersion = 0;
   private contextTarget: EventTarget | null = null;
+  /** 上一次显式按段解析:同块 400ms 内的重复触发直接挡掉(见 `debounceExplicitParse`)。 */
+  private lastExplicitParse?: { blockId: string; at: number };
   private mutationObserver?: MutationObserver;
   private mutationTimer?: ReturnType<typeof setTimeout>;
   private removeDisconnectListener?: () => void;
@@ -412,13 +437,74 @@ export class SessionController {
   }
 
   async parseHoveredBlock(): Promise<ExtensionError | undefined> {
+    const hovered = this.hoverTarget();
+    // 先判「鼠标停在我方卡片上」= 这段已经解析过了。原文被卡片替换后是 display:none 的
+    // 兄弟节点(扫描的可见性判据会跳过它),所以第二次按键落在的一定是卡片;而卡片宿主在
+    // 浅 DOM 里没有文本,nearestSafeBlock 会一路向上找不到块并返回 null——不先判这一条,
+    // 用户拿到的是与事实相反的「未找到可解析的段落」。IntelliJ 侧同款判据见 rendering.md。
+    const showing = this.explicitBlockNotice(this.blockShowing(hovered));
+    if (showing !== undefined) return showing;
     // 快捷键可作为页面冷启动入口：轻量启动，不做全页扫描。
     if (this.state === "stopped") await this.start({ scan: false });
-    const candidate = nearestSafeBlock(this.hoverTarget());
+    const candidate = nearestSafeBlock(hovered);
     if (candidate === null) return HOVER_ERROR;
-    if (!this.blocks.has(candidate.id)) await this.registerCandidates([candidate]);
+    const known = this.blocks.get(candidate.id);
+    const notice = this.explicitBlockNotice(known);
+    if (notice !== undefined) return notice;
+    // 去抖挡的是「相位还没翻到在飞」的那一小段窗口:注册句子要 await(SHA-256 算 sentenceId),
+    // 连按两次会各自跑一遍 registerCandidates,后一遍把前一遍的记录整条换掉——卡片留在 DOM
+    // 上却没人认领,同一批句子还会被发两遍(第二次 ++operationVersion 让第一次的响应作废)。
+    if (this.debounceExplicitParse(candidate.id)) return IN_FLIGHT_ERROR;
+    if (known === undefined) await this.registerCandidates([candidate]);
+    // registerCandidates 有两条静默丢候选的分支(非 HTMLElement / 切不出句子)。今天这两条都
+    // 到不了显式手势路径(候选文本非空即至少切出一句),但一旦到得了,冷启动刚亮起的进度胶囊
+    // 会永远停在「句法解析中…」——一个块都没有,此后再没有任何 emitStatus 来收尾。
+    if (!this.blocks.has(candidate.id)) return UNSEGMENTABLE_ERROR;
     this.queueVisibleBlock(candidate.id, true);
     return undefined;
+  }
+
+  /** 悬停元素落在哪个块**当前呈现的卡片**里(尚未替换的块不算)。 */
+  private blockShowing(target: Element | null): BlockRecord | undefined {
+    if (target === null) return undefined;
+    for (const block of this.blocks.values()) {
+      if (!block.replacement.active) continue;
+      const shown = block.replacement.currentElement(block.candidate.element);
+      if (shown === block.candidate.element) continue;
+      if (shown === target || shown.contains(target)) return block;
+    }
+    return undefined;
+  }
+
+  /**
+   * 显式手势打到一个已知块时该说什么:在飞就说在飞,全到终态就说已解析(顺带报失败句数,
+   * 卡片里每句自带「重新解析」)。两者都必须给出提示而不是静默返回——快捷键没有右键菜单
+   * 那样的「已触发」反馈,静默失败会让用户以为键坏了(见 rendering.md)。
+   * 返回 `undefined` = 这一按应当照常下发(`discovered` / `queued` / `stale`)。
+   */
+  private explicitBlockNotice(block: BlockRecord | undefined): ExtensionError | undefined {
+    if (block === undefined) return undefined;
+    if (block.sentences.some(({ phase }) => IN_FLIGHT_PHASES.includes(phase))) {
+      return IN_FLIGHT_ERROR;
+    }
+    if (!block.sentences.every(({ phase }) => SETTLED_PHASES.includes(phase))) return undefined;
+    const failed = block.sentences.filter(({ phase }) => phase === "failed").length;
+    if (failed === 0) return ALREADY_PARSED_ERROR;
+    // 失败句不在这里重发:queueVisibleBlock 的终态闸门对视口路径同样生效,放开会招来重发环。
+    // 卡片里每个失败句自带「重新解析」按钮,提示指向它即可。
+    return { ...ALREADY_PARSED_ERROR, message: `该段已解析，${failed} 句失败，可点卡片里的「重新解析」` };
+  }
+
+  /** @returns 这一按是否落在同块去抖窗口内(落在窗口内即不下发)。 */
+  private debounceExplicitParse(blockId: string): boolean {
+    const at = this.now();
+    const last = this.lastExplicitParse;
+    // 时间戳不随被挡掉的按键刷新:否则一直按着键就永远发不出去。
+    if (last !== undefined && last.blockId === blockId && at - last.at < PARSE_DEBOUNCE_MS) {
+      return true;
+    }
+    this.lastExplicitParse = { blockId, at };
+    return false;
   }
 
   switchProfile(profileId: string): void {
