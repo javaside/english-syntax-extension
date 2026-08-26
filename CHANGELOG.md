@@ -16,6 +16,7 @@
 
 ### 修复（IntelliJ 插件）
 
+- **同一段按第二次快捷键后永远停在「解析中」，且已翻好的句子点不动**。三处成因叠在一起：① 隐藏原文的 CSS 规则（`[data-english-syntax-hidden]{display:none!important}`）整条缺失，一段翻完屏上有两份文字，鼠标本来就停在那份可见原文上；② 原文是卡片的**兄弟**节点，页面侧「已解析」判据只查了 `closest([data-english-syntax-card])`，拦不住停在原文上的第二次按键，于是对同一段重复下发 `PARSE_BLOCK`；③ Kotlin 侧 `parseExplicitBlock` 遇到「这段已全部 READY、没有新句可派」时静默返回——而页面在按下的那一刻就自己打上了「解析中」竖条与浮层，撤掉它的唯一信号是该块的 `CORE_RESULT`/`CORE_ERROR`，于是标记永不消失。重复下发还顺带让 `renderer.registerBlock` 清空该块的句子映射，卡片仍在 DOM 上、监听器也在，但点成分查不到句子，表现为「原来翻译出来的句子也点击不了」。现补上 CSS 规则、页面侧按 `data-english-syntax-hidden` 也提示「该段已解析」、Kotlin 侧改为把已存结果经同一个 `applyOutcome` 原样重发（不调模型、不构成重扫环）。`preview.css` 规则、页面双判据、Kotlin 重发三处各有守护测试。
 - **翻译卡片的英文行顺序与原文不一致**。卡片句子排列此前按「消息到达顺序」累积（`#blockSentenceOrder`），流式分片按模型输出到达、可能先吐后半句，final 卡片就按乱序排。现渲染前按 `sentenceId` 末尾的 `index`（源序）数值升序重排，无论分片/结果乱序与否都恢复原文顺序。新增 `render.test.ts` 用例钉住。
 - **点「停止并恢复原文」后，预览页右下角又亮起「正在解析」进度浮层**。清卡（`RESTORE_ALL` → `renderer.restoreAll()`）也是 DOM 变更，会被 MutationObserver 的「卡片从有到无」边沿误判成官方 `updateDom` 重渲染，上报 `PREVIEW_RENDERED` → Kotlin 换代重扫 → `rescan()` 又 `setStatus("正在解析…")`。现于 `RESTORE_ALL` 分支同步把「有卡片」基线复位为 false，让我方清卡不构成重渲染边沿。新增 `bootstrap-lifecycle.test.ts` 钉住。
 - **点「开始句法学习」后预览毫无变化、也无报错**。「移除自建预览面板」重构时把 JS→Kotlin 的消息接线整体丢掉了：`VISIBLE_BLOCKS`/`DETAIL_REQUEST`/`RETRY_SENTENCE` 无任何消费者，每层单测全绿但端到端无一条页面消息到达会话。现由 `PreviewSessionConnector` 统一收口接线（先接线后启动会话，顺序不可拆），并新增 `PageMessageWiringTest` 走 Panel 桥接入口钉住这条链路。

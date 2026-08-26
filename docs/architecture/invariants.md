@@ -353,3 +353,23 @@
 **症状**:按一次快捷键(或按一次后保存文件),整篇文档全部开始翻译——「按段翻译」变成整篇翻译,长文档瞬间几十上百次模型请求。
 
 **守护测试**:`bootstrap-lifecycle.test.ts`(`autoScan=false 时只注册不上报，浮层也不亮`)、`PageMessageWiringTest`(`parse block from the page lightweight-starts the session and registers only that block`,断言 `panel.autoScan == false`)。
+
+### 按段解析:页面先自曝「解析中」,Kotlin 侧不得静默返回
+
+**规则**:`parseHoveredBlock` 在按下的那一刻就打上「解析中」竖条并亮起浮层,撤掉它的**唯一**信号是该 `blockId` 的 `CORE_RESULT` / `CORE_ERROR`。因此 `PreviewSession.parseExplicitBlock` 里 `registerFresh` 返回空集时**不得** `return`,必须走 `replayBlock(blockId)` 把该块已存的 `CoreAnalysis` 经同一个 `applyOutcome` 原样重发一遍。页面侧则要在下发前先挡住「已经出过卡」的段落(`HIDDEN_ATTRIBUTE` 判据),两头各守一道。
+
+**为什么**:`registerFresh` 有反环不变量——已到终态的句子不再注册(我方插卡本身是 DOM 变更 → rescan,否则永远循环),所以「同一段再按一次」必然拿到空集。空集静默返回等于让页面自己许下的承诺无人兑现。重发不构成环:不调模型、按段路径 `autoScan=false` 不上报 `VISIBLE_BLOCKS`、整篇模式下 READY 句同样被 `registerFresh` 挡掉;全部在飞时只记日志,否则同一句会被发两遍。
+
+**症状**:同一段已经翻译好,再按一次快捷键就永远停在「解析中」(竖条呼吸动画 + 右下角浮层不灭);顺带 `renderer.registerBlock` 清空该块的句子映射,卡片还在 DOM 上但点成分毫无反应。
+
+**守护测试**:`PreviewSessionTest`(`parse explicit block replays the stored result instead of going silent`)、`bootstrap-lifecycle.test.ts`(`同一段解析完再按：提示已解析、不重复下发，卡片仍点得动`)。
+
+### 被卡片替换的原文必须真的隐藏
+
+**规则**:`preview.css` 必须有 `[data-english-syntax-hidden] { display: none !important; }`。属性本身只是标记(`restoreBlock` 据它精确删除),隐藏是 CSS 的责任;`!important` 是为了压过官方 Markdown 主题里特异性更高的 `p`/`li` 规则(与 Chrome 端注入 `.<hide-class>{display:none!important}` 同款考虑)。
+
+**为什么**:卡片插在原文**之后**,原文是卡片的兄弟节点。规则缺失时一段翻完屏上有两份文字,而且鼠标本来就停在那份可见原文上——`parseHoveredBlock` 里的 `closest("[data-english-syntax-card]")` 只拦得住「停在卡片里」,拦不住兄弟节点,于是同一段被重复下发(见上一条)。
+
+**症状**:一段翻译完成后原文与卡片同时显示;紧接着再按快捷键就复现「一直显示在翻译状态」。
+
+**守护测试**:`render.test.ts`(`the injected stylesheet really hides the replaced original, not just marks it`——happy-dom 不加载注入的样式表,只能按文本钉住规则)。

@@ -32,6 +32,16 @@
   margin-inline-end: 0;
 }
 
+/* 被卡片替换的原文：属性本身只是标记（还原时据它精确删除），真正的隐藏靠这条规则。
+   曾整条缺失——卡片插在原文之后，原文照旧显示，一段翻完屏上有两份；更糟的是鼠标本来
+   就停在那份可见原文上，再按一次按段解析快捷键会对同一段重复下发（原文是卡片的兄弟
+   节点，`closest([data-english-syntax-card])` 拦不住），表现为「一直显示在翻译状态」。
+   用 !important：官方 Markdown 主题里 p/li 的规则特异性可能更高（Chrome 端注入的
+   `.<hide-class>{display:none!important}` 同款考虑）。 */
+[data-english-syntax-hidden] {
+  display: none !important;
+}
+
 /* 「解析中」段落标记：data 属性 + inset box-shadow，不参与布局（Chrome 端同款，
    竖条用 box-shadow 而非 border-left——border 会位移文字，曾推翻折行布局测试）。 */
 [data-english-syntax-active] {

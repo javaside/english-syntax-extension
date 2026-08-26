@@ -625,6 +625,42 @@ class PreviewSessionTest {
   }
 
   @Test
+  fun `parse explicit block replays the stored result instead of going silent`() = runBlocking {
+    // 用户 bug：「同一段已经按快捷键翻译好，再按一次就一直显示在翻译状态。」
+    // 页面在按下的那一刻就打上「解析中」竖条 + 「正在解析 1 段…」浮层，撤掉它的**唯一**信号
+    // 是该块的 CORE_RESULT / CORE_ERROR。所以 registerFresh 一句都不返回（整段已 READY）时
+    // 绝不能静默 return——那就是永久「解析中」的成因。改成把已存结果原样重发一遍：
+    // 既撤掉标记，又顺手把 JS 渲染器的句子映射补回来（重发走的是与首次完全相同的 applyOutcome）。
+    val session = session()
+    val text = "The service validates every response carefully today."
+    service.outcome = CoreBatchOutcome(
+      listOf(
+        CoreAnalysis(
+          sentenceId = "s-b1-0",
+          components = listOf(CoreComponent(0, 1, GrammarRole.SUBJECT, "该服务")),
+          modelProfileId = "p1",
+        ),
+      ),
+      emptyList(),
+      cacheHit = false,
+    )
+    session.parseExplicitBlock("b1", text)
+    kotlinx.coroutines.delay(100)
+    assertEquals(1, service.analyzeCalls)
+    assertEquals(SentencePhase.READY, session.sentences["s-b1-0"]?.phase)
+    assertEquals(1, sender.of("CORE_RESULT").size)
+
+    session.parseExplicitBlock("b1", text)
+    kotlinx.coroutines.delay(100)
+
+    assertEquals(1, service.analyzeCalls, "已解析的段落不得再调一次模型")
+    val results = sender.of("CORE_RESULT")
+    assertEquals(2, results.size, "必须重发已存结果，否则页面永远停在「解析中」")
+    assertEquals("s-b1-0", results.last()["sentenceId"]?.jsonPrimitive?.contentOrNull)
+    assertEquals("b1", results.last()["blockId"]?.jsonPrimitive?.contentOrNull)
+  }
+
+  @Test
   fun `streamed components still reach the page while paused`() = runBlocking {
     // 暂停穿透的配套：分片守卫从「必须 RUNNING」放宽到「非 STOPPED」。否则显式路径
     // 在暂停时只能等整批返回，卡片突然整块冒出来、没有流式过程。

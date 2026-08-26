@@ -201,9 +201,39 @@ class PreviewSession(
   fun parseExplicitBlock(blockId: String, text: String) {
     if (state == SessionState.STOPPED) state = SessionState.RUNNING
     val fresh = registerFresh(listOf(blockId to text))
-    if (fresh.isEmpty()) return
+    if (fresh.isEmpty()) {
+      replayBlock(blockId)
+      return
+    }
     LOGGER.info("parseExplicitBlock: blockId=$blockId sentences=${fresh.size} state=$state")
     scope.launch { dispatch(fresh, offscreen = false, allowPaused = true) }
+  }
+
+  /**
+   * 这一段没有任何需要派发的句子（整段已 READY）——**不能就这么返回**。
+   *
+   * 页面在按下快捷键的那一刻就已经打上「解析中」竖条 + 「正在解析 1 段…」浮层，撤掉它的
+   * 唯一信号是该块的 `CORE_RESULT` / `CORE_ERROR`。静默返回的真机症状就是「同一段再按一次
+   * 快捷键，从此永远停在翻译状态」。所以把已存的权威结果原样重发一遍:走的是与首次完全
+   * 相同的 [applyOutcome]，页面因此既撤掉标记、又能把渲染器里被清掉的句子映射补回来
+   * （JS 侧 `registerBlock` 重注册会清空旧句子，卡片还在但点不动）。
+   *
+   * 不构成「渲染 → rescan → 再派发」的环:重发不调模型，且 JS 侧按段路径 `autoScan=false`
+   * 不上报 `VISIBLE_BLOCKS`;整篇模式下上报回来的 READY 句也会被 [registerFresh] 挡掉。
+   *
+   * 一句可重发的都没有（全在飞:QUEUED/REQUESTING/VALIDATING）时只记日志——在飞请求自己
+   * 的结果会撤掉标记，这里再补一条反而会把同一句发两遍。
+   */
+  private fun replayBlock(blockId: String) {
+    val stored = sentences.values
+      .filter { it.blockId == blockId && it.phase == SentencePhase.READY }
+      .mapNotNull { it.core }
+    if (stored.isEmpty()) {
+      LOGGER.info("parseExplicitBlock: blockId=$blockId nothing fresh and nothing stored (in flight?)")
+      return
+    }
+    LOGGER.info("parseExplicitBlock: blockId=$blockId already analysed, replaying ${stored.size} sentences")
+    applyOutcome(CoreBatchOutcome(stored, emptyList(), cacheHit = true))
   }
 
   private fun blockIdOf(blocks: List<Pair<String, String>>, sentenceId: String): String {

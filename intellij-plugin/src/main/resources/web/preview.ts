@@ -16,7 +16,11 @@ const CANDIDATE_SELECTOR = "h1,h2,h3,h4,h5,h6,p,li,blockquote";
 const EXCLUDED_SELECTOR =
   "pre,code,table,.math,.katex,.mermaid,.footnotes,[role='doc-endnotes']," +
   "button,input,textarea,select,iframe,[contenteditable],[data-english-syntax-card]";
-const HIDDEN_ATTRIBUTE = "data-english-syntax-hidden";
+/**
+ * 原文被卡片替换后打在原元素上的标记。`render.ts` 负责写/删，`preview.css` 据它隐藏原文，
+ * 扫描与按段解析据它跳过「已经出过卡」的段落。
+ */
+export const HIDDEN_ATTRIBUTE = "data-english-syntax-hidden";
 const BLOCK_ID_ATTRIBUTE = "data-english-syntax-block";
 const MIN_TEXT_LENGTH = 20;
 const ENGLISH_RATIO = 0.6;

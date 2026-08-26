@@ -6,7 +6,13 @@
  * 由构建(rolldown)打包成单文件 IIFE 注入预览页。
  */
 import { BRIDGE_VERSION, parseHostMessage } from "./bridge";
-import { ensureBlockId, nearestPreviewBlock, resetScanRegistry, scanMarkdownBlocks } from "./preview";
+import {
+  ensureBlockId,
+  HIDDEN_ATTRIBUTE,
+  nearestPreviewBlock,
+  resetScanRegistry,
+  scanMarkdownBlocks,
+} from "./preview";
 import { PreviewRenderer } from "./render";
 import { setDarkMode } from "./roles";
 
@@ -251,6 +257,15 @@ function parseHoveredBlock(target?: Element | null): void {
   const element = nearestPreviewBlock(hovered);
   if (element === null) {
     flashStatus("未找到可解析的段落");
+    return;
+  }
+  if (element.hasAttribute(HIDDEN_ATTRIBUTE)) {
+    // 已出过卡的原文。上面那条 closest 只拦得住「鼠标停在卡片里」——原文是卡片的**兄弟**
+    // 节点，停在原文上照样会走到这里（CSS 隐藏后仍可能命中：JCEF 的 `:hover` 链在 DOM 变
+    // 更后不一定重算，测试与右键路径还会显式传元素）。放行的后果是对同一段重复下发
+    // PARSE_BLOCK，而 Kotlin 侧那段句子已全部 READY，没有任何 CORE_RESULT 回来撤掉
+    // 「解析中」竖条与浮层；顺带 `registerBlock` 还会清空该块的句子映射，卡片虽在却点不动。
+    flashStatus("该段已解析");
     return;
   }
   const blockId = ensureBlockId(element);

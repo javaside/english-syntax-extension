@@ -185,7 +185,6 @@
 	//#region src/main/resources/web/preview.ts
 	const CANDIDATE_SELECTOR = "h1,h2,h3,h4,h5,h6,p,li,blockquote";
 	const EXCLUDED_SELECTOR = "pre,code,table,.math,.katex,.mermaid,.footnotes,[role='doc-endnotes'],button,input,textarea,select,iframe,[contenteditable],[data-english-syntax-card]";
-	const HIDDEN_ATTRIBUTE$1 = "data-english-syntax-hidden";
 	const BLOCK_ID_ATTRIBUTE = "data-english-syntax-block";
 	const MIN_TEXT_LENGTH = 20;
 	const ENGLISH_RATIO = .6;
@@ -265,7 +264,7 @@
 	function scanMarkdownBlocks(root) {
 		const elements = [];
 		for (const element of root.querySelectorAll(CANDIDATE_SELECTOR)) collectCandidates(element, elements);
-		return elements.filter((element) => !registeredElements.has(element) && !element.hasAttribute(HIDDEN_ATTRIBUTE$1)).map((element) => {
+		return elements.filter((element) => !registeredElements.has(element) && !element.hasAttribute("data-english-syntax-hidden")).map((element) => {
 			registeredElements.add(element);
 			return {
 				blockId: ensureBlockId(element),
@@ -996,6 +995,10 @@
 		const element = nearestPreviewBlock(hovered);
 		if (element === null) {
 			flashStatus("未找到可解析的段落");
+			return;
+		}
+		if (element.hasAttribute("data-english-syntax-hidden")) {
+			flashStatus("该段已解析");
 			return;
 		}
 		const blockId = ensureBlockId(element);

@@ -1,5 +1,7 @@
 // @vitest-environment happy-dom
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PreviewRenderer } from "./render";
 import { setDarkMode, isDarkMode } from "./roles";
@@ -53,6 +55,16 @@ describe("PreviewRenderer", () => {
     expect(element.hasAttribute(HIDDEN)).toBe(false);
     expect(document.querySelector("[data-english-syntax-card]")).toBeNull();
     void renderer;
+  });
+
+  it("the injected stylesheet really hides the replaced original, not just marks it", () => {
+    // HIDDEN 属性只是标记（还原时据它精确删除），真正的隐藏靠 preview.css 里的规则。
+    // 这条规则曾整个缺失：卡片插在原文之后，原文照旧显示，一段翻完屏上有两份。
+    // 后果不止是难看——鼠标本来就停在那份可见的原文上，再按一次按段解析快捷键就会
+    // 对同一段重复下发（原文是卡片的兄弟节点，`closest([data-...-card])` 查不到），
+    // 表现为「一直显示在翻译状态」。happy-dom 不加载注入的样式表，只能按文本钉住。
+    const css = readFileSync(join(process.cwd(), "src/main/resources/web/preview.css"), "utf8");
+    expect(css).toMatch(/\[data-english-syntax-hidden\][^{]*\{[^}]*display:\s*none/);
   });
 
   it("renders a provisional card from the first streamed component", () => {

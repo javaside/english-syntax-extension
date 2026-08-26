@@ -65,6 +65,9 @@ describe("bootstrap-entry 停止回归", () => {
     // 忘了 npm run bundle-web 的症状是「Kotlin 侧全绿、真机按快捷键毫无反应」。
     expect(bundle).toContain("PARSE_BLOCK");
     expect(bundle).toContain("__englishSyntaxParseHoveredBlock");
+    // 「该段已解析」有两处判据：鼠标停在卡片里、以及停在已出过卡的原文上（卡片的兄弟节点）。
+    // 少一处就会对同一段重复下发，页面永远停在「解析中」——而这两条判据都只活在 bundle 里。
+    expect(bundle.match(/该段已解析/g) ?? []).toHaveLength(2);
   });
 
   it("RESTORE_ALL 清卡后不再把清卡误判成官方重渲染、也不重新亮出进度浮层", async () => {
@@ -185,6 +188,10 @@ describe("bootstrap-entry 按段解析", () => {
     (window as unknown as Record<string, unknown>).__englishSyntaxParseHoveredBlock as (
       target?: Element | null,
     ) => void;
+  const hostMessage = () =>
+    (window as unknown as Record<string, unknown>).__englishSyntaxMessage as (
+      message: Record<string, unknown>,
+    ) => void;
   const label = (): string =>
     document.querySelector(".english-syntax-status-label")?.textContent ?? "";
 
@@ -272,6 +279,55 @@ describe("bootstrap-entry 按段解析", () => {
 
     expect(posted.some((m) => m.type === "PARSE_BLOCK")).toBe(false);
     expect(label()).toContain("该段已解析");
+  });
+
+  it("同一段解析完再按：提示已解析、不重复下发，卡片仍点得动", async () => {
+    // 用户 bug：「同一段，已经按过快捷键翻译好，再按的话就一直显示在翻译状态，
+    // 原来翻译出来的句子也点击不了。」两处成因都钉在这条用例里：
+    //  ① 卡片插在原文之后，原文是卡片的**兄弟**节点 —— 上一条用例的
+    //     `closest([data-english-syntax-card])` 只拦得住「鼠标停在卡片里」，
+    //     停在原文上照样放行 → 对同一段重复下发 PARSE_BLOCK，而 Kotlin 侧那段已全 READY，
+    //     于是没有任何 CORE_RESULT 回来撤掉「解析中」竖条与浮层。
+    //  ② 放行后 `renderer.registerBlock` 会清空该块的句子映射，卡片虽然还在 DOM 上、
+    //     监听器也还在，但 `#showDetailLoading`/`#showDetailPanel` 查 `#sentences` 全部落空，
+    //     点成分毫无反应。
+    const para = document.createElement("p");
+    para.textContent = "The service validates every response before returning anything.";
+    document.body.append(para);
+
+    initialize()("pv-again", 0, false);
+    await flush();
+    posted.length = 0;
+
+    parseHovered()(para);
+    await flush();
+    expect(posted.filter((m) => m.type === "PARSE_BLOCK")).toHaveLength(1);
+    const blockId = para.getAttribute("data-english-syntax-block")!;
+
+    hostMessage()(coreResultMessage("pv-again", 0, blockId));
+    await flush();
+    expect(document.querySelector("[data-english-syntax-card]")).not.toBeNull();
+    expect(para.hasAttribute("data-english-syntax-hidden")).toBe(true);
+
+    // 跨过 400ms 去抖窗口：要证明拦住第二次的是「这段已出卡」判据，而不是去抖顺手挡掉。
+    const later = Date.now() + 5_000;
+    vi.spyOn(Date, "now").mockReturnValue(later);
+    posted.length = 0;
+
+    parseHovered()(para);
+    await flush();
+
+    expect(posted.filter((m) => m.type === "PARSE_BLOCK")).toHaveLength(0);
+    expect(label()).toContain("该段已解析");
+    // 卡片没被清掉，且渲染器的句子映射还在 —— 点成分要能发出 DETAIL_REQUEST，
+    // 并就地插出「正在加载详解…」占位（占位正是需要 `#sentences` 命中才画得出来的那一步）。
+    const component = document.querySelector<HTMLElement>(".english-syntax-component");
+    expect(component).not.toBeNull();
+    component!.click();
+    await flush();
+
+    expect(posted.filter((m) => m.type === "DETAIL_REQUEST")).toHaveLength(1);
+    expect(document.querySelector(".english-syntax-detail-loading")).not.toBeNull();
   });
 
   it("keydown 兼底逐位匹配修饰键，并随 setHotkey 改键", async () => {
