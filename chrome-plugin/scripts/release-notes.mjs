@@ -33,8 +33,9 @@ export function installSection(version) {
     `1. 下载下方的 \`intellij-plugin-${version}.zip\`（**不要解压**）；`,
     "2. `Settings / Preferences → Plugins → ⚙ → Install Plugin from Disk…`，选中该 zip；",
     "3. 重启 IDE；",
-    "4. `Settings → Tools → English Syntax`，配置模型端点与 API key（key 存进 PasswordSafe，不进任何日志）；",
-    "5. 打开一份 Markdown，用预览工具栏的「开始句法学习」。",
+    "4. `Settings → Tools → English Syntax Learning`，配置模型端点与 API key（key 存进 PasswordSafe，不进任何日志）；",
+    "5. 打开一份 Markdown 切到预览，`Tools → 句法学习 → 开始句法学习`；" +
+      "或把鼠标停在某一段上按 `Alt+T`（Mac：`Option+T`），只解析那一段。",
     "",
     "> 需要 IDEA 2025.1+ 且运行在自带 JCEF 的 JetBrains Runtime 上；预览面板不可用时 Action 会置灰并提示。",
     "",
