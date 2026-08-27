@@ -10,7 +10,7 @@
 
 ## 上传物
 
-`chrome-plugin/release/english-syntax-extension-v1.1.0.zip`（194 KB，19 个文件，已排除 source map）。本文所有命令都在 `chrome-plugin/` 里跑，产物相对路径也在 `chrome-plugin/` 下。
+`chrome-plugin/release/english-syntax-extension-v1.2.0.zip`（zip 96 KB，解压后 202 KB，19 个文件，已排除 source map）。本文所有命令都在 `chrome-plugin/` 里跑，产物相对路径也在 `chrome-plugin/` 下。
 
 用 `npm run package` 生成。zip 里必须是**扩展根目录直接展开**，不能多套一层文件夹——当前打包脚本已保证这点，并会校验 `manifest.json` 与 `content-script.js` 在包内。
 

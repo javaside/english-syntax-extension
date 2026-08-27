@@ -2,7 +2,13 @@
 
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## 未发布
+## 1.2.0 — 2026-08-27
+
+这一版有两件大事：仓库多了**第二个运行时**——IntelliJ IDEA Markdown 预览插件，与 Chrome 扩展共用同一套契约与缓存，同一批文档两端阅读零重复请求；以及一轮真机验收（真 Chrome + 真 DeepSeek）把一批只在真环境里才显形的缺陷逼了出来，连同两端提示词口径一起收口。
+
+**升级后请重新加载扩展并刷新页面。** 成分粒度口径这一版改了（`CORE_SCHEMA_VERSION` 3 / `CORE_PROMPT_VERSION` 5），**已有的 core 缓存随之作废**，下次打开文档会重新翻译一遍；详解缓存不受影响。
+
+**本版 Release 附两个包**：Chrome 扩展 `english-syntax-extension-v1.2.0.zip`（解压后加载）与 IDEA 插件 `intellij-plugin-1.2.0.zip`（不解压，`Settings → Plugins → ⚙ → Install Plugin from Disk…`，需 IDEA 2025.1+ 与自带 JCEF 的 JetBrains Runtime）。两端从此同版本号发布。
 
 ### 新增
 
