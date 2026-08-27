@@ -2,7 +2,9 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  deepestHovered,
   ensureBlockId,
+  HOVER_CHAIN_SELECTOR,
   nearestPreviewBlock,
   observeBlocks,
   resetScanRegistry,
@@ -247,6 +249,48 @@ describe("nearestPreviewBlock", () => {
     hoverFixture();
     expect(nearestPreviewBlock(null)).toBeNull();
     expect(nearestPreviewBlock(at("para").firstChild)?.id).toBe("para");
+  });
+});
+
+/**
+ * quirks 模式（预览页 HTML 由 IDEA 生成，doctype 有无不由我们说了算）下 Chromium 只让链接
+ * 匹配裸 `:hover`，`querySelectorAll(":hover")` 整页恒为空集，按快捷键只会得到「未找到可
+ * 解析的段落」。实测同一 quirks 页面同一位置：`:hover` → 空，`:is(:hover)` → 完整悬停链。
+ * happy-dom 不实现该 quirk，所以这里钉的是「查的到底是哪个选择器」。
+ */
+describe("deepestHovered", () => {
+  beforeEach(() => {
+    document.body.replaceChildren();
+  });
+
+  it("查的是 :is(:hover) 而不是裸 :hover", () => {
+    expect(HOVER_CHAIN_SELECTOR).toBe(":is(:hover)");
+    const outer = el("div", "outer", "");
+    const inner = el("p", "inner", "Hovered paragraph.");
+    outer.append(inner);
+    document.body.append(outer);
+    const chain = vi
+      .spyOn(document, "querySelectorAll")
+      .mockReturnValue([outer, inner] as unknown as ReturnType<Document["querySelectorAll"]>);
+
+    try {
+      expect(deepestHovered(document)?.id).toBe("inner");
+      expect(chain).toHaveBeenCalledWith(":is(:hover)");
+    } finally {
+      chain.mockRestore();
+    }
+  });
+
+  it("伪类不被支持时查询抛错也只当没悬停", () => {
+    const chain = vi.spyOn(document, "querySelectorAll").mockImplementation(() => {
+      throw new Error("unsupported pseudo-class");
+    });
+
+    try {
+      expect(deepestHovered(document)).toBeNull();
+    } finally {
+      chain.mockRestore();
+    }
   });
 });
 

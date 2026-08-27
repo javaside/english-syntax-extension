@@ -209,6 +209,30 @@
 		return blockId;
 	}
 	/**
+	* 悬停链选择器。
+	*
+	* `:is()` 不能省：quirks 模式（HTML 没有 doctype）下 Chromium 按 hover/active quirk
+	* 只让链接匹配裸 `:hover`，`querySelectorAll(":hover")` 于是**整页恒为空集**，按快捷键
+	* 只会得到「未找到可解析的段落」。该 quirk 只在「复合选择器里除伪类之外别无他物」时生效，
+	* 塞进 `:is()` 就落进子选择器语境、不再适用（实测同一 quirks 页面：`:hover` → 空，
+	* `:is(:hover)` → `html > body > main > p#safe`）；标准模式下两者结果恒等。
+	*
+	* 预览页 HTML 由 IDEA 生成，doctype 有无不由我们说了算，所以不赌它是标准模式。
+	* Chrome 端同一判据在 `chrome-plugin/src/content/hover-target.ts`。
+	*/
+	const HOVER_CHAIN_SELECTOR = ":is(:hover)";
+	/** 悬停链的最深元素。happy-dom 等环境不实现该伪类，查询可能抛错，兜住返回 null。 */
+	function deepestHovered(doc) {
+		let chain = null;
+		try {
+			chain = doc.querySelectorAll(HOVER_CHAIN_SELECTOR);
+		} catch {
+			chain = null;
+		}
+		if (chain === null || chain.length === 0) return null;
+		return chain[chain.length - 1] ?? null;
+	}
+	/**
 	* 显式手势（快捷键悬停解析）的块定位：从悬停元素逐级向上找最近的可解析块。
 	*
 	* **刻意不套用自动扫描的取舍**：不要求 20 字符、不要求英文占比、不限定候选标签。
@@ -981,17 +1005,6 @@
 		};
 		return state;
 	}
-	/** CSS `:hover` 链的最深元素。happy-dom 等环境不实现该伪类，查询可能抛错，兜住返回 null。 */
-	function deepestHovered() {
-		let chain = null;
-		try {
-			chain = document.querySelectorAll(":hover");
-		} catch {
-			chain = null;
-		}
-		if (chain === null || chain.length === 0) return null;
-		return chain[chain.length - 1] ?? null;
-	}
 	/** 同一块的重复触发去抖：两条快捷键通道（IDEA Action + 本页 keydown）可能同时到达。 */
 	const PARSE_DEBOUNCE_MS = 400;
 	let lastParsedBlockId = "";
@@ -999,13 +1012,13 @@
 	/**
 	* 解析一段并上报 `PARSE_BLOCK`。
 	*
-	* `target` 省略时查 CSS `:hover` 取最深元素——这是 Kotlin 的调用方式（`executeJavaScript`
-	* 里不传参）。测试与将来可能的右键路径可以显式传入目标元素。
+	* `target` 省略时查悬停链取最深元素（`deepestHovered`，判据见 `preview.ts`）——这是 Kotlin 的
+	* 调用方式（`executeJavaScript` 里不传参）。测试与将来可能的右键路径可以显式传入目标元素。
 	*/
 	function parseHoveredBlock(target) {
 		const s = state;
 		if (s === null || s.previewId === "") return;
-		const hovered = target === void 0 ? deepestHovered() : target;
+		const hovered = target === void 0 ? deepestHovered(document) : target;
 		if (hovered !== null && hovered.closest("[data-english-syntax-card]") !== null) {
 			flashStatus("该段已解析");
 			return;

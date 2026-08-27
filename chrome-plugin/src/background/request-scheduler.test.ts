@@ -128,6 +128,35 @@ describe("request scheduler", () => {
     expect(sleep.mock.calls.map(([milliseconds]) => milliseconds)).toEqual([525, 1_025]);
   });
 
+  // 上游持续 5xx 时的上界:一次首发 + maxRetries 次重试就收手,不许无限退避重发。
+  // 真机上「上游一直 500」正是这条的现场:同一份请求体被发 3 趟(默认 maxRetries=2)后
+  // 才落成失败卡,趟数不能再多——每一趟都在烧 token。
+  it("stops after maxRetries attempts when the upstream keeps failing", async () => {
+    const sleep = vi.fn<SchedulerSleep>().mockResolvedValue(undefined);
+    const alwaysFailing = vi
+      .fn<RunTask<Input, number>>()
+      .mockRejectedValue(new ModelRequestError("NETWORK_ERROR", "server", true, { status: 500 }));
+    const scheduler = new RequestScheduler<Input, number>({
+      runTask: alwaysFailing,
+      sleep,
+      jitter: () => 0,
+    });
+    await expect(scheduler.schedule(task(1))).rejects.toMatchObject({ code: "NETWORK_ERROR" });
+    expect(alwaysFailing).toHaveBeenCalledTimes(3);
+    expect(sleep.mock.calls.map(([milliseconds]) => milliseconds)).toEqual([500, 1_000]);
+
+    alwaysFailing.mockClear();
+    sleep.mockClear();
+    const noRetry = new RequestScheduler<Input, number>({
+      runTask: alwaysFailing,
+      sleep,
+      maxRetries: 0,
+    });
+    await expect(noRetry.schedule(task(2))).rejects.toMatchObject({ code: "NETWORK_ERROR" });
+    expect(alwaysFailing).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
   it("does not retry authentication failures", async () => {
     const runTask = vi
       .fn()

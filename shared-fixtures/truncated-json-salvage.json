@@ -1,0 +1,57 @@
+[
+  {
+    "name": "truncated-final-brace",
+    "input": "{\"sentences\":[{\"sentenceId\":\"s1\",\"components\":[{\"startToken\":0,\"endToken\":1,\"role\":\"SUBJECT\",\"translation\":\"两位年轻的工程师\"}]}]",
+    "expected": "{\"sentences\":[{\"sentenceId\":\"s1\",\"components\":[{\"startToken\":0,\"endToken\":1,\"role\":\"SUBJECT\",\"translation\":\"两位年轻的工程师\"}]}]}"
+  },
+  {
+    "name": "truncated-after-comma",
+    "input": "{\"sentences\":[{\"sentenceId\":\"s1\",\"components\":[{\"startToken\":0,\"endToken\":1,\"role\":\"SUBJECT\",",
+    "expected": "{\"sentences\":[{\"sentenceId\":\"s1\",\"components\":[{\"startToken\":0,\"endToken\":1,\"role\":\"SUBJECT\"}]}]}"
+  },
+  {
+    "name": "truncated-inside-string",
+    "input": "{\"sentences\":[{\"sentenceId\":\"s1\",\"components\":[{\"startToken\":0,\"endToken\":1,\"role\":\"SUBJECT\",\"translation\":\"两位年轻",
+    "expected": "{\"sentences\":[{\"sentenceId\":\"s1\",\"components\":[{\"startToken\":0,\"endToken\":1,\"role\":\"SUBJECT\"}]}]}"
+  },
+  {
+    "name": "truncated-trailing-number",
+    "input": "{\"sentences\":[{\"sentenceId\":\"s1\",\"components\":[{\"startToken\":0,\"endToken\":1",
+    "expected": "{\"sentences\":[{\"sentenceId\":\"s1\",\"components\":[{\"startToken\":0}]}]}"
+  },
+  {
+    "name": "second-sentence-truncated",
+    "input": "{\"sentences\":[{\"sentenceId\":\"s1\",\"components\":[{\"startToken\":0,\"endToken\":2,\"role\":\"PREDICATE\",\"translation\":\"修好了\"}]},{\"sentenceId\":\"s2\",\"comp",
+    "expected": "{\"sentences\":[{\"sentenceId\":\"s1\",\"components\":[{\"startToken\":0,\"endToken\":2,\"role\":\"PREDICATE\",\"translation\":\"修好了\"}]},{\"sentenceId\":\"s2\"}]}"
+  },
+  {
+    "name": "unclosed-opening-fence",
+    "input": "```json\n{\"sentences\":[{\"sentenceId\":\"s1\",\"components\":[]}]}",
+    "expected": "{\"sentences\":[{\"sentenceId\":\"s1\",\"components\":[]}]}"
+  },
+  {
+    "name": "prose-after-json",
+    "input": "{\"sentences\":[]}\n\n希望这个解析对你有帮助！",
+    "expected": "{\"sentences\":[]}"
+  },
+  {
+    "name": "escaped-quote-then-truncated",
+    "input": "{\"sentences\":[{\"sentenceId\":\"s1\",\"components\":[{\"startToken\":0,\"endToken\":1,\"role\":\"OBJECT\",\"translation\":\"所谓\\\"完整\\\"的句子\"},{\"startToken\":2,\"endTok",
+    "expected": "{\"sentences\":[{\"sentenceId\":\"s1\",\"components\":[{\"startToken\":0,\"endToken\":1,\"role\":\"OBJECT\",\"translation\":\"所谓\\\"完整\\\"的句子\"},{\"startToken\":2}]}]}"
+  },
+  {
+    "name": "no-complete-value",
+    "input": "{\"sentences\":[{\"sentenceId",
+    "expected": null
+  },
+  {
+    "name": "already-valid",
+    "input": "{\"sentences\":[{\"sentenceId\":\"s1\",\"components\":[]}]}",
+    "expected": "{\"sentences\":[{\"sentenceId\":\"s1\",\"components\":[]}]}"
+  },
+  {
+    "name": "not-json-at-all",
+    "input": "抱歉，我无法解析这句话。",
+    "expected": null
+  }
+]

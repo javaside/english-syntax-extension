@@ -83,7 +83,7 @@ export interface SessionStatus {
   /** 无可用模型配置:本次只查缓存，没有任何模型请求。影响进度提示的措辞。 */
   cacheOnly?: true;
   /** 详解预载:已就绪句子的成分总数(仅预载开启的会话出现)。 */
-  /** 在飞的句子数(requesting + validating)。判定「当前是否还有工作」用。 */
+  /** 在飞的句子数(cache-check + requesting + validating)。判定「当前是否还有工作」用。 */
   inFlight?: number;
   detailTotal?: number;
   /** 详解预载:已确认入缓存的成分数(含预载前已命中缓存的)。 */
@@ -94,18 +94,20 @@ export interface SessionStatus {
 }
 
 /**
- * 「当前没有在飞的工作」,而不是「所有发现的句子都出了结果」。
+ * 「已经出过结果,且当前没有在飞的工作」,而不是「所有发现的句子都出了结果」。
  *
  * discovered 含屏外尚未触发的句子——它们要滚动到可见才入队。按旧口径要求全部
  * 达终态,长页面就永远停在「解析中…」,主按钮不会变成「恢复网页原文」。
- * queued 单独不够:requesting / validating 不在任何计数里,所以要有 inFlight。
+ * queued 单独不够:cache-check / requesting / validating 不在它里面,所以要有 inFlight。
  *
- * 仍要求 discovered > 0:会话刚启动时 SW 先塞一个空状态占位,那时 queued 与
- * inFlight 都是 0,少了这道保护会把「还没开始」当成「已完成」。至于 discovered
- * 始终为 0 的空转状态(status 上报没到达),由 popup 单独给恢复入口,不靠放宽这里。
+ * 又必须要求「至少落地一句」:光有 discovered > 0 挡不住派发之前那些状态——扫描
+ * 登记完(全部 discovered 相位)、视口回调还没回来时,queued 与 inFlight 都是 0,
+ * 进度胶囊会在 t=0 闪一下「✓ 解析完成」再退回「解析中」。ready/failed/skipped
+ * 三者之和 > 0 才说明这一趟真的有句子跑完过。
  */
 export function isSessionComplete(status: SessionStatus): boolean {
-  return status.discovered > 0 && status.queued === 0 && (status.inFlight ?? 0) === 0;
+  const settled = status.ready + status.failed + (status.skipped ?? 0);
+  return settled > 0 && status.queued === 0 && (status.inFlight ?? 0) === 0;
 }
 
 export interface CacheStats {

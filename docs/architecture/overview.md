@@ -148,7 +148,7 @@ MV3 把扩展拆成互不共享内存的几个世界。**每个模块能做什�
 
 **预载路径**(选项页开启「预载成分详解」后):每句 core 就绪即 `DetailPrefetcher.enqueue()`,发 `PREFETCH_SENTENCE_DETAILS`——**一次整句请求覆盖该句所有缺失成分**,结果逐成分写进**与点击路径完全相同的缓存键**。于是后续点击零模型调用。
 
-> 缓存键 = 规范化句文本 + schema 版本 + focus 区间,**与 profile / 模型无关**。改任一侧的键构造必须两侧同步,并用对方路径读回验证。
+> 缓存键 = 规范化句文本 + schema 版本 + 提示词版本(core 用 `CORE_PROMPT_VERSION`,详解用 `DETAIL_PROMPT_VERSION`)+ focus 区间,**与 profile / 模型无关**。改任一侧的键构造必须两侧同步,并用对方路径读回验证。
 
 ## 6. 两个状态机
 
@@ -189,11 +189,11 @@ discovered ─▶ cache-check ─▶ queued ─▶ requesting ─▶ validating 
 
 Chrome 扩展之外,本仓库还交付一个 IntelliJ IDEA Markdown 预览插件(`intellij-plugin/`,与 `chrome-plugin/` 平级的独立子模块:Kotlin 构建归 Gradle,`resources/web/` 的 TS 桥测试在 `intellij-plugin/` 里 `npm ci && npm test` 独立跑)。两个运行时**不共享运行代码**,只共享契约:
 
-- 仓库根 `shared-fixtures/` 的分句/缓存键向量、交换 fixture 由 TS(chrome-plugin)与 Kotlin(intellij-plugin)测试同时消费——两端任何一侧改规则,另一侧的测试立刻红。
+- 仓库根 `shared-fixtures/` 的分句/缓存键向量、整段 core 提示词(`core-prompt-parity.json`)、交换 fixture 由 TS(chrome-plugin)与 Kotlin(intellij-plugin)测试同时消费——两端任何一侧改规则,另一侧的测试立刻红。
 - 模型链路(prompt、校验、修复、降级)在 Kotlin 侧按同一骨架重新实现(见 [model-pipeline.md](./model-pipeline.md) 的 IntelliJ 小节)。
 
-链路时序:IntelliJ 打开 `.md` 预览(官方 `MarkdownJCEFHtmlPanel`,IDEA 默认 JCEF 预览)→ 用户点 Tools → 开始句法学习 → `EnglishSyntaxPreviewPanel.findPanel` 经 `MarkdownPreviewFileEditor.PREVIEW_BROWSER` UserData 定位官方面板并包装 → `PreviewSessionConnector.start` 接线页面消息(先接线、后启动会话)→ 包装在页面 load 完成后注入 `web/bundle.js` 与 `preview.css`(bundle 由 `scripts/bundle-web.mjs` 从 `bootstrap-entry.ts` 打包;JS→Kotlin 走 `JBCefJSQuery`)→ `__englishSyntaxInitialize` 触发扫描 → JS 回传 `VISIBLE_BLOCKS` → `PreviewSessionConnector` 派发进 `PreviewSession` 分句分词、合批、查 SQLite 缓存(与 Chrome 扩展互通)→ 未命中经 `RequestScheduler` 调模型 → 校验/一次修复 → `CORE_RESULT`/`CORE_STREAM`(带 `blockId`)回推页面 → `render.ts` 按 blockId 惰性注册句子、可逆替换卡片。官方每次整体重渲染(updateDom 重写 body)由 JS 上报 `PREVIEW_RENDERED`,Kotlin 换代重扫。用户手势(Tools 菜单的四个 Action)经 `PreviewSessionManagerService` 取 manager:前三个驱动 start/pause/stop,stop 发 `RESTORE_ALL` 恢复原文;第四个「解析鼠标悬停的段落」不碰会话开关,走下面的快捷键支线。
+链路时序:IntelliJ 打开 `.md` 预览(官方 `MarkdownJCEFHtmlPanel`,IDEA 默认 JCEF 预览)→ 用户点 Tools → 开始句法学习 → `EnglishSyntaxPreviewPanel.findPanel` 经 `MarkdownPreviewFileEditor.PREVIEW_BROWSER` UserData 定位官方面板并包装 → `PreviewSessionConnector.start` 接线页面消息(先接线、后启动会话)→ 包装在页面 load 完成后注入 `web/bundle.js` 与 `preview.css`(bundle 由 `scripts/bundle-web.mjs` 从 `bootstrap-entry.ts` 打包;JS→Kotlin 走 `JBCefJSQuery`)→ `__englishSyntaxInitialize` 触发扫描 → JS 回传 `VISIBLE_BLOCKS` → `PreviewSessionConnector` 派发进 `PreviewSession` 分句分词、合批、查 SQLite 缓存(与 Chrome 扩展互通)→ 未命中经 `RequestScheduler` 调模型 → 校验/一次修复 → `CORE_RESULT`/`CORE_STREAM`(带 `blockId`)回推页面 → `render.ts` 按 blockId 惰性注册句子、可逆替换卡片。完整 `CORE_RESULT` 同时作为该句的权威核心分析保存在 `SentenceRecord`;后续 `DETAIL_REQUEST` 必须把它原样传给详解模型,流式暂定成分不能替代它。官方每次整体重渲染(updateDom 重写 body)由 JS 上报 `PREVIEW_RENDERED`,Kotlin 换代重扫。用户手势(Tools 菜单的四个 Action)经 `PreviewSessionManagerService` 取 manager:前三个驱动 start/pause/stop,stop 发 `RESTORE_ALL` 恢复原文;第四个「解析鼠标悬停的段落」不碰会话开关,走下面的快捷键支线。
 
-快捷键支线(只翻悬停那一段):用户按 `Alt+T`(IDEA Action,或焦点在预览里时由页面 keydown 兼底)→ `ParseHoveredBlockAction` 经 `findPanel` 定位官方面板 → `PreviewSessionConnector.parseHovered` 接线并调 `panel.requestParseHoveredBlock()`(bundle 尚未注入时只记标记,延迟到注入末尾补发)→ 页面 `parseHoveredBlock()` 查 CSS `:hover` + `nearestPreviewBlock` 定位段落 → 回传 `PARSE_BLOCK` → `PreviewSession.parseExplicitBlock` 在 STOPPED 时轻量启动(置 RUNNING 但不做全文扫描)并以 `ACTIVE_VISIBLE_CORE` 单块派发 → 其余(分句分词、查缓存、调度、校验、`CORE_RESULT` 回推、卡片替换)与整篇路径完全相同。
+快捷键支线(只翻悬停那一段):用户按 `Alt+T`(IDEA Action,或焦点在预览里时由页面 keydown 兼底)→ `ParseHoveredBlockAction` 经 `findPanel` 定位官方面板 → `PreviewSessionConnector.parseHovered` 接线并调 `panel.requestParseHoveredBlock()`(bundle 尚未注入时只记标记,延迟到注入末尾补发)→ 页面 `parseHoveredBlock()` 查 `:is(:hover)` + `nearestPreviewBlock` 定位段落 → 回传 `PARSE_BLOCK` → `PreviewSession.parseExplicitBlock` 在 STOPPED 时轻量启动(置 RUNNING 但不做全文扫描)并以 `ACTIVE_VISIBLE_CORE` 单块派发 → 其余(分句分词、查缓存、调度、校验、`CORE_RESULT` 回推、卡片替换)与整篇路径完全相同。
 
 生命周期:每个预览一个 `PreviewSession`(child Job),面板 dispose 时随项目 scope 取消;Profile 是 start 时刻的快照,设置变更后由 Manager 刷新。JCEF 不可用时 Action 不可用并提示切换 JetBrains Runtime。

@@ -10,6 +10,13 @@ import java.security.MessageDigest
 data class CoreCacheKeyInput(
   val normalizedSentence: String,
   val schemaVersion: Int,
+  /**
+   * 结果的另一半身份：同一句在不同版本的提示词下会得到不同粒度的成分。少了它，改
+   * 提示词等于把旧粒度的结果永久钉在缓存里——新旧质量混着显示，谁也说不清屏幕上
+   * 那一句是哪版规则的产物。core 传 CORE_PROMPT，详解传 DETAIL_PROMPT：两条提示词
+   * 各自演进，不该互相作废。
+   */
+  val promptVersion: Int,
   val focus: TokenRange? = null,
 )
 
@@ -18,8 +25,8 @@ data class CoreCacheKeyInput(
  * SHA-256 小写十六进制。键不含 profile/模型——同一句英文跨端、跨模型复用。
  *
  * 身份数组形状：
- * - core: ["core", normalizedSentence, schemaVersion, null]
- * - detail: ["core", normalizedSentence, schemaVersion, [startToken, endToken]]
+ * - core: ["core", normalizedSentence, schemaVersion, promptVersion, null]
+ * - detail: ["core", normalizedSentence, schemaVersion, promptVersion, [startToken, endToken]]
  */
 fun createCoreCacheKey(input: CoreCacheKeyInput): String {
   val focus: JsonElement = input.focus?.let {
@@ -30,6 +37,7 @@ fun createCoreCacheKey(input: CoreCacheKeyInput): String {
       JsonPrimitive("core"),
       JsonPrimitive(input.normalizedSentence),
       JsonPrimitive(input.schemaVersion),
+      JsonPrimitive(input.promptVersion),
       focus,
     ),
   )

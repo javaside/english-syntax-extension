@@ -191,4 +191,24 @@ describe("SyntaxProgressPill", () => {
     expect(text).toContain("缓存命中 1/4");
     expect(text).not.toContain("解析完成");
   });
+
+  /**
+   * 扫描登记完全部句子(相位 discovered)、视口回调还没把可见块推去派发时，
+   * queued 与 inFlight 都是 0。这是会话真正的 t=0,以前会闪一下「✓ 解析完成」
+   * 再退回「解析中」,还顺手起了淡出定时器——一句都没解析就先说完成。
+   */
+  it("句子刚发现、还没派发时不许说完成", () => {
+    pill.update(status({ state: "running", discovered: 12, queued: 0, inFlight: 0 }));
+
+    expect(label()).toBe("句法解析中 0/12");
+    expect(spinnerVisible()).toBe(true);
+    vi.advanceTimersByTime(2600);
+    expect(pill.host.isConnected).toBe(true);
+  });
+
+  it("落地一句后回到既有的完成口径:屏外未触发的不阻塞", () => {
+    pill.update(status({ state: "running", discovered: 12, queued: 0, ready: 1, inFlight: 0 }));
+
+    expect(label()).toBe("✓ 解析完成");
+  });
 });

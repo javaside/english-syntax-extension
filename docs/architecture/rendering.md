@@ -166,6 +166,8 @@ content script 跑在隔离世界,`window.customElements` 是 `null`。所以 `S
 
 行判定依赖真实布局(`getBoundingClientRect`)。零尺寸环境(happy-dom 单测)所有矩形都是 0,所以要**显式判断有没有真实布局**(`height > 0`),否则数值比较会误判成"下面还有成分"而选错分支。
 
+详解标注不是任意嵌套语法树:渲染前的双端 `validateDetail` 要求 structure 完全位于点击 focus 内、按 Token ID 有序且互不重叠;流式预览也用同一过滤规则。因此同一英文片段不会因“整段 + 内部词组”同时返回而重复上屏。
+
 全页同时只开一个面板。再点同一个成分则关闭(toggle),不重新请求。
 
 ## 6. 可逆替换(`block-replacement.ts`)
@@ -260,6 +262,7 @@ Chrome 端在真实网页里替换 DOM;IntelliJ 端在 **IDEA 默认的官方 Ma
 - **手动扫描模式**:`autoScan=false` 时 `rescan()` 只做 `registerBlock`(渲染器需要 blockId → element 映射),**绝不** `postToHost(VISIBLE_BLOCKS)`。`EnglishSyntaxPreviewPanel.autoScan` **默认 false**,只有 `PreviewSessionConnector.start`(整篇会话)置 true、`StopSyntaxLearningAction` 停止后复位 false;`parseHovered` 刻意不碰它。否则我方插卡引发的 mutation、以及官方重渲染后的 `initialize`(会 `resetScanRegistry` 并清空可见指纹)都会把整篇文档送去翻译(见 [invariants.md](./invariants.md))。段落级「解析中」标记与完成账目改用 `requestedBlocks: Set<string>`(取代此前的计数器):整篇路径整体替换,按段路径 `add`——用计数器的话第二次按快捷键时 `settledBlocks.size` 已经 ≥ 1,完成判定会立刻误判为"全部完成"。
 - **可见性**:IntersectionObserver(rootMargin 上下各一屏),不支持时退化为 rAF 节流的 scroll/resize。**start() 先用几何判定(getBoundingClientRect 与视口±一屏)播种首批可见块并立即上报**——JCEF 里 IO 的初始回调不可靠,只依赖它会导致 `VISIBLE_BLOCKS` 永远不发出(见 [invariants.md](./invariants.md))。
 - **卡片**:`render.ts` 用 `data-english-syntax-hidden` 隐藏原文、在其后插入 `data-english-syntax-card` 卡片;`restoreAll` 精确删除插件节点与 data 属性。**属性只是标记,真正的隐藏靠 `preview.css` 的 `[data-english-syntax-hidden]{display:none!important}`**(`!important` 压过官方主题里特异性更高的 `p`/`li` 规则,同 Chrome 端注入的隐藏类)——这条规则曾整个缺失,一段翻完屏上有两份文字,而且鼠标停在那份可见原文上再按快捷键就复现「一直显示在翻译状态」(见上面「显式手势的块定位」与 [invariants.md](./invariants.md))。模型文本一律 `textContent`,杜绝 `<img onerror>` 注入。**结构与视觉对齐 Chrome 端 `learning-block.ts`**:三行组件(角色标签/英文原文/中文译文,`roles.ts` 与 Chrome 端 `grammar.ts`/`ROLE_COLORS` 逐值同源)、按角色着色的细下划线、中文角色标签、失败句保留原文 + 「重新解析」按钮、详解面板为「标注行(①角色+英文摘录) + 解释列表 + 语法点 + 整体说明」。**句子惰性注册**:sentenceId 由 Kotlin 权威生成(`s-{blockId}-{index}`),JS 端不做分句;`CORE_STREAM`/`CORE_RESULT`/`CORE_ERROR` 携带 `blockId`,渲染器在消息首次到达时按 blockId 注册句子再渲染——曾因生产路径从不注册句子(`registerSentence` 被当成测试辅助),`#sentences` 永远为空、`entry === undefined` 直接 return,卡片永远不出现。**句子排列 = 源序,不是消息到达序**:`#blockSentenceOrder` 累积的是句子 ID,`#repaintBlock` 渲染前按 sentenceId 末尾 `index` 数值升序重排(`bySourceOrder`)——流式分片按模型输出到达可能先吐后半句,若不重排 final 卡片英文顺序会和原文对不上(Chrome 端 `setExpectedSentenceIds` 同语义,这里直接从 sentenceId 推断,宿主无需额外传序)。
+- **标点还原**:`CORE_STREAM` / `CORE_RESULT` 同步携带精简源 Token；渲染器像 Chrome 的 `#appendPunctuation` 一样扫描成分覆盖间隙，把句首标点放句容器、成分间和句尾标点附到前一成分英文行。破折号和逗号不成为语法成分，但必须按原空白与源序恰好出现一次。
 - **generation 双闸**:页面收到旧 generation 的 `CORE_RESULT`/`DETAIL_*` 一律丢弃(见 [invariants.md](./invariants.md))。
 - **详解**:点击成分经 bridge 发 `DETAIL_REQUEST`,面板同时只展开一个详解面板;再次点击同一成分关闭。**面板锚定在「被点成分所在视觉行」正下方**(移植 Chrome 端 `setDetailLoading` 的行判定:被点成分下面还有同句成分时插到该行最后一个成分之后,否则插到句子之后;零尺寸环境退化插句子后)。**加载占位与终态面板必须走同一个落点函数(`#anchorDetail`)**——占位若图省事直接 `sentence.after(panel)`,内容一到就会从句尾跳回点击行(见 [invariants.md](./invariants.md) I-23.3)。曾因 append 到卡片末尾,面板跑到很远的下面。
 - **状态反馈**:点「开始句法学习」立即弹 BALLOON;预览页右下角注入 `#english-syntax-status` 浮层(带转圈 spinner,对齐 Chrome 进度胶囊)——扫描完成显示「正在解析 N 段」,每个 `CORE_RESULT`/`CORE_ERROR` 更新「已处理 k 句」,`SESSION_STATE`(Toggle 暂停/继续时由 Kotlin 推送)显示「⏸ 已暂停 / ready/discovered」,`RESTORE_ALL` 隐藏。

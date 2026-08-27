@@ -347,6 +347,20 @@ export function validateDetail(
       .filter((structure): structure is DetailStructure => structure !== undefined);
   }
 
+  if (focus !== undefined) {
+    let previousEnd = focus.startToken - 1;
+    structures.forEach((structure, index) => {
+      const path = `structures[${index}]`;
+      if (structure.startToken < focus.startToken || structure.endToken > focus.endToken) {
+        addError(errors, path, "must stay inside the requested focus");
+      }
+      if (structure.startToken <= previousEnd) {
+        addError(errors, "structures", "must be ordered and non-overlapping");
+      }
+      previousEnd = Math.max(previousEnd, structure.endToken);
+    });
+  }
+
   const grammarPoints: string[] = [];
   if (!Array.isArray(raw.grammarPoints)) {
     addError(errors, "grammarPoints", "must be an array");

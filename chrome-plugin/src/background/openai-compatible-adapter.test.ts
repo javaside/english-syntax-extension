@@ -6,6 +6,7 @@ import {
   type JsonSchemaSpec,
 } from "./openai-compatible-adapter";
 import { buildCorePrompt, buildDetailPrompt, buildRepairPrompt } from "./prompts";
+import { CORE_SCHEMA_VERSION } from "../shared/versions";
 
 const profile: ModelProfile = {
   id: "profile-1",
@@ -348,6 +349,37 @@ describe("OpenAI-compatible chat completions adapter", () => {
     ).rejects.toMatchObject({ code });
   });
 
+  it("salvages a truncated non-streaming content instead of failing the whole batch", async () => {
+    const truncated =
+      '{"sentences":[{"sentenceId":"s1","components":[{"startToken":0,"endToken":1,"role":"SUBJECT","translation":"学习者"}]}]';
+    const adapter = new OpenAiCompatibleAdapter({
+      fetch: vi.fn<typeof globalThis.fetch>().mockResolvedValue(completion(truncated)),
+    });
+
+    await expect(
+      adapter.completeJson(profile, messages, schema, new AbortController().signal),
+    ).resolves.toEqual({
+      sentences: [
+        {
+          sentenceId: "s1",
+          components: [
+            { startToken: 0, endToken: 1, role: "SUBJECT", translation: "学习者" },
+          ],
+        },
+      ],
+    });
+  });
+
+  it("still rejects content with no complete value at all", async () => {
+    const adapter = new OpenAiCompatibleAdapter({
+      fetch: vi.fn<typeof globalThis.fetch>().mockResolvedValue(completion('{"sentences":[{"sen')),
+    });
+
+    await expect(
+      adapter.completeJson(profile, messages, schema, new AbortController().signal),
+    ).rejects.toMatchObject({ code: "INVALID_MODEL_OUTPUT" });
+  });
+
   it("strips one outer JSON fence but never extracts JSON from prose", async () => {
     const fetch = vi
       .fn<typeof globalThis.fetch>()
@@ -414,7 +446,7 @@ describe("syntax prompts", () => {
     expect(repair).toContain('{"sentences":');
 
     const verifiedCore = {
-      schemaVersion: 1 as const,
+      schemaVersion: CORE_SCHEMA_VERSION,
       sentenceId: "s-1",
       components: [],
       modelProfileId: "profile-1",
@@ -436,7 +468,7 @@ describe("syntax prompts", () => {
 
   it("limits detail context to the selected sentence, verified core, and focus", () => {
     const core = {
-      schemaVersion: 1 as const,
+      schemaVersion: CORE_SCHEMA_VERSION,
       sentenceId: "s-1",
       components: [],
       modelProfileId: "profile-1",
@@ -449,7 +481,7 @@ describe("syntax prompts", () => {
 
   it("requires Chinese role names and internal breakdown in detail structures", () => {
     const core = {
-      schemaVersion: 1 as const,
+      schemaVersion: CORE_SCHEMA_VERSION,
       sentenceId: "s-1",
       components: [],
       modelProfileId: "profile-1",
@@ -638,6 +670,26 @@ describe("streaming core completions", () => {
     );
 
     expect(result).toEqual(JSON.parse(streamEnvelope));
+  });
+
+  it("salvages a stream that stopped mid-sentence instead of failing the whole chunk", async () => {
+    // 本机模型每次都少最后一个 `}`；撞上 max_tokens 会断在半句上。此前这里整块判死。
+    const truncated = `${streamEnvelope.slice(0, streamEnvelope.lastIndexOf("]}"))}`;
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(sseResponse(envelopeEvents(truncated)));
+    const adapter = new OpenAiCompatibleAdapter({ fetch });
+
+    const result = (await adapter.completeJsonStreaming(
+      profile,
+      messages,
+      schema,
+      new AbortController().signal,
+      () => undefined,
+    )) as { sentences: { sentenceId: string }[] };
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(result.sentences.map(({ sentenceId }) => sentenceId)).toEqual(["s1", "s2"]);
   });
 
   it("times out a stream that stalls longer than the profile timeout", async () => {

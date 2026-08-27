@@ -40,6 +40,26 @@
 
 **测试** `chrome-plugin/src/background/service-worker.test.ts` 的 `documentId 熬过 service worker 重启` 组。
 
+### I-4.1 「忘掉一个标签页」必须同步做完,还要挡住回填
+
+**规则** `cancelTab` 一律**同步**清账(取消调度 → 删 `activeTabs` → 落盘 → 需要时通知页面);回填尚未落地时另外立一块墓碑(`forgottenTabs`),让回填**跳过**这个 tabId——而不是把清理挪到 `await hydrated` 之后。SPA 那一路的墓碑还带「要通知页面」,回填读到时用**存下来的 documentId** 补发 `STOP_SESSION`。
+
+**为什么** 两个方向各有一个坑,只能同时躲开:① 唤醒 SW 的往往正是这次导航 / 关闭本身,那一刻 `activeTabs` 还空着,清理无从下手,紧接着回填又把陈旧记录塞回内存——这个标签页于是**再也忘不掉**;② 反过来,若把清理推到回填之后,紧随导航而来的状态中继会先看到旧 `documentId` 而被判过期文档拒掉,页面的新会话**再也登记不上**(SPA 导航正是这个次序)。
+
+**症状** ① 旧 `documentId` 一直顶着:点成分报错、弹窗回落成「开始学习」;② 新页面整篇解析不出卡片,SW 日志里全是 `REQUEST_CANCELLED`。
+
+**测试** `chrome-plugin/src/background/service-worker.test.ts` 的 `回填落地前就被忘掉的标签页` 组(方向 ①)与 `cancels only the recorded document on tab close and navigation`(方向 ②)。
+
+### I-4.2 「已完成」= 至少落地一句 + 当前无在飞
+
+**规则** `isSessionComplete(status)` 要求 `ready + failed + skipped > 0` 且 `queued === 0` 且 `inFlight === 0`。`SessionStatus.inFlight` 必须与块级在飞判据共用同一张相位表 `IN_FLIGHT_PHASES`(`cache-check` / `requesting` / `validating`)。
+
+**为什么** 口径**不是**「所有 discovered 都出了结果」:屏外句子要滚到可见才入队,按全覆盖要求长页面永远停在「解析中…」。但「没有在飞」单独也不够——扫描登记完、视口回调还没回来时,`queued` 与 `inFlight` 都是 0。而 `transition()` 每换一次相位就上报状态,`cache-check` 漏出相位表就会送出一条假空闲状态。
+
+**症状** 进度胶囊在 t=0 闪一下「✓ 解析完成」再退回「解析中」;弹窗主按钮同时闪成「恢复网页原文」。
+
+**测试** `chrome-plugin/src/shared/protocol.test.ts` 的 `isSessionComplete 与屏外未触发的句子`、`chrome-plugin/src/content/progress-pill.test.ts` 的「句子刚发现、还没派发时不许说完成」。
+
 ### I-5 SPA 换页必须通知页面
 
 **规则** `tabs.onUpdated` 里 `changeInfo.url !== undefined` 时调 `cancelTab(tabId, notifyPage = true)`。
@@ -52,9 +72,19 @@
 
 ## 模型输出与流式
 
+### I-5.1 IntelliJ Web 源码与注入 bundle 必须同步
+
+**规则** 修改 `intellij-plugin/src/main/resources/web/*.ts` 后必须运行 `npm run bundle-web`，并提交更新后的 `bundle.js`；真机只执行 bundle，不执行 TS 源。
+
+**为什么** Kotlin 桥增加字段而 bundle 仍是旧严格白名单时，模型请求与 Kotlin 校验都成功，但 JCEF 会静默丢弃全部 `CORE_STREAM` / `CORE_RESULT`。
+
+**症状** 日志显示 `dispatch: outcome ready=N`，页面却一张翻译卡都没有，也没有模型错误。
+
+**守护测试** `bootstrap-lifecycle.test.ts` 的 bundle 协议标记断言。
+
 ### I-6 分片是未校验的模型输出
 
-**规则** 流式分片**仅用于渲染**:不写缓存、不改句子相位(保持 `requesting`,不计入 `ready`)。SW 侧只放行角色在枚举内、区间在 token 界内、且与已发成分有序不重叠的成分。
+**规则** 流式分片**仅用于渲染**:不写缓存、不改句子相位(保持 `requesting`,不计入 `ready`)。双端只放行角色在枚举内、区间在 token 界内、不是纯标点、且与已发成分有序不重叠的成分。纯标点必须读取源 Token 的 `punctuation` 标记判定，不能相信模型给它的角色。
 
 **为什么** `validateCoreBatch` 的整句覆盖率只能等完整响应到齐才判得了。
 
@@ -148,13 +178,23 @@
 
 **测试** `chrome-plugin/src/content/session-controller.test.ts` 的 `SessionController offscreen marking`。
 
+### I-17.1 一句同时只在飞一趟
+
+**规则** 块是下发单位,每句只属于一个块,所以哨兵挂在块上:`BlockRecord.inFlight` 记着那一趟下发的 Promise,`analyzeBlocks` 只下发 `inFlight === undefined` 的块,其余改挂等待链(`redispatchAfterInFlight`,一个块只挂一根),落地后重走 `queueVisibleBlock` 让终态闸门决定还要不要补发。同一批里重复出现的块只算一份(`queueBlock` 去重),重连计划(`reconnectAndResume`)也不许重入。
+
+**为什么** 同一批句子再发一条请求有两笔代价:白付一次上游调用,且换代会把先到的那条响应整条作废——用户反倒从头再等一轮。实测一句失败要付三次调用(首轮 + 视口重复回调 + 一次 SW 回收带来的重连补发)。
+
+**症状** 上游账单是预期的两三倍;页面上「解析中」竖条久久不散,失败句要等最后一趟才出「重新解析」。
+
+**测试** `chrome-plugin/src/content/session-controller.test.ts` 的 `resubmits after reconnect only once the in-flight round has landed` 与 `spends exactly one upstream round on a sentence a dead worker keeps failing`。
+
 ## 缓存
 
 ### I-18 详解缓存键两侧必须同构
 
-**规则** 详解缓存键 = 规范化句文本 + schema 版本 + focus 区间(**与 profile / 模型无关**)。预载路径与点击路径共用同一键。
+**规则** 详解缓存键 = 规范化句文本 + schema 版本 + `DETAIL_PROMPT_VERSION` + focus 区间(**与 profile / 模型无关**)。预载路径与点击路径共用同一键;core 键同构,只是换成 `CORE_PROMPT_VERSION` 且 focus 为 `null`——两条提示词各自演进,改 core 规则不作废已有详解。
 
-**症状** 改任一侧的键构造而不同步 → 预载全部白跑,点击时仍要发请求,而计数看上去一切正常。
+**症状** 改任一侧的键构造而不同步 → 预载全部白跑,点击时仍要发请求,而计数看上去一切正常。改了提示词却不升版本 → 屏幕上新旧粒度的成分混在一起,无从判断哪一句是哪版规则的产物。
 
 **做法** 改完必须**用对方路径读回验证**。
 
@@ -188,6 +228,28 @@
 
 **测试** `chrome-plugin/src/content/document-scanner.test.ts` 的 `nearestSafeBlock on an explicit gesture`、`scanDocument 对 CSS 排版的正文`、`自动扫描放宽后仍有的克制`。
 
+### I-21.1 一个元素只许有一条块记录
+
+**规则** `scanDocument` 与 `nearestSafeBlock` 都经 `getBlockId(element)`(模块级 `WeakMap`)认块 id,所以同一个元素永远拿同一个 id。显式手势要先查 `this.blocks.get(candidate.id)`:已登记就**复用那一条**,只有元素完全没登记过时才 `registerCandidates`。跨段选区、或落在没有安全块的位置,才另造一个临时锚点元素(它是新元素,不与页面块抢宿主)。复用时**不为这次选区改写记录里的句子**——按它自己的整段文本重来。
+
+**为什么** 同一个宿主被两条记录各渲染一张卡,两张卡还各自把它 `display:none`,谁 `restore()` 都还不回原样;改写在飞记录的句子则会让响应与卡片对不上(与快捷键连按同一个坑)。
+
+**症状** 选中一段已翻好的文字再「解析选中文本」→ 页面上同一段出现两张卡片,停止后原文不回来。
+
+**测试** `chrome-plugin/src/content/session-controller.test.ts` 的「选区落在已登记的段落上时复用那条记录，不再多渲染一张卡」「扫描跳过的短段落:选区把它登记成正式块，第二次选区不会再造一条」。
+
+### I-21.2 悬停定位查的是 `:is(:hover)`,不是裸 `:hover`
+
+**规则** 两端(`chrome-plugin/src/content/hover-target.ts`、`intellij-plugin/.../web/preview.ts`)的悬停链一律查 `:is(:hover)` 取链尾;链为空时才退到 `document.elementFromPoint(x, y)`,坐标由**内容脚本装载时**就挂上的 capture + passive 的 `pointermove` / `mousemove` 记着。
+
+**为什么** 页面没有 doctype 时(`document.compatMode === "BackCompat"`)Chrome 套用 [hover/active 怪癖](https://quirks.spec.whatwg.org/#the-active-and-hover-quirk):裸 `:hover` 只让链接匹配,`querySelectorAll(":hover")` **整页恒为空集**,快捷键在这类页面上全线失灵。怪癖只在「复合选择器里除伪类之外别无他物」时生效,`:is()` 让它落进子选择器语境、不再适用(实测同一 quirks 页面同一位置:`:hover` → 空集,`:is(:hover)` → `html > body > main > p#safe`);标准模式下两者恒等,所以不必先探文档模式。IntelliJ 预览页同一判据:那份 HTML 由 IDEA 生成,doctype 有无不由插件说了算。
+
+坐标兜底**不足以**替代 `:is()`:快捷键常常是冷启动,内容脚本正是被这一按注入的(`service-worker.ts` 先 `inject` 再下发 `PARSE_HOVERED_BLOCK`),此后指针不动就永远等不到第一个 pointer 事件,`point` 恒为 undefined。它守的是另一种情形——引擎压根没建立 hover 状态(如指针已移出窗口)时,最后见到的坐标是唯一线索。装载即挂同理:用户早在按键之前就把鼠标放好了。
+
+**症状** 无 doctype 的页面上按 `Alt+T` 报「未找到可解析的段落」,同一份内容加上 doctype 就正常。
+
+**测试** `chrome-plugin/src/content/hover-target.test.ts`(钉住选择器字面量与两条兜底分支)、`intellij-plugin/.../web/preview.test.ts` 的 `deepestHovered`;真机由 `sweep-d-hotkey` 的「quirks 页面冷启动照样解析」一条钉住(同时断言裸 `:hover` 仍恒空——若哪天不空了,说明 Chrome 改了怪癖,这条不变量该重写)。
+
 ### I-22 合批分桶与定时器顺序
 
 **规则** 待发块按 `${是否屏外}:${是否跳缓存}` 分桶;`enqueueForBatch` 里**先把条目写进 `pendingBatches` 再起定时器**。
@@ -204,9 +266,17 @@
 
 **测试** `chrome-plugin/tests/e2e/layout.spec.ts` 的"长句折行时,详解面板出现在被点成分那一行的下方"。
 
+### I-23.1 IntelliJ 渲染器的全局句子映射必须随块重注册一起清空
+
+**规则** `PreviewRenderer.registerBlock()` 换掉 `#blocks` 里的记录时,必须把旧记录名下的 sentenceId 从全局 `#sentences` 里删掉。
+
+**症状** 「停止并恢复原文」→ 再点开始:`initialize` 清空防重扫描注册表后重扫同一批元素,blockId 由元素上的 `data-english-syntax-block` 沿用、sentenceId(`s-{blockId}-{index}`)也照旧复用,于是新旧条目精确相撞。`#ensureSentence` 判「这句已存在」提前返回 → 新 `BlockRecord.sentences` 永远拿不到这一句 → `#repaintBlock` 算出 `hasContent=false` → 走 `#restoreBlock`,**卡片一张都画不出来且无任何报错**。官方 `updateDom` 重渲染不会撞(整个 body 被换掉,blockId 全部重新分配),所以只有停止→再开始这条路径会踩。
+
+**测试** `intellij-plugin/src/main/resources/web/render.test.ts` 的 "renders again after restoreAll when the same block is registered a second time";会话侧对应 `PreviewSessionTest` 的 "stop then start dispatches the same blocks again"。
+
 ### I-23.2 显式按段解析的每一种「没下发」都必须回一句话
 
-**规则** `parseHoveredBlock` 的返回值是这条路**唯一**的反馈通道(content script 只把 `PARSE_HOVERED_BLOCK` 的 ERROR 交给 `pill.notice()`)。因此:已出卡(悬停命中 `replacement.currentElement()`)或全到终态 → `该段已解析`;任一句处于 `cache-check`/`requesting`/`validating`,或落在同块 `PARSE_DEBOUNCE_MS`(400ms)窗口内 → `该段正在解析中…` **且不下发**;候选被 `registerCandidates` 静默丢掉 → `这一段没有可解析的句子…`。`queued`/`discovered`/`stale` 一律放行(显式手势的本意就是把排队的那段提前发走)。
+**规则** 三个显式手势(`PARSE_HOVERED_BLOCK` / `PARSE_SELECTION` / `PARSE_CONTEXT_BLOCK`)的返回值是这条路**唯一**的反馈通道——content script 把这三种消息的 ERROR 一律交给 `pill.notice()`(`isExplicitParseCommand`),因为快捷键根本没有反馈渠道、右键菜单只反馈「已触发」,而 SW 会丢弃页面命令的响应。因此:已出卡(悬停命中 `replacement.currentElement()`)或全到终态 → `该段已解析`;任一句处于 `cache-check`/`requesting`/`validating`,或落在同块 `PARSE_DEBOUNCE_MS`(400ms)窗口内 → `该段正在解析中…` **且不下发**;候选被 `registerCandidates` 静默丢掉 → `这一段没有可解析的句子…`。`queued`/`discovered`/`stale` 一律放行(显式手势的本意就是把排队的那段提前发走)。
 
 **为什么** 快捷键没有右键菜单那样的「已触发」反馈,静默返回等于让用户以为键坏了。而放行在飞的第二按会为同一批句子再发一条 `ANALYZE_CORE`,`++operationVersion` 让第一条的响应整条作废——白付一次模型调用、用户从头多等一轮;落在注册句子的 `await`(SHA-256)窗口里的连按更狠:两遍 `registerCandidates` 后一遍整条换掉前一遍的 `BlockRecord`,卡片留在 DOM 上却没人认领(与 `performScan` 过滤已注册 id 防的是同一件事)。
 
@@ -331,6 +401,26 @@
 **症状**:开始后翻译出现,但 CPU 持续高占用、日志里 `onVisibleBlocks → dispatch → outcome(cacheHit=true)` 无限重复。
 
 **守护测试**:`PreviewSessionTest` 的 `repeated visible blocks after ready do not redispatch`(同一批块重复上报三次,断言 `analyzeCalls` 恒为 1、相位保持 READY)。
+
+### 详解必须复用已校验的核心分析
+
+**规则**:IntelliJ `PreviewSession` 收到完整 `CoreBatchOutcome` 后,必须把每句 `CoreAnalysis` 保存在对应 `SentenceRecord`;点击成分时只允许把这份权威结果传给 `analyzeDetail`。核心结果尚不存在时不发详解请求;`CORE_STREAM` 的暂定成分只供渲染,不能充当 verified core。
+
+**为什么**:详解提示词明确把 `verifiedCore` 视为不可变输入。若会话临时构造 `components=[]`,模型看不到正文已经确认的成分边界,会重新猜结构;复杂语序下容易把相邻短语重复拆分,局部译文也与正文卡片错位。
+
+**症状**:正文核心卡片看似正常,点击后详解标注却重复/交叠,或把组件级 gloss 按英文语序硬拼成不自然中文。
+
+**守护测试**:`PreviewSessionTest` 的 `detail request reuses the verified core analysis`。
+
+### 详解结构不得越出 focus 或互相重叠
+
+**规则**:`DetailAnalysis.structures` 每项必须完全位于请求 focus 内,按 Token ID 升序且互不重叠;完整响应和缓存读取由双端 `validateDetail` 把关,流式 `ProvisionalStructures` 使用同一范围/顺序规则。提示词同时禁止“先返回整段,再重复拆内部”。
+
+**为什么**:结构只是自由数组,JSON Schema 只能约束字段类型,不能表达跨项区间关系。若不做语义校验,模型会同时返回 `how much process the request needs`、`how much`、`process`、`the request`、`request`、`needs`,渲染层忠实还原后就像把同一句重复了多遍。
+
+**症状**:详解标注英文重复、区间嵌套,圈号解释列表也重复描述同一批词。
+
+**守护测试**:双端 `AnalysisValidatorTest` / `analysis-validator.test.ts` 的 focus/overlap 用例,以及 IntelliJ `AnalysisServiceTest.detail stream drops nested structures before rendering`。
 
 ### Action 的 `update()` 绝不能触发 JCEF 注入
 

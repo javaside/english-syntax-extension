@@ -70,6 +70,47 @@ const MINIFIED_OUTPUT =
   "Output minified JSON on a single line: no newlines, no indentation, no spaces after ':' or ','. " +
   "Do not wrap it in a Markdown code fence.";
 
+/**
+ * 成分粒度的三条边界,以及它们必须按这个顺序出现的原因。
+ *
+ * 缺了这三条,同一个模型(deepseek-v4-flash)对指令型文本会给出词级碎片:实测
+ * "Help turn ideas into fully formed designs and specs through natural collaborative
+ * dialogue." 被切成 8-9 个成分——Help / turn 两个 PREDICATE、介词 into 与其宾语
+ * 拆开、拆出来的名词短语再误标 ATTRIBUTE;补上后稳定收敛到 4 个短语级成分。
+ * 祈使句串更极端:6 个动词逗号串成一句时逐个动词标谓语,给出 6 个 PREDICATE /
+ * 16 个成分;先定分句层级后是 0 个 PREDICATE / 12 个成分(整串按 COORDINATE_CLAUSE)。
+ *
+ * 判定顺序必须写死"先分句、再句内":只把祈使句串规则与 peer 规则并列摆着,
+ * 两条会互相打架,实测同一句在两次调用之间会在两种切法之间跳。所以 peer 规则
+ * 也收窄成「在单个分句之内」——它原本要挡的"谓语吞掉宾语"照旧被挡住。
+ */
+const CLAUSE_FIRST_RULE =
+  "Clause-structure-first rule: decide the clause layout before anything else. " +
+  "If the sentence chains two or more clauses that each carry their own verb — separated by a comma, a colon, a semicolon, a dash, or a coordinating conjunction, " +
+  "and each able to stand alone as a sentence (this includes a series of imperatives) — emit exactly one COORDINATE_CLAUSE per clause, " +
+  "carrying the complete Chinese translation of that clause, and do not analyse the inside of any clause. " +
+  "Only when the sentence contains a single clause do you split it into peer components (subject, predicate, object, adverbial, …).";
+
+const PREDICATE_SCOPE_RULE =
+  "Predicate-scope rule: inside a single clause a PREDICATE covers only the verb group — auxiliaries plus the main verb, " +
+  'including a bare-infinitive chain that belongs to it ("Help turn" is one PREDICATE, "let go" is one PREDICATE). ' +
+  "Two PREDICATE components must never be adjacent: side-by-side verbs belong to a single PREDICATE.";
+
+const PREPOSITIONAL_PHRASE_RULE =
+  "Prepositional-phrase rule: a preposition and everything it governs form exactly one component (ADVERBIAL or ATTRIBUTE), " +
+  'including a coordinated object — "into fully formed designs and specs" is ONE ADVERBIAL, not a preposition plus separate noun phrases. ' +
+  "Never emit a preposition as its own component, and never tag a noun phrase governed by a verb or preposition as ATTRIBUTE; " +
+  'ATTRIBUTE is only a modifier sitting inside a noun phrase, like "fully formed" inside "fully formed designs".';
+
+const PEER_COMPONENT_RULE =
+  "Peer-component rule: within a single clause, identify the coequal grammatical components rather than labeling every verb-led span as PREDICATE. " +
+  "A PREDICATE must not absorb a separable OBJECT, PREDICATIVE, COMPLEMENT, or ADVERBIAL; emit each such span as its own component.";
+
+const SUPPLEMENT_RULE =
+  "Supplement rule: text after an em dash or colon is often an explanation, reformulation, or list, not a coordinate clause and not a conjunction. " +
+  "Keep the output flat and non-overlapping: use APPOSITIVE or INDEPENDENT_ELEMENT for an indivisible supplement, but when it contains separable predicate, object, or adverbial peers, emit those internal peers instead of an overlapping outer supplement. " +
+  "Do not label a whole noun phrase plus its relative clause as ATTRIBUTIVE_CLAUSE: in 'the ones that matter', 'the ones' is the noun phrase and only 'that matter' is ATTRIBUTIVE_CLAUSE.";
+
 export const CORE_OUTPUT_SHAPE = [
   "Output exactly one JSON object of this shape, not a top-level array:",
   '{"sentences": [{"sentenceId": string, "components": [{"startToken": number, "endToken": number, "role": string, "translation": string}]}]}',
@@ -81,7 +122,7 @@ const DETAIL_OUTPUT_SHAPE = [
   "Output exactly one JSON object of this shape:",
   '{"sentenceId": string, "focus": {"startToken": number, "endToken": number}, "structures": [{"startToken": number, "endToken": number, "role": string, "explanation": string, "translation": string}], "grammarPoints": [string], "explanation": string}',
   "Echo the supplied sentenceId and focus unchanged. Write explanations, grammar points, and every structure's role field in Chinese. Use concise Chinese grammatical terms for roles (主语/谓语/宾语/定语/状语/系动词/引导词/连词 etc.), never English enum values.",
-  "The structures array must break down the internal components of the focus range. Never return a single structure that covers the entire focus — split it into meaningful sub-components (subject, predicate, object, clauses, etc.).",
+  "The structures array must break down only the internal components of the focus range. Every structure must stay inside focus, be ordered by Token ID, and be disjoint from every other structure; never return a whole span and then repeat its nested words or phrases. When the focus contains multiple lexical Tokens, never return a single structure that covers the entire focus — split it into meaningful non-overlapping sub-components; an indivisible one-Token focus may return one structure (subject, predicate, object, clauses, etc.).",
   "Give every structure a concise Chinese translation of exactly its own English text in the translation field (a few words, like a gloss under the phrase); keep the longer analysis in explanation. The translation field must be written in Chinese characters (中文译文) — copying the English words unchanged is invalid.",
   MINIFIED_OUTPUT,
 ].join("\n");
@@ -91,23 +132,38 @@ const SENTENCE_DETAILS_OUTPUT_SHAPE = [
   '{"details": [{"sentenceId": string, "focus": {"startToken": number, "endToken": number}, "structures": [{"startToken": number, "endToken": number, "role": string, "explanation": string, "translation": string}], "grammarPoints": [string], "explanation": string}]}',
   "Return exactly one details entry per requested focus range, echoing the supplied sentenceId and that focus unchanged.",
   "Write explanations, grammar points, and every structure's role field in Chinese. Use concise Chinese grammatical terms for roles (主语/谓语/宾语/定语/状语/系动词/引导词/连词 etc.), never English enum values.",
-  "Each entry's structures array must break down the internal components of its focus range. Never return a single structure that covers the entire focus — split it into meaningful sub-components (subject, predicate, object, clauses, etc.).",
+  "Each entry's structures array must break down only the internal components of its focus range. Every structure must stay inside that focus, be ordered by Token ID, and be disjoint from every other structure; never return a whole span and then repeat its nested words or phrases. When the focus contains multiple lexical Tokens, never return a single structure that covers the entire focus — split it into meaningful non-overlapping sub-components; an indivisible one-Token focus may return one structure (subject, predicate, object, clauses, etc.).",
   "Give every structure a concise Chinese translation of exactly its own English text in the translation field (a few words, like a gloss under the phrase); keep the longer analysis in explanation. The translation field must be written in Chinese characters (中文译文) — copying the English words unchanged is invalid.",
   MINIFIED_OUTPUT,
 ].join("\n");
 
+const GRAMMAR_ROLE_NAMES: readonly string[] = Object.values(GrammarRole);
+
+/**
+ * core 与 repair 共用的全套分析规则。修复轮曾只带 peer + supplement 两条,把覆盖率、
+ * 角色枚举、并列/复合/简单句和译文要求全丢了——一句一旦进修复轮,剩下的唯一语法
+ * 指导就是"把成分拆开",只会越修越碎。两处必须共享同一个来源。
+ */
+const CORE_ANALYSIS_RULES: readonly string[] = [
+  `The role field is a closed ${GRAMMAR_ROLE_NAMES.length}-role enum: ${GRAMMAR_ROLE_NAMES.join(", ")}.`,
+  "Every component uses a closed Token interval [startToken, endToken]; both endpoints are inclusive Token IDs from the supplied sentence.",
+  'Each supplied Token is {"id","text"}; a Token is punctuation only when it carries "punctuation": true.',
+  "Coverage rule: every non-punctuation Token must be covered exactly once. Components must be ordered, non-overlapping, and may include punctuation but may not contain punctuation only.",
+  CLAUSE_FIRST_RULE,
+  PREDICATE_SCOPE_RULE,
+  PREPOSITIONAL_PHRASE_RULE,
+  PEER_COMPONENT_RULE,
+  SUPPLEMENT_RULE,
+  "Compound-sentence rule: when two or more clauses that could each stand alone as a sentence are joined by a coordinating conjunction (for, and, nor, but, or, yet, so) or a semicolon, tag each clause as one whole COORDINATE_CLAUSE whose translation is the complete Chinese translation of that clause, and tag the coordinating conjunction as its own separate CONJUNCTION component (in a comma-plus-conjunction pair, tag only the conjunction itself as CONJUNCTION).",
+  "Complex-sentence rule: keep tagging a subordinate clause as one whole component with one of the five clause roles (SUBJECT_CLAUSE, OBJECT_CLAUSE, PREDICATIVE_CLAUSE, ATTRIBUTIVE_CLAUSE, ADVERBIAL_CLAUSE); never split its internal structure.",
+  "Simple-sentence rule: never wrap a sentence with a single subject-predicate structure in COORDINATE_CLAUSE.",
+  "Give every component other than a COORDINATE_CLAUSE a concise, non-empty Chinese translation; a COORDINATE_CLAUSE keeps the complete clause translation required above.",
+];
+
 export function buildCorePrompt(sentences: readonly SentenceInput[]): string {
-  const roles = Object.values(GrammarRole);
   return [
     PROMPT_FIRST_LINES.core,
-    `The role field is a closed ${roles.length}-role enum: ${roles.join(", ")}.`,
-    "Every component uses a closed Token interval [startToken, endToken]; both endpoints are inclusive Token IDs from the supplied sentence.",
-    'Each supplied Token is {"id","text"}; a Token is punctuation only when it carries "punctuation": true.',
-    "Coverage rule: every non-punctuation Token must be covered exactly once. Components must be ordered, non-overlapping, and may include punctuation but may not contain punctuation only.",
-    "Compound-sentence rule: when two or more clauses that could each stand alone as a sentence are joined by a coordinating conjunction (for, and, nor, but, or, yet, so) or a semicolon, tag each clause as one whole COORDINATE_CLAUSE whose translation is the complete Chinese translation of that clause, and tag the coordinating conjunction as its own separate CONJUNCTION component (in a comma-plus-conjunction pair, tag only the conjunction itself as CONJUNCTION).",
-    "Complex-sentence rule: keep tagging a subordinate clause as one whole component with one of the five clause roles (SUBJECT_CLAUSE, OBJECT_CLAUSE, PREDICATIVE_CLAUSE, ATTRIBUTIVE_CLAUSE, ADVERBIAL_CLAUSE); never split its internal structure.",
-    "Simple-sentence rule: never wrap a sentence with a single subject-predicate structure in COORDINATE_CLAUSE.",
-    "Give every component other than a COORDINATE_CLAUSE a concise, non-empty Chinese translation; a COORDINATE_CLAUSE keeps the complete clause translation required above.",
+    ...CORE_ANALYSIS_RULES,
     "Keep every sentenceId and every supplied Token unchanged. Return JSON only, with no Markdown or explanatory prose.",
     CORE_OUTPUT_SHAPE,
     "Numbered sentence requests:",
@@ -124,6 +180,7 @@ export function buildRepairPrompt(
     PROMPT_FIRST_LINES.coreRepair,
     "Do not change sentence IDs or Tokens. Do not add sentences and do not reinterpret the source text.",
     "Return the repaired JSON only, without a Markdown fence or prose.",
+    ...CORE_ANALYSIS_RULES,
     CORE_OUTPUT_SHAPE,
     "Original sentence IDs and Tokens:",
     serializeSentences(sentences),

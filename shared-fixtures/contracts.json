@@ -1,8 +1,8 @@
 {
   "messageVersion": 1,
-  "coreSchemaVersion": 1,
-  "corePromptVersion": 2,
-  "detailPromptVersion": 3,
+  "coreSchemaVersion": 3,
+  "corePromptVersion": 5,
+  "detailPromptVersion": 4,
   "maxSentencesPerRequest": 6,
   "cloudSentencesPerRequest": 2,
   "roles": [
@@ -32,6 +32,7 @@
     "NETWORK_ERROR",
     "REQUEST_TIMEOUT",
     "INVALID_MODEL_OUTPUT",
+    "MALFORMED_MESSAGE",
     "UNSUPPORTED_PAGE",
     "UNSAFE_CONTENT_BLOCK",
     "SENTENCE_TOO_LONG",

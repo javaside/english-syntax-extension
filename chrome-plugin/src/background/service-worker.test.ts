@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GrammarRole } from "../shared/grammar";
+import { CORE_SCHEMA_VERSION } from "../shared/versions";
 import type {
   RequestMessage,
   ResponseMessage,
@@ -110,7 +111,7 @@ function dependencies(
   const defaultAnalyzeCore: AnalysisService["analyzeCore"] = ({ sentences, profile }) =>
     Promise.resolve({
       result: sentences.map((sentence: SentenceInput) => ({
-        schemaVersion: 1,
+        schemaVersion: CORE_SCHEMA_VERSION,
         sentenceId: sentence.sentenceId,
         components: [
           {
@@ -470,7 +471,7 @@ describe("service worker orchestration", () => {
 
   it("never exposes profile keys, headers, or surplus service fields in core/detail responses", async () => {
     const leakyCore = {
-      schemaVersion: 1 as const,
+      schemaVersion: CORE_SCHEMA_VERSION,
       sentenceId: sentence.sentenceId,
       components: [
         {
@@ -485,7 +486,7 @@ describe("service worker orchestration", () => {
       headers: { Authorization: "SECRET-A" },
     };
     const requestCore = {
-      schemaVersion: 1 as const,
+      schemaVersion: CORE_SCHEMA_VERSION,
       sentenceId: sentence.sentenceId,
       components: [
         {
@@ -730,7 +731,7 @@ describe("service worker orchestration", () => {
     expect(cancelDocument).toHaveBeenNthCalledWith(2, "document-2");
   });
 
-  it("binds a content-script Port to its sender tab and cancels that document on disconnect", () => {
+  it("binds a content-script Port to its sender tab and cancels that document on disconnect", async () => {
     const subject = chromeMock();
     const deps = dependencies();
     registerServiceWorker(deps, subject.api);
@@ -744,8 +745,69 @@ describe("service worker orchestration", () => {
     subject.events.runtime.onConnect.listeners[0]!(port);
     onDisconnect.listeners[0]!();
 
+    // 会话清理排在 session 回填之后:同步断言会跑在回填前。
+    await vi.waitFor(() =>
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      expect(deps.scheduler.cancelDocument).toHaveBeenCalledWith("document-port"),
+    );
+  });
+
+  it("keeps a reconnected session alive when the stale port finally disconnects", async () => {
+    // SW 重启/bfcache 恢复后,页面用同一个 documentId 重新连一条端口。旧端口的断开
+    // 事件此前会取消这条刚接上的会话并把状态清成 stopped:页面上卡片还在,弹窗却回落
+    // 成「开始学习」。
+    const subject = chromeMock();
+    const deps = dependencies();
+    registerServiceWorker(deps, subject.api);
+    const connect = subject.events.runtime.onConnect.listeners[0]!;
+    const stale = event<() => void>();
+    const fresh = event<() => void>();
+    const portOf = (onDisconnect: ReturnType<typeof event<() => void>>) =>
+      ({
+        name: "syntax-learning:document-1",
+        sender: { tab: { id: 7 } as chrome.tabs.Tab },
+        onDisconnect,
+        postMessage: vi.fn(),
+      }) as unknown as chrome.runtime.Port;
+
+    connect(portOf(stale));
+    connect(portOf(fresh));
+    stale.listeners[0]!();
+    await dispatch(
+      subject.events.runtime.onMessage.listeners[0]!,
+      pageRequest({ type: "GET_SESSION_STATUS" }),
+    );
+
     // eslint-disable-next-line @typescript-eslint/unbound-method
-    expect(deps.scheduler.cancelDocument).toHaveBeenCalledWith("document-port");
+    expect(deps.scheduler.cancelDocument).not.toHaveBeenCalled();
+  });
+
+  it("does not reset a hydrated running session when the page reconnects after a restart", async () => {
+    // G⑩:SW 回收后页面重连,onConnect 抢在 session 回填之前写 activeTabs,把
+    // running 覆盖成 stopped——弹窗于是显示「开始学习」，而页面上卡片一张没少。
+    const running: SessionStatus = {
+      ...emptyRunningStatus,
+      discovered: 3,
+      ready: 1,
+      queued: 2,
+    };
+    const subject = chromeMock({
+      "activeTabs.v1": [[7, { documentId: "document-1", status: running }]],
+    });
+    registerServiceWorker(dependencies(), subject.api);
+
+    subject.events.runtime.onConnect.listeners[0]!({
+      name: "syntax-learning:document-1",
+      sender: { tab: { id: 7 } as chrome.tabs.Tab },
+      onDisconnect: event<() => void>(),
+      postMessage: vi.fn(),
+    } as unknown as chrome.runtime.Port);
+    const response = await dispatch(
+      subject.events.runtime.onMessage.listeners[0]!,
+      pageRequest({ type: "GET_SESSION_STATUS" }),
+    );
+
+    expect(response).toMatchObject({ type: "SESSION_STATUS", status: running });
   });
 
   it("pauses new analysis only for the profile that receives a 401", async () => {
@@ -795,7 +857,7 @@ describe("service worker orchestration", () => {
         Promise.resolve({
           result: [
             {
-              schemaVersion: 1 as const,
+              schemaVersion: CORE_SCHEMA_VERSION,
               sentenceId: sentences[0]!.sentenceId,
               components: [
                 { startToken: 0, endToken: 0, role: GrammarRole.SUBJECT, translation: "学习者" },
@@ -829,7 +891,7 @@ describe("service worker orchestration", () => {
 
   it("暂停期间 ANALYZE_CORE 仍查缓存返回命中，不再无脑整批鉴权失败", async () => {
     const cachedAnalysis = {
-      schemaVersion: 1 as const,
+      schemaVersion: CORE_SCHEMA_VERSION,
       sentenceId: sentence.sentenceId,
       components: [
         { startToken: 0, endToken: 0, role: GrammarRole.SUBJECT, translation: "学习者" },
@@ -895,7 +957,7 @@ describe("service worker orchestration", () => {
         type: "ANALYZE_DETAIL",
         sentence,
         core: {
-          schemaVersion: 1,
+          schemaVersion: CORE_SCHEMA_VERSION,
           sentenceId: sentence.sentenceId,
           components: [],
           modelProfileId: "cached",
@@ -910,7 +972,7 @@ describe("service worker orchestration", () => {
         type: "ANALYZE_DETAIL",
         sentence,
         core: {
-          schemaVersion: 1,
+          schemaVersion: CORE_SCHEMA_VERSION,
           sentenceId: sentence.sentenceId,
           components: [],
           modelProfileId: "cached",
@@ -956,7 +1018,7 @@ describe("service worker orchestration", () => {
 
   it("ANALYZE_CORE returns cache hits with cacheOnly instead of CONFIG_MISSING", async () => {
     const cachedAnalysis = {
-      schemaVersion: 1 as const,
+      schemaVersion: CORE_SCHEMA_VERSION,
       sentenceId: sentence.sentenceId,
       components: [
         { startToken: 0, endToken: 0, role: GrammarRole.SUBJECT, translation: "学习者" },
@@ -1008,7 +1070,7 @@ describe("service worker orchestration", () => {
 
   it("ANALYZE_DETAIL returns NO_CACHE on a miss and DETAIL_RESULT on a hit", async () => {
     const requestCore = {
-      schemaVersion: 1 as const,
+      schemaVersion: CORE_SCHEMA_VERSION,
       sentenceId: sentence.sentenceId,
       components: [
         { startToken: 0, endToken: 0, role: GrammarRole.SUBJECT, translation: "学习者" },
@@ -1046,7 +1108,7 @@ describe("service worker orchestration", () => {
 
   it("REANALYZE_WITH_FEEDBACK still requires a profile", async () => {
     const requestCore = {
-      schemaVersion: 1 as const,
+      schemaVersion: CORE_SCHEMA_VERSION,
       sentenceId: sentence.sentenceId,
       components: [
         { startToken: 0, endToken: 0, role: GrammarRole.SUBJECT, translation: "学习者" },
@@ -1107,7 +1169,7 @@ describe("detail prefetch", () => {
     url: "chrome-extension://extension-id/src/popup/popup.html",
   };
   const requestCore = {
-    schemaVersion: 1 as const,
+    schemaVersion: CORE_SCHEMA_VERSION,
     sentenceId: sentence.sentenceId,
     components: [{ startToken: 0, endToken: 0, role: GrammarRole.SUBJECT, translation: "学习者" }],
     modelProfileId: "profile-a",
@@ -1257,7 +1319,8 @@ describe("detail prefetch", () => {
       });
       expect(rejected).toMatchObject({
         type: "ERROR",
-        error: { code: "INVALID_MODEL_OUTPUT" },
+        // 形状不对的会话状态是协议问题,不该顶着 INVALID_MODEL_OUTPUT 把人引去换模型。
+        error: { code: "MALFORMED_MESSAGE" },
       });
     }
   });
@@ -1477,6 +1540,69 @@ describe("documentId 熬过 service worker 重启", () => {
       .documentId;
 
     expect(after).toBe(before);
+  });
+});
+
+/**
+ * 唤醒 SW 的往往正是这次关闭或导航本身:那一刻 activeTabs 还空着，清理无从下手，
+ * 紧接着 session 回填又把陈旧记录塞回内存——这个标签页就再也忘不掉了。旧 documentId
+ * 一直顶着，页面新会话的状态中继全被判成过期文档(点成分报错、弹窗回落成「开始学习」)。
+ *
+ * 反方向由「cancels only the recorded document on tab close and navigation」钉着:
+ * 清理不能挪到回填之后——紧随导航而来的状态中继会先看到旧 documentId 而被拒。
+ */
+describe("回填落地前就被忘掉的标签页", () => {
+  const running: SessionStatus = {
+    state: "running",
+    discovered: 3,
+    queued: 0,
+    ready: 3,
+    failed: 0,
+  };
+  const seed = (documentId: string) => ({
+    "activeTabs.v1": [[7, { documentId, status: running }]],
+  });
+
+  it("回填不许把刚关掉的标签页塞回账本", async () => {
+    const mock = chromeMock(seed("document-old"));
+    registerServiceWorker(dependencies(), mock.api);
+
+    // 回填(await storage.session.get)还挂在微任务队列上，标签页就已经关了。
+    mock.events.tabs.onRemoved.listeners[0]!(7);
+
+    await vi.waitFor(() => expect(mock.sessionData["activeTabs.v1"]).toEqual([]));
+    // 忘干净了，同一个标签页的新会话才登记得上，而不是撞上旧 documentId 被拒。
+    const response = await dispatch(mock.events.runtime.onMessage.listeners[0]!, {
+      version: 1,
+      requestId: "status-1",
+      type: "SESSION_STATUS",
+      status: running,
+      tabId: 7,
+      documentId: "document-new",
+    });
+    expect(response.type).toBe("ACK");
+    expect(mock.sessionData["activeTabs.v1"]).toEqual([
+      [7, { documentId: "document-new", status: running }],
+    ]);
+  });
+
+  it("回填落地前的 SPA 导航照旧通知页面停下，documentId 取自 session", async () => {
+    const mock = chromeMock(seed("document-old"));
+    registerServiceWorker(dependencies(), mock.api);
+
+    mock.events.tabs.onUpdated.listeners[0]!(7, { url: "https://example.com/next" }, {
+      id: 7,
+    } as chrome.tabs.Tab);
+
+    // 文档没重载，页面里那个 controller 还活着，攥着的正是 session 里记下的
+    // documentId;不通知它，MutationObserver 一看到新内容就把新页面整篇解析了。
+    await vi.waitFor(() =>
+      expect(mock.events.tabs.sendMessage).toHaveBeenCalledWith(
+        7,
+        expect.objectContaining({ type: "STOP_SESSION", documentId: "document-old" }),
+      ),
+    );
+    expect(mock.sessionData["activeTabs.v1"]).toEqual([]);
   });
 });
 

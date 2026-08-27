@@ -44,12 +44,14 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 
 data class AnalysisFailure(
   val sentenceId: String,
@@ -121,32 +123,36 @@ class AnalysisService(
     schema = buildJsonObject {
       put("type", "object")
       put("additionalProperties", false)
-      put("required", "sentences")
-      put("sentences", buildJsonObject {
-        put("type", "array")
-        put("items", buildJsonObject {
-          put("type", "object")
-          put("additionalProperties", false)
-          put("required", "sentenceId")
-          put("required", "components")
-          put("sentenceId", buildJsonObject { put("type", "string") })
-          put("components", buildJsonObject {
-            put("type", "array")
-            put("minItems", 1)
-            put("items", buildJsonObject {
-              put("type", "object")
-              put("additionalProperties", false)
-              put("required", "startToken")
-              put("required", "endToken")
-              put("required", "role")
-              put("required", "translation")
-              put("startToken", buildJsonObject { put("type", "integer"); put("minimum", 0) })
-              put("endToken", buildJsonObject { put("type", "integer"); put("minimum", 0) })
-              put("role", buildJsonObject {
-                put("type", "string")
-                put("enum", buildJsonArray { GrammarRole.entries.forEach { add(JsonPrimitive(it.name)) } })
+      putJsonArray("required") { add("sentences") }
+      put("properties", buildJsonObject {
+        put("sentences", buildJsonObject {
+          put("type", "array")
+          put("items", buildJsonObject {
+            put("type", "object")
+            put("additionalProperties", false)
+            putJsonArray("required") { add("sentenceId"); add("components") }
+            put("properties", buildJsonObject {
+              put("sentenceId", buildJsonObject { put("type", "string") })
+              put("components", buildJsonObject {
+                put("type", "array")
+                put("minItems", 1)
+                put("items", buildJsonObject {
+                  put("type", "object")
+                  put("additionalProperties", false)
+                  putJsonArray("required") {
+                    add("startToken"); add("endToken"); add("role"); add("translation")
+                  }
+                  put("properties", buildJsonObject {
+                    put("startToken", buildJsonObject { put("type", "integer"); put("minimum", 0) })
+                    put("endToken", buildJsonObject { put("type", "integer"); put("minimum", 0) })
+                    put("role", buildJsonObject {
+                      put("type", "string")
+                      put("enum", buildJsonArray { GrammarRole.entries.forEach { add(JsonPrimitive(it.name)) } })
+                    })
+                    put("translation", buildJsonObject { put("type", "string"); put("minLength", 1) })
+                  })
+                })
               })
-              put("translation", buildJsonObject { put("type", "string"); put("minLength", 1) })
             })
           })
         })
@@ -159,42 +165,42 @@ class AnalysisService(
     schema = buildJsonObject {
       put("type", "object")
       put("additionalProperties", false)
-      put("required", "sentenceId")
-      put("required", "focus")
-      put("required", "structures")
-      put("required", "grammarPoints")
-      put("required", "explanation")
-      put("sentenceId", buildJsonObject { put("type", "string") })
-      put("focus", buildJsonObject {
-        put("type", "object")
-        put("additionalProperties", false)
-        put("required", "startToken")
-        put("required", "endToken")
-        put("startToken", buildJsonObject { put("type", "integer"); put("minimum", 0) })
-        put("endToken", buildJsonObject { put("type", "integer"); put("minimum", 0) })
-      })
-      put("structures", buildJsonObject {
-        put("type", "array")
-        put("items", buildJsonObject {
+      putJsonArray("required") {
+        add("sentenceId"); add("focus"); add("structures"); add("grammarPoints"); add("explanation")
+      }
+      put("properties", buildJsonObject {
+        put("sentenceId", buildJsonObject { put("type", "string") })
+        put("focus", buildJsonObject {
           put("type", "object")
           put("additionalProperties", false)
-          put("required", "startToken")
-          put("required", "endToken")
-          put("required", "role")
-          put("required", "explanation")
-          put("startToken", buildJsonObject { put("type", "integer"); put("minimum", 0) })
-          put("endToken", buildJsonObject { put("type", "integer"); put("minimum", 0) })
-          put("role", buildJsonObject { put("type", "string"); put("minLength", 1) })
-          put("explanation", buildJsonObject { put("type", "string"); put("minLength", 1) })
-          put("translation", buildJsonObject { put("type", "string"); put("minLength", 1); put("maxLength", 120) })
+          putJsonArray("required") { add("startToken"); add("endToken") }
+          put("properties", buildJsonObject {
+            put("startToken", buildJsonObject { put("type", "integer"); put("minimum", 0) })
+            put("endToken", buildJsonObject { put("type", "integer"); put("minimum", 0) })
+          })
         })
+        put("structures", buildJsonObject {
+          put("type", "array")
+          put("items", buildJsonObject {
+            put("type", "object")
+            put("additionalProperties", false)
+            putJsonArray("required") { add("startToken"); add("endToken"); add("role"); add("explanation") }
+            put("properties", buildJsonObject {
+              put("startToken", buildJsonObject { put("type", "integer"); put("minimum", 0) })
+              put("endToken", buildJsonObject { put("type", "integer"); put("minimum", 0) })
+              put("role", buildJsonObject { put("type", "string"); put("minLength", 1) })
+              put("explanation", buildJsonObject { put("type", "string"); put("minLength", 1) })
+              put("translation", buildJsonObject { put("type", "string"); put("minLength", 1); put("maxLength", 120) })
+            })
+          })
+        })
+        put("grammarPoints", buildJsonObject {
+          put("type", "array")
+          put("maxItems", 12)
+          put("items", buildJsonObject { put("type", "string"); put("minLength", 1); put("maxLength", 300) })
+        })
+        put("explanation", buildJsonObject { put("type", "string"); put("minLength", 1) })
       })
-      put("grammarPoints", buildJsonObject {
-        put("type", "array")
-        put("maxItems", 12)
-        put("items", buildJsonObject { put("type", "string"); put("minLength", 1); put("maxLength", 300) })
-      })
-      put("explanation", buildJsonObject { put("type", "string"); put("minLength", 1) })
     },
   )
 
@@ -210,7 +216,7 @@ class AnalysisService(
     onStreamedComponent: StreamedComponentSink?,
   ): CoreBatchOutcome {
     val keyed = sentences.map { sentence ->
-      sentence to createCoreCacheKey(CoreCacheKeyInput(normalize(sentence.text), ContractVersions.CORE_SCHEMA))
+      sentence to createCoreCacheKey(coreKeyInput(sentence))
     }
     val cached: List<JsonObject?> = if (bypassCache) {
       keyed.map { null }
@@ -269,7 +275,7 @@ class AnalysisService(
 
   override suspend fun lookupCore(sentences: List<SentenceInput>): List<CoreAnalysis> {
     return sentences.mapNotNull { sentence ->
-      val key = createCoreCacheKey(CoreCacheKeyInput(normalize(sentence.text), ContractVersions.CORE_SCHEMA))
+      val key = createCoreCacheKey(coreKeyInput(sentence))
       val raw = cache.getCore(key) ?: return@mapNotNull null
       validateCoreBatch(cachedCoreEnvelope(raw), listOf(sentence), CACHE_ONLY_PROFILE_ID).let { result ->
         (result as? ValidationResult.Valid)?.value?.firstOrNull()
@@ -294,7 +300,7 @@ class AnalysisService(
     }
     if (cached != null) return DetailOutcome(cached.copy(modelProfileId = profile.id), cacheHit = true)
 
-    val provisional = onStreamedStructure?.let { ProvisionalStructures(sentence.tokens.size) }
+    val provisional = onStreamedStructure?.let { ProvisionalStructures(sentence.tokens.size, focus) }
     val raw = request(
       profile,
       documentId,
@@ -348,25 +354,33 @@ class AnalysisService(
   ): ChunkOutcome {
     val sentences = chunk.map { it.first }
     val provisional = onStreamedComponent?.let {
-      ProvisionalComponents(chunk.associate { (sentence, _) -> sentence.sentenceId to sentence.tokens.size })
+      ProvisionalComponents(chunk.associate { (sentence, _) -> sentence.sentenceId to sentence.tokens })
     }
-    val raw = request(
-      profile,
-      documentId,
-      priority,
-      chunk.joinToString(":") { it.second },
-      listOf(ChatMessage("user", buildCorePrompt(sentences))),
-      coreSchema,
-      sentenceCount = chunk.size,
-      onComponent = if (provisional != null) {
-        { streamed ->
-          val accepted = provisional.accept(streamed)
-          if (accepted != null) onStreamedComponent!!.accept(streamed.sentenceId, accepted)
-        }
-      } else {
-        null
-      },
-    )
+    val raw = try {
+      request(
+        profile,
+        documentId,
+        priority,
+        chunk.joinToString(":") { it.second },
+        listOf(ChatMessage("user", buildCorePrompt(sentences))),
+        coreSchema,
+        sentenceCount = chunk.size,
+        onComponent = if (provisional != null) {
+          { streamed ->
+            val accepted = provisional.accept(streamed)
+            if (accepted != null) onStreamedComponent!!.accept(streamed.sentenceId, accepted)
+          }
+        } else {
+          null
+        },
+      )
+    } catch (failure: ExtensionFailure) {
+      // 首轮输出连救都救不回来(不是 JSON、或一个完整值都没有)时，别把整块判死:
+      // 当成「这一批全无效」交给修复轮再要一次。网络/鉴权/超时/取消照旧上抛——
+      // 那类失败重发一次也是白发。与 Chrome 侧 analyzeCoreChunk 同一取舍。
+      if (failure.code != ErrorCode.INVALID_MODEL_OUTPUT) throw failure
+      EMPTY_CORE_OUTPUT
+    }
     val firstPass = validateAndCacheCore(profile, chunk, raw)
     var invalid = firstPass.invalid
     if (invalid.isNotEmpty()) {
@@ -500,6 +514,9 @@ class AnalysisService(
     private val promptJson = Json { prettyPrint = false; encodeDefaults = true }
     private const val CACHE_ONLY_PROFILE_ID = "cached"
 
+    /** 首轮完全解析不了时充当「这一批全无效」的替身，让那一轮修复真的会跑。 */
+    private val EMPTY_CORE_OUTPUT: JsonElement = buildJsonObject { put("sentences", JsonArray(emptyList())) }
+
     private fun List<ValidationError>.toJsonElement(): JsonElement = buildJsonArray {
       forEach { error ->
         add(
@@ -513,8 +530,21 @@ class AnalysisService(
 
     private fun normalize(text: String): String = text.trim().replace(Regex("\\s+"), " ")
 
+    /** core 结果的身份：句子 + schema 版本 + core 提示词版本（提示词一改，旧粒度结果自然失效）。 */
+    private fun coreKeyInput(sentence: SentenceInput): CoreCacheKeyInput = CoreCacheKeyInput(
+      normalizedSentence = normalize(sentence.text),
+      schemaVersion = ContractVersions.CORE_SCHEMA,
+      promptVersion = ContractVersions.CORE_PROMPT,
+    )
+
+    /** 详解结果只随详解提示词失效，与 core 提示词各自演进。 */
     private fun detailKey(sentence: SentenceInput, focus: TokenRange): String = createCoreCacheKey(
-      CoreCacheKeyInput(normalize(sentence.text), ContractVersions.CORE_SCHEMA, focus),
+      CoreCacheKeyInput(
+        normalizedSentence = normalize(sentence.text),
+        schemaVersion = ContractVersions.CORE_SCHEMA,
+        promptVersion = ContractVersions.DETAIL_PROMPT,
+        focus = focus,
+      ),
     )
 
     private fun invalidOutput(errors: List<ValidationError>): ExtensionFailure {
@@ -617,28 +647,33 @@ class AnalysisService(
   }
 }
 
-/** 流式暂定成分的安全过滤：角色在枚举内、区间在界内、与已发成分有序不重叠。 */
-private class ProvisionalComponents(private val tokenCounts: Map<String, Int>) {
+/** 流式暂定成分的安全过滤：角色在枚举内、区间在界内、非纯标点且与已发成分有序不重叠。 */
+private class ProvisionalComponents(private val tokensBySentence: Map<String, List<dev.codetui.englishsyntax.domain.Token>>) {
   private val acceptedBySentence = mutableMapOf<String, MutableList<CoreComponent>>()
 
   fun accept(streamed: StreamedComponent): List<CoreComponent>? {
-    val tokenCount = tokenCounts[streamed.sentenceId] ?: return null
+    val tokens = tokensBySentence[streamed.sentenceId] ?: return null
     val list = acceptedBySentence.getOrPut(streamed.sentenceId) { mutableListOf() }
     val start = streamed.component["startToken"]?.jsonPrimitiveOrNull?.contentOrNull?.toIntOrNull() ?: return null
     val end = streamed.component["endToken"]?.jsonPrimitiveOrNull?.contentOrNull?.toIntOrNull() ?: return null
     val roleText = streamed.component["role"]?.jsonPrimitiveOrNull?.contentOrNull ?: return null
     val role = runCatching { GrammarRole.valueOf(roleText) }.getOrNull() ?: return null
     val translation = streamed.component["translation"]?.jsonPrimitiveOrNull?.contentOrNull ?: return null
-    if (start < 0 || end < start || end >= tokenCount) return null
+    if (start < 0 || end < start || end >= tokens.size) return null
+    if (tokens.subList(start, end + 1).all { it.punctuation }) return null
     if (list.isNotEmpty() && start <= list.last().endToken) return null
     list += CoreComponent(start, end, role, translation)
     return list.toList()
   }
 }
 
-/** 流式暂定结构的安全过滤：区间在句内、role/explanation 非空且安全。 */
-private class ProvisionalStructures(private val tokenCount: Int) {
+/** 流式暂定结构的安全过滤：区间限于 focus、有序不重叠，role/explanation 非空。 */
+private class ProvisionalStructures(
+  private val tokenCount: Int,
+  private val focus: TokenRange,
+) {
   private val accepted = mutableListOf<DetailStructure>()
+  private var lastEnd = focus.startToken - 1
 
   fun accept(raw: JsonObject): List<DetailStructure>? {
     val start = raw["startToken"]?.jsonPrimitiveOrNull?.contentOrNull?.toIntOrNull() ?: return null
@@ -646,7 +681,14 @@ private class ProvisionalStructures(private val tokenCount: Int) {
     val role = raw["role"]?.jsonPrimitiveOrNull?.contentOrNull?.takeUnless { it.trim().isEmpty() } ?: return null
     val explanation = raw["explanation"]?.jsonPrimitiveOrNull?.contentOrNull?.takeUnless { it.trim().isEmpty() } ?: return null
     val translation = raw["translation"]?.jsonPrimitiveOrNull?.contentOrNull
-    if (start < 0 || end < start || end >= tokenCount) return null
+    if (
+      start < focus.startToken ||
+      end < start ||
+      end > focus.endToken ||
+      end >= tokenCount ||
+      start <= lastEnd
+    ) return null
+    lastEnd = end
     accepted += DetailStructure(start, end, role, explanation, translation?.takeUnless { it.isEmpty() })
     return accepted.toList()
   }

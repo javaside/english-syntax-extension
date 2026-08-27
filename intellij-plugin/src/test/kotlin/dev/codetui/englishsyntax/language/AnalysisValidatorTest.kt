@@ -85,23 +85,18 @@ class AnalysisValidatorTest {
   }
 
   @Test
-  fun `validates punctuation components before dropping them`() {
+  fun `drops punctuation components before validating their invented role`() {
     val request = sentence("The service works.")
-    val variants = listOf(
-      """{"startToken":3,"endToken":3,"role":"UNKNOWN","translation":"。"}""",
-      """{"startToken":3,"endToken":3,"role":"OBJECT","translation":"。","extra":true}""",
-      """{"startToken":3,"endToken":3,"role":"OBJECT","translation":"<script>"}""",
-      """{"startToken":3,"endToken":3,"role":"OBJECT"}""",
-    )
+    val raw = core("""
+      {"startToken":0,"endToken":1,"role":"SUBJECT","translation":"该服务"},
+      {"startToken":2,"endToken":2,"role":"PREDICATE","translation":"工作"},
+      {"startToken":3,"endToken":3,"role":"PUNCTUATION","translation":"。"}
+    """.trimIndent())
 
-    variants.forEach { component ->
-      val result = validateCoreBatch(core("""
-        {"startToken":0,"endToken":1,"role":"SUBJECT","translation":"该服务"},
-        {"startToken":2,"endToken":2,"role":"PREDICATE","translation":"工作"},
-        $component
-      """.trimIndent()), listOf(request), "profile-1")
-      assertFalse(result.ok)
-    }
+    val result = validateCoreBatch(raw, listOf(request), "profile-1")
+
+    assertTrue(result.ok)
+    assertEquals(2, result.requireValue().single().components.size)
   }
 
   @Test
@@ -208,13 +203,36 @@ class AnalysisValidatorTest {
 
   @Test
   fun `accepts valid detail and normalizes optional blank translation`() {
-    val structures = """[{"startToken":2,"endToken":4,"role":"verb phrase","explanation":"谓语及宾语","translation":"  "}]"""
+    val structures = """[{"startToken":2,"endToken":2,"role":"谓语动词","explanation":"谓语中心","translation":"  "}]"""
     val result = validateDetail(detail(structures = structures), sentence(), TokenRange(2, 2), "trusted-profile")
 
     assertTrue(result.ok)
     val analysis = result.requireValue()
     assertEquals("trusted-profile", analysis.modelProfileId)
     assertNull(analysis.structures.single().translation)
+  }
+
+  @Test
+  fun `rejects detail structures outside focus or overlapping earlier structures`() {
+    val request = sentence("Start by classifying how much process the request needs.")
+    val focus = TokenRange(2, 9)
+    val outsideFocus = detail(
+      focus = """{"startToken":2,"endToken":9}""",
+      structures = """[{"startToken":0,"endToken":9,"role":"谓语","explanation":"越出点击成分"}]""",
+    )
+    val nestedAndRepeated = detail(
+      focus = """{"startToken":2,"endToken":9}""",
+      structures = """[
+        {"startToken":2,"endToken":9,"role":"宾语从句","explanation":"整个从句"},
+        {"startToken":2,"endToken":3,"role":"引导词","explanation":"重复拆内部"},
+        {"startToken":6,"endToken":7,"role":"主语","explanation":"名词短语"},
+        {"startToken":7,"endToken":7,"role":"中心词","explanation":"再次重复"}
+      ]""",
+    )
+
+    listOf(outsideFocus, nestedAndRepeated).forEach {
+      assertFalse(validateDetail(it, request, focus, "profile-1").ok)
+    }
   }
 
   @Test
@@ -238,7 +256,8 @@ class AnalysisValidatorTest {
       detail(structures = """[{"startToken":2,"endToken":2,"role":"javascript:x","explanation":"x"}]"""),
       detail(structures = """[{"startToken":2,"endToken":2,"role":"x","explanation":"<iframe"}]"""),
       detail(structures = """[{"startToken":2,"endToken":2,"role":"x","explanation":"x","translation":"javascript:x"}]"""),
-      detail(grammarPoints = """["safe unsafe"]"""),
+      // 控制字符用转义写（三引号不过转义）：源文件里埋裸 NUL 会让 grep 把这个文件当二进制。
+      detail(grammarPoints = "[\"safe\u0000unsafe\"]"),
     )
 
     variants.forEach { assertFalse(validateDetail(it, sentence(), TokenRange(2, 2), "profile-1").ok) }

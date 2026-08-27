@@ -10,7 +10,11 @@ import type {
 import { MAX_SENTENCES_PER_REQUEST } from "../shared/protocol";
 import { isLoopbackBaseUrl } from "./base-url";
 import type { SentenceInput } from "../shared/protocol";
-import { CORE_SCHEMA_VERSION } from "../shared/versions";
+import {
+  CORE_PROMPT_VERSION,
+  CORE_SCHEMA_VERSION,
+  DETAIL_PROMPT_VERSION,
+} from "../shared/versions";
 import { validateCoreBatch, validateDetail } from "../language/analysis-validator";
 import type { ValidationError } from "../language/analysis-validator";
 import { createCoreCacheKey, createCorrectionCacheKey } from "./analysis-cache";
@@ -297,14 +301,14 @@ const GRAMMAR_ROLES: ReadonlySet<string> = new Set(Object.values(GrammarRole));
 
 /**
  * 流式分片是未校验的模型输出:role 可能不在枚举里、区间可能越界或与前一个成分重叠。
- * 渲染层要求成分有序、不重叠、在 token 界内，违反会直接抛错，所以这里逐个把关，
+ * 渲染层要求成分有序、不重叠、在 token 界内且不能是纯标点，违反会直接抛错，所以这里逐个把关，
  * 只放行能安全画出来的。整句覆盖率仍然只能等完整响应到齐后校验。
  */
 class ProvisionalComponents {
   readonly #accepted: CoreComponent[] = [];
   #lastEnd = -1;
 
-  constructor(private readonly tokenCount: number) {}
+  constructor(private readonly punctuationByToken: readonly boolean[]) {}
 
   /** 接受则返回累积列表，否则返回 undefined。 */
   accept(raw: Record<string, unknown>): readonly CoreComponent[] | undefined {
@@ -319,7 +323,13 @@ class ProvisionalComponents {
     }
     const start = startToken as number;
     const end = endToken as number;
-    if (start < 0 || end < start || end >= this.tokenCount || start <= this.#lastEnd) {
+    if (
+      start < 0 ||
+      end < start ||
+      end >= this.punctuationByToken.length ||
+      this.punctuationByToken.slice(start, end + 1).every(Boolean) ||
+      start <= this.#lastEnd
+    ) {
       return undefined;
     }
     this.#lastEnd = end;
@@ -339,8 +349,14 @@ class ProvisionalComponents {
  */
 class ProvisionalStructures {
   readonly #accepted: DetailStructure[] = [];
+  #lastEnd: number;
 
-  constructor(private readonly tokenCount: number) {}
+  constructor(
+    private readonly tokenCount: number,
+    private readonly focus: TokenRange,
+  ) {
+    this.#lastEnd = focus.startToken - 1;
+  }
 
   accept(raw: Record<string, unknown>): readonly DetailStructure[] | undefined {
     const { startToken, endToken, role, explanation, translation } = raw;
@@ -356,7 +372,16 @@ class ProvisionalStructures {
     }
     const start = startToken as number;
     const end = endToken as number;
-    if (start < 0 || end < start || end >= this.tokenCount) return undefined;
+    if (
+      start < this.focus.startToken ||
+      end < start ||
+      end > this.focus.endToken ||
+      end >= this.tokenCount ||
+      start <= this.#lastEnd
+    ) {
+      return undefined;
+    }
+    this.#lastEnd = end;
     this.#accepted.push({
       startToken: start,
       endToken: end,
@@ -377,7 +402,7 @@ function normalizedSentenceText(sentence: SentenceInput): string {
 }
 
 function cancellationError(): ModelRequestError {
-  return new ModelRequestError("REQUEST_CANCELLED", "Analysis request was cancelled", false);
+  return new ModelRequestError("REQUEST_CANCELLED", "解析请求已取消", false);
 }
 
 /**
@@ -391,14 +416,14 @@ function asModelRequestError(error: unknown): ModelRequestError {
     if (typeof shape.code === "string") {
       return new ModelRequestError(
         shape.code,
-        shape.message ?? "Model request failed",
+        shape.message ?? "模型请求失败",
         shape.retryable === true,
       );
     }
   }
   return new ModelRequestError(
     "NETWORK_ERROR",
-    error instanceof Error ? error.message : "Model request failed",
+    error instanceof Error ? error.message : "模型请求失败",
     true,
   );
 }
@@ -407,7 +432,7 @@ function invalidOutput(errors: readonly ValidationError[]): ModelRequestError {
   const summary = errors.map(({ path, message }) => `${path || "output"}: ${message}`).join("; ");
   return new ModelRequestError(
     "INVALID_MODEL_OUTPUT",
-    `Model output remained invalid after one repair${summary.length === 0 ? "" : `: ${summary}`}`,
+    `模型输出经一轮修复后仍不合格${summary.length === 0 ? "" : `：${summary}`}`,
     false,
   );
 }
@@ -656,18 +681,27 @@ export class CachedAnalysisService implements AnalysisService {
   ): Promise<{ valid: CoreAnalysis[]; invalid: InvalidCoreSentence[] }> {
     const priority = input.priority ?? "visible-core";
     const chunkKey = chunk.map(({ key }) => key).join(":");
-    const firstRaw = await this.requestModel(
-      input.profile,
-      input.documentId,
-      priority,
-      chunkKey,
-      chunk.length,
-      [{ role: "user", content: buildCorePrompt(chunk.map(({ sentence }) => sentence)) }],
-      CORE_SCHEMA,
-      signal,
-      false,
-      this.streamHandler(input, chunk),
-    );
+    let firstRaw: unknown;
+    try {
+      firstRaw = await this.requestModel(
+        input.profile,
+        input.documentId,
+        priority,
+        chunkKey,
+        chunk.length,
+        [{ role: "user", content: buildCorePrompt(chunk.map(({ sentence }) => sentence)) }],
+        CORE_SCHEMA,
+        signal,
+        false,
+        this.streamHandler(input, chunk),
+      );
+    } catch (error) {
+      // 首轮输出连救都救不回来(不是 JSON、或一个完整值都没有)时，别把整块判死:
+      // 当成「这一批全无效」交给修复轮再要一次。网络/鉴权/超时/取消照旧上抛——
+      // 那类失败重发一次也是白发,且 AUTH_FAILED 必须原样传到 SW 去暂停 profile。
+      if (asModelRequestError(error).code !== "INVALID_MODEL_OUTPUT") throw error;
+      firstRaw = { sentences: [] };
+    }
     const firstPass = await this.validateAndCacheCore(input.profile, chunk, firstRaw);
     const valid = [...firstPass.valid];
 
@@ -714,7 +748,7 @@ export class CachedAnalysisService implements AnalysisService {
     if (sink === undefined || this.options.adapter.completeDetailStreaming === undefined) {
       return undefined;
     }
-    const provisional = new ProvisionalStructures(input.sentence.tokens.length);
+    const provisional = new ProvisionalStructures(input.sentence.tokens.length, input.focus);
     return (structure) => {
       const accepted = provisional.accept(structure);
       if (accepted !== undefined) sink(input.sentence.sentenceId, input.focus, accepted);
@@ -733,7 +767,7 @@ export class CachedAnalysisService implements AnalysisService {
     const provisional = new Map<string, ProvisionalComponents>(
       chunk.map(({ sentence }) => [
         sentence.sentenceId,
-        new ProvisionalComponents(sentence.tokens.length),
+        new ProvisionalComponents(sentence.tokens.map((token) => token.punctuation)),
       ]),
     );
     return ({ sentenceId, component }) => {
@@ -1062,6 +1096,7 @@ export class CachedAnalysisService implements AnalysisService {
     return createCoreCacheKey({
       normalizedSentence: normalizedSentenceText(sentence),
       schemaVersion: CORE_SCHEMA_VERSION,
+      promptVersion: CORE_PROMPT_VERSION,
     });
   }
 
@@ -1069,6 +1104,7 @@ export class CachedAnalysisService implements AnalysisService {
     return createCoreCacheKey({
       normalizedSentence: normalizedSentenceText(input.sentence),
       schemaVersion: CORE_SCHEMA_VERSION,
+      promptVersion: DETAIL_PROMPT_VERSION,
       focus: input.focus,
     });
   }
@@ -1077,6 +1113,7 @@ export class CachedAnalysisService implements AnalysisService {
     return createCorrectionCacheKey({
       normalizedSentence: normalizedSentenceText(input.sentence),
       schemaVersion: CORE_SCHEMA_VERSION,
+      promptVersion: CORE_PROMPT_VERSION,
       pageUrl: input.pageUrl,
       sentenceInstanceId: input.sentenceInstanceId,
       correctionContext: input.feedback,

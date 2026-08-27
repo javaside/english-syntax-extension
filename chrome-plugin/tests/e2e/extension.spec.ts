@@ -677,7 +677,7 @@ test("a compound sentence renders numbered coordinate clauses and an annotated d
     );
   expect(componentColors).toEqual(["#0d9488", "#6b7280", "#0d9488"]);
 
-  // 点击第一个并列分句 → 详解面板出现两行式标注区与 ①②③ 对应解释。
+  // 点击第一个并列分句 → 详解只拆 focus 内部的主语与谓语，不跨界重复外部连词。
   const firstClause = page.locator(".component").first();
   await firstClause.click();
   await expect(page.locator(".detail")).toContainText("详细语法解析", { timeout: 15_000 });
@@ -712,19 +712,10 @@ test("a compound sentence renders numbered coordinate clauses and an annotated d
       ],
       color: "#dc2626",
     },
-    {
-      rows: [
-        ["annotation-role", "③ 并列连词"],
-        ["annotation-english", "and"],
-        ["annotation-translation", "和"],
-      ],
-      color: "#6b7280",
-    },
   ]);
   expect(detail.structures).toEqual([
     "① 主语：The sun 是第一分句的主语。",
     "② 谓语：rose 是第一分句的谓语动词。",
-    "③ 并列连词：and 连接前后两个并列分句。",
   ]);
   expect(detail.grammarPoints).toBe("并列句");
   expect(detail.summary).toBe("这是针对所选并列分句的详细语法解析。");

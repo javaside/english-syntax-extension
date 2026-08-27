@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { GrammarRole } from "./grammar";
+import { CORE_SCHEMA_VERSION } from "./versions";
 import {
   isCoreStreamPush,
   isRequestMessage,
@@ -30,7 +31,7 @@ const sentence = {
 };
 
 const core = {
-  schemaVersion: 1,
+  schemaVersion: CORE_SCHEMA_VERSION,
   sentenceId: "sentence-1",
   components: [
     {
@@ -353,5 +354,16 @@ describe("isSessionComplete 与屏外未触发的句子", () => {
     expect(
       isSessionComplete({ state: "running", discovered: 0, queued: 0, ready: 0, failed: 0 }),
     ).toBe(false);
+  });
+
+  // 扫描登记完(全部 discovered 相位)、视口回调还没回来:光靠 discovered > 0
+  // 挡不住,得要求真有句子落地过。
+  it("句子只是被发现、一句都没落地时不算完成", () => {
+    expect(isSessionComplete({ ...base, ready: 0, inFlight: 0 })).toBe(false);
+  });
+
+  it("落地的那一句可以是失败或纯缓存跳过", () => {
+    expect(isSessionComplete({ ...base, ready: 0, failed: 1, inFlight: 0 })).toBe(true);
+    expect(isSessionComplete({ ...base, ready: 0, skipped: 1, inFlight: 0 })).toBe(true);
   });
 });

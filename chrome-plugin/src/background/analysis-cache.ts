@@ -38,6 +38,13 @@ export interface ImportOutcome {
 export interface CoreCacheKeyInput {
   normalizedSentence: string;
   schemaVersion: number;
+  /**
+   * 结果的另一半身份:同一句在不同版本的提示词下会得到不同粒度的成分。少了它，
+   * 改提示词等于把旧粒度的结果永久钉在缓存里——新旧质量混着显示，谁也说不清
+   * 屏幕上那一句是哪版规则的产物。core 传 CORE_PROMPT_VERSION，详解传
+   * DETAIL_PROMPT_VERSION:两条提示词各自演进，不该互相作废。
+   */
+  promptVersion: number;
   focus?: TokenRange;
 }
 
@@ -51,6 +58,7 @@ function coreIdentity(input: CoreCacheKeyInput): readonly unknown[] {
   return [
     input.normalizedSentence,
     input.schemaVersion,
+    input.promptVersion,
     input.focus === undefined ? null : [input.focus.startToken, input.focus.endToken],
   ];
 }

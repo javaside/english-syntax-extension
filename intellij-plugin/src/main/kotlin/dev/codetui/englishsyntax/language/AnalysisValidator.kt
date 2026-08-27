@@ -127,7 +127,20 @@ private fun parseCoreSentence(
     errors += error("$path.components", "must be a non-empty array")
     return null
   }
-  val parsed = componentsValue.mapIndexed { componentIndex, component ->
+  // 模型常给逗号/句号虚构 PUNCTUATION、CONJUNCTION 等角色。标点本来就允许不覆盖，
+  // 所以必须在角色枚举校验前丢掉纯标点区间；否则未知角色会让整句在 repair 后仍失败。
+  val semanticComponents = componentsValue.filterNot { component ->
+    val candidate = component.asObject() ?: return@filterNot false
+    val start = candidate["startToken"]?.safeInt() ?: return@filterNot false
+    val end = candidate["endToken"]?.safeInt() ?: return@filterNot false
+    val covered = request.tokens.filter { it.id in start..end }
+    covered.isNotEmpty() && covered.first().id == start && covered.last().id == end && covered.all { it.punctuation }
+  }
+  if (semanticComponents.isEmpty()) {
+    errors += error("$path.components", "must contain a non-punctuation component")
+    return null
+  }
+  val parsed = semanticComponents.mapIndexed { componentIndex, component ->
     parseCoreComponent(component, request.tokens, "$path.components[$componentIndex]", errors)
   }
   var previousEnd = -1
@@ -233,6 +246,19 @@ fun validateDetail(raw: JsonElement, request: SentenceInput, requestedFocus: Tok
   val structures = if (structuresValue is kotlinx.serialization.json.JsonArray) structuresValue.mapIndexedNotNull { i, value -> parseDetailStructure(value, request.tokens, "structures[$i]", errors) } else {
     errors += error("structures", "must be an array")
     emptyList()
+  }
+  if (focus != null) {
+    var previousEnd = focus.startToken - 1
+    structures.forEachIndexed { index, structure ->
+      val path = "structures[$index]"
+      if (structure.startToken < focus.startToken || structure.endToken > focus.endToken) {
+        errors += error(path, "must stay inside the requested focus")
+      }
+      if (structure.startToken <= previousEnd) {
+        errors += error("structures", "must be ordered and non-overlapping")
+      }
+      previousEnd = maxOf(previousEnd, structure.endToken)
+    }
   }
   val pointsValue = envelope["grammarPoints"]
   val grammarPoints = if (pointsValue is kotlinx.serialization.json.JsonArray) {

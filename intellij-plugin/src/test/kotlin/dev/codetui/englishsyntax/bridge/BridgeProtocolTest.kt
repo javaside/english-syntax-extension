@@ -135,7 +135,7 @@ class BridgeProtocolTest {
   fun `core result carries blockId`() {
     val message = BridgeProtocol.parseHostMessage(
       Json.parseToJsonElement(
-        """{"version":1,"type":"CORE_RESULT","previewId":"p1","generation":0,"sentenceId":"s-b1-0","blockId":"b1","analysisJson":"{}"}""",
+        """{"version":1,"type":"CORE_RESULT","previewId":"p1","generation":0,"sentenceId":"s-b1-0","blockId":"b1","analysisJson":"{}","tokensJson":"[]"}""",
       ).jsonObject,
     )
     val core = message as HostMessage.CoreResult

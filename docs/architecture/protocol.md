@@ -7,11 +7,11 @@
 | 常量                    | 当前值 | 含义                                        | 改动影响                                               |
 | ----------------------- | ------ | ------------------------------------------- | ------------------------------------------------------ |
 | `MESSAGE_VERSION`       | `1`    | 消息信封版本;收发两侧都校验                 | 改了会让旧页面上残留的 content script 与新 SW 互不认账 |
-| `CORE_SCHEMA_VERSION`   | `1`    | core / detail 结果的结构版本;**参与缓存键** | 改了等于全量作废缓存;缓存导入也会因版本不符整体拒绝    |
-| `CORE_PROMPT_VERSION`   | `2`    | core 提示词版本(记录用,不参与键)            | —                                                      |
-| `DETAIL_PROMPT_VERSION` | `3`    | detail 提示词版本(记录用,不参与键)          | —                                                      |
+| `CORE_SCHEMA_VERSION`   | `3`    | core / detail 结果的语义契约版本;**参与缓存键** | 改了等于全量作废缓存;缓存导入也会因版本不符整体拒绝    |
+| `CORE_PROMPT_VERSION`   | `5`    | core 提示词版本;**参与 core / correction 缓存键** | 改了作废全部 core 缓存(旧粒度的成分不再复用),详解缓存不受影响 |
+| `DETAIL_PROMPT_VERSION` | `4`    | detail 提示词版本;**参与 detail 缓存键**    | 改了只作废详解缓存                                     |
 
-> 缓存键**刻意不含** profile / 模型 / 提示词维度——换模型不该让已有译文全部作废。IndexedDB 的 v1→v2 升级正是为此清空了旧键。
+> 缓存键**刻意不含** profile / 模型维度——换模型不该让已有译文全部作废;但**含提示词版本**,因为同一句在不同规则下会被切成不同粒度的成分,旧结果继续复用只会让新旧质量混在一屏。IndexedDB 的 v1→v2 升级正是为清空更早的键。
 
 ## 2. 请求消息 `RequestMessage`
 
@@ -73,6 +73,8 @@ trustedPageControl = trustedExtensionUi && type ∈ {START_SESSION, PAUSE_SESSIO
 - **`GET_SESSION_STATUS` 与 `SWITCH_PROFILE` 只在②里被豁免,并没有③。** 它们在 `trustedPageControl` 集合里,但 case 体内没有 `if (!trustedExtensionUi)` 检查——两件事别搞混。
 
 ②的豁免为什么必要:popup 并不知道页面真实的 `documentId`,它一律用占位值 `popup-tab-${tabId}`。没有这条豁免,popup 的每一次启停与状态查询都会被判成过期文档。
+
+**推论:占位 documentId 绝不能原样转发给页面。** 每一条会改会话的分支(含 `PARSE_SELECTION` / `PARSE_CONTEXT_BLOCK` / `PARSE_HOVERED_BLOCK`)都要先解析出真实 id——`activeTabs.get(tabId)?.documentId ?? request.documentId`——改写待转发的消息,并把这次手势记进 `activeTabs`。照占位值下发的话,页面路由按 `documentId` 认 controller,会为同一个标签页再建一套会话:卡片与上游调用都翻倍,而这套会话的状态中继又因与账本里的 id 不符被②拒成 `REQUEST_CANCELLED`。不记账则相反:SW 眼里这个标签页始终是 `stopped`,弹窗回落成「开始学习」,「解析此区域」与「重新解析可见段落」一律按停止态拒掉。已在跑 / 已暂停的状态要原样保留,只把 `stopped` 翻成 `running`(清零会抹掉真实计数,还会把暂停谎报成进行中)。
 
 ## 3. 响应消息 `ResponseMessage`
 
@@ -187,7 +189,8 @@ DetailAnalysis  = { sentenceId, focus, structures[], grammarPoints[], explanatio
 | `RATE_LIMITED`           | ✓        | HTTP 429                                               | 按 `Retry-After` 透明重试                                  |
 | `NETWORK_ERROR`          | 5xx 时 ✓ | 其它 HTTP 错误 / fetch 失败 / 消息通道中断             | 重试或提示检查网络                                         |
 | `REQUEST_TIMEOUT`        | ✓        | 超过 `profile.timeoutMs`                               | 重试                                                       |
-| `INVALID_MODEL_OUTPUT`   | ✗        | 非法 JSON、修复后仍不合格、消息不合协议                | 标红该句 + 重试按钮                                        |
+| `INVALID_MODEL_OUTPUT`   | ✗        | 非法 JSON(截断抢救也救不回)、或修复后仍不合格          | 标红该句 + 重试按钮                                        |
+| `MALFORMED_MESSAGE`      | ✗        | 消息不合协议(扩展内部消息形状不对/不受支持)            | 静默丢弃;与模型输出无关,不要引向「换模型」                 |
 | `UNSUPPORTED_PAGE`       | ✗        | 发送方与目标 tab 不符                                  | —                                                          |
 | `UNSAFE_CONTENT_BLOCK`   | ✗        | 无会话时用右键菜单 / 悬停未命中段落                    | 页面内胶囊提示                                             |
 | `SENTENCE_TOO_LONG`      | ✗        | 句子超 2000 规范化字符,或超调度器上限                  | 标红该句                                                   |
@@ -197,14 +200,15 @@ DetailAnalysis  = { sentenceId, focus, structures[], grammarPoints[], explanatio
 ## 9. 缓存键
 
 ```
-core 键        = SHA-256(["core", 规范化句文本, CORE_SCHEMA_VERSION, null])
-detail 键      = SHA-256(["core", 规范化句文本, CORE_SCHEMA_VERSION, [focus.start, focus.end]])
-correction 键  = SHA-256(["correction", …同上…, pageUrl, sentenceInstanceId, feedback])
+core 键        = SHA-256(["core", 规范化句文本, CORE_SCHEMA_VERSION, CORE_PROMPT_VERSION, null])
+detail 键      = SHA-256(["core", 规范化句文本, CORE_SCHEMA_VERSION, DETAIL_PROMPT_VERSION, [focus.start, focus.end]])
+correction 键  = SHA-256(["correction", …同上(用 CORE_PROMPT_VERSION)…, pageUrl, sentenceInstanceId, feedback])
 ```
 
 规范化 = `text.trim().replace(/\s+/gu, " ")`。
 
 - **detail 与 core 共用同一个工厂**,只多一个 focus 维度——所以**预载路径与点击路径天然同键**。
+- 提示词版本进键,且 core / detail **各传自己那条**:两条提示词各自演进,改 core 规则不该作废已有详解。少了这一维,改提示词等于把旧粒度的成分永久钉在缓存里,新旧质量混着显示。
 - correction 绑定页面实例与反馈文本,跨人不可命中,因此**不参与导入导出**。
 
 ## 10. 存储清单
@@ -254,7 +258,7 @@ Chrome 端协议(SW↔content)之外,IntelliJ 端定义 JCEF 页面↔Kotlin 的
 
 - **JS→Kotlin**:`PREVIEW_READY`、`VISIBLE_BLOCKS`(≤2000 块,每块 ≤20,000 字符)、`DETAIL_REQUEST`(focus 非负闭区间)、`RETRY_SENTENCE`、`PREVIEW_RENDERED`(官方预览整体重渲染,带 previewId/generation,四键白名单)、`PARSE_BLOCK`(显式手势按段解析)。
 - **`PARSE_BLOCK`**:六键白名单 `version` / `type` / `previewId` / `generation` / `blockId` / `text`,`blockId` 非空、`text` 长度受 `MAX_BLOCK_TEXT`(20,000)限制。由 `PreviewSessionConnector` 的 `when` 派发到 `PreviewSession.parseExplicitBlock(blockId, text)`。**与 `VISIBLE_BLOCKS` 刻意分开**:后者是自动扫描的批量上报(进 120ms 合批窗口、`PAUSED` 时进 `pausedBlocks` 等 resume);前者是用户手势——单块直派不合批、`offscreen = false` 拿 `ACTIVE_VISIBLE_CORE` 最高可见优先级、`allowPaused = true` 穿透暂停、会话 `STOPPED` 时置 `RUNNING` 轻量启动(不触发全文扫描)。两者共用 `registerFresh`,已出结果的句子照旧被过滤掉,所以对同一段连按快捷键不会重复请求。`bypassCache` 不置位:按段解析要的是"翻这一段",不是"重新翻这一段"。
-- **Kotlin→JS**:`SESSION_STATE`、`CORE_STREAM`、`CORE_RESULT`、`CORE_ERROR`、`DETAIL_STREAM`、`DETAIL_RESULT`、`RESTORE_ALL`。`CORE_STREAM`/`CORE_RESULT`/`CORE_ERROR` 必带 `blockId`——JS 侧渲染器靠它**惰性注册句子**(sentenceId 由 Kotlin 权威生成 `s-{blockId}-{index}`,JS 端不做分句),否则 `#sentences` 永远为空、卡片渲染不出来。`DETAIL_*` 不带 blockId(句子在详解前必已注册)。
+- **Kotlin→JS**:`SESSION_STATE`、`CORE_STREAM`、`CORE_RESULT`、`CORE_ERROR`、`DETAIL_STREAM`、`DETAIL_RESULT`、`RESTORE_ALL`。`CORE_STREAM`/`CORE_RESULT` 必带 `blockId` 与精简 `tokensJson`；JS 侧靠 `blockId` **惰性注册句子**，靠 Token 的 `text` / `leadingWhitespace` / `punctuation` 恢复模型未覆盖的破折号、逗号和句末标点。`CORE_ERROR` 只需 `blockId`；`DETAIL_*` 不带 blockId(句子在详解前必已注册)。
 - 公共字段:`version=1`、`previewId`、`generation`;句子消息再加 `sentenceId`。
 - **键白名单**:每类型一组允许键,多余键整体拒绝;`apiKey`/`headers`/`baseUrl` 永远禁止。JS 侧对 Kotlin 回调复检 generation,旧代次丢弃。
 - **新增一条页面消息要同步五处,缺一不可**:① `bridge/BridgeProtocol.kt` 的 `PageMessage` 成员;② 同文件 `parsePageMessage` 的分支(键白名单);③ `session/PreviewSessionConnector` 里 `when (message)` 的分支;④ `BridgeProtocolTest`;⑤ **`resources/web/bridge.ts` 的联合类型 + `PAGE_KEYS_BY_TYPE` + `parsePageMessage` 分支(含 `bridge.test.ts`)**。第⑤处运行时并不生效——`bootstrap-entry.ts` 直接构造消息 `postToHost`,不经它校验——所以漏了**不会有任何测试变红**,Kotlin 侧全绿、功能也正常,代价是两侧白名单就此分叉、后来人照抄的是残缺样板。`PARSE_BLOCK` 就是这么漏掉的,实现到一半才发现(见 [invariants.md](./invariants.md))。
@@ -267,5 +271,5 @@ Chrome 端协议(SW↔content)之外,IntelliJ 端定义 JCEF 页面↔Kotlin 的
 | `__englishSyntaxScrollTo(offset, smooth)`                    | 滚动同步                      | 官方预览滚动联动                                                                                                                                                  |
 | `__englishSyntaxMessage(json)`                               | 每条 Kotlin→JS 消息           | 唯一的 host 消息入口,内部走 `parseHostMessage`                                                                                                                    |
 | `__englishSyntaxSetTheme(isDark)`                            | 注入时与主题变化              | 供 `roles.ts` 选色板                                                                                                                                              |
-| `__englishSyntaxParseHoveredBlock(target?)`                   | 快捷键按段解析                | 省略 `target` 时查 CSS `:hover` 取最深元素(Kotlin 就是这么调的);定位成功即回传 `PARSE_BLOCK`                                                                       |
+| `__englishSyntaxParseHoveredBlock(target?)`                   | 快捷键按段解析                | 省略 `target` 时查 `:is(:hover)` 取最深元素(Kotlin 就是这么调的;裸 `:hover` 在 quirks 页面恒为空集);定位成功即回传 `PARSE_BLOCK`                                                                       |
 | `__englishSyntaxSetHotkey(descriptor)`                       | 注入时(读 keymap 之后)        | 下发页面兼底 keydown 的键位判据;**传 `null` 表示关掉兼底监听**(keymap 里没有可下发的单段字母数字绑定)                                                             |

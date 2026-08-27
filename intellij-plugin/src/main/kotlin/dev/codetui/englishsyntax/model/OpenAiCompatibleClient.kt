@@ -471,11 +471,19 @@ private fun parseEnvelopeContent(text: String): JsonElement {
   return parseContent(string)
 }
 
+/**
+ * 解析模型吐出来的 JSON 正文。少吐收尾括号、或撞上 max_tokens 断在半句上是常态,
+ * 此时先按截断救一遍(见 [repairTruncatedJson]):救回来的对象若缺字段，由上层逐句校验
+ * 判无效并进修复轮——那远好过整块判死。
+ */
 private fun parseContent(content: String): JsonElement {
+  val text = stripSingleJsonFence(content)
   return try {
-    json.parseToJsonElement(stripSingleJsonFence(content))
+    json.parseToJsonElement(text)
   } catch (_: Exception) {
-    throw ExtensionFailure(ErrorCode.INVALID_MODEL_OUTPUT, "Model message content is not valid JSON", false)
+    val salvaged = repairTruncatedJson(text)
+      ?: throw ExtensionFailure(ErrorCode.INVALID_MODEL_OUTPUT, "Model message content is not valid JSON", false)
+    json.parseToJsonElement(salvaged)
   }
 }
 

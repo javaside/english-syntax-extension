@@ -85,7 +85,7 @@ class CacheTransferTest {
   fun `counts invalid entries but imports valid ones`() = runBlocking {
     AnalysisCache(tempDir.resolve("cache.sqlite")).use { cache ->
       val file = """
-        {"format":"english-syntax-cache","formatVersion":1,"schemaVersion":1,
+        {"format":"english-syntax-cache","formatVersion":1,"schemaVersion":${dev.codetui.englishsyntax.domain.ContractVersions.CORE_SCHEMA},
          "exportedAt":"2026-08-18T00:00:00Z",
          "core":[
            {"key":"not-hex","value":{}},

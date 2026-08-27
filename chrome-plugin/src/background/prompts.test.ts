@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { GrammarRole } from "../shared/grammar";
+import { CORE_SCHEMA_VERSION } from "../shared/versions";
 import type { CoreAnalysis } from "../shared/grammar";
 import { tokenize } from "../language/segmenter";
 import type { SentenceInput } from "../shared/protocol";
@@ -23,7 +24,7 @@ const sentence: SentenceInput = {
 };
 
 const core: CoreAnalysis = {
-  schemaVersion: 1,
+  schemaVersion: CORE_SCHEMA_VERSION,
   sentenceId: sentence.sentenceId,
   components: [
     { startToken: 0, endToken: 1, role: GrammarRole.SUBJECT, translation: "主语" },
@@ -64,6 +65,81 @@ describe("model-facing sentence payload", () => {
     expect(prompt).toContain('{"id":0,"text":"Learners"}');
   });
 
+  it("forbids predicates from swallowing peer components", () => {
+    const prompt = buildCorePrompt([sentence]);
+
+    expect(prompt).toContain("PREDICATE must not absorb");
+    expect(prompt).toContain("OBJECT, PREDICATIVE, COMPLEMENT, or ADVERBIAL");
+  });
+
+  /**
+   * 三条粒度边界:少了它们，实测同一句会被切成词级碎片(Help/turn 两个谓语、
+   * 介词与宾语分离、宾语短语误标定语)。判定顺序也是实测出来的——分句规则必须
+   * 排在 peer 规则之前，两条平列时模型会在两种切法之间跳。
+   */
+  it("bounds component granularity and decides clause layout first", () => {
+    const prompt = buildCorePrompt([sentence]);
+
+    expect(prompt).toContain("Clause-structure-first rule:");
+    expect(prompt).toContain("emit exactly one COORDINATE_CLAUSE per clause");
+    expect(prompt).toContain('"Help turn" is one PREDICATE');
+    expect(prompt).toContain("Two PREDICATE components must never be adjacent");
+    expect(prompt).toContain("a preposition and everything it governs form exactly one component");
+    expect(prompt).toContain(
+      "never tag a noun phrase governed by a verb or preposition as ATTRIBUTE",
+    );
+    expect(prompt.indexOf("Clause-structure-first rule:")).toBeLessThan(
+      prompt.indexOf("Peer-component rule:"),
+    );
+    // peer 规则收窄到分句内，才不会与分句规则打架。
+    expect(prompt).toContain("Peer-component rule: within a single clause");
+  });
+
+  /**
+   * 修复轮曾只带 peer + supplement 两条规则，覆盖率/角色枚举/复合句/译文要求全丢，
+   * 于是"修一次就更碎"。core 与 repair 现在共享同一份规则清单。
+   */
+  it("carries the full rule set into the repair prompt", () => {
+    const core = buildCorePrompt([sentence]);
+    const repair = buildRepairPrompt([sentence], [{ path: "sentences[0]", message: "bad" }], {});
+
+    for (const rule of [
+      "The role field is a closed 16-role enum:",
+      "Coverage rule:",
+      "Clause-structure-first rule:",
+      "Predicate-scope rule:",
+      "Prepositional-phrase rule:",
+      "Peer-component rule:",
+      "Supplement rule:",
+      "Compound-sentence rule:",
+      "Complex-sentence rule:",
+      "Simple-sentence rule:",
+      "Give every component other than a COORDINATE_CLAUSE",
+    ]) {
+      expect(core).toContain(rule);
+      expect(repair).toContain(rule);
+    }
+  });
+
+  it("treats dash supplements as explanations instead of coordination", () => {
+    const dashSentence: SentenceInput = {
+      sentenceId: "dash-1",
+      text: "Ask clarifying questions — one at a time, the ones that matter.",
+      tokens: tokenize("Ask clarifying questions — one at a time, the ones that matter."),
+    };
+    const prompts = [
+      buildCorePrompt([dashSentence]),
+      buildRepairPrompt([dashSentence], [{ path: "sentences[0]", message: "bad" }], {}),
+    ];
+
+    for (const prompt of prompts) {
+      expect(prompt).toContain("dash or colon");
+      expect(prompt).toContain("APPOSITIVE or INDEPENDENT_ELEMENT");
+      expect(prompt).toContain("the ones");
+      expect(prompt).toContain("that matter");
+    }
+  });
+
   // Guards the regression this fix exists for: the full pretty-printed Token
   // record put the payload around 30x the source text, which every core,
   // repair, and detail call paid for in prefill latency.
@@ -87,6 +163,7 @@ describe("model-facing sentence payload", () => {
       expect(prompt).not.toContain("leadingWhitespace");
       expect(prompt).toContain('{"id":0,"text":"Learners"}');
     }
+    expect(prompts[0]).toContain("PREDICATE must not absorb");
   });
 });
 

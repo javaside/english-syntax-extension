@@ -77,6 +77,7 @@ sealed interface HostMessage {
     val sentenceId: String,
     val blockId: String,
     val componentsJson: String,
+    val tokensJson: String,
   ) : HostMessage
 
   data class CoreResult(
@@ -85,6 +86,7 @@ sealed interface HostMessage {
     val sentenceId: String,
     val blockId: String,
     val analysisJson: String,
+    val tokensJson: String,
   ) : HostMessage
 
   data class CoreError(
@@ -204,7 +206,7 @@ object BridgeProtocol {
     if (generation < 0) return null
     return when (value.string("type")) {
       "SESSION_STATE" -> {
-        if (!hasOnlyKeys(value, "version", "type", "previewId", "generation", "state", "ready", "discovered")) return null
+        if (!hasOnlyKeys(value, "version", "type", "previewId", "generation", "state", "ready", "discovered", "failed")) return null
         HostMessage.SessionState(
           previewId, generation,
           value.string("state") ?: return null,
@@ -213,15 +215,15 @@ object BridgeProtocol {
         )
       }
       "CORE_STREAM", "CORE_RESULT" -> {
-        val sentenceKey = if (value.keys.contains("analysisJson")) "analysisJson" else "componentsJson"
-        if (!hasOnlyKeys(value, "version", "type", "previewId", "generation", "sentenceId", "blockId", sentenceKey)) return null
+        val type = value.string("type") ?: return null
+        val sentenceKey = if (type == "CORE_STREAM") "componentsJson" else "analysisJson"
+        if (!hasOnlyKeys(value, "version", "type", "previewId", "generation", "sentenceId", "blockId", sentenceKey, "tokensJson")) return null
         val sentenceId = value.string("sentenceId")?.takeIf { it.isNotEmpty() } ?: return null
         val blockId = value.string("blockId")?.takeIf { it.isNotEmpty() } ?: return null
         val payload = value.string(sentenceKey) ?: return null
-        when (value.string("type")) {
-          "CORE_STREAM" -> HostMessage.CoreStream(previewId, generation, sentenceId, blockId, payload)
-          else -> HostMessage.CoreResult(previewId, generation, sentenceId, blockId, payload)
-        }
+        val tokensJson = value.string("tokensJson") ?: return null
+        if (type == "CORE_STREAM") HostMessage.CoreStream(previewId, generation, sentenceId, blockId, payload, tokensJson)
+        else HostMessage.CoreResult(previewId, generation, sentenceId, blockId, payload, tokensJson)
       }
       "DETAIL_RESULT" -> {
         if (!hasOnlyKeys(value, "version", "type", "previewId", "generation", "sentenceId", "analysisJson")) return null

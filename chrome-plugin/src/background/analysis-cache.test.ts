@@ -6,6 +6,7 @@ import { AnalysisCache, createCoreCacheKey, createCorrectionCacheKey } from "./a
 const coreIdentity = {
   normalizedSentence: "The cat sleeps.",
   schemaVersion: 1,
+  promptVersion: 4,
 };
 
 describe("shared cache key vectors", () => {
@@ -21,6 +22,8 @@ describe("analysis cache keys", () => {
   it.each([
     ["sentence", { normalizedSentence: "The dog sleeps." }],
     ["schema version", { schemaVersion: 2 }],
+    // 提示词版本进键:改了成分粒度规则就该重算，而不是把旧粒度的结果一直显示下去。
+    ["prompt version", { promptVersion: 9 }],
     ["focus interval", { focus: { startToken: 1, endToken: 2 } }],
   ])("separates keys by %s", async (_field, override) => {
     const baseline = await createCoreCacheKey(coreIdentity);
@@ -29,14 +32,13 @@ describe("analysis cache keys", () => {
     expect(changed).not.toBe(baseline);
   });
 
-  it("ignores profile, provider, model, and prompt-version fields entirely", async () => {
+  it("ignores profile, provider, and model fields entirely", async () => {
     const baseline = await createCoreCacheKey(coreIdentity);
     const withLegacyFields = await createCoreCacheKey({
       ...coreIdentity,
       profileId: "profile-2",
       providerOrigin: "https://other.example.com",
       model: "other-model",
-      promptVersion: 99,
     } as never);
 
     expect(withLegacyFields).toBe(baseline);

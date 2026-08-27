@@ -3,6 +3,7 @@ package dev.codetui.englishsyntax.analysis
 import dev.codetui.englishsyntax.cache.AnalysisCache
 import dev.codetui.englishsyntax.domain.CoreAnalysis
 import dev.codetui.englishsyntax.domain.CoreComponent
+import dev.codetui.englishsyntax.domain.DetailStructure
 import dev.codetui.englishsyntax.domain.GrammarRole
 import dev.codetui.englishsyntax.domain.SentenceInput
 import dev.codetui.englishsyntax.domain.TokenRange
@@ -19,8 +20,12 @@ import dev.codetui.englishsyntax.testsupport.FakeOpenAiServer
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlin.io.path.createTempDirectory
 import kotlin.test.AfterTest
@@ -87,16 +92,39 @@ class AnalysisServiceTest {
   }
 
   @Test
+  fun `core request sends a valid object schema with required arrays and properties`() = runBlocking {
+    val sentence = sentence("s1", "The service validates every response.")
+    server.enqueueJson(validCoreRaw("s1"))
+
+    service.analyzeCore(profile(), "doc-1", listOf(sentence))
+
+    val schema = server.requests.single().body.getValue("response_format").jsonObject
+      .getValue("json_schema").jsonObject.getValue("schema").jsonObject
+    assertEquals(listOf("sentences"), schema.getValue("required").jsonArray.map { it.jsonPrimitive.content })
+    val sentenceSchema = schema.getValue("properties").jsonObject.getValue("sentences").jsonObject
+      .getValue("items").jsonObject
+    assertEquals(
+      setOf("sentenceId", "components"),
+      sentenceSchema.getValue("required").jsonArray.map { it.jsonPrimitive.content }.toSet(),
+    )
+    assertTrue(sentenceSchema.getValue("properties").jsonObject.containsKey("components"))
+  }
+
+  @Test
   fun `cache hit does not call the client`() = runBlocking {
     val sentence = sentence("s1", "The service validates every response.")
     // 直接以 Chrome CoreAnalysis 交换形状写入一条合法缓存。
     val key = dev.codetui.englishsyntax.cache.createCoreCacheKey(
-      dev.codetui.englishsyntax.cache.CoreCacheKeyInput("The service validates every response.", 1),
+      dev.codetui.englishsyntax.cache.CoreCacheKeyInput(
+        "The service validates every response.",
+        dev.codetui.englishsyntax.domain.ContractVersions.CORE_SCHEMA,
+        dev.codetui.englishsyntax.domain.ContractVersions.CORE_PROMPT,
+      ),
     )
     cache.putCore(
       key,
       "other-profile",
-      json.parseToJsonElement("""{"schemaVersion":1,"sentenceId":"s1","components":[{"startToken":0,"endToken":5,"role":"SUBJECT","translation":"整句"}],"modelProfileId":"other-profile"}""") as JsonObject,
+      json.parseToJsonElement("""{"schemaVersion":${dev.codetui.englishsyntax.domain.ContractVersions.CORE_SCHEMA},"sentenceId":"s1","components":[{"startToken":0,"endToken":5,"role":"SUBJECT","translation":"整句"}],"modelProfileId":"other-profile"}""") as JsonObject,
     )
 
     val outcome = service.analyzeCore(profile(), "doc-1", listOf(sentence))
@@ -156,6 +184,34 @@ class AnalysisServiceTest {
   }
 
   @Test
+  fun `truncated first round is salvaged instead of killing the chunk`() = runBlocking {
+    val sentence = sentence("s1", "The service validates every response.")
+    // 少最后一个 `}`：本机模型每次如此。救回来即合法，一趟就够。
+    val truncated = validCoreRaw("s1").removeSuffix("}")
+    server.enqueueJson(truncated)
+
+    val outcome = service.analyzeCore(profile(), "doc-1", listOf(sentence))
+
+    assertEquals(1, server.requests.size)
+    assertTrue(outcome.failures.isEmpty())
+    assertEquals(1, outcome.result.size)
+  }
+
+  @Test
+  fun `unsalvageable first round still spends its one repair round`() = runBlocking {
+    // 回归:此前首轮 INVALID_MODEL_OUTPUT 直接把整块判死，修复轮压根不跑。
+    val sentence = sentence("s1", "The service validates every response.")
+    server.enqueueJson("对不起，我无法解析这句话。")
+    server.enqueueJson(validCoreRaw("s1"))
+
+    val outcome = service.analyzeCore(profile(), "doc-1", listOf(sentence))
+
+    assertEquals(2, server.requests.size)
+    assertTrue(outcome.failures.isEmpty())
+    assertEquals(1, outcome.result.size)
+  }
+
+  @Test
   fun `repair failure becomes invalid model output`() = runBlocking {
     val sentence = sentence("s1", "The service validates every response.")
     server.enqueueJson("""{"sentences":[{"sentenceId":"s1","components":[{"startToken":0,"endToken":1,"role":"SUBJECT","translation":"部分"}]}]}""")
@@ -169,6 +225,25 @@ class AnalysisServiceTest {
       dev.codetui.englishsyntax.domain.ErrorCode.INVALID_MODEL_OUTPUT,
       outcome.failures[0].error.code,
     )
+  }
+
+  @Test
+  fun `core stream never renders a punctuation token as a grammar component`() = runBlocking {
+    val sentence = sentence("s1", "The service works, reliably.")
+    val raw = """{"sentences":[{"sentenceId":"s1","components":[{"startToken":0,"endToken":1,"role":"SUBJECT","translation":"该服务"},{"startToken":2,"endToken":2,"role":"PREDICATE","translation":"工作"},{"startToken":3,"endToken":3,"role":"CONJUNCTION","translation":"，"},{"startToken":4,"endToken":4,"role":"ADVERBIAL","translation":"可靠地"}]}]}"""
+    server.enqueueSse(listOf(raw))
+    val streamed = mutableListOf<List<CoreComponent>>()
+
+    val outcome = service.analyzeCore(
+      profile(),
+      "doc-1",
+      listOf(sentence),
+      onStreamedComponent = StreamedComponentSink { _, components -> streamed += components },
+    )
+
+    assertTrue(outcome.failures.isEmpty())
+    assertEquals(listOf(1, 2, 3), streamed.map { it.size })
+    assertTrue(streamed.flatten().none { it.startToken == 3 && it.endToken == 3 })
   }
 
   @Test
@@ -194,6 +269,33 @@ class AnalysisServiceTest {
     val second = service.analyzeCore(profile(), "doc-1", listOf(sentence))
     assertTrue(second.cacheHit)
     assertEquals(0, server.requests.size)
+  }
+
+  @Test
+  fun `detail stream drops nested structures before rendering`() = runBlocking {
+    val sentence = sentence("s1", "Start by classifying how much process the request needs.")
+    val core = CoreAnalysis(
+      sentenceId = "s1",
+      components = listOf(CoreComponent(2, 9, GrammarRole.OBJECT_CLAUSE, "请求需要多少处理过程")),
+      modelProfileId = "profile-1",
+    )
+    val overlapping = """{"sentenceId":"s1","focus":{"startToken":2,"endToken":9},"structures":[{"startToken":2,"endToken":9,"role":"宾语从句","explanation":"整个从句"},{"startToken":2,"endToken":3,"role":"引导词","explanation":"重复内部"}],"grammarPoints":[],"explanation":"解析"}"""
+    val repaired = """{"sentenceId":"s1","focus":{"startToken":2,"endToken":9},"structures":[{"startToken":2,"endToken":3,"role":"引导词","explanation":"疑问词短语"},{"startToken":4,"endToken":5,"role":"主语","explanation":"名词短语"},{"startToken":6,"endToken":9,"role":"谓语","explanation":"谓语部分"}],"grammarPoints":[],"explanation":"解析"}"""
+    server.enqueueSse(listOf(overlapping))
+    server.enqueueJson(repaired)
+    val streamed = mutableListOf<List<DetailStructure>>()
+
+    val outcome = service.analyzeDetail(
+      profile(),
+      "doc-1",
+      sentence,
+      core,
+      TokenRange(2, 9),
+      StreamedStructureSink { _, _, structures -> streamed += structures },
+    )
+
+    assertEquals(listOf(1), streamed.map { it.size })
+    assertEquals(3, outcome.result.structures.size)
   }
 
   @Test

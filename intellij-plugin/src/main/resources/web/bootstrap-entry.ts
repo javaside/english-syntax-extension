@@ -7,6 +7,7 @@
  */
 import { BRIDGE_VERSION, parseHostMessage } from "./bridge";
 import {
+  deepestHovered,
   ensureBlockId,
   HIDDEN_ATTRIBUTE,
   nearestPreviewBlock,
@@ -222,18 +223,6 @@ function ensureState(): RuntimeState {
   return state;
 }
 
-/** CSS `:hover` 链的最深元素。happy-dom 等环境不实现该伪类，查询可能抛错，兜住返回 null。 */
-function deepestHovered(): Element | null {
-  let chain: NodeListOf<Element> | null = null;
-  try {
-    chain = document.querySelectorAll(":hover");
-  } catch {
-    chain = null;
-  }
-  if (chain === null || chain.length === 0) return null;
-  return chain[chain.length - 1] ?? null;
-}
-
 /** 同一块的重复触发去抖：两条快捷键通道（IDEA Action + 本页 keydown）可能同时到达。 */
 const PARSE_DEBOUNCE_MS = 400;
 let lastParsedBlockId = "";
@@ -242,13 +231,13 @@ let lastParsedAt = 0;
 /**
  * 解析一段并上报 `PARSE_BLOCK`。
  *
- * `target` 省略时查 CSS `:hover` 取最深元素——这是 Kotlin 的调用方式（`executeJavaScript`
- * 里不传参）。测试与将来可能的右键路径可以显式传入目标元素。
+ * `target` 省略时查悬停链取最深元素（`deepestHovered`，判据见 `preview.ts`）——这是 Kotlin 的
+ * 调用方式（`executeJavaScript` 里不传参）。测试与将来可能的右键路径可以显式传入目标元素。
  */
 function parseHoveredBlock(target?: Element | null): void {
   const s = state;
   if (s === null || s.previewId === "") return;
-  const hovered = target === undefined ? deepestHovered() : target;
+  const hovered = target === undefined ? deepestHovered(document) : target;
   if (hovered !== null && hovered.closest("[data-english-syntax-card]") !== null) {
     // 已经是卡片了：落到下面的「未找到」提示会误导用户。
     flashStatus("该段已解析");

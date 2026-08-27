@@ -37,6 +37,7 @@
 | `sse.ts`                       | 极简 SSE 解码器:只处理 `data:` 字段、空行边界、注释、CRLF,跨 chunk 缓冲半行                                                                                             |
 | `core-stream-parser.ts`        | 从**还在流式中的** core 信封里逐个抠出闭合的 component,并归属到正确的 `sentenceId`                                                                                      |
 | `detail-stream-parser.ts`      | 同上,但针对 detail 信封的 `structures[]`(信封是扁的,不需要归属;`focus` 对象在 `structures` 之前,所以必须按 key 判定而非数括号深度)                                      |
+| `lenient-json.ts`              | 截断 JSON 抢救:按词法找到最后一个完整值、补齐未闭合括号。与 Kotlin `LenientJson.kt` 逐字对齐,向量在 `shared-fixtures/truncated-json-salvage.json`                        |
 
 ## chrome-plugin/src/content —— 页面世界
 
@@ -45,6 +46,7 @@
 | `content-script.ts`        | 三件事:①`ContentScriptRouter` 路由 SW 下发的页面命令;②`ChromeRuntimeTransport` 传输层(sendMessage + 端口 + 重连);③`isRuntimeResponse()` **响应守卫**   |
 | `session-controller.ts`    | **最重的一个文件**:会话状态机、块与句的注册、相位流转、合批窗口、发请求与版本守卫、详解 / 纠正交互、MutationObserver、断线重连、状态上报               |
 | `document-scanner.ts`      | `scanDocument()`(自动扫描:选正文容器 → 收候选块)与 `nearestSafeBlock()`(显式手势:从光标往上找最近的安全叶子块)。**两者的取舍刻意不同**                 |
+| `hover-target.ts`          | 「鼠标指着谁」:查 `:is(:hover)` 取链尾(裸 `:hover` 在 quirks 页面恒为空集),链空才用记着的最后指针位置 `elementFromPoint` 兜底。装载即挂,冷启动快捷键才有坐标 |
 | `viewport-observer.ts`     | `IntersectionObserver`(`rootMargin: 100%`)包一层,不支持时退回 scroll/resize + rAF 轮询;`isVisible()` 供优先级判定                                      |
 | `learning-block.ts`        | Shadow DOM 卡片:三行成分、角色配色、并列分句编号、标点归属、详解面板的插入位置与内容、失败 / 跳过 / 重试的渲染                                         |
 | `block-replacement.ts`     | **可逆替换**:给原元素加一个唯一 hide class + 注入对应 `display:none` 样式,卡片插在其后;`restore()` 精确还原(包括原本没有 `class` 属性时删掉空 `class`) |
@@ -78,10 +80,11 @@
 | `model/CoreStreamParser.kt`                  | core 流式增量解析(暂定成分)                                                                         |
 | `model/DetailStreamParser.kt`                | detail 流式增量解析(暂定结构)                                                                       |
 | `model/StreamJsonSupport.kt`                 | 流式能力降级位持久化                                                                                |
+| `model/LenientJson.kt`                       | 截断 JSON 抢救,与 TS `lenient-json.ts` 逐字对齐(共用同一批向量)                                     |
 | `settings/ProfileState.kt`                   | Profile 持久化状态(JsonSchemaSupport 等降级位)                                                      |
 | `settings/ProfileRepository.kt`              | Profile 仓库:敏感字段走 CredentialStore(PasswordSafe)                                               |
 | `settings/CredentialStore.kt`                | 凭据存储抽象:密钥只进 PasswordSafe,永不入 state                                                     |
-| `settings/EnglishSyntaxConfigurable.kt`      | 设置页 UI                                                                                           |
+| `settings/EnglishSyntaxConfigurable.kt`      | 设置页 UI:Profile/行为配置、缓存统计与二次确认清空                                                   |
 | `scheduler/RequestScheduler.kt`              | 优先级调度器:一请求一槽位、jumpQueue、backgroundConcurrency、按 document 取消(与 Chrome 端同名对应) |
 | `cache/CacheKeys.kt`                         | 跨端一致的缓存键(SHA-256,共享向量钉住)                                                              |
 | `cache/AnalysisCache.kt`                     | SQLite 缓存:跨 store LRU、单调时间戳、导入合并                                                      |

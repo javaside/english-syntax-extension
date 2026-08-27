@@ -55,13 +55,15 @@ CachedAnalysisService.analyzeCore(input, signal)
 
 ### 语法规则句
 
-`buildCorePrompt` 里逐条声明:16 值封闭枚举、闭区间 Token 语义、覆盖率规则、并列句规则(每个能独立成句的分句整体标 `COORDINATE_CLAUSE`,连词单独标 `CONJUNCTION`)、复合句规则(从句整体标五类从句之一,不拆内部)、简单句规则(单主谓不得包成 `COORDINATE_CLAUSE`)、译文要求。
+`buildCorePrompt` 里逐条声明:16 值封闭枚举、闭区间 Token 语义、覆盖率规则、**同层成分规则**(`PREDICATE` 不得吞并可单独标注的 `OBJECT` / `PREDICATIVE` / `COMPLEMENT` / `ADVERBIAL`,祈使句也只标谓语中心)、并列句规则(每个能独立成句的分句整体标 `COORDINATE_CLAUSE`,连词单独标 `CONJUNCTION`)、复合句规则(从句整体标五类从句之一,不拆内部)、简单句规则(单主谓不得包成 `COORDINATE_CLAUSE`)、译文要求。
+
+详解 `structures` 只拆当前 focus 内部,必须按 Token ID 有序且互不重叠;完整响应由 `validateDetail` 拒绝越界/重叠,流式 `ProvisionalStructures` 同步过滤,防止先画整段、再重复画内部词组。
 
 ## 3. JSON Schema(`analysis-service.ts`)
 
 三份 `JsonSchemaSpec`:`CORE_SCHEMA`、`DETAIL_SCHEMA`、`SENTENCE_DETAILS_SCHEMA`(= `{details: [DETAIL_SCHEMA]}`)。
 
-支持 `response_format: json_schema` 的端点走 schema 约束;不支持的走**兼容模式**——此时输出形状只能靠提示词里的 `*_OUTPUT_SHAPE` 说清楚,所以那几段文字不是冗余。
+支持 `response_format: json_schema` 的端点走 schema 约束;不支持的走**兼容模式**——此时输出形状只能靠提示词里的 `*_OUTPUT_SHAPE` 说清楚,所以那几段文字不是冗余。Kotlin 端也必须生成标准 JSON Schema:`required` 是字符串数组,字段定义放在 `properties`;连续 `put("required", "...")` 会相互覆盖,顶层直放字段也不是 Schema 属性。
 
 `DETAIL_SCHEMA` 里 `translation` **刻意不列入 `required`**:兼容模式下模型偶发缺失时降级为两行标注,而不是整次 `INVALID_MODEL_OUTPUT`。
 
@@ -194,7 +196,28 @@ raw → dropPunctuationOnlyComponents → validateCoreBatch
 
 - **只修一次。** 第二次仍不合格就作为失败上报。
 - 修复请求只带**失败的那几句**(`invalidRawSubset`),不重发整块。
-- `dropPunctuationOnlyComponents` 是纯本地修复:覆盖率规则本就允许标点不被覆盖,丢掉纯标点成分即合法,渲染层会把它画回原位。实测每碰上一次就省掉一整轮模型往返(本地 6–23 秒)。
+- **修复轮与首轮共享同一份规则清单**(`CORE_ANALYSIS_RULES`)。修复 prompt 曾只带 peer + supplement 两条,覆盖率、角色枚举、并列/复合/简单句和译文要求全丢——一句进了修复轮,剩下的唯一语法指导就是"把成分拆开",实测越修越碎。
+- 纯标点成分走本地归一化:覆盖率规则本就允许标点不被覆盖,丢掉它即合法,渲染层会按源 Token 画回原位。Chrome 的 `dropPunctuationOnlyComponents` 与 IntelliJ 的 `validateCoreBatch` 都必须在角色枚举校验前处理，因此即使模型给逗号虚构 `PUNCTUATION` / `CONJUNCTION` 等角色也不会让整句失败；流式暂定成分同样读取原 Token 的 `punctuation` 标记并拒绝纯标点，避免最终校验前短暂显示成“并列连词”。
+- core / repair prompt 的 `SUPPLEMENT_RULE` 区分破折号、冒号后的补充说明或列举与真正并列句：补充跨度使用 `APPOSITIVE` / `INDEPENDENT_ELEMENT`，内部可分离谓语、宾语、状语仍按同层成分输出；名词短语不能连同其关系从句整体标成 `ATTRIBUTIVE_CLAUSE`（`the ones that matter` 中只有 `that matter` 是从句）。
+
+### 8.1 成分粒度的三条边界(`CORE_PROMPT_VERSION` 5)
+
+只有"别让谓语吞掉宾语"这类**下界**规则时,指令型文本会被切成词级碎片。同一模型(deepseek-v4-flash,temperature 0,兼容模式)实测:
+
+| 输入 | 只有 peer 规则 | 补齐三条边界后 |
+| --- | --- | --- |
+| `Help turn ideas into fully formed designs and specs through natural collaborative dialogue.` | 8–9 成分:`Help` / `turn` 两个 `PREDICATE`、`into` 与其宾语拆开、宾语短语误标 `ATTRIBUTE` | 4 成分:`PREDICATE(Help turn)` + `OBJECT(ideas)` + 两个整体介词短语 `ADVERBIAL` |
+| 6 个祈使动词逗号串成的一句 | 16 成分 / 6 个 `PREDICATE` | 12 成分 / 0 个 `PREDICATE`(整串按 `COORDINATE_CLAUSE`) |
+
+三条边界:
+
+1. `CLAUSE_FIRST_RULE`——**先定分句层级**:两个以上各带谓语、能独立成句的分句(逗号/冒号/分号/破折号/并列连词分隔,含祈使句串)一律一句一个 `COORDINATE_CLAUSE`,不再往分句内部拆。
+2. `PREDICATE_SCOPE_RULE`——`PREDICATE` 只覆盖动词组本身(含 `help/let` 后的原形动词链,`Help turn` 是**一个**谓语);两个 `PREDICATE` 不得相邻。
+3. `PREPOSITIONAL_PHRASE_RULE`——介词与它管辖的一切(含并列宾语)是**一个**成分;动词或介词管辖的名词短语永远不是 `ATTRIBUTE`。
+
+**顺序是规则的一部分**:分句规则必须排在 `PEER_COMPONENT_RULE` 之前,`PEER_COMPONENT_RULE` 本身也收窄为"在单个分句之内"。两条平列摆着时实测同一句会在两种切法之间跳(同一 prompt 连发两次得到 7 成分 / 0 谓语与 17 成分 / 2 谓语两种结果)。`prompts.test.ts` / `PromptsTest.kt` 用 `indexOf` 钉住这个顺序。
+
+两端提示词逐字一致由 `shared-fixtures/core-prompt-parity.json` 钉住(整段 prompt 存进 fixture,规则文本、章节顺序、分词结果任一处分叉都会红)。改提示词的姿势:两端一起改 → 更新 fixture → 升 `CORE_PROMPT_VERSION`(键会自动作废旧粒度结果)。
 
 ## 9. 缓存(`analysis-cache.ts`)
 
@@ -229,7 +252,7 @@ raw → dropPunctuationOnlyComponents → validateCoreBatch
 
 - **优先级**:五档同名同序(`USER_RETRY > DETAIL_CLICK > ACTIVE_VISIBLE_CORE > OTHER_VISIBLE_CORE > ACTIVE_PREFETCH_CORE`)。IntelliJ 侧多一档语义:非活动预览的可见块走 `OTHER_VISIBLE_CORE`(Chrome 端只有单文档,用不到)。
 - **分块**:`isLoopbackBaseUrl` 判定本地端点(Ollama 等)时每请求 6 句,云端 2 句——与 Chrome 端的 `CLOUD_SENTENCES_PER_REQUEST` 语义一致。
-- **缓存**:SQLite(`analysis_cache` 表,跨 core/detail store 的 LRU,键与 Chrome 扩展逐字节一致),导入导出格式与 Chrome 选项页互通(`english-syntax-cache` v1)。连接经 `SQLiteDataSource` 直接实例化,**不用 `DriverManager.getConnection`**——后者依赖 sqlite-jdbc 的 ServiceLoader 自动注册,在 IDEA 插件 classloader 下不可靠,曾抛 `No suitable driver found for jdbc:sqlite:` 导致 Action 点击静默失败;`SQLiteDataSource` 不碰全局驱动注册表,动态卸载也无类加载器泄漏。
+- **缓存**:SQLite(`analysis_cache` 表,跨 core/detail store 的 LRU,键与 Chrome 扩展逐字节一致),导入导出格式与 Chrome 选项页互通(`english-syntax-cache` v1)。设置页显示当前条目数/估算占用,经二次确认可清空 core 与 detail 全部缓存;只删除持久缓存,不停止在途请求、不移除预览页已渲染卡片。连接经 `SQLiteDataSource` 直接实例化,**不用 `DriverManager.getConnection`**——后者依赖 sqlite-jdbc 的 ServiceLoader 自动注册,在 IDEA 插件 classloader 下不可靠,曾抛 `No suitable driver found for jdbc:sqlite:` 导致 Action 点击静默失败;`SQLiteDataSource` 不碰全局驱动注册表,动态卸载也无类加载器泄漏。
 - **降级**:`JsonSchemaSupport`/`streamSupport`/reasoningControl 三块与 Chrome 端对称,只持久化否定态。设置页「测试连接」按钮(ConnectionProbe)会先保存 profile、再经 `probeJsonCapability` 打一次真模型探测,把 JSON schema 支持态写回 profile 并在状态栏反馈——与 Chrome 选项页「测试连接」同套路。
 - **修复 pass**:整块校验失败只把非法句送修复(`jumpQueue` 同优先级插队),修复后仍失败记 `INVALID_MODEL_OUTPUT`,兄弟句不受连坐。
 - **流式**:分片先经 `ProvisionalComponents`/`ProvisionalStructures` 安全过滤(角色枚举、区间界内、有序不重叠)再作为 `CORE_STREAM` 推给页面;分片不写缓存、不改相位——与 Chrome 端约定一致。

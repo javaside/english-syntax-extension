@@ -91,18 +91,19 @@ function requestIdOf(value: unknown): string {
 }
 
 const ERROR_MESSAGES: Record<ExtensionErrorCode, string> = {
-  CONFIG_MISSING: "No active model profile is configured",
-  HOST_PERMISSION_DENIED: "Host permission was denied",
-  AUTH_FAILED: "Model profile authentication failed; update its credentials to resume",
-  MODEL_NOT_FOUND: "The configured model was not found",
-  RATE_LIMITED: "The model provider rate-limited the request",
-  NETWORK_ERROR: "The model request failed",
-  REQUEST_TIMEOUT: "The model request timed out",
-  INVALID_MODEL_OUTPUT: "Invalid or unsupported extension message",
-  UNSUPPORTED_PAGE: "The message sender does not match the target tab",
+  CONFIG_MISSING: "尚未配置可用的模型档案",
+  HOST_PERMISSION_DENIED: "未获得该模型地址的访问权限",
+  AUTH_FAILED: "模型档案鉴权失败，更新凭据后才会恢复",
+  MODEL_NOT_FOUND: "找不到配置里的模型",
+  RATE_LIMITED: "模型服务限流了这次请求",
+  NETWORK_ERROR: "模型请求失败",
+  REQUEST_TIMEOUT: "模型请求超时",
+  INVALID_MODEL_OUTPUT: "模型输出不是合法 JSON",
+  MALFORMED_MESSAGE: "扩展内部消息不合协议或不受支持",
+  UNSUPPORTED_PAGE: "消息来源与目标标签页不一致",
   UNSAFE_CONTENT_BLOCK: CONTEXT_INSTRUCTION,
-  SENTENCE_TOO_LONG: "The sentence is too long",
-  REQUEST_CANCELLED: "The request was cancelled",
+  SENTENCE_TOO_LONG: "这句话太长",
+  REQUEST_CANCELLED: "请求已取消",
   NO_CACHE: "该成分暂无缓存详解，配置模型后可获取",
 };
 
@@ -239,28 +240,65 @@ export function registerServiceWorker(
    * 拿不到该 API 时退回纯内存，行为与从前一致。
    */
   const sessionArea = (chromeApi.storage as { session?: SessionArea } | undefined)?.session;
+  let commandCounter = 0;
+  const persistActiveTabs = (): void => {
+    void sessionArea?.set({ [ACTIVE_TABS_KEY]: [...activeTabs] }).catch(() => undefined);
+  };
+  const notifyPageStopped = (tabId: number, documentId: string): void => {
+    void chromeApi.tabs
+      ?.sendMessage(tabId, {
+        version: MESSAGE_VERSION,
+        requestId: `background:${tabId}:${++commandCounter}`,
+        type: "STOP_SESSION",
+        tabId,
+        documentId,
+      })
+      // 页面可能已经卸载或没有 content script:静默忽略。
+      ?.catch?.(() => undefined);
+  };
+  /**
+   * 回填落地前就被导航 / 关闭忘掉的标签页 → 当时是否要求通知页面停下。
+   *
+   * 唤醒 SW 的往往正是这次导航或关闭本身,那时 activeTabs 还空着,清理无从下手;
+   * 没有墓碑,回填就会把陈旧记录塞回内存,这个标签页于是再也忘不掉——旧 documentId
+   * 一直顶着,页面新会话的状态中继全被判成过期文档。
+   */
+  const forgottenTabs = new Map<number, boolean>();
+  let hydrating = sessionArea !== undefined;
   const hydrated = (async () => {
     if (sessionArea === undefined) return;
     try {
       const stored = await sessionArea.get(ACTIVE_TABS_KEY);
       const entries = stored[ACTIVE_TABS_KEY];
       if (!Array.isArray(entries)) return;
+      let dropped = false;
       for (const entry of entries) {
         if (!Array.isArray(entry) || typeof entry[0] !== "number") continue;
+        const tabId = entry[0];
+        const record = entry[1] as ActiveDocument;
+        const notifyPage = forgottenTabs.get(tabId);
+        if (notifyPage !== undefined) {
+          // 已经忘掉了,不许塞回来。SPA 导航还得通知页面里那个仍然活着的 controller
+          // 停下——它攥着的正是这条记录里的 documentId。调度器不用管:route 一律先等
+          // 回填,回填之前谁也没法把请求排进去,此刻它必然是空的。
+          if (notifyPage) notifyPageStopped(tabId, record.documentId);
+          dropped = true;
+          continue;
+        }
         // 已经建立的会话优先:hydrate 只补空缺，绝不覆盖本次运行的现况。
-        if (!activeTabs.has(entry[0])) activeTabs.set(entry[0], entry[1] as ActiveDocument);
+        if (!activeTabs.has(tabId)) activeTabs.set(tabId, record);
       }
+      if (dropped) persistActiveTabs();
     } catch {
       // session 不可用:退回纯内存。
+    } finally {
+      hydrating = false;
+      forgottenTabs.clear();
     }
   })();
-  const persistActiveTabs = (): void => {
-    void sessionArea?.set({ [ACTIVE_TABS_KEY]: [...activeTabs] }).catch(() => undefined);
-  };
   const pausedProfiles = new Map<string, string>();
   /** content 侧那条 syntax-learning 端口:流式分片的唯一推送通道。 */
   const documentPorts = new Map<string, chrome.runtime.Port>();
-  let commandCounter = 0;
 
   const profileCredentialFingerprint = (profile: ModelProfile): string =>
     JSON.stringify([
@@ -292,22 +330,16 @@ export function registerServiceWorker(
    *   新页面。标签页关闭那条路径不需要，页面已经没了。
    */
   const cancelTab = (tabId: number, notifyPage = false): void => {
+    // 回填还没落地时先立墓碑,别的都照旧同步做完。这里不能改成「等回填之后再清」:
+    // 紧随导航而来的状态中继会先看到旧 documentId 而被判成过期文档,页面的新会话
+    // 就再也登记不上——SPA 导航正是这个次序。
+    if (hydrating) forgottenTabs.set(tabId, notifyPage);
     const active = activeTabs.get(tabId);
     if (active === undefined) return;
     dependencies.scheduler.cancelDocument(active.documentId);
     activeTabs.delete(tabId);
     persistActiveTabs();
-    if (!notifyPage) return;
-    void chromeApi.tabs
-      ?.sendMessage(tabId, {
-        version: MESSAGE_VERSION,
-        requestId: `background:${tabId}:${++commandCounter}`,
-        type: "STOP_SESSION",
-        tabId,
-        documentId: active.documentId,
-      })
-      // 页面可能已经卸载或没有 content script:静默忽略。
-      ?.catch?.(() => undefined);
+    if (notifyPage) notifyPageStopped(tabId, active.documentId);
   };
 
   const inject = async (tabId: number): Promise<void> => {
@@ -704,10 +736,27 @@ export function registerServiceWorker(
             status: active.status,
           };
         }
-        case "PARSE_SELECTION": {
+        case "PARSE_SELECTION":
+        case "PARSE_HOVERED_BLOCK": {
           if (!trustedExtensionUi) return errorResponse(request.requestId, "UNSUPPORTED_PAGE");
+          const previous = activeTabs.get(request.tabId);
+          // 扩展页面只会送来占位 documentId(popup-tab-N):照它下发,页面就按这个 id 再建
+          // 一个 controller——同一个标签页两套会话,卡片与上游调用都翻倍,而它的状态中继
+          // 还会因为与 activeTabs 里的 documentId 不符被判 REQUEST_CANCELLED。
+          const documentId = previous?.documentId ?? request.documentId;
           await inject(request.tabId);
-          await chromeApi.tabs.sendMessage(request.tabId, request);
+          const profile = await dependencies.configRepository.getActiveProfile();
+          // 这两个手势在会话未启动时由页面侧自行轻量冷启动,所以「停止」要翻成「进行中」;
+          // 已在跑 / 已暂停的原样保留——清零会抹掉真实计数,还会把暂停谎报成进行中。
+          // 不落这一笔,SW 眼里这个标签页始终是停止:弹窗回落成「开始学习」,
+          //「解析此区域」与「重新解析可见段落」也一律按 stopped 拒掉。
+          const status =
+            previous === undefined || previous.status.state === "stopped"
+              ? emptyStatus("running", profile?.id)
+              : previous.status;
+          activeTabs.set(request.tabId, { documentId, status });
+          persistActiveTabs();
+          await chromeApi.tabs.sendMessage(request.tabId, { ...request, documentId });
           return {
             version: MESSAGE_VERSION,
             requestId: request.requestId,
@@ -721,17 +770,6 @@ export function registerServiceWorker(
           if (active === undefined || active.status.state === "stopped") {
             return errorResponse(request.requestId, "UNSAFE_CONTENT_BLOCK");
           }
-          await chromeApi.tabs.sendMessage(request.tabId, request);
-          return {
-            version: MESSAGE_VERSION,
-            requestId: request.requestId,
-            type: "ACK",
-            acknowledgedType: request.type,
-          };
-        }
-        case "PARSE_HOVERED_BLOCK": {
-          if (!trustedExtensionUi) return errorResponse(request.requestId, "UNSUPPORTED_PAGE");
-          await inject(request.tabId);
           await chromeApi.tabs.sendMessage(request.tabId, request);
           return {
             version: MESSAGE_VERSION,
@@ -931,7 +969,7 @@ export function registerServiceWorker(
         } satisfies ResponseMessage;
       }
       if (!isRequestMessage(value)) {
-        return errorResponse(requestIdOf(value), "INVALID_MODEL_OUTPUT");
+        return errorResponse(requestIdOf(value), "MALFORMED_MESSAGE");
       }
       return route(value, sender);
       // 返回 true 后必须回包，否则发送方会报 "message channel closed"；
@@ -945,25 +983,35 @@ export function registerServiceWorker(
     if (tabId === undefined || !port.name.startsWith("syntax-learning:")) return;
     const documentId = port.name.slice("syntax-learning:".length);
     if (documentId.length === 0) return;
-    const existing = activeTabs.get(tabId);
-    if (existing !== undefined && existing.documentId !== documentId) return;
-    activeTabs.set(tabId, {
-      documentId,
-      status: existing?.status ?? emptyStatus("stopped"),
-    });
-    persistActiveTabs();
+    // 挂端口与断开监听必须同步做完:await 之后再挂会漏掉这中间发生的断开事件。
     documentPorts.set(documentId, port);
     port.onDisconnect.addListener(() => {
-      // 先摘端口再走会话清理:后者带 documentId 守卫，会漏掉已换代的陈旧端口。
-      if (documentPorts.get(documentId) === port) documentPorts.delete(documentId);
       // 读一次 lastError,避免页面进 bfcache 关闭端口时控制台打
       // "Unchecked runtime.lastError"。
       void chromeApi.runtime.lastError;
-      if (activeTabs.get(tabId)?.documentId !== documentId) return;
-      dependencies.scheduler.cancelDocument(documentId);
-      activeTabs.delete(tabId);
-      persistActiveTabs();
+      // 同一个 documentId 可能已经用新端口重连(SW 重启、bfcache 恢复):陈旧端口的
+      // 断开事件不许碰会话,否则会取消刚接上的那条会话并把状态清成 stopped——页面上
+      // 卡片还在,弹窗却显示「开始学习」。
+      if (documentPorts.get(documentId) !== port) return;
+      documentPorts.delete(documentId);
+      void (async () => {
+        await hydrated;
+        if (activeTabs.get(tabId)?.documentId !== documentId) return;
+        dependencies.scheduler.cancelDocument(documentId);
+        activeTabs.delete(tabId);
+        persistActiveTabs();
+      })();
     });
+    void (async () => {
+      // activeTabs 要等 session 回填:抢在回填之前写,会把「进行中」的会话覆盖成
+      // stopped(弹窗于是回落成「开始学习」，而页面上卡片一张没少)。
+      await hydrated;
+      // 这条记录归谁不由端口说了算:已有记录(不论 documentId 是否相同)一律照旧,
+      // 状态由 SESSION_STATUS 中继与各启动路径维护。
+      if (activeTabs.get(tabId) !== undefined) return;
+      activeTabs.set(tabId, { documentId, status: emptyStatus("stopped") });
+      persistActiveTabs();
+    })();
   });
 
   chromeApi.tabs?.onRemoved?.addListener((tabId) => cancelTab(tabId));

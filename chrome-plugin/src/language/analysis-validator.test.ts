@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { GrammarRole } from "../shared/grammar";
+import { CORE_SCHEMA_VERSION } from "../shared/versions";
 import type { TokenRange } from "../shared/grammar";
 import type { SentenceInput } from "../shared/protocol";
 import { validateCoreBatch, validateDetail } from "./analysis-validator";
@@ -29,7 +30,7 @@ const rawCore = {
 };
 
 const expectedAnalysis = {
-  schemaVersion: 1,
+  schemaVersion: CORE_SCHEMA_VERSION,
   sentenceId: "sentence-1",
   components: [
     { startToken: 0, endToken: 0, role: GrammarRole.SUBJECT, translation: "学习者" },
@@ -75,7 +76,7 @@ describe("core analysis validation", () => {
       ok: true,
       value: [
         {
-          schemaVersion: 1,
+          schemaVersion: CORE_SCHEMA_VERSION,
           sentenceId: "sentence-1",
           components: [
             {
@@ -207,7 +208,7 @@ const focus: TokenRange = { startToken: 1, endToken: 1 };
 const rawDetail = {
   sentenceId: "sentence-1",
   focus,
-  structures: [{ startToken: 1, endToken: 2, role: "verb phrase", explanation: "谓语及其宾语" }],
+  structures: [{ startToken: 1, endToken: 1, role: "verb", explanation: "谓语动词" }],
   grammarPoints: ["一般现在时"],
   explanation: "说明阅读这一动作。",
 };
@@ -228,6 +229,20 @@ describe("detail analysis validation", () => {
 
   it("rejects output that changes the requested focus", () => {
     invalidDetail({ ...rawDetail, focus: { startToken: 1, endToken: 2 } });
+  });
+
+  it("rejects structures outside focus or overlapping earlier structures", () => {
+    invalidDetail({
+      ...rawDetail,
+      structures: [{ ...rawDetail.structures[0], startToken: 0, endToken: 1 }],
+    });
+    invalidDetail({
+      ...rawDetail,
+      structures: [
+        { ...rawDetail.structures[0], startToken: 1, endToken: 1 },
+        { ...rawDetail.structures[0], startToken: 1, endToken: 1 },
+      ],
+    });
   });
 
   it.each([

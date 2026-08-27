@@ -659,13 +659,6 @@ export class FakeOpenAiServer {
             explanation: "rose 是第一分句的谓语动词。",
             translation: "升起",
           },
-          {
-            startToken: 3,
-            endToken: 3,
-            role: "并列连词",
-            explanation: "and 连接前后两个并列分句。",
-            translation: "和",
-          },
         ],
         grammarPoints: ["并列句"],
         explanation: "这是针对所选并列分句的详细语法解析。",

@@ -9,7 +9,8 @@ import type {
   ResponseMessage,
   SessionStatus,
 } from "../shared/protocol";
-import { MESSAGE_VERSION } from "../shared/versions";
+import { CORE_SCHEMA_VERSION, MESSAGE_VERSION } from "../shared/versions";
+import { installHoverTracker } from "./hover-target";
 import { SyntaxProgressPill } from "./progress-pill";
 import { SessionController } from "./session-controller";
 import type { RuntimeTransport, SessionControllerOptions } from "./session-controller";
@@ -31,6 +32,8 @@ export interface ContentScriptRouterOptions {
   controllerFactory?: (options: SessionControllerOptions) => RoutedController;
   transportFactory?: (tabId: number, documentId: string) => RuntimeTransport;
   relayStatus?: (documentId: string, status: SessionStatus) => void;
+  /** 悬停目标解析器:由内容脚本装载时安装(见 hover-target.ts,冷启动前就得记指针位置)。 */
+  hoverTarget?: () => Element | null;
 }
 
 function invalidMessage(requestId = "invalid-message"): ResponseMessage {
@@ -39,8 +42,8 @@ function invalidMessage(requestId = "invalid-message"): ResponseMessage {
     requestId,
     type: "ERROR",
     error: {
-      code: "INVALID_MODEL_OUTPUT",
-      message: "Invalid or unsupported content-script message",
+      code: "MALFORMED_MESSAGE",
+      message: "内容脚本收到不合协议的消息",
       retryable: false,
     },
   };
@@ -53,7 +56,7 @@ function errorResponse(requestId: string, error: ExtensionError): ResponseMessag
 function channelError(requestId = "channel-error"): ResponseMessage {
   return errorResponse(requestId, {
     code: "NETWORK_ERROR",
-    message: "Extension message channel interrupted",
+    message: "扩展消息通道中断",
     retryable: true,
   });
 }
@@ -93,7 +96,7 @@ function isRange(
 function isCoreAnalysis(value: unknown): boolean {
   return (
     isRecord(value) &&
-    value.schemaVersion === 1 &&
+    value.schemaVersion === CORE_SCHEMA_VERSION &&
     typeof value.sentenceId === "string" &&
     value.sentenceId.length > 0 &&
     typeof value.modelProfileId === "string" &&
@@ -408,6 +411,7 @@ export class ContentScriptRouter {
       tabId,
       documentId,
       transport,
+      hoverTarget: this.options.hoverTarget,
       onStatus: (status) => this.options.relayStatus?.(documentId, status),
       requestFeedback: () => window.prompt("请描述需要纠正的语法解析；取消则重试详细解析"),
     });
@@ -416,12 +420,22 @@ export class ContentScriptRouter {
   }
 }
 
+function isExplicitParseCommand(message: unknown): boolean {
+  const type = isRecord(message) ? message.type : undefined;
+  return (
+    type === "PARSE_HOVERED_BLOCK" || type === "PARSE_SELECTION" || type === "PARSE_CONTEXT_BLOCK"
+  );
+}
+
 function installContentScript(): void {
   if (typeof chrome === "undefined" || chrome.runtime?.onMessage === undefined) return;
   if (document.documentElement.dataset.syntaxLearningExtension === "ready") return;
   let statusCounter = 0;
   const pill = new SyntaxProgressPill();
+  // 先挂指针追踪:快捷键冷启动时会话还不存在,那时才开始记就晚了。
+  const hoverTarget = installHoverTracker(document);
   const router = new ContentScriptRouter({
+    hoverTarget,
     relayStatus: (documentId, status) => {
       pill.update(status);
       const message: ResponseMessage = {
@@ -435,14 +449,10 @@ function installContentScript(): void {
   });
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     void router.route(message).then((response) => {
-      // 快捷键没有右键菜单那样的"已触发"反馈，且 SW 会丢弃页面命令的响应，
-      // 未命中段落只能在页面里就地提示。
-      if (
-        typeof message === "object" &&
-        message !== null &&
-        (message as { type?: unknown }).type === "PARSE_HOVERED_BLOCK" &&
-        response.type === "ERROR"
-      ) {
+      // 三个显式手势(快捷键 / 解析选中文本 / 解析此区域)的失败都只能在页面里就地说:
+      // 快捷键根本没有反馈渠道,右键菜单也只反馈「已触发」,而 SW 会丢弃页面命令的响应。
+      // 于是「该段已解析」「未找到可解析的段落」「请先启动学习模式」全都要走胶囊。
+      if (isExplicitParseCommand(message) && response.type === "ERROR") {
         pill.notice(response.error.message);
       }
       sendResponse(response);

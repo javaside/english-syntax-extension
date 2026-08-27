@@ -44,6 +44,87 @@ class PromptsTest {
   }
 
   @Test
+  fun `core prompt forbids predicates from swallowing peer components`() {
+    val prompt = buildCorePrompt(
+      listOf(sentence("Start by classifying how much process the request needs, then work through your path.")),
+    )
+
+    assertTrue(prompt.contains("PREDICATE must not absorb"))
+    assertTrue(prompt.contains("OBJECT, PREDICATIVE, COMPLEMENT, or ADVERBIAL"))
+  }
+
+  /**
+   * 三条粒度边界：少了它们，实测同一句会被切成词级碎片（Help/turn 两个谓语、介词与
+   * 宾语分离、宾语短语误标定语）。判定顺序也是实测出来的——分句规则必须排在 peer
+   * 规则之前，两条平列时模型会在两种切法之间跳。
+   */
+  @Test
+  fun `core prompt bounds granularity and decides clause layout first`() {
+    val prompt = buildCorePrompt(listOf(sentence("Help turn ideas into fully formed designs and specs.")))
+
+    assertTrue(prompt.contains("Clause-structure-first rule:"))
+    assertTrue(prompt.contains("emit exactly one COORDINATE_CLAUSE per clause"))
+    assertTrue(prompt.contains("\"Help turn\" is one PREDICATE"))
+    assertTrue(prompt.contains("Two PREDICATE components must never be adjacent"))
+    assertTrue(prompt.contains("a preposition and everything it governs form exactly one component"))
+    assertTrue(prompt.contains("never tag a noun phrase governed by a verb or preposition as ATTRIBUTE"))
+    assertTrue(prompt.indexOf("Clause-structure-first rule:") < prompt.indexOf("Peer-component rule:"))
+    assertTrue(prompt.contains("Peer-component rule: within a single clause"))
+  }
+
+  /**
+   * 修复轮曾只带 peer + supplement 两条规则，覆盖率/角色枚举/复合句/译文要求全丢，
+   * 于是"修一次就更碎"。core 与 repair 现在共享同一份规则清单。
+   */
+  @Test
+  fun `repair prompt carries the full rule set`() {
+    val input = sentence("The service works.")
+    val core = buildCorePrompt(listOf(input))
+    val repair = buildRepairPrompt(
+      listOf(input),
+      listOf(ValidationError("sentences[0]", "bad")),
+      buildJsonObject { put("sentences", buildJsonArray { }) },
+    )
+
+    listOf(
+      "The role field is a closed 16-role enum:",
+      "Coverage rule:",
+      "Clause-structure-first rule:",
+      "Predicate-scope rule:",
+      "Prepositional-phrase rule:",
+      "Peer-component rule:",
+      "Supplement rule:",
+      "Compound-sentence rule:",
+      "Complex-sentence rule:",
+      "Simple-sentence rule:",
+      "Give every component other than a COORDINATE_CLAUSE",
+    ).forEach { rule ->
+      assertTrue(core.contains(rule), rule)
+      assertTrue(repair.contains(rule), rule)
+    }
+  }
+
+  @Test
+  fun `dash supplements remain explanations and keep relative clause boundaries`() {
+    val input = sentence("Ask clarifying questions — one at a time, the ones that matter.")
+    val prompts = listOf(
+      buildCorePrompt(listOf(input)),
+      buildRepairPrompt(
+        listOf(input),
+        listOf(ValidationError("sentences[0]", "bad")),
+        buildJsonObject { put("sentences", buildJsonArray { }) },
+      ),
+    )
+
+    prompts.forEach { prompt ->
+      assertTrue(prompt.contains("dash or colon"))
+      assertTrue(prompt.contains("APPOSITIVE or INDEPENDENT_ELEMENT"))
+      assertTrue(prompt.contains("the ones"))
+      assertTrue(prompt.contains("that matter"))
+    }
+  }
+
+  @Test
   fun `repair prompt carries validation errors and invalid JSON compactly`() {
     val invalid = buildJsonObject { put("sentences", buildJsonArray { }) }
     val prompt = buildRepairPrompt(
@@ -53,6 +134,7 @@ class PromptsTest {
     )
     assertTrue(prompt.startsWith(firstLine("coreRepair")))
     assertTrue(prompt.contains("""{"path":"sentences[0]","message":"is missing"}"""))
+    assertTrue(prompt.contains("PREDICATE must not absorb"))
     assertFalse(prompt.contains("\n  \"path\""))
   }
 
@@ -68,7 +150,7 @@ class PromptsTest {
     val prompt = buildDetailPrompt(sentence("The service works."), core, TokenRange(0, 1))
     assertTrue(prompt.startsWith(firstLine("detail")))
     assertTrue(prompt.contains("\"sentenceId\":\"s1\",\"text\":\"The service works.\""))
-    assertTrue(prompt.contains("\"schemaVersion\":1"))
+    assertTrue(prompt.contains("\"schemaVersion\":${dev.codetui.englishsyntax.domain.ContractVersions.CORE_SCHEMA}"))
     assertTrue(prompt.contains("\"role\":\"SUBJECT\""))
     assertTrue(prompt.contains("\"startToken\":0,\"endToken\":1"))
   }

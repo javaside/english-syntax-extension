@@ -3,6 +3,7 @@ import { chatCompletionsUrl } from "./base-url";
 import type { ModelProfile } from "./config-repository";
 import { CoreStreamParser, type StreamedComponent } from "./core-stream-parser";
 import { DetailStreamParser } from "./detail-stream-parser";
+import { salvageTruncatedJson } from "./lenient-json";
 import { SSE_DONE, SseDecoder } from "./sse";
 
 export interface JsonSchemaSpec {
@@ -110,8 +111,25 @@ function invalidOutput(message: string): ModelRequestError {
   return new ModelRequestError("INVALID_MODEL_OUTPUT", message, false);
 }
 
+/**
+ * 解析模型吐出来的 JSON 正文。少吐收尾括号、或撞上 max_tokens 断在半句上是常态,
+ * 此时先按截断救一遍:救回来的对象若缺字段，由上层逐句校验判无效并进修复轮——
+ * 那远好过整块判死(此前这里直接抛 INVALID_MODEL_OUTPUT，同一批句子全军覆没,
+ * 而其中前几句往往是完整的，且修复轮压根不会跑)。
+ */
+function parseModelContent(content: string, message: string): unknown {
+  const text = stripSingleJsonFence(content);
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    const salvaged = salvageTruncatedJson(text);
+    if (salvaged !== undefined) return salvaged;
+    throw invalidOutput(message);
+  }
+}
+
 function mapHttpError(status: number, retryAfter: string | null, body: string): ModelRequestError {
-  const message = body.trim() || `Model endpoint returned HTTP ${status}`;
+  const message = body.trim() || `模型服务返回 HTTP ${status}`;
   if (status === 401 || status === 403) {
     return new ModelRequestError("AUTH_FAILED", message, false, { status });
   }
@@ -330,11 +348,7 @@ export class OpenAiCompatibleAdapter {
 
       // 连一个内容分片都没有:这个端点的流式没法用，回落非流式而不是报解析失败。
       if (content.length === 0) throw new UnsupportedStreamError();
-      try {
-        return JSON.parse(stripSingleJsonFence(content)) as unknown;
-      } catch {
-        throw invalidOutput("Model stream content is not valid JSON");
-      }
+      return parseModelContent(content, "模型流式返回的正文不是合法 JSON");
     } catch (error) {
       if (
         error instanceof ModelRequestError ||
@@ -344,14 +358,14 @@ export class OpenAiCompatibleAdapter {
         throw error;
       }
       if (abortCause === "timeout") {
-        throw new ModelRequestError("REQUEST_TIMEOUT", "Model request timed out", true);
+        throw new ModelRequestError("REQUEST_TIMEOUT", "模型请求超时", true);
       }
       if (abortCause === "caller") {
-        throw new ModelRequestError("REQUEST_CANCELLED", "Model request was cancelled", false);
+        throw new ModelRequestError("REQUEST_CANCELLED", "模型请求已取消", false);
       }
       throw new ModelRequestError(
         "NETWORK_ERROR",
-        error instanceof Error ? error.message : "Model network request failed",
+        error instanceof Error ? error.message : "模型网络请求失败",
         true,
       );
     } finally {
@@ -418,7 +432,7 @@ export class OpenAiCompatibleAdapter {
       Object.keys(value).length !== 1 ||
       (value as Record<string, unknown>).ok !== true
     ) {
-      throw invalidOutput("Model did not follow the connection probe JSON instruction");
+      throw invalidOutput("模型没有按连通性探测的 JSON 指令作答");
     }
     if (support === "supported") {
       await this.persistJsonSchemaSupport(profile.id, "supported");
@@ -492,17 +506,13 @@ export class OpenAiCompatibleAdapter {
       try {
         envelope = JSON.parse(text) as ChatCompletionEnvelope;
       } catch {
-        throw invalidOutput("Model response envelope is not valid JSON");
+        throw invalidOutput("模型响应信封不是合法 JSON");
       }
       const content = envelope.choices?.[0]?.message?.content;
       if (typeof content !== "string") {
-        throw invalidOutput("Model response is missing choices[0].message.content");
+        throw invalidOutput("模型响应缺少 choices[0].message.content");
       }
-      try {
-        return JSON.parse(stripSingleJsonFence(content)) as unknown;
-      } catch {
-        throw invalidOutput("Model message content is not valid JSON");
-      }
+      return parseModelContent(content, "模型返回的正文不是合法 JSON");
     } catch (error) {
       if (
         error instanceof ModelRequestError ||
@@ -512,14 +522,14 @@ export class OpenAiCompatibleAdapter {
         throw error;
       }
       if (abortCause === "timeout") {
-        throw new ModelRequestError("REQUEST_TIMEOUT", "Model request timed out", true);
+        throw new ModelRequestError("REQUEST_TIMEOUT", "模型请求超时", true);
       }
       if (abortCause === "caller") {
-        throw new ModelRequestError("REQUEST_CANCELLED", "Model request was cancelled", false);
+        throw new ModelRequestError("REQUEST_CANCELLED", "模型请求已取消", false);
       }
       throw new ModelRequestError(
         "NETWORK_ERROR",
-        error instanceof Error ? error.message : "Model network request failed",
+        error instanceof Error ? error.message : "模型网络请求失败",
         true,
       );
     } finally {

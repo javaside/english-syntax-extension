@@ -2,6 +2,7 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GrammarRole } from "../shared/grammar";
+import { CORE_SCHEMA_VERSION } from "../shared/versions";
 import type { CoreAnalysis, DetailAnalysis, Token, TokenRange } from "../shared/grammar";
 import type {
   CoreStreamPush,
@@ -254,7 +255,7 @@ class FakeTransport implements RuntimeTransport {
 
 function core(sentenceId: string, profile = "profile-a"): CoreAnalysis {
   return {
-    schemaVersion: 1,
+    schemaVersion: CORE_SCHEMA_VERSION,
     sentenceId,
     components: [{ startToken: 0, endToken: 1, role: GrammarRole.SUBJECT, translation: "译文" }],
     modelProfileId: profile,
@@ -926,6 +927,44 @@ describe("SessionController", () => {
     expect(subject.replacements.at(-1)!.originals[0]).not.toBe(document.body);
   });
 
+  /**
+   * 选区所在的 <p> 已被自动扫描登记时,另建一条 selection-N 记录会让同一个元素
+   * 挂两条块记录:两张卡都插在它后面、都把它 display:none,谁 restore 都还不回原样。
+   * 真机验收里就是「3 块页面渲出 4 张卡」。
+   */
+  it("选区落在已登记的段落上时复用那条记录，不再多渲染一张卡", async () => {
+    const subject = harness("Readers understand complex sentences.", new FakeTransport(), {
+      scan: () => refreshPrincipalRoot(),
+    });
+    await startAndEmit(subject);
+    expect(subject.learningBlocks).toHaveLength(1);
+
+    document.querySelector("p")!.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+    const error = await subject.controller.parseSelection("understand complex sentences");
+
+    expect(error?.message).toContain("该段已解析");
+    expect(subject.learningBlocks).toHaveLength(1);
+    expect(subject.replacements).toHaveLength(1);
+    expect(subject.transport.sent.filter(({ type }) => type === "ANALYZE_CORE")).toHaveLength(1);
+  });
+
+  it("扫描跳过的短段落:选区把它登记成正式块，第二次选区不会再造一条", async () => {
+    // 自动扫描有最短长度下限,这一段进不去;显式手势的判据更松,能登记。
+    const subject = harness("Tiny English words.", new FakeTransport(), { scan: () => [] });
+    await subject.controller.start();
+
+    document.querySelector("p")!.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+    expect(await subject.controller.parseSelection("Tiny English words.")).toBeUndefined();
+    await vi.waitFor(() => expect(subject.controller.status.ready).toBe(1));
+
+    const second = await subject.controller.parseSelection("Tiny English words.");
+
+    expect(second?.message).toContain("该段已解析");
+    expect(subject.learningBlocks).toHaveLength(1);
+    expect(subject.replacements).toHaveLength(1);
+    expect(subject.transport.sent.filter(({ type }) => type === "ANALYZE_CORE")).toHaveLength(1);
+  });
+
   it("routes detail retry and explicit correction component events", async () => {
     const subject = harness();
     await startAndEmit(subject);
@@ -1101,11 +1140,13 @@ describe("SessionController", () => {
     expect(subject.learningBlocks[0]!.details).toEqual([detail("sentence-1")]);
   });
 
-  it("reconnects immediately and resubmits only unfinished sentences", async () => {
+  it("resubmits after reconnect only once the in-flight round has landed", async () => {
     vi.useFakeTimers();
     const pending = deferred<ResponseMessage>();
-    const transport = new FakeTransport((message) =>
-      pending.promise.then(() => ({
+    let round = 0;
+    const transport = new FakeTransport((message) => {
+      round += 1;
+      const response: ResponseMessage = {
         version: 1,
         requestId: message.requestId,
         type: "CORE_RESULT",
@@ -1113,8 +1154,10 @@ describe("SessionController", () => {
           message.type === "ANALYZE_CORE"
             ? message.sentences.map((sentence) => core(sentence.sentenceId))
             : [],
-      })),
-    );
+      };
+      // 首轮吊着不回:重连补发不许与它并发,只能等它落地。
+      return round === 1 ? pending.promise : Promise.resolve(response);
+    });
     const subject = harness(undefined, transport);
     await subject.controller.start();
     subject.viewport.emit();
@@ -1124,7 +1167,53 @@ describe("SessionController", () => {
     await vi.runOnlyPendingTimersAsync();
 
     expect(transport.reconnects).toBeGreaterThanOrEqual(1);
+    expect(transport.sent).toHaveLength(1);
+
+    // 首轮的响应带着别的 requestId 回来(陈旧响应):句子仍未结,这才轮到补发。
+    pending.resolve({
+      version: 1,
+      requestId: "stale-request",
+      type: "CORE_RESULT",
+      analyses: [core("sentence-1")],
+    });
+    await vi.runOnlyPendingTimersAsync();
+
     expect(transport.sent).toHaveLength(2);
+    expect(transport.sent[1]!.type).toBe("ANALYZE_CORE");
+    expect(subject.controller.status.ready).toBe(1);
+    vi.useRealTimers();
+  });
+
+  it("spends exactly one upstream round on a sentence a dead worker keeps failing", async () => {
+    // 回归:同一句曾在 1.7 秒里发出三条 ANALYZE_CORE——一次回收连着来的断开事件各自
+    // 补发一遍，而在飞的那趟压根没被记账。失败一次就该只花一次上游调用。
+    vi.useFakeTimers();
+    const pending = deferred<ResponseMessage>();
+    const transport = new FakeTransport(() => pending.promise);
+    const subject = harness(undefined, transport);
+    await subject.controller.start();
+    subject.viewport.emit();
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(1));
+
+    const requestId = transport.sent[0]!.requestId;
+    transport.disconnect();
+    transport.disconnect();
+    transport.disconnect();
+    await vi.runOnlyPendingTimersAsync();
+
+    expect(transport.sent).toHaveLength(1);
+
+    pending.resolve({
+      version: 1,
+      requestId,
+      type: "ERROR",
+      error: { code: "NETWORK_ERROR", message: "上游持续 500", retryable: true },
+    });
+    await vi.runOnlyPendingTimersAsync();
+
+    // 句子入终态(失败)之后也不再补发:卡片里的「重新解析」才是重发的入口。
+    expect(transport.sent).toHaveLength(1);
+    expect(subject.controller.status.failed).toBe(1);
     vi.useRealTimers();
   });
 
@@ -1471,7 +1560,7 @@ describe("detail prefetch integration", () => {
 
   function richCore(sentenceId: string, componentCount = 2): CoreAnalysis {
     return {
-      schemaVersion: 1,
+      schemaVersion: CORE_SCHEMA_VERSION,
       sentenceId,
       modelProfileId: "profile-a",
       components: Array.from({ length: componentCount }, (_, index) => ({

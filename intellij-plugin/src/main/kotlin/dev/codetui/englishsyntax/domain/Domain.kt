@@ -4,9 +4,9 @@ import kotlinx.serialization.Serializable
 
 object ContractVersions {
   const val MESSAGE = 1
-  const val CORE_SCHEMA = 1
-  const val CORE_PROMPT = 2
-  const val DETAIL_PROMPT = 3
+  const val CORE_SCHEMA = 3
+  const val CORE_PROMPT = 5
+  const val DETAIL_PROMPT = 4
   const val MAX_SENTENCES_PER_REQUEST = 6
   const val CLOUD_SENTENCES_PER_REQUEST = 2
 }
@@ -60,6 +60,7 @@ enum class ErrorCode {
   NETWORK_ERROR,
   REQUEST_TIMEOUT,
   INVALID_MODEL_OUTPUT,
+  MALFORMED_MESSAGE,
   UNSUPPORTED_PAGE,
   UNSAFE_CONTENT_BLOCK,
   SENTENCE_TOO_LONG,

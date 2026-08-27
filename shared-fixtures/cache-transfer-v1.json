@@ -1,13 +1,13 @@
 {
   "format": "english-syntax-cache",
   "formatVersion": 1,
-  "schemaVersion": 1,
+  "schemaVersion": 3,
   "exportedAt": "2026-08-18T00:00:00.000Z",
   "core": [
     {
-      "key": "49a9b9835761131d20496f0867eb10e2f38772fc51d5204ad148f78464bcc937",
+      "key": "be655399f27808ed95a7b5d06f4f573179917c4f1bfd5cbbfeab8a21af96e03e",
       "value": {
-        "schemaVersion": 1,
+        "schemaVersion": 3,
         "sentenceId": "shared-fixture-core",
         "components": [
           {
@@ -35,7 +35,7 @@
   ],
   "detail": [
     {
-      "key": "e5876a844e369797d94e99f5ad82c8a79eb16c42841f8b7fea85d0377ffe32b2",
+      "key": "cbd9232fe48fc2607c8bedd073bff946a34ea951d7924668a34fbd2b73074a80",
       "value": {
         "sentenceId": "shared-fixture-detail",
         "focus": {

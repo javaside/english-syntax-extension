@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { GrammarRole } from "../shared/grammar";
+import { CORE_SCHEMA_VERSION } from "../shared/versions";
 import type { CoreAnalysis, TokenRange } from "../shared/grammar";
 import { MAX_SENTENCES_PER_REQUEST } from "../shared/protocol";
 import type { SentenceInput } from "../shared/protocol";
@@ -56,7 +57,7 @@ function rawCore(sentence: SentenceInput) {
 
 function coreAnalysis(sentence: SentenceInput, modelProfileId = profile.id): CoreAnalysis {
   return {
-    schemaVersion: 1,
+    schemaVersion: CORE_SCHEMA_VERSION,
     sentenceId: sentence.sentenceId,
     components: [
       { startToken: 0, endToken: 0, role: GrammarRole.SUBJECT, translation: "主语" },
@@ -335,6 +336,41 @@ describe("CachedAnalysisService core orchestration", () => {
     ];
     expect(repairWork[1][0]!.content).toMatch(/repair only/i);
     expect(repairWork[1][0]!.content).toContain("must be a non-empty array");
+  });
+
+  it("still runs the one repair round when the first output cannot be parsed at all", async () => {
+    // 回归:此前首轮 INVALID_MODEL_OUTPUT 直接把整块判死,修复轮压根不跑(core-repair 0 → 0)。
+    const { adapter, cache, service } = harness([
+      new ModelRequestError("INVALID_MODEL_OUTPUT", "Model stream content is not valid JSON", false),
+      { sentences: [rawCore(sentenceOne)] },
+    ]);
+
+    const outcome = await service.analyzeCore(coreInput(), new AbortController().signal);
+
+    expect(outcome).toMatchObject({ result: [coreAnalysis(sentenceOne)], failures: [] });
+    expect(adapter.completeJson).toHaveBeenCalledTimes(2);
+    expect(cache.core.size).toBe(1);
+    const repairWork = adapter.completeJson.mock.calls[1] as [
+      ModelProfile,
+      AnalysisModelWork["messages"],
+    ];
+    expect(repairWork[1][0]!.content).toMatch(/repair only/i);
+  });
+
+  it("does not spend a repair round on network, auth, or timeout failures", async () => {
+    for (const failure of [
+      new ModelRequestError("NETWORK_ERROR", "boom", true),
+      new ModelRequestError("AUTH_FAILED", "bad key", false),
+      new ModelRequestError("REQUEST_TIMEOUT", "too slow", true),
+    ]) {
+      const { adapter, service } = harness([failure, { sentences: [rawCore(sentenceOne)] }]);
+
+      // 唯一的块整块失败时错误照旧上抛(SW 靠 AUTH_FAILED 暂停 profile)。
+      await expect(
+        service.analyzeCore(coreInput(), new AbortController().signal),
+      ).rejects.toMatchObject({ code: failure.code });
+      expect(adapter.completeJson).toHaveBeenCalledTimes(1);
+    }
   });
 
   it("returns INVALID_MODEL_OUTPUT and does not cache after one failed repair", async () => {
@@ -1098,6 +1134,25 @@ describe("provisional components while a core request streams", () => {
     ]);
   });
 
+  it("never forwards punctuation-only components to the renderer", async () => {
+    const subject = streamingHarness(
+      (onComponent) => {
+        onComponent({
+          sentenceId: sentenceOne.sentenceId,
+          component: { startToken: 2, endToken: 2, role: "CONJUNCTION", translation: "。" },
+        });
+      },
+      { sentences: [rawCore(sentenceOne)] },
+    );
+
+    await subject.service.analyzeCore(
+      { ...coreInput(), onStreamedComponent: subject.sink },
+      new AbortController().signal,
+    );
+
+    expect(subject.streamed).toEqual([]);
+  });
+
   it("stays on the buffered path when no sink is supplied", async () => {
     const subject = streamingHarness(() => undefined, { sentences: [rawCore(sentenceOne)] });
 
@@ -1146,8 +1201,8 @@ describe("详解流式:边生成边上报结构", () => {
 
   it("累积上报已完成的结构", async () => {
     const h = streamingDetailHarness((on) => {
-      on(good);
-      on({ ...good, startToken: 0, endToken: 0, role: "主语" });
+      on({ ...good, endToken: 1 });
+      on({ ...good, startToken: 2, endToken: 2, role: "宾语" });
     }, rawDetail(focus));
 
     await h.service.analyzeDetail(

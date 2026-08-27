@@ -21,6 +21,7 @@ class CacheKeysTest {
         CoreCacheKeyInput(
           normalizedSentence = input.getValue("normalizedSentence").jsonPrimitive.content,
           schemaVersion = input.getValue("schemaVersion").jsonPrimitive.content.toInt(),
+          promptVersion = input.getValue("promptVersion").jsonPrimitive.content.toInt(),
           focus = focus?.let { TokenRange(it.getValue("startToken").jsonPrimitive.content.toInt(), it.getValue("endToken").jsonPrimitive.content.toInt()) },
         ),
       )
@@ -30,9 +31,16 @@ class CacheKeysTest {
 
   @Test
   fun `detail focus changes the key`() {
-    val base = CoreCacheKeyInput("The service validates every response.", 1)
+    val base = CoreCacheKeyInput("The service validates every response.", 1, 4)
     val withFocus = base.copy(focus = TokenRange(2, 4))
     assertEquals(createCoreCacheKey(base), createCoreCacheKey(base))
     check(createCoreCacheKey(base) != createCoreCacheKey(withFocus))
+  }
+
+  /** 提示词版本进键：改了成分粒度规则，旧粒度的缓存必须失效而不是继续显示。 */
+  @Test
+  fun `prompt version changes the key`() {
+    val base = CoreCacheKeyInput("The service validates every response.", 1, 4)
+    check(createCoreCacheKey(base) != createCoreCacheKey(base.copy(promptVersion = 5)))
   }
 }

@@ -51,6 +51,32 @@ export function ensureBlockId(element: HTMLElement): string {
 }
 
 /**
+ * 悬停链选择器。
+ *
+ * `:is()` 不能省：quirks 模式（HTML 没有 doctype）下 Chromium 按 hover/active quirk
+ * 只让链接匹配裸 `:hover`，`querySelectorAll(":hover")` 于是**整页恒为空集**，按快捷键
+ * 只会得到「未找到可解析的段落」。该 quirk 只在「复合选择器里除伪类之外别无他物」时生效，
+ * 塞进 `:is()` 就落进子选择器语境、不再适用（实测同一 quirks 页面：`:hover` → 空，
+ * `:is(:hover)` → `html > body > main > p#safe`）；标准模式下两者结果恒等。
+ *
+ * 预览页 HTML 由 IDEA 生成，doctype 有无不由我们说了算，所以不赌它是标准模式。
+ * Chrome 端同一判据在 `chrome-plugin/src/content/hover-target.ts`。
+ */
+export const HOVER_CHAIN_SELECTOR = ":is(:hover)";
+
+/** 悬停链的最深元素。happy-dom 等环境不实现该伪类，查询可能抛错，兜住返回 null。 */
+export function deepestHovered(doc: Document): Element | null {
+  let chain: NodeListOf<Element> | null = null;
+  try {
+    chain = doc.querySelectorAll(HOVER_CHAIN_SELECTOR);
+  } catch {
+    chain = null;
+  }
+  if (chain === null || chain.length === 0) return null;
+  return chain[chain.length - 1] ?? null;
+}
+
+/**
  * 显式手势（快捷键悬停解析）的块定位：从悬停元素逐级向上找最近的可解析块。
  *
  * **刻意不套用自动扫描的取舍**：不要求 20 字符、不要求英文占比、不限定候选标签。

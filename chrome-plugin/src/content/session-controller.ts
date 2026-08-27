@@ -25,6 +25,7 @@ import { nearestSafeBlock, scanDocument } from "./document-scanner";
 import type { CandidateBlock } from "./document-scanner";
 import { DetailPrefetcher } from "./detail-prefetcher";
 import type { PrefetchSendResult } from "./detail-prefetcher";
+import { resolveHoverTarget } from "./hover-target";
 import type { SyntaxFocusEventDetail } from "./learning-block";
 import { SyntaxLearningBlock } from "./learning-block";
 import { ViewportObserver } from "./viewport-observer";
@@ -109,6 +110,11 @@ interface BlockRecord {
   operationVersion: number;
   /** 「重新解析」一次性标记:下次 analyzeBlock 携带 bypassCache 后即清除。 */
   bypassCacheOnce?: boolean;
+  /**
+   * 正在飞的那一趟下发(未落地时非空)。一个块同一时刻只许有一趟上游调用:块是下发单位,
+   * 每句只属于一个块，块级哨兵即「一句同时只在飞一趟」。
+   */
+  inFlight?: Promise<void>;
 }
 
 export interface SessionControllerOptions {
@@ -130,7 +136,7 @@ export interface SessionControllerOptions {
   onTransition?: (sentenceId: string, phase: SentencePhase) => void;
   onStatus?: (status: SessionStatus) => void;
   requestFeedback?: (sentenceId: string) => string | null | Promise<string | null>;
-  /** 测试注入：返回当前鼠标悬停的最深元素；默认查询 CSS :hover 链。 */
+  /** 测试注入：返回当前鼠标悬停的最深元素；默认走 `resolveHoverTarget`(只查悬停链)。 */
   hoverTarget?: () => Element | null;
   /** 攒批窗口:视口一次放出的多个段落在这段时间内合并成一条请求。 */
   batchWindowMs?: number;
@@ -218,6 +224,9 @@ export class SessionController {
   private prefetcher?: DetailPrefetcher;
   private readonly correctionVersions = new Map<string, number>();
   private readonly reconnectTimers = new Set<ReturnType<typeof setTimeout>>();
+  /** 已挂上「等在飞那趟落地」等待链的块:一个块只挂一根,否则一次回收要补发好几遍。 */
+  private readonly redispatchWaiters = new Set<string>();
+  private reconnecting = false;
   private state: SessionStatus["state"] = "stopped";
   private requestCounter = 0;
   private operationVersion = 0;
@@ -250,12 +259,9 @@ export class SessionController {
 
   constructor(private readonly options: SessionControllerOptions) {
     this.document = options.document ?? document;
-    this.hoverTarget =
-      options.hoverTarget ??
-      (() => {
-        const chain = this.document.querySelectorAll(":hover");
-        return chain.length > 0 ? (chain[chain.length - 1] ?? null) : null;
-      });
+    // 生产路径由 content-script 注入带指针追踪的那份;这里的默认值只在没注入时兜底,
+    // 但判据必须同源——自己抄一遍裸 `:hover` 就会把 quirks 页面的缺陷抄回来。
+    this.hoverTarget = options.hoverTarget ?? (() => resolveHoverTarget(this.document, undefined));
     this.scan = options.scan ?? scanDocument;
     this.batchWindowMs = options.batchWindowMs ?? 120;
     this.sentenceIdFactory = options.createSentenceId ?? createSentenceId;
@@ -281,8 +287,10 @@ export class SessionController {
       ready: records.filter(({ phase }) => phase === "ready").length,
       failed: records.filter(({ phase }) => phase === "failed").length,
       skipped: records.filter(({ phase }) => phase === "skipped").length,
-      inFlight: records.filter(({ phase }) => phase === "requesting" || phase === "validating")
-        .length,
+      // 与块级在飞判据共用一张相位表:cache-check 也算在飞。它虽然只在派发的
+      // 同步循环里停留一瞬,但每次 transition 都会上报状态,漏掉它就会送出一条
+      // 「queued 与 inFlight 皆为 0」的假空闲状态,让胶囊闪一下「解析完成」。
+      inFlight: records.filter(({ phase }) => IN_FLIGHT_PHASES.includes(phase)).length,
       ...(this.cacheOnly ? { cacheOnly: true as const } : {}),
       ...(this.selectedProfileId === undefined ? {} : { profileId: this.selectedProfileId }),
       ...(this.prefetcher === undefined
@@ -406,6 +414,7 @@ export class SessionController {
     for (const anchor of this.ephemeralSelectionAnchors) anchor.remove();
     this.ephemeralSelectionAnchors.clear();
     this.pendingRequestIds.clear();
+    this.redispatchWaiters.clear();
     this.detailVersions.clear();
     this.correctionVersions.clear();
     this.pausedBlocks.clear();
@@ -419,11 +428,30 @@ export class SessionController {
     if (this.state === "stopped") await this.start();
     const target = this.selectionTarget() ?? this.contextTarget;
     const candidate = nearestSafeBlock(target);
-    const element = candidate?.element ?? this.createSelectionAnchor(text);
-    const id = `selection-${++this.operationVersion}`;
-    const selectionCandidate: CandidateBlock = { id, element, text };
-    await this.registerCandidates([selectionCandidate]);
-    this.queueVisibleBlock(id, true);
+    if (candidate === null) {
+      // 选区跨段、或落在没有安全块的位置:挂一个临时锚点,只解析选中的这段文字。
+      // 锚点是新造的元素,不会与页面上的块记录抢同一个宿主。
+      const id = `selection-${++this.operationVersion}`;
+      await this.registerCandidates([
+        { id, element: this.createSelectionAnchor(text), text },
+      ]);
+      this.queueVisibleBlock(id, true);
+      return undefined;
+    }
+    // 一个元素只许有一条块记录。选区所在的 <p> 若已登记(自动扫描或上一次手势),
+    // 就复用那一条:另建 selection-N 记录会让同一个 <p> 被两条记录各渲染一张卡,
+    // 两张卡还各自把它 display:none,谁 restore 都还不回原样。
+    const known = this.blocks.get(candidate.id);
+    const notice = this.explicitBlockNotice(known);
+    if (notice !== undefined) return notice;
+    if (this.debounceExplicitParse(candidate.id)) return IN_FLIGHT_ERROR;
+    // 已登记的那条按它自己的文本(整段)重来,不为这次选区改写记录:改写会让在飞的
+    // 响应与卡片对不上——与快捷键连按那条注释是同一个坑。
+    if (known === undefined) {
+      await this.registerCandidates([{ ...candidate, text }]);
+      if (!this.blocks.has(candidate.id)) return UNSEGMENTABLE_ERROR;
+    }
+    this.queueVisibleBlock(candidate.id, true);
     return undefined;
   }
 
@@ -736,7 +764,9 @@ export class SessionController {
       };
       this.pendingBatches.set(key, entry);
       entry.timer = this.scheduleTimeout(() => this.flushBatch(key), this.batchWindowMs);
-    } else {
+    } else if (!pending.blocks.includes(block)) {
+      // 同一个块在窗口里被入队两次(视口重复回调、重连补发)只算一份:重复条目会让
+      // 这条请求把同一句带上两遍，还会虚报句数提前把窗口挤爆。
       pending.blocks.push(block);
       pending.sentences += sentences;
     }
@@ -757,8 +787,52 @@ export class SessionController {
   /**
    * 一条 ANALYZE_CORE 覆盖一批块。响应回来后按块分发并各自 finishBlock——
    * 每个块保有自己的 operationVersion 守卫，期间被失效的块会被跳过。
+   *
+   * 已有一趟在飞的块不进这一批:同一批句子再发一条请求,一是白付一次上游调用(一句失败
+   * 就要付三次的来路),二是换代会把先到的那条响应整条作废,用户反倒从头再等一轮。它们
+   * 改挂等待链,落地后再看还有没有未结的句子(见 `redispatchAfterInFlight`)。
    */
   private async analyzeBlocks(
+    blocks: readonly BlockRecord[],
+    userInitiated: boolean,
+  ): Promise<void> {
+    const dispatchable: BlockRecord[] = [];
+    for (const block of blocks) {
+      if (dispatchable.includes(block)) continue;
+      if (block.inFlight === undefined) dispatchable.push(block);
+      else this.redispatchAfterInFlight(block);
+    }
+    if (dispatchable.length === 0) return;
+    const dispatch = this.dispatchBlocks(dispatchable, userInitiated);
+    for (const block of dispatchable) block.inFlight = dispatch;
+    try {
+      await dispatch;
+    } finally {
+      // 认准是自己那趟才摘:后来者的所有权不能被先行者的收尾清掉。
+      for (const block of dispatchable) {
+        if (block.inFlight === dispatch) block.inFlight = undefined;
+      }
+    }
+  }
+
+  /**
+   * 在飞那趟落地之后再看这个块:响应正常到齐时句子都已入终态，`queueVisibleBlock` 的
+   * 终态闸门会拦下这一次补发;只有那条响应被换代丢弃、或 SW 半路被回收时才真的补发一次。
+   */
+  private redispatchAfterInFlight(block: BlockRecord): void {
+    const blockId = block.candidate.id;
+    const inFlight = block.inFlight;
+    if (inFlight === undefined || this.redispatchWaiters.has(blockId)) return;
+    this.redispatchWaiters.add(blockId);
+    const release = (): void => {
+      this.redispatchWaiters.delete(blockId);
+      this.queueVisibleBlock(blockId);
+    };
+    // 两个分支都要接:下发链上的异常不该变成页面里的未捕获拒绝。
+    void inFlight.then(release, release);
+  }
+
+  private async dispatchBlocks(
     blocks: readonly BlockRecord[],
     userInitiated: boolean,
   ): Promise<void> {
@@ -1203,23 +1277,33 @@ export class SessionController {
     void this.reconnectAndResume();
   };
 
+  /**
+   * 一次 SW 回收常连着来好几个断开事件(重连上又断)。重连计划不许重入:每跑一遍都会
+   * 把未结的块补发一次，同一批句子于是要多付几次上游调用。
+   */
   private async reconnectAndResume(): Promise<void> {
+    if (this.reconnecting) return;
     if (this.isStopped() || this.options.transport.reconnect === undefined) return;
-    const delays = [0, 250, 500, 1_000];
-    for (const delay of delays) {
-      if (this.isStopped()) return;
-      if (delay > 0) await this.reconnectDelay(delay);
-      if (this.isStopped()) return;
-      try {
-        await this.options.transport.reconnect();
-        this.resumeUnfinishedAfterReconnect();
-        return;
-      } catch {
-        // The bounded retry schedule handles transient worker startup races.
+    this.reconnecting = true;
+    try {
+      const delays = [0, 250, 500, 1_000];
+      for (const delay of delays) {
+        if (this.isStopped()) return;
+        if (delay > 0) await this.reconnectDelay(delay);
+        if (this.isStopped()) return;
+        try {
+          await this.options.transport.reconnect();
+          this.resumeUnfinishedAfterReconnect();
+          return;
+        } catch {
+          // The bounded retry schedule handles transient worker startup races.
+        }
       }
+      // 重连彻底失败:相位会停在 requesting,标记不清就会一直亮在页面上。
+      for (const block of this.blocks.values()) block.marker.clear();
+    } finally {
+      this.reconnecting = false;
     }
-    // 重连彻底失败:相位会停在 requesting,标记不清就会一直亮在页面上。
-    for (const block of this.blocks.values()) block.marker.clear();
   }
 
   private emitStatus(): void {

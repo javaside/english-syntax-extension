@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { CoreAnalysis } from "../shared/grammar";
+import { CORE_SCHEMA_VERSION } from "../shared/versions";
 import type { SentenceInput } from "../shared/protocol";
 import { DetailPrefetcher, type PrefetchSendResult } from "./detail-prefetcher";
 
@@ -9,7 +10,7 @@ function sentence(id: string): SentenceInput {
 
 function core(id: string, componentCount: number): CoreAnalysis {
   return {
-    schemaVersion: 1,
+    schemaVersion: CORE_SCHEMA_VERSION,
     sentenceId: id,
     modelProfileId: "p",
     components: Array.from({ length: componentCount }, (_, index) => ({
