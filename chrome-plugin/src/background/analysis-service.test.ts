@@ -341,7 +341,11 @@ describe("CachedAnalysisService core orchestration", () => {
   it("still runs the one repair round when the first output cannot be parsed at all", async () => {
     // 回归:此前首轮 INVALID_MODEL_OUTPUT 直接把整块判死,修复轮压根不跑(core-repair 0 → 0)。
     const { adapter, cache, service } = harness([
-      new ModelRequestError("INVALID_MODEL_OUTPUT", "Model stream content is not valid JSON", false),
+      new ModelRequestError(
+        "INVALID_MODEL_OUTPUT",
+        "Model stream content is not valid JSON",
+        false,
+      ),
       { sentences: [rawCore(sentenceOne)] },
     ]);
 

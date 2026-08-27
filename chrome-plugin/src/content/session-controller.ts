@@ -432,9 +432,7 @@ export class SessionController {
       // 选区跨段、或落在没有安全块的位置:挂一个临时锚点,只解析选中的这段文字。
       // 锚点是新造的元素,不会与页面上的块记录抢同一个宿主。
       const id = `selection-${++this.operationVersion}`;
-      await this.registerCandidates([
-        { id, element: this.createSelectionAnchor(text), text },
-      ]);
+      await this.registerCandidates([{ id, element: this.createSelectionAnchor(text), text }]);
       this.queueVisibleBlock(id, true);
       return undefined;
     }
@@ -520,7 +518,10 @@ export class SessionController {
     if (failed === 0) return ALREADY_PARSED_ERROR;
     // 失败句不在这里重发:queueVisibleBlock 的终态闸门对视口路径同样生效,放开会招来重发环。
     // 卡片里每个失败句自带「重新解析」按钮,提示指向它即可。
-    return { ...ALREADY_PARSED_ERROR, message: `该段已解析，${failed} 句失败，可点卡片里的「重新解析」` };
+    return {
+      ...ALREADY_PARSED_ERROR,
+      message: `该段已解析，${failed} 句失败，可点卡片里的「重新解析」`,
+    };
   }
 
   /** @returns 这一按是否落在同块去抖窗口内(落在窗口内即不下发)。 */

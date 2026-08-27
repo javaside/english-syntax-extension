@@ -57,10 +57,11 @@ harness 提供三个口子:`seedProfiles()`(直接写 `chrome.storage.local`)、
 
 ### 假 OpenAI 服务器(`chrome-plugin/tests/support/fake-openai-server.ts`)
 
-两条契约,破了就是一连串莫名其妙的 E2E 失败:
+三条契约,破了就是一连串莫名其妙的 E2E 失败:
 
 1. **按 prompt 首行前缀识别请求类型**(`detectKind`)。前缀表见 [`model-pipeline.md` §2](./model-pipeline.md#2-提示词promptsts)。改 prompt 首行措辞 = 破坏 E2E。
 2. **任何"模型内容"都必须经 `writeContent` 出去**——core / detail / sentence-details / compound / probe 一个都不能漏。**这条踩过两次**(第一次漏了 scripted 分支,第二次漏了详解路径):直接 `response.end(completion(...))` 会让流式请求收到 JSON 体,客户端判定不支持流式后回落重发,依赖 fetch 计数的用例随之错乱。
+3. **`script()` 的队列耗尽即回落默认合法响应**,所以脚本要覆盖生产里的每一轮:一条失败路径若会进修复轮,首轮与修复轮各排一个非法响应。只排一个 = 修复轮拿到合法响应、页面渲染成功,用例从"验证失败可见"悄悄变成"验证成功渲染"(详见 [`invariants.md` I-13.1](./invariants.md))。
 
 服务器还记录每次请求(kind / model / 是否带 Authorization / 是否用了 response_format / 是否流式 / 句子文本 / 完整 prompt),并可脚本化注入错误、分片、非法输出。详解 fixture 也必须遵守生产校验:每个 structure 位于 focus 内且有序不重叠;测试并列分句内部时不能把 focus 外的并列连词塞进详解。
 

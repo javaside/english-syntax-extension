@@ -148,6 +148,14 @@
 
 **症状** 直接 `response.end(completion(...))` 会让流式请求收到 JSON 体,客户端判定不支持流式后回落重发,**依赖 fetch 计数的用例随之错乱**。这条踩过两次。
 
+### I-13.1 脚本化响应的队列长度要覆盖重试轮
+
+**规则** `FakeOpenAiServer.script(model, outcomes)` 是 FIFO 队列,**耗尽即回落默认合法响应**。一条失败路径在生产里要走几轮(首轮 + 修复轮),脚本就得为每一轮各排一个非法响应。
+
+**症状** 「非法输出不再直接判死,整批无效交修复轮」这一版改完,只排了一个 `invalid-json` 的用例就红了:首轮非法交给修复轮,修复轮拿到队列耗尽后的默认合法响应,页面**渲染成功**,`.sentence-failure` 永不出现(20s 超时)。反过来同类改动也能造成**假绿**——本该失败的路径靠默认响应通过。附带线索:两个这样的超时用例能把整轮 E2E 从 45 秒拖到 17.9 分钟,**「E2E 跑得异常久」本身就是有用例在等超时的信号**。
+
+**守护测试** `extension.spec.ts` 的 "an invalid response envelope fails the block visibly instead of hanging" 排两个 `invalid-json`,并断言 `core` 1 次 + `core-repair` 1 次——判死之前必须真的多要过一次。
+
 ## 调度与并发
 
 ### I-14 优先级与插队边界

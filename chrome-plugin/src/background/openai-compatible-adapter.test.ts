@@ -362,9 +362,7 @@ describe("OpenAI-compatible chat completions adapter", () => {
       sentences: [
         {
           sentenceId: "s1",
-          components: [
-            { startToken: 0, endToken: 1, role: "SUBJECT", translation: "学习者" },
-          ],
+          components: [{ startToken: 0, endToken: 1, role: "SUBJECT", translation: "学习者" }],
         },
       ],
     });

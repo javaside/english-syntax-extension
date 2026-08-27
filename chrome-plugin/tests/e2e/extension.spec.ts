@@ -472,12 +472,17 @@ test("an invalid response envelope fails the block visibly instead of hanging", 
   harness,
 }) => {
   await seedLocalProfile(harness, "garbage-model");
-  harness.fakeModel.script("garbage-model", [{ kind: "invalid-json" }]);
+  // 两轮都给非法输出:首轮的非法不再直接判死(截断救援救不回来时按「整批无效」交修复轮),
+  // 只有修复轮也非法才轮到可见失败。少给一个,修复轮会拿到队列耗尽后的默认合法响应。
+  harness.fakeModel.script("garbage-model", [{ kind: "invalid-json" }, { kind: "invalid-json" }]);
   const { page } = await startSession(harness, "error-single.html");
 
   const failure = page.locator(".sentence-failure");
   await expect(failure).toContainText("INVALID_MODEL_OUTPUT", { timeout: 20_000 });
   await expect(failure).toContainText(SINGLE_SENTENCE);
+  // 判死之前必须真的多要过一次——否则"整批无效交修复轮"这条就退化回了旧的直接判死。
+  expect(harness.fakeModel.recordedOfKind("core")).toHaveLength(1);
+  expect(harness.fakeModel.recordedOfKind("core-repair")).toHaveLength(1);
 });
 
 test("a script-like translation renders as literal text and never executes", async ({
@@ -923,9 +928,7 @@ test("悬停段落经 PARSE_HOVERED_BLOCK 冷启动解析，其余段落保持�
 // 回归:同一段第二次按快捷键曾报「未找到可解析的段落」——替换后原文已隐藏，鼠标停在的
 // 其实是卡片，而卡片文字在影子根里，nearestSafeBlock 一路向上找不到候选。真实布局与真实
 // :hover 链只有 E2E 才有，单测里的替换是假件。
-test("同一段再按快捷键：提示该段已解析，不多出第二张卡片也不再发请求", async ({
-  harness,
-}) => {
+test("同一段再按快捷键：提示该段已解析，不多出第二张卡片也不再发请求", async ({ harness }) => {
   await seedLocalProfile(harness);
   const page = await openArticle(harness, "hover-blocks.html");
   const tabId = await harness.tabIdFor(`${harness.pagesOrigin}/hover-blocks.html`);
