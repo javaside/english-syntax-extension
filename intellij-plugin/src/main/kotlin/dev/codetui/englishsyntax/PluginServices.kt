@@ -55,17 +55,20 @@ class ModelClientService {
  */
 @Service(Service.Level.APP)
 class AnalysisServiceService {
-  val analysis: AnalysisServicePort by lazy {
+  val cache: AnalysisCache by lazy {
     val cacheDir: Path = PathManager.getSystemDir().resolve("english-syntax-learning")
     Files.createDirectories(cacheDir)
-    val repository = service<ProfileRepository>()
     val profileState = service<ProfileState>()
+    AnalysisCache(
+      databasePath = cacheDir.resolve("analysis-cache.sqlite"),
+      limitBytes = profileState.state.cacheLimitMb * 1024L * 1024L,
+    )
+  }
+
+  val analysis: AnalysisServicePort by lazy {
     AnalysisService(
       client = service<ModelClientService>().client,
-      cache = AnalysisCache(
-        databasePath = cacheDir.resolve("analysis-cache.sqlite"),
-        limitBytes = profileState.state.cacheLimitMb * 1024L * 1024L,
-      ),
+      cache = cache,
       scheduler = RequestScheduler(concurrency = 4),
     )
   }

@@ -2,13 +2,14 @@ package dev.codetui.englishsyntax.settings
 
 import com.intellij.openapi.components.service
 import com.intellij.openapi.options.BoundConfigurable
+import com.intellij.openapi.ui.Messages
 import com.intellij.ui.dsl.builder.AlignX
 import com.intellij.ui.dsl.builder.bindIntText
 import com.intellij.ui.dsl.builder.bindSelected
 import com.intellij.ui.dsl.builder.bindText
 import com.intellij.ui.dsl.builder.panel
+import dev.codetui.englishsyntax.AnalysisServiceService
 import dev.codetui.englishsyntax.EnglishSyntaxBundle
-import dev.codetui.englishsyntax.PreviewSessionManagerService
 import kotlinx.coroutines.runBlocking
 import java.util.UUID
 
@@ -16,7 +17,39 @@ class EnglishSyntaxConfigurable(
   private val repository: ProfileRepository = service(),
   private val profileState: ProfileState = service(),
   private val connectionProbe: ConnectionProbe = ServiceConnectionProbe(),
+  private val cacheOperations: CacheOperations = ServiceCacheOperations(),
+  private val clearConfirmation: ClearConfirmation = DialogClearConfirmation(),
 ) : BoundConfigurable(EnglishSyntaxBundle.message("settings.display.name")) {
+
+  data class CacheSummary(val entries: Int, val estimatedBytes: Long)
+
+  interface CacheOperations {
+    suspend fun stats(): CacheSummary
+    suspend fun clear()
+  }
+
+  fun interface ClearConfirmation {
+    fun confirm(): Boolean
+  }
+
+  private class ServiceCacheOperations : CacheOperations {
+    override suspend fun stats(): CacheSummary {
+      val stats = service<AnalysisServiceService>().cache.stats()
+      return CacheSummary(stats.entries, stats.estimatedBytes)
+    }
+
+    override suspend fun clear() {
+      service<AnalysisServiceService>().cache.clear()
+    }
+  }
+
+  private class DialogClearConfirmation : ClearConfirmation {
+    override fun confirm(): Boolean = Messages.showYesNoDialog(
+      EnglishSyntaxBundle.message("settings.cache.clear.confirmation"),
+      EnglishSyntaxBundle.message("settings.cache.clear.title"),
+      Messages.getQuestionIcon(),
+    ) == Messages.YES
+  }
 
   /** 测试连接的抽象：生产打真模型探测，测试注入假实现。 */
   fun interface ConnectionProbe {
@@ -58,14 +91,22 @@ class EnglishSyntaxConfigurable(
   val form = Form()
   var actionStatus: String = ""
     private set
+  var cacheStatus: String = ""
+    private set
   private var baseline = form.copy()
 
   /** 状态反馈可见组件；createPanel 时绑定。 */
   private var statusLabel: javax.swing.JLabel? = null
+  private var cacheStatusLabel: javax.swing.JLabel? = null
 
   private fun setStatus(text: String) {
     actionStatus = text
     statusLabel?.text = text
+  }
+
+  private fun setCacheStatus(text: String) {
+    cacheStatus = text
+    cacheStatusLabel?.text = text
   }
 
   init {
@@ -73,6 +114,7 @@ class EnglishSyntaxConfigurable(
   }
 
   override fun createPanel() = panel {
+    refreshCacheStatus()
     group(EnglishSyntaxBundle.message("settings.profile.group")) {
       row(EnglishSyntaxBundle.message("settings.profile.active")) {
         button(EnglishSyntaxBundle.message("settings.profile.new")) { newProfile() }
@@ -112,6 +154,11 @@ class EnglishSyntaxConfigurable(
     group(EnglishSyntaxBundle.message("settings.behavior.group")) {
       row(EnglishSyntaxBundle.message("settings.cache.limit")) {
         intTextField(10..200).bindIntText(form::cacheLimitMb).align(AlignX.FILL)
+      }
+      row(EnglishSyntaxBundle.message("settings.cache.usage")) {
+        cacheStatusLabel = javax.swing.JLabel(cacheStatus) as javax.swing.JLabel?
+        cell(cacheStatusLabel!!)
+        button(EnglishSyntaxBundle.message("settings.cache.clear")) { runClearCacheAction() }
       }
       row {
         checkBox(EnglishSyntaxBundle.message("settings.streamRendering")).bindSelected(form::streamRendering)
@@ -158,6 +205,30 @@ class EnglishSyntaxConfigurable(
   } catch (error: IllegalStateException) {
     setStatus("Save failed: ${error.message}")
     false
+  }
+
+  fun refreshCacheStatus(): Boolean = try {
+    val stats = runBlocking { cacheOperations.stats() }
+    setCacheStatus("${stats.entries} entries, ${formatBytes(stats.estimatedBytes)}")
+    true
+  } catch (error: Exception) {
+    setCacheStatus("Unavailable")
+    setStatus("Cache status failed: ${error.message ?: error.javaClass.simpleName}")
+    false
+  }
+
+  fun runClearCacheAction(): Boolean {
+    if (!clearConfirmation.confirm()) return false
+    return try {
+      val before = runBlocking { cacheOperations.stats() }
+      runBlocking { cacheOperations.clear() }
+      refreshCacheStatus()
+      setStatus("Cleared ${before.entries} cache entries")
+      true
+    } catch (error: Exception) {
+      setStatus("Clear cache failed: ${error.message ?: error.javaClass.simpleName}")
+      false
+    }
   }
 
   fun activateForm(): Boolean {
@@ -264,6 +335,12 @@ class EnglishSyntaxConfigurable(
     val text = if (result.success) "Test connection: ${result.message}" else "Test connection failed: ${result.message}"
     setStatus(text)
     return result.success
+  }
+
+  private fun formatBytes(bytes: Long): String = when {
+    bytes >= 1024 * 1024 -> String.format("%.1f MB", bytes / (1024.0 * 1024.0))
+    bytes >= 1024 -> String.format("%.1f KB", bytes / 1024.0)
+    else -> "$bytes B"
   }
 
   private fun parseHeaders(value: String): Map<String, String> {

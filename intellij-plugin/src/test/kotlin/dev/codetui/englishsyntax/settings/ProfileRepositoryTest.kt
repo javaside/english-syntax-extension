@@ -312,6 +312,61 @@ class ProfileRepositoryTest {
   }
 
   @Test
+  fun `configurable clears all cache after confirmation and reports removed entries`() = runBlocking {
+    val repository = repository()
+    repository.save(profile())
+    val cache = object : EnglishSyntaxConfigurable.CacheOperations {
+      var entries = 7
+
+      override suspend fun stats() = EnglishSyntaxConfigurable.CacheSummary(entries, 4_096)
+
+      override suspend fun clear() {
+        entries = 0
+      }
+    }
+    val configurable = EnglishSyntaxConfigurable(
+      repository,
+      ProfileState(),
+      EnglishSyntaxConfigurable.ConnectionProbe { EnglishSyntaxConfigurable.ConnectionProbeResult(true, "stub") },
+      cache,
+      EnglishSyntaxConfigurable.ClearConfirmation { true },
+    )
+
+    configurable.refreshCacheStatus()
+    assertTrue(configurable.cacheStatus.contains("7"))
+    assertTrue(configurable.runClearCacheAction())
+    assertEquals(0, cache.entries)
+    assertTrue(configurable.cacheStatus.contains("0"))
+    assertTrue(configurable.actionStatus.contains("7"))
+  }
+
+  @Test
+  fun `configurable keeps cache when clear confirmation is declined`() = runBlocking {
+    val repository = repository()
+    repository.save(profile())
+    val cache = object : EnglishSyntaxConfigurable.CacheOperations {
+      var clearCalls = 0
+
+      override suspend fun stats() = EnglishSyntaxConfigurable.CacheSummary(3, 1_024)
+
+      override suspend fun clear() {
+        clearCalls += 1
+      }
+    }
+    val configurable = EnglishSyntaxConfigurable(
+      repository,
+      ProfileState(),
+      EnglishSyntaxConfigurable.ConnectionProbe { EnglishSyntaxConfigurable.ConnectionProbeResult(true, "stub") },
+      cache,
+      EnglishSyntaxConfigurable.ClearConfirmation { false },
+    )
+
+    assertFalse(configurable.runClearCacheAction())
+    assertEquals(0, cache.clearCalls)
+    assertTrue(configurable.actionStatus.isBlank())
+  }
+
+  @Test
   fun `configurable exposes save delete and activate operations`() = runBlocking {
     val credentials = FakeCredentialStore()
     val repository = repository(credentials)
