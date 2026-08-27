@@ -103,17 +103,19 @@ npm run release -- 1.2.0 --dry-run
 
 `chrome-plugin/scripts/release.mjs` 存在的理由很具体:这套流程手工做了五次栽了三次——两次改完版本忘了 `npm run package`(本地 `release/` 里躺着上一版的包),一次 `format:check` 报错却没看结果就 commit + push,把红 CI 推了出去。
 
-它会校验:semver 递增(**新功能升 minor**)、工作树干净、CHANGELOG 有对应小节、商店文档版本一致。版本号同时写进 `chrome-plugin/manifest.json` / `chrome-plugin/package.json` / `chrome-plugin/package-lock.json`;CHANGELOG 在仓库根,git 操作也从仓库根执行。
+它会校验:semver 递增(**新功能升 minor**)、工作树干净、CHANGELOG 有对应小节、商店文档版本一致。版本号同时写进 `chrome-plugin/manifest.json` / `chrome-plugin/package.json` / `chrome-plugin/package-lock.json` **与 `intellij-plugin/build.gradle.kts`**——双运行时同版本发布,IDEA 插件的产物名里就带版本号(`intellij-plugin-<version>.zip`),两端各自维护版本只会重演商店手册那个坑:tag 发出去了,附件却还是上一版。`build.gradle.kts` 因此也在 `RELEASE_FILES` 里(prettier 不认 `.kts`,发版脚本写完它不做格式化)。CHANGELOG 在仓库根,git 操作也从仓库根执行。
 
 ### CI(`.github/workflows/release.yml`)
 
 tag `v*` 触发,`permissions: contents: write`:
 
 ```
-校验 tag == manifest.version == package.version(不一致直接终止)
+校验 tag == manifest.version == package.version == intellij-plugin 的 gradle version(不一致直接终止)
 → npm test → npm run package
-→ scripts/release-notes.mjs 切出本版本那一节 + 补安装说明
+→ ./gradlew :intellij-plugin:buildPlugin(job 里另装 JDK21 + gradle 缓存;这一步 working-directory 回到仓库根)
+→ scripts/release-notes.mjs 切出本版本那一节 + 补安装说明(Chrome / IDEA 各一段)
 → softprops/action-gh-release 建 draft release,附 chrome-plugin/release/*.zip
+  与 intellij-plugin/build/distributions/*.zip
 ```
 
 只取当前版本那一节:整个 CHANGELOG 当正文会把所有历史版本一起贴出去。
@@ -141,5 +143,5 @@ tag `v*` 触发,`permissions: contents: write`:
 - **测试分层**:Kotlin 单测(JUnit5,231 例)覆盖模型/调度/缓存/会话;集成测试(`integration/`)用 FakeOpenAiServer + 真实 AnalysisService 走全链路,断言用探针(请求计数、发送记录)不用墙钟;`SecretIsolationTest` 钉密钥隔离;`PageMessageWiringTest` 钉 JS→Kotlin 消息接线(Panel 桥接入口 → 会话)。跨端契约由仓库根 `shared-fixtures/` 双端消费(chrome-plugin 里 `npm run test:contracts`)。
 - **假模型服务器**:Kotlin 侧复用 `testsupport/FakeOpenAiServer`(本地 HTTP,FIFO 响应队列);并发分块用例的响应内容做成"任意配对都合法",不依赖 HTTP 到达顺序。
 - **CI**:三个 job——chrome(chrome-plugin 全部前端门禁)、intellij(JDK21 + Gradle 缓存 + 插件 zip 产物,web 测试也在这个 job 里)、contracts(契约向量)。不上传 PasswordSafe/沙箱目录。
-- **发版**:`buildPlugin` 产出带版本 zip;Plugin Verifier 对 IC 2025.1+ 校验。JCEF 不可用的运行时里「开始句法学习」Action 不可用并提示切换 JetBrains Runtime。
+- **发版**:与 Chrome 扩展**同版本、同一个 Release**。`intellij-plugin/build.gradle.kts` 的 `version` 由 `chrome-plugin/scripts/release.mjs` 一并改写(仓库里平时是 `0.1.0-SNAPSHOT`,发版提交里才落成正式版本号),`buildPlugin` 产出 `intellij-plugin-<version>.zip`(约 17 MB,含 sqlite-jdbc 多平台原生库),由 release CI 附进同一个 draft;`plugin.xml` 不写 `<version>`,由 gradle 注入。Plugin Verifier 对 IC 2025.1+ 校验。JCEF 不可用的运行时里「开始句法学习」Action 不可用并提示切换 JetBrains Runtime。
 - **重启语义**:扩展点(applicationService / applicationConfigurable / notificationGroup)与 Action 都在 `plugin.xml` 声明。只改 class 内容、不碰 plugin.xml 的更新可热加载(IDE 不提示重启,日志见 `loaded without restart`);改动 plugin.xml(增删扩展点)则 IDE 提示重启——这是插件是否要求重启的判定依据。

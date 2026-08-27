@@ -25,14 +25,24 @@ jobs:
 
       - run: npm ci
 
-      # tag 与 manifest 版本对不上就别发——发出去再改比现在失败贵得多
-      - name: 校验 tag 与 manifest 版本一致
+      # IDEA 插件与扩展同版本发布，草稿里要附它的 zip，所以这个 job 也要 JDK
+      - uses: actions/setup-java@v5
+        with:
+          distribution: zulu
+          java-version: 21
+          cache: gradle
+
+      # tag 与两端版本对不上就别发——发出去再改比现在失败贵得多。
+      # IDEA 插件的产物名里就带版本号，漏改会把上一版的 zip 挂到新 Release 上。
+      # tag 名来自 GITHUB_REF_NAME 环境变量（不是 ${{ }} 插值），且被 on.push.tags 约束。
+      - name: 校验 tag 与两端版本一致
         run: |
           TAG="${GITHUB_REF_NAME#v}"
           MANIFEST=$(node -p "require('./manifest.json').version")
           PKG=$(node -p "require('./package.json').version")
-          echo "tag=$TAG manifest=$MANIFEST package=$PKG"
-          if [ "$TAG" != "$MANIFEST" ] || [ "$TAG" != "$PKG" ]; then
+          IDEA=$(sed -n 's/^version = "\(.*\)"$/\1/p' ../intellij-plugin/build.gradle.kts)
+          echo "tag=$TAG manifest=$MANIFEST package=$PKG idea=$IDEA"
+          if [ "$TAG" != "$MANIFEST" ] || [ "$TAG" != "$PKG" ] || [ "$TAG" != "$IDEA" ]; then
             echo "版本不一致，终止发布"
             exit 1
           fi
@@ -42,6 +52,11 @@ jobs:
       - name: 打包扩展
         run: npm run package
 
+      # 产物即 intellij-plugin/build/distributions/intellij-plugin-<version>.zip
+      - name: 构建 IDEA 插件
+        working-directory: .
+        run: ./gradlew --no-daemon :intellij-plugin:buildPlugin
+
       # 只取本版本那一节并补上安装说明；整个 CHANGELOG 当正文会把历史版本一起贴出去
       - name: 生成 Release 说明
         run: node scripts/release-notes.mjs "${GITHUB_REF_NAME#v}" RELEASE_NOTES.md
@@ -49,7 +64,9 @@ jobs:
       - name: 创建 Release
         uses: softprops/action-gh-release@v3
         with:
-          files: chrome-plugin/release/*.zip
+          files: |
+            chrome-plugin/release/*.zip
+            intellij-plugin/build/distributions/*.zip
           body_path: chrome-plugin/RELEASE_NOTES.md
           draft: true
           fail_on_unmatched_files: true

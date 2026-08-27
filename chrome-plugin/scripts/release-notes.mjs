@@ -16,6 +16,10 @@ export function installSection(version) {
   return [
     "## 安装",
     "",
+    "两个运行时各自独立，装哪个都不影响另一个。",
+    "",
+    "### Chrome 扩展",
+    "",
     `1. 下载下方的 \`english-syntax-extension-v${version}.zip\`；`,
     "2. 解压到一个**不会被删掉**的目录（Chrome 每次启动都从这里读取）；",
     "3. 打开 `chrome://extensions`，右上角开启「开发者模式」；",
@@ -24,8 +28,18 @@ export function installSection(version) {
     "",
     "> 本扩展未上架应用商店，Chrome 会周期性提示「禁用开发者模式扩展」，选择保留即可。",
     "",
+    "### IntelliJ IDEA 插件（Markdown 预览里学句法）",
+    "",
+    `1. 下载下方的 \`intellij-plugin-${version}.zip\`（**不要解压**）；`,
+    "2. `Settings / Preferences → Plugins → ⚙ → Install Plugin from Disk…`，选中该 zip；",
+    "3. 重启 IDE；",
+    "4. `Settings → Tools → English Syntax`，配置模型端点与 API key（key 存进 PasswordSafe，不进任何日志）；",
+    "5. 打开一份 Markdown，用预览工具栏的「开始句法学习」。",
+    "",
+    "> 需要 IDEA 2025.1+ 且运行在自带 JCEF 的 JetBrains Runtime 上；预览面板不可用时 Action 会置灰并提示。",
+    "",
     "> 思考模型(Qwen3、DeepSeek v4 等)会为一句话先生成上万 token 推理，" +
-      "扩展默认已要求模型不做思考，无需任何设置;端点不接受该参数时会自动去掉并重发。",
+      "扩展与插件默认已要求模型不做思考，无需任何设置;端点不接受该参数时会自动去掉并重发。",
   ].join("\n");
 }
 

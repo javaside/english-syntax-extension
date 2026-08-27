@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildReleaseBody, extractReleaseNotes } from "./release-notes.mjs";
+import { buildReleaseBody, extractReleaseNotes, installSection } from "./release-notes.mjs";
 
 const changelog = [
   "# 更新日志",
@@ -47,5 +47,16 @@ describe("release notes", () => {
     // 关思考已改为默认行为，安装说明不该再让用户去找那个开关。
     expect(body).toContain("默认已要求模型不做思考");
     expect(body).not.toContain("勾选「关闭模型思考」");
+  });
+
+  // 双运行时同版本发布:Release 附两个包,安装说明漏掉哪个,那个包就没人知道怎么装。
+  it("两个运行时各有一段安装说明，zip 名都跟着本版版本号", () => {
+    const section = installSection("1.2.0");
+
+    expect(section).toContain("### Chrome 扩展");
+    expect(section).toContain("english-syntax-extension-v1.2.0.zip");
+    expect(section).toContain("### IntelliJ IDEA 插件");
+    expect(section).toContain("intellij-plugin-1.2.0.zip");
+    expect(section).toContain("Install Plugin from Disk");
   });
 });

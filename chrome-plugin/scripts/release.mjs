@@ -1,5 +1,6 @@
 /**
- * 一条命令走完发版:改版本 → 跑全套门禁 → 打包 → 提交 → 打 tag → 推送。
+ * 一条命令走完发版:改版本（扩展三处 + IDEA 插件）→ 跑全套门禁 → 打包 → 提交 →
+ * 打 tag → 推送。
  *
  * 存在的理由很具体——这套流程我手工做了五次，栽了三次:两次改完版本忘了
  * `npm run package`（本地 release/ 里躺着上一版的包），一次 format:check 报错
@@ -18,14 +19,17 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const VERSION_FILES = ["manifest.json", "package.json", "package-lock.json"];
+/** IntelliJ 插件的版本单点（仓库相对路径）;plugin.xml 不写 version,由它注入。 */
+const GRADLE_VERSION_FILE = "intellij-plugin/build.gradle.kts";
 /**
  * 发版这一步允许自己改动的文件（仓库相对路径），其余一律要求先提交。
- * 版本文件与商店手册在 chrome-plugin/ 内,CHANGELOG 在仓库根。
+ * 版本文件与商店手册在 chrome-plugin/ 内,CHANGELOG 与 IDEA 插件构建脚本在仓库根侧。
  */
 const RELEASE_FILES = [
   ...VERSION_FILES.map((name) => `chrome-plugin/${name}`),
   "CHANGELOG.md",
   "chrome-plugin/docs/chrome-web-store.md",
+  GRADLE_VERSION_FILE,
 ];
 
 export function parseVersion(raw) {
@@ -77,6 +81,22 @@ export function bumpVersionFiles(files, next) {
     out[name] = `${JSON.stringify(parsed, null, 2)}\n`;
   }
   return out;
+}
+
+/**
+ * IntelliJ 插件与扩展同版本发布,所以它的版本也由这条命令改——两端各自维护版本
+ * 只会重演商店手册那个坑:tag 发出去了,附件却还是上一版（这里更隐蔽,产物名里
+ * 就带着版本号,`intellij-plugin-0.1.0-SNAPSHOT.zip` 会直接挂到 Release 上）。
+ * CI 侧另有一道 tag↔gradle 版本比对。
+ *
+ * @param text build.gradle.kts 全文
+ */
+export function bumpGradleVersion(text, next) {
+  const pattern = /^version = "[^"]*"$/mu;
+  if (!pattern.test(text)) {
+    throw new Error(`${GRADLE_VERSION_FILE} 里找不到 \`version = "…"\` 这一行,无法改版本`);
+  }
+  return text.replace(pattern, `version = "${next}"`);
 }
 
 /**
@@ -197,6 +217,9 @@ function main() {
   }
 
   for (const [name, text] of Object.entries(bumped)) writeFileSync(join(root, name), text);
+  // IDEA 插件的版本单点。prettier 不认 .kts,不能塞进下面那条 --write。
+  const gradlePath = join(repoRoot, GRADLE_VERSION_FILE);
+  writeFileSync(gradlePath, bumpGradleVersion(readFileSync(gradlePath, "utf8"), version));
   const changelogPath = join(repoRoot, "CHANGELOG.md");
   const today = new Date().toISOString().slice(0, 10);
   writeFileSync(
@@ -222,7 +245,7 @@ function main() {
   }
   assertSemverBump(changelog, version, from);
   assertStoreDocVersion(readFileSync(join(root, "docs", "chrome-web-store.md"), "utf8"), version);
-  console.log(`已改版本到 ${version}，说明与商店手册均已就位。`);
+  console.log(`已改版本到 ${version}（含 IDEA 插件），说明与商店手册均已就位。`);
 
   for (const step of steps) {
     const [bin, argv] = step.command;
@@ -242,6 +265,7 @@ function main() {
       `=== 已就绪，等你确认 ===`,
       `本地与远端都已就位:版本 ${version}、tag v${version}、包 release/english-syntax-extension-v${version}.zip。`,
       `CI(.github/workflows/release.yml)会建一个 **草稿** Release——草稿是刻意的,正式发布由你按下。`,
+      `草稿会附两个包:扩展 zip 与 IDEA 插件 zip(intellij-plugin-${version}.zip,CI 现场构建)。`,
       ``,
       `剩下两步只能由人做:`,
       `  1. 正式发布 GitHub Release:gh release edit v${version} --draft=false`,

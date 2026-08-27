@@ -3,6 +3,7 @@ import {
   assertReleasableTree,
   assertSemverBump,
   assertStoreDocVersion,
+  bumpGradleVersion,
   bumpVersionFiles,
   nextChangelogHeading,
   parseVersion,
@@ -53,6 +54,37 @@ describe("bumpVersionFiles", () => {
     const drifted = { ...files, "package.json": '{\n  "version": "1.0.3"\n}\n' };
 
     expect(() => bumpVersionFiles(drifted, "1.0.5")).toThrow(/必须一致/u);
+  });
+});
+
+describe("bumpGradleVersion", () => {
+  const gradle = [
+    'group = "dev.codetui"',
+    'version = "0.1.0-SNAPSHOT"',
+    "",
+    "kotlin { jvmToolchain(21) }",
+  ].join("\n");
+
+  it("改掉版本行，其余内容原样保留", () => {
+    const out = bumpGradleVersion(gradle, "1.2.0");
+
+    expect(out).toContain('version = "1.2.0"');
+    expect(out).not.toContain("SNAPSHOT");
+    expect(out).toContain("kotlin { jvmToolchain(21) }");
+  });
+
+  // 产物名里带版本号,漏改就会把 intellij-plugin-0.1.0-SNAPSHOT.zip 挂到 Release 上。
+  it("只动顶层 version 行，不碰依赖里的同名赋值", () => {
+    const withNested = `${gradle}\n\nintellijPlatformTesting {\n  runIde {\n    version = "2025.1"\n  }\n}\n`;
+
+    const out = bumpGradleVersion(withNested, "1.2.0");
+
+    expect(out).toContain('version = "1.2.0"');
+    expect(out).toContain('    version = "2025.1"');
+  });
+
+  it("找不到版本行时拒绝——宁可现在失败，也别发出错版本的附件", () => {
+    expect(() => bumpGradleVersion('group = "dev.codetui"\n', "1.2.0")).toThrow(/build\.gradle/u);
   });
 });
 
@@ -115,6 +147,8 @@ describe("assertReleasableTree", () => {
       " M chrome-plugin/manifest.json",
       " M chrome-plugin/package.json",
       " M CHANGELOG.md",
+      // IDEA 插件与扩展同版本发布,它的版本行也由发版命令自己改
+      " M intellij-plugin/build.gradle.kts",
     ].join("\n");
 
     expect(() => assertReleasableTree(status)).not.toThrow();
