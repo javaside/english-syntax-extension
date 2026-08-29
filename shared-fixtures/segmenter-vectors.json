@@ -8,9 +8,20 @@
         "start": 0,
         "end": 24,
         "tokens": [
-          { "text": "Dr", "start": 0, "end": 2, "leadingWhitespace": "", "punctuation": false },
-          { "text": ".", "start": 2, "end": 3, "leadingWhitespace": "", "punctuation": true },
-          { "text": "Smith", "start": 4, "end": 9, "leadingWhitespace": " ", "punctuation": false },
+          {
+            "text": "Dr.",
+            "start": 0,
+            "end": 3,
+            "leadingWhitespace": "",
+            "punctuation": false
+          },
+          {
+            "text": "Smith",
+            "start": 4,
+            "end": 9,
+            "leadingWhitespace": " ",
+            "punctuation": false
+          },
           {
             "text": "doesn't",
             "start": 10,
@@ -25,7 +36,13 @@
             "leadingWhitespace": " ",
             "punctuation": false
           },
-          { "text": ".", "start": 23, "end": 24, "leadingWhitespace": "", "punctuation": true }
+          {
+            "text": ".",
+            "start": 23,
+            "end": 24,
+            "leadingWhitespace": "",
+            "punctuation": true
+          }
         ]
       },
       {
@@ -33,7 +50,13 @@
         "start": 25,
         "end": 42,
         "tokens": [
-          { "text": "The", "start": 0, "end": 3, "leadingWhitespace": "", "punctuation": false },
+          {
+            "text": "The",
+            "start": 0,
+            "end": 3,
+            "leadingWhitespace": "",
+            "punctuation": false
+          },
           {
             "text": "parser",
             "start": 4,
@@ -48,7 +71,13 @@
             "leadingWhitespace": " ",
             "punctuation": false
           },
-          { "text": ".", "start": 16, "end": 17, "leadingWhitespace": "", "punctuation": true }
+          {
+            "text": ".",
+            "start": 16,
+            "end": 17,
+            "leadingWhitespace": "",
+            "punctuation": true
+          }
         ]
       }
     ]
@@ -90,7 +119,672 @@
             "leadingWhitespace": " ",
             "punctuation": false
           },
-          { "text": ".", "start": 44, "end": 45, "leadingWhitespace": "", "punctuation": true }
+          {
+            "text": ".",
+            "start": 44,
+            "end": 45,
+            "leadingWhitespace": "",
+            "punctuation": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "compound-tokens",
+    "block": "The U.S. team cited https://example.com/a and 1,920.50 units.",
+    "sentences": [
+      {
+        "text": "The U.S. team cited https://example.com/a and 1,920.50 units.",
+        "start": 0,
+        "end": 61,
+        "tokens": [
+          {
+            "text": "The",
+            "start": 0,
+            "end": 3,
+            "leadingWhitespace": "",
+            "punctuation": false
+          },
+          {
+            "text": "U.S.",
+            "start": 4,
+            "end": 8,
+            "leadingWhitespace": " ",
+            "punctuation": false
+          },
+          {
+            "text": "team",
+            "start": 9,
+            "end": 13,
+            "leadingWhitespace": " ",
+            "punctuation": false
+          },
+          {
+            "text": "cited",
+            "start": 14,
+            "end": 19,
+            "leadingWhitespace": " ",
+            "punctuation": false
+          },
+          {
+            "text": "https://example.com/a",
+            "start": 20,
+            "end": 41,
+            "leadingWhitespace": " ",
+            "punctuation": false
+          },
+          {
+            "text": "and",
+            "start": 42,
+            "end": 45,
+            "leadingWhitespace": " ",
+            "punctuation": false
+          },
+          {
+            "text": "1,920.50",
+            "start": 46,
+            "end": 54,
+            "leadingWhitespace": " ",
+            "punctuation": false
+          },
+          {
+            "text": "units",
+            "start": 55,
+            "end": 60,
+            "leadingWhitespace": " ",
+            "punctuation": false
+          },
+          {
+            "text": ".",
+            "start": 60,
+            "end": 61,
+            "leadingWhitespace": "",
+            "punctuation": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "initials-and-list-marker",
+    "block": "1. Ask J. R. Smith first. 2. Compare React vs. Vue.",
+    "sentences": [
+      {
+        "text": "1. Ask J. R. Smith first.",
+        "start": 0,
+        "end": 25,
+        "tokens": [
+          {
+            "text": "1",
+            "start": 0,
+            "end": 1,
+            "leadingWhitespace": "",
+            "punctuation": false
+          },
+          {
+            "text": ".",
+            "start": 1,
+            "end": 2,
+            "leadingWhitespace": "",
+            "punctuation": true
+          },
+          {
+            "text": "Ask",
+            "start": 3,
+            "end": 6,
+            "leadingWhitespace": " ",
+            "punctuation": false
+          },
+          {
+            "text": "J",
+            "start": 7,
+            "end": 8,
+            "leadingWhitespace": " ",
+            "punctuation": false
+          },
+          {
+            "text": ".",
+            "start": 8,
+            "end": 9,
+            "leadingWhitespace": "",
+            "punctuation": true
+          },
+          {
+            "text": "R",
+            "start": 10,
+            "end": 11,
+            "leadingWhitespace": " ",
+            "punctuation": false
+          },
+          {
+            "text": ".",
+            "start": 11,
+            "end": 12,
+            "leadingWhitespace": "",
+            "punctuation": true
+          },
+          {
+            "text": "Smith",
+            "start": 13,
+            "end": 18,
+            "leadingWhitespace": " ",
+            "punctuation": false
+          },
+          {
+            "text": "first",
+            "start": 19,
+            "end": 24,
+            "leadingWhitespace": " ",
+            "punctuation": false
+          },
+          {
+            "text": ".",
+            "start": 24,
+            "end": 25,
+            "leadingWhitespace": "",
+            "punctuation": true
+          }
+        ]
+      },
+      {
+        "text": "2. Compare React vs. Vue.",
+        "start": 26,
+        "end": 51,
+        "tokens": [
+          {
+            "text": "2",
+            "start": 0,
+            "end": 1,
+            "leadingWhitespace": "",
+            "punctuation": false
+          },
+          {
+            "text": ".",
+            "start": 1,
+            "end": 2,
+            "leadingWhitespace": "",
+            "punctuation": true
+          },
+          {
+            "text": "Compare",
+            "start": 3,
+            "end": 10,
+            "leadingWhitespace": " ",
+            "punctuation": false
+          },
+          {
+            "text": "React",
+            "start": 11,
+            "end": 16,
+            "leadingWhitespace": " ",
+            "punctuation": false
+          },
+          {
+            "text": "vs.",
+            "start": 17,
+            "end": 20,
+            "leadingWhitespace": " ",
+            "punctuation": false
+          },
+          {
+            "text": "Vue",
+            "start": 21,
+            "end": 24,
+            "leadingWhitespace": " ",
+            "punctuation": false
+          },
+          {
+            "text": ".",
+            "start": 24,
+            "end": 25,
+            "leadingWhitespace": "",
+            "punctuation": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "context-sensitive-abbreviation-boundary",
+    "block": "We left the U.S. She stayed. The U.S. delegation arrived.",
+    "sentences": [
+      {
+        "text": "We left the U.S.",
+        "start": 0,
+        "end": 16,
+        "tokens": [
+          {
+            "text": "We",
+            "start": 0,
+            "end": 2,
+            "leadingWhitespace": "",
+            "punctuation": false
+          },
+          {
+            "text": "left",
+            "start": 3,
+            "end": 7,
+            "leadingWhitespace": " ",
+            "punctuation": false
+          },
+          {
+            "text": "the",
+            "start": 8,
+            "end": 11,
+            "leadingWhitespace": " ",
+            "punctuation": false
+          },
+          {
+            "text": "U.S.",
+            "start": 12,
+            "end": 16,
+            "leadingWhitespace": " ",
+            "punctuation": false
+          }
+        ]
+      },
+      {
+        "text": "She stayed.",
+        "start": 17,
+        "end": 28,
+        "tokens": [
+          {
+            "text": "She",
+            "start": 0,
+            "end": 3,
+            "leadingWhitespace": "",
+            "punctuation": false
+          },
+          {
+            "text": "stayed",
+            "start": 4,
+            "end": 10,
+            "leadingWhitespace": " ",
+            "punctuation": false
+          },
+          {
+            "text": ".",
+            "start": 10,
+            "end": 11,
+            "leadingWhitespace": "",
+            "punctuation": true
+          }
+        ]
+      },
+      {
+        "text": "The U.S. delegation arrived.",
+        "start": 29,
+        "end": 57,
+        "tokens": [
+          {
+            "text": "The",
+            "start": 0,
+            "end": 3,
+            "leadingWhitespace": "",
+            "punctuation": false
+          },
+          {
+            "text": "U.S.",
+            "start": 4,
+            "end": 8,
+            "leadingWhitespace": " ",
+            "punctuation": false
+          },
+          {
+            "text": "delegation",
+            "start": 9,
+            "end": 19,
+            "leadingWhitespace": " ",
+            "punctuation": false
+          },
+          {
+            "text": "arrived",
+            "start": 20,
+            "end": 27,
+            "leadingWhitespace": " ",
+            "punctuation": false
+          },
+          {
+            "text": ".",
+            "start": 27,
+            "end": 28,
+            "leadingWhitespace": "",
+            "punctuation": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "et-al-unicode-whitespace",
+    "block": "Smith et al. agree. Jones et al. concur.",
+    "sentences": [
+      {
+        "text": "Smith et al. agree.",
+        "start": 0,
+        "end": 19,
+        "tokens": [
+          {
+            "text": "Smith",
+            "start": 0,
+            "end": 5,
+            "leadingWhitespace": "",
+            "punctuation": false
+          },
+          {
+            "text": "et al.",
+            "start": 6,
+            "end": 12,
+            "leadingWhitespace": " ",
+            "punctuation": false
+          },
+          {
+            "text": "agree",
+            "start": 13,
+            "end": 18,
+            "leadingWhitespace": " ",
+            "punctuation": false
+          },
+          {
+            "text": ".",
+            "start": 18,
+            "end": 19,
+            "leadingWhitespace": "",
+            "punctuation": true
+          }
+        ]
+      },
+      {
+        "text": "Jones et al. concur.",
+        "start": 20,
+        "end": 40,
+        "tokens": [
+          {
+            "text": "Jones",
+            "start": 0,
+            "end": 5,
+            "leadingWhitespace": "",
+            "punctuation": false
+          },
+          {
+            "text": "et al.",
+            "start": 6,
+            "end": 12,
+            "leadingWhitespace": " ",
+            "punctuation": false
+          },
+          {
+            "text": "concur",
+            "start": 13,
+            "end": 19,
+            "leadingWhitespace": " ",
+            "punctuation": false
+          },
+          {
+            "text": ".",
+            "start": 19,
+            "end": 20,
+            "leadingWhitespace": "",
+            "punctuation": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "phd-terminal-and-inline-abbreviation",
+    "block": "He earned a Ph.D. He now teaches. She has a Ph.D. in physics.",
+    "sentences": [
+      {
+        "text": "He earned a Ph.D.",
+        "start": 0,
+        "end": 17,
+        "tokens": [
+          {
+            "text": "He",
+            "start": 0,
+            "end": 2,
+            "leadingWhitespace": "",
+            "punctuation": false
+          },
+          {
+            "text": "earned",
+            "start": 3,
+            "end": 9,
+            "leadingWhitespace": " ",
+            "punctuation": false
+          },
+          {
+            "text": "a",
+            "start": 10,
+            "end": 11,
+            "leadingWhitespace": " ",
+            "punctuation": false
+          },
+          {
+            "text": "Ph.D.",
+            "start": 12,
+            "end": 17,
+            "leadingWhitespace": " ",
+            "punctuation": false
+          }
+        ]
+      },
+      {
+        "text": "He now teaches.",
+        "start": 18,
+        "end": 33,
+        "tokens": [
+          {
+            "text": "He",
+            "start": 0,
+            "end": 2,
+            "leadingWhitespace": "",
+            "punctuation": false
+          },
+          {
+            "text": "now",
+            "start": 3,
+            "end": 6,
+            "leadingWhitespace": " ",
+            "punctuation": false
+          },
+          {
+            "text": "teaches",
+            "start": 7,
+            "end": 14,
+            "leadingWhitespace": " ",
+            "punctuation": false
+          },
+          {
+            "text": ".",
+            "start": 14,
+            "end": 15,
+            "leadingWhitespace": "",
+            "punctuation": true
+          }
+        ]
+      },
+      {
+        "text": "She has a Ph.D. in physics.",
+        "start": 34,
+        "end": 61,
+        "tokens": [
+          {
+            "text": "She",
+            "start": 0,
+            "end": 3,
+            "leadingWhitespace": "",
+            "punctuation": false
+          },
+          {
+            "text": "has",
+            "start": 4,
+            "end": 7,
+            "leadingWhitespace": " ",
+            "punctuation": false
+          },
+          {
+            "text": "a",
+            "start": 8,
+            "end": 9,
+            "leadingWhitespace": " ",
+            "punctuation": false
+          },
+          {
+            "text": "Ph.D.",
+            "start": 10,
+            "end": 15,
+            "leadingWhitespace": " ",
+            "punctuation": false
+          },
+          {
+            "text": "in",
+            "start": 16,
+            "end": 18,
+            "leadingWhitespace": " ",
+            "punctuation": false
+          },
+          {
+            "text": "physics",
+            "start": 19,
+            "end": 26,
+            "leadingWhitespace": " ",
+            "punctuation": false
+          },
+          {
+            "text": ".",
+            "start": 26,
+            "end": 27,
+            "leadingWhitespace": "",
+            "punctuation": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "inc-terminal-and-inline-abbreviation",
+    "block": "The company is Acme Inc. It opened today. Acme Inc. reported gains.",
+    "sentences": [
+      {
+        "text": "The company is Acme Inc.",
+        "start": 0,
+        "end": 24,
+        "tokens": [
+          {
+            "text": "The",
+            "start": 0,
+            "end": 3,
+            "leadingWhitespace": "",
+            "punctuation": false
+          },
+          {
+            "text": "company",
+            "start": 4,
+            "end": 11,
+            "leadingWhitespace": " ",
+            "punctuation": false
+          },
+          {
+            "text": "is",
+            "start": 12,
+            "end": 14,
+            "leadingWhitespace": " ",
+            "punctuation": false
+          },
+          {
+            "text": "Acme",
+            "start": 15,
+            "end": 19,
+            "leadingWhitespace": " ",
+            "punctuation": false
+          },
+          {
+            "text": "Inc.",
+            "start": 20,
+            "end": 24,
+            "leadingWhitespace": " ",
+            "punctuation": false
+          }
+        ]
+      },
+      {
+        "text": "It opened today.",
+        "start": 25,
+        "end": 41,
+        "tokens": [
+          {
+            "text": "It",
+            "start": 0,
+            "end": 2,
+            "leadingWhitespace": "",
+            "punctuation": false
+          },
+          {
+            "text": "opened",
+            "start": 3,
+            "end": 9,
+            "leadingWhitespace": " ",
+            "punctuation": false
+          },
+          {
+            "text": "today",
+            "start": 10,
+            "end": 15,
+            "leadingWhitespace": " ",
+            "punctuation": false
+          },
+          {
+            "text": ".",
+            "start": 15,
+            "end": 16,
+            "leadingWhitespace": "",
+            "punctuation": true
+          }
+        ]
+      },
+      {
+        "text": "Acme Inc. reported gains.",
+        "start": 42,
+        "end": 67,
+        "tokens": [
+          {
+            "text": "Acme",
+            "start": 0,
+            "end": 4,
+            "leadingWhitespace": "",
+            "punctuation": false
+          },
+          {
+            "text": "Inc.",
+            "start": 5,
+            "end": 9,
+            "leadingWhitespace": " ",
+            "punctuation": false
+          },
+          {
+            "text": "reported",
+            "start": 10,
+            "end": 18,
+            "leadingWhitespace": " ",
+            "punctuation": false
+          },
+          {
+            "text": "gains",
+            "start": 19,
+            "end": 24,
+            "leadingWhitespace": " ",
+            "punctuation": false
+          },
+          {
+            "text": ".",
+            "start": 24,
+            "end": 25,
+            "leadingWhitespace": "",
+            "punctuation": true
+          }
         ]
       }
     ]

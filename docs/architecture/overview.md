@@ -4,8 +4,8 @@
 
 MV3 把扩展拆成互不共享内存的几个世界。**每个模块能做什么,首先取决于它跑在哪个世界里**——这是本项目最多约束的来源。
 
-| 上下文                   | 入口                               | 能力                                           | 关键限制                                                                                        |
-| ------------------------ | ---------------------------------- | ---------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| 上下文                   | 入口                                             | 能力                                           | 关键限制                                                                                        |
+| ------------------------ | ------------------------------------------------ | ---------------------------------------------- | ----------------------------------------------------------------------------------------------- |
 | **Service Worker(后台)** | `chrome-plugin/src/background/service-worker.ts` | 唯一能发模型请求的地方;持有缓存、调度器、配置  | **空闲约 30 秒即被终止**,内存状态随之清空                                                       |
 | **Content script(页面)** | `chrome-plugin/src/content/content-script.ts`    | 读写页面 DOM、扫描段落、渲染卡片               | **读不到 `chrome.storage`**(SW 启动时设了 `TRUSTED_CONTEXTS`);`window.customElements` 为 `null` |
 | **Popup(弹窗)**          | `chrome-plugin/src/popup/popup.ts`               | 启停会话、显示进度                             | 关闭即销毁;属于受信任扩展 UI                                                                    |
@@ -101,6 +101,9 @@ MV3 把扩展拆成互不共享内存的几个世界。**每个模块能做什�
   ├─ content: SessionController.start()
   │      ├─ scanDocument(document)          正文容器打分 → 候选块
   │      ├─ 每块 segmentBlock + tokenize    → SentenceInput[]（相位 discovered）
+  │      │     自定义标点候选边界 → 强非终结/语境缩写分类 → 合并 initial/列表/无实词片段
+  │      │     U.S./Ph.D./Inc./Ltd./Co./Corp. 遇小写或数字续片才合并，遇大写新句保留边界
+  │      │     点号缩写/数字版本/URL/邮箱各占一个 Token；内部空白用显式 Unicode class
   │      └─ ViewportObserver.observe()      rootMargin 100%,进视口即回调
   │
   ├─ 视口回调 → enqueueForBatch()           按「屏外? × 跳缓存?」分桶
@@ -118,8 +121,8 @@ MV3 把扩展拆成互不共享内存的几个世界。**每个模块能做什�
   │            │        └─ adapter.completeJson[Streaming]()
   │            │              流式时逐分片经 CoreStreamParser 上报暂定成分
   │            │              → SW 经端口推 CORE_STREAM(已脱敏)
-  │            ├─ validateCoreBatch()  覆盖率/有序/不重叠/角色枚举
-  │            ├─ 不合格 → 一次 repair pass(jumpQueue,同优先级插队)
+  │            ├─ validateCoreBatch()  结构/覆盖率 + 四条本地语法粒度硬约束
+  │            ├─ 不合格 → 错误文案原样进入一次 repair pass(jumpQueue,同优先级插队)
   │            └─ 合格 → 写缓存
   │
   ├─ SW → content: CORE_RESULT {analyses[], cacheOnly?, error?}(全部脱敏)
@@ -189,7 +192,7 @@ discovered ─▶ cache-check ─▶ queued ─▶ requesting ─▶ validating 
 
 Chrome 扩展之外,本仓库还交付一个 IntelliJ IDEA Markdown 预览插件(`intellij-plugin/`,与 `chrome-plugin/` 平级的独立子模块:Kotlin 构建归 Gradle,`resources/web/` 的 TS 桥测试在 `intellij-plugin/` 里 `npm ci && npm test` 独立跑)。两个运行时**不共享运行代码**,只共享契约:
 
-- 仓库根 `shared-fixtures/` 的分句/缓存键向量、整段 core 提示词(`core-prompt-parity.json`)、交换 fixture 由 TS(chrome-plugin)与 Kotlin(intellij-plugin)测试同时消费——两端任何一侧改规则,另一侧的测试立刻红。
+- 仓库根 `shared-fixtures/` 的分句/分词向量(`segmenter-vectors.json`)、缓存键向量、整段 core 提示词(`core-prompt-parity.json`)、交换 fixture 由 TS(chrome-plugin)与 Kotlin(intellij-plugin)测试同时消费——两端任何一侧改规则,另一侧的测试立刻红。分句不再借助各平台原始边界：两端先按「句末标点串 + 收尾引号/括号 + 空白」产生同一批候选。`Dr.` / `Prof.` / `Capt.` 等强非终结缩写始终撤销边界；`U.S.` / `Ph.D.` / `Inc.` / `Ltd.` / `Co.` / `Corp.` 等可收句缩写只在下一片段以小写词或数字开头时撤销边界，遇大写新句则保留。两端 token regex 的缩写内部空白统一使用显式 JS Unicode whitespace class（含 NBSP、U+2000–U+200A），不用平台 `\s`。链式 initials、编号与无实词片段按同一规则合并；`rebuildTokens` 只承诺对已 trim 的生产句文本无损。
 - 模型链路(prompt、校验、修复、降级)在 Kotlin 侧按同一骨架重新实现(见 [model-pipeline.md](./model-pipeline.md) 的 IntelliJ 小节)。
 
 链路时序:IntelliJ 打开 `.md` 预览(官方 `MarkdownJCEFHtmlPanel`,IDEA 默认 JCEF 预览)→ 用户点 Tools → 开始句法学习 → `EnglishSyntaxPreviewPanel.findPanel` 经 `MarkdownPreviewFileEditor.PREVIEW_BROWSER` UserData 定位官方面板并包装 → `PreviewSessionConnector.start` 接线页面消息(先接线、后启动会话)→ 包装在页面 load 完成后注入 `web/bundle.js` 与 `preview.css`(bundle 由 `scripts/bundle-web.mjs` 从 `bootstrap-entry.ts` 打包;JS→Kotlin 走 `JBCefJSQuery`)→ `__englishSyntaxInitialize` 触发扫描 → JS 回传 `VISIBLE_BLOCKS` → `PreviewSessionConnector` 派发进 `PreviewSession` 分句分词、合批、查 SQLite 缓存(与 Chrome 扩展互通)→ 未命中经 `RequestScheduler` 调模型 → 校验/一次修复 → `CORE_RESULT`/`CORE_STREAM`(带 `blockId`)回推页面 → `render.ts` 按 blockId 惰性注册句子、可逆替换卡片。完整 `CORE_RESULT` 同时作为该句的权威核心分析保存在 `SentenceRecord`;后续 `DETAIL_REQUEST` 必须把它原样传给详解模型,流式暂定成分不能替代它。官方每次整体重渲染(updateDom 重写 body)由 JS 上报 `PREVIEW_RENDERED`,Kotlin 换代重扫。用户手势(Tools 菜单的四个 Action)经 `PreviewSessionManagerService` 取 manager:前三个驱动 start/pause/stop,stop 发 `RESTORE_ALL` 恢复原文;第四个「解析鼠标悬停的段落」不碰会话开关,走下面的快捷键支线。

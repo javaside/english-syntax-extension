@@ -36,10 +36,10 @@ IntelliJ 的 JCEF 真机执行提交的 `intellij-plugin/src/main/resources/web/
 
 ## 3. 测试分层
 
-| 层   | 工具                                                    | 范围                                         | 命令                              |
-| ---- | ------------------------------------------------------- | -------------------------------------------- | --------------------------------- |
+| 层   | 工具                                                    | 范围                                                                     | 命令                                                  |
+| ---- | ------------------------------------------------------- | ------------------------------------------------------------------------ | ----------------------------------------------------- |
 | 单测 | Vitest(happy-dom / fake-indexeddb,`restoreMocks: true`) | `chrome-plugin/src/**/*.test.ts` + `chrome-plugin/scripts/**/*.test.mjs` | `chrome-plugin/` 里 `npm test` / `npm run test:watch` |
-| E2E  | Playwright + 真实 Chromium + 真实构建产物               | `chrome-plugin/tests/e2e/*.spec.ts`          | `chrome-plugin/` 里 `npm run test:e2e` |
+| E2E  | Playwright + 真实 Chromium + 真实构建产物               | `chrome-plugin/tests/e2e/*.spec.ts`                                      | `chrome-plugin/` 里 `npm run test:e2e`                |
 
 E2E 配置:`fullyParallel: false`、`workers: 1`(共享持久化 profile 的权限与存储状态)、单例 30s / 断言 10s 超时、CI 上重试 1 次。**不碰外网**——只有本地假模型与固定页服务器。
 
@@ -69,6 +69,19 @@ harness 提供三个口子:`seedProfiles()`(直接写 `chrome.storage.local`)、
 
 - **用探针,不用墙钟。** 判"是否真调了模型"用 fetch 计数 / 请求记录;判"预载成功"断言 `detailReady === detailTotal && detailFailed === 0`,不能只断言"结束了"。
 - 教学语料(`chrome-plugin/tests/fixtures/teaching-sentences.json`)的测试**只校验结构不变量**(分句、无损分词、声明的词元数),**永不断言某个唯一的模型答案**——不同模型对成分的切分本就可以不同。
+- 准确性回归另用 `tests/fixtures/core-gold-annotations.json` 的显式黄金标注约定。CI 中的 `core-gold-annotations.test.ts` 只验证 fixture 与生产 tokenizer 自洽，`scripts/core-evaluation.test.mjs` / `core-evaluation-runner.test.mjs` 只验证纯评分器和 runner 公共件；**都不联网、不调用真实模型**。
+
+### 黄金集与评分器
+
+`scripts/core-evaluation.mjs` 是无网络、无 provider 依赖的纯评分器，接受黄金句与预测句，输出：
+
+- 整句 exact 数量与比例；
+- span exact precision / recall / F1；
+- labeled span precision / recall / F1；
+- exact span 上的 role accuracy；
+- 每句的 missing span、extra span、role error，以及缺句/多句/重复句状态。
+
+准确性修改必须以这套指标比较 baseline/candidate，不能只凭某一句手测。黄金 fixture 的 Token ID 由生产 `tokenize()` 解释，因此 tokenizer 变化会在离线自洽测试中显式暴露并要求重审标注。
 
 ### 商店截图
 
@@ -79,6 +92,20 @@ harness 提供三个口子:`seedProfiles()`(直接写 `chrome.storage.local`)、
 - 脚本放 `.superpowers/acceptance/`(已 gitignore,**永不提交**)。
 - API key 只从环境变量读(如 `DEEPSEEK_API_KEY`,存在 `~/.secrets`),日志一律脱敏(`key <masked>`)。
 - 运行:`source ~/.secrets && node .superpowers/acceptance/<script>.mjs`。
+
+核心句法黄金集的手动真模型 runner 是 `.superpowers/acceptance/run-core-gold-evaluation.mjs`（runner base URL 只接受 HTTP(S)，拒绝 username/password/query/fragment；网络请求、日志与 artifact 统一使用去尾斜杠的规范化安全 URL）（gitignored，**不是 CI 门禁**）：
+
+```bash
+source ~/.secrets
+CORE_EVAL_API_KEY="$DEEPSEEK_API_KEY" \
+CORE_EVAL_BASE_URL="https://api.deepseek.com/v1" \
+CORE_EVAL_MODEL="deepseek-chat" \
+node .superpowers/acceptance/run-core-gold-evaluation.mjs \
+  --baseline .superpowers/acceptance/core-eval-baseline.json \
+  --candidate .superpowers/acceptance/core-eval-candidate.json
+```
+
+还可用 `CORE_EVAL_TIMEOUT_MS`、`CORE_EVAL_BASELINE_PATH`、`CORE_EVAL_CANDIDATE_PATH`。runner 逐句使用生产 tokenizer 与 core prompt，保存预测、失败与完整评分报告，再打印 candidate-minus-baseline；默认发送 `reasoning_effort: "none"` 与 JSON `response_format`，provider 以 400/422 明确拒绝对应字段时逐项删除后重试。API key 只从环境变量读取，控制台固定显示 `key <masked>`，provider 错误会替换 key/Bearer/Authorization 并截断。
 
 ## 5. CI(`.github/workflows/ci.yml`)
 
@@ -126,16 +153,16 @@ tag `v*` 触发,`permissions: contents: write`:
 
 ## 7. 其它工程约定
 
-| 事项         | 约定                                                                                                                       |
-| ------------ | -------------------------------------------------------------------------------------------------------------------------- |
-| 新功能流程   | 先 brainstorming 出方案确认 → 写 spec(`docs/superpowers/specs/`)与实现计划(`docs/superpowers/plans/`)→ 编码(TDD)           |
-| git 远端     | 走 `gh` HTTPS(本环境 SSH 被墙)                                                                                             |
+| 事项         | 约定                                                                                                                                      |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| 新功能流程   | 先 brainstorming 出方案确认 → 写 spec(`docs/superpowers/specs/`)与实现计划(`docs/superpowers/plans/`)→ 编码(TDD)                          |
+| git 远端     | 走 `gh` HTTPS(本环境 SSH 被墙)                                                                                                            |
 | npm registry | 两个子工程的 `.npmrc` 均固定 `registry.npmjs.org`。**公开仓库的 lockfile 不应固化任何镜像地址**;需要镜像请用 `npm install --registry=...` |
-| ESLint       | `recommendedTypeChecked` 全开;`*.js`/`*.mjs` 关类型感知(不在 tsconfig include 里);两个绘图脚本单独放行浏览器全局           |
-| Prettier     | `.prettierrc.json`;`npm run format:check` 是门禁的一环                                                                     |
-| TypeScript   | `strict` + `noUncheckedIndexedAccess` + `noImplicitOverride` + `isolatedModules`,`noEmit`(Vite 负责产出)                   |
-| Node         | `>= 22.20.0`                                                                                                               |
-| 依赖         | 全部是 devDependencies——运行时零依赖                                                                                       |
+| ESLint       | `recommendedTypeChecked` 全开;`*.js`/`*.mjs` 关类型感知(不在 tsconfig include 里);两个绘图脚本单独放行浏览器全局                          |
+| Prettier     | `.prettierrc.json`;`npm run format:check` 是门禁的一环                                                                                    |
+| TypeScript   | `strict` + `noUncheckedIndexedAccess` + `noImplicitOverride` + `isolatedModules`,`noEmit`(Vite 负责产出)                                  |
+| Node         | `>= 22.20.0`                                                                                                                              |
+| 依赖         | 全部是 devDependencies——运行时零依赖                                                                                                      |
 
 ## IntelliJ 插件的构建、测试与发布
 

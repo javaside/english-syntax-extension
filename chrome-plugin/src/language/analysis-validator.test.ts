@@ -4,6 +4,7 @@ import { CORE_SCHEMA_VERSION } from "../shared/versions";
 import type { TokenRange } from "../shared/grammar";
 import type { SentenceInput } from "../shared/protocol";
 import { validateCoreBatch, validateDetail } from "./analysis-validator";
+import { tokenize } from "./segmenter";
 
 const request: SentenceInput = {
   sentenceId: "sentence-1",
@@ -56,20 +57,26 @@ describe("core analysis validation", () => {
   });
 
   it("accepts the compound-sentence roles COORDINATE_CLAUSE and CONJUNCTION", () => {
+    // 用真的并列句：CONJUNCTION 现在必须真的盖住一个并列连词。
+    const compound: SentenceInput = {
+      sentenceId: "sentence-1",
+      text: "Learners read and writers revise.",
+      tokens: tokenize("Learners read and writers revise."),
+    };
     const result = validateCoreBatch(
       {
         sentences: [
           {
             sentenceId: "sentence-1",
             components: [
-              { startToken: 0, endToken: 0, role: "COORDINATE_CLAUSE", translation: "第一分句" },
-              { startToken: 1, endToken: 1, role: "CONJUNCTION", translation: "并且" },
-              { startToken: 2, endToken: 3, role: "COORDINATE_CLAUSE", translation: "第二分句" },
+              { startToken: 0, endToken: 1, role: "COORDINATE_CLAUSE", translation: "第一分句" },
+              { startToken: 2, endToken: 2, role: "CONJUNCTION", translation: "并且" },
+              { startToken: 3, endToken: 5, role: "COORDINATE_CLAUSE", translation: "第二分句" },
             ],
           },
         ],
       },
-      [request],
+      [compound],
       "profile-1",
     );
     expect(result).toEqual({
@@ -81,14 +88,14 @@ describe("core analysis validation", () => {
           components: [
             {
               startToken: 0,
-              endToken: 0,
+              endToken: 1,
               role: GrammarRole.COORDINATE_CLAUSE,
               translation: "第一分句",
             },
-            { startToken: 1, endToken: 1, role: GrammarRole.CONJUNCTION, translation: "并且" },
+            { startToken: 2, endToken: 2, role: GrammarRole.CONJUNCTION, translation: "并且" },
             {
-              startToken: 2,
-              endToken: 3,
+              startToken: 3,
+              endToken: 5,
               role: GrammarRole.COORDINATE_CLAUSE,
               translation: "第二分句",
             },
@@ -202,6 +209,231 @@ describe("core analysis validation", () => {
       invalidCore(raw);
     },
   );
+});
+
+/**
+ * 提示词里的粒度规则,凡本地能判定的都在这里变成硬校验:只写在 prompt 里的约束,
+ * 模型违反了没人拦,坏划分直接写进缓存并长期显示。校验失败会走已有的修复轮,
+ * 所以错误文案本身就是发给模型的修复指令,必须写成「该怎么做」而不只是「哪里错」。
+ */
+describe("core analysis grammar constraints", () => {
+  function sentenceOf(text: string): SentenceInput {
+    return { sentenceId: "grammar-1", text, tokens: tokenize(text) };
+  }
+
+  function grammarErrors(sentence: SentenceInput, components: readonly unknown[]) {
+    const result = validateCoreBatch(
+      { sentences: [{ sentenceId: sentence.sentenceId, components }] },
+      [sentence],
+      "profile-1",
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected invalid core output");
+    return result.errors;
+  }
+
+  it("reports unknown fields and adjacent PREDICATE grammar errors together", () => {
+    const sentence = sentenceOf("Help turn ideas.");
+    const errors = grammarErrors(sentence, [
+      { startToken: 0, endToken: 0, role: "PREDICATE", translation: "帮助", unexpected: true },
+      { startToken: 1, endToken: 1, role: "PREDICATE", translation: "转化" },
+      { startToken: 2, endToken: 3, role: "OBJECT", translation: "想法" },
+    ]);
+
+    expect(errors).toContainEqual({
+      path: "sentences[0].components[0]",
+      message: "contains unknown fields",
+    });
+    expect(errors).toContainEqual({
+      path: "sentences[0].components[1]",
+      message:
+        "adjacent PREDICATE components must be merged into one PREDICATE covering the whole verb group",
+    });
+  });
+
+  it("reports an overlong translation and lone COORDINATE_CLAUSE together", () => {
+    const sentence = sentenceOf("Readers understand complex sentences.");
+    const errors = grammarErrors(sentence, [
+      {
+        startToken: 0,
+        endToken: 4,
+        role: "COORDINATE_CLAUSE",
+        translation: "译".repeat(501),
+      },
+    ]);
+
+    expect(errors).toContainEqual({
+      path: "sentences[0].components[0].translation",
+      message: "is too long",
+    });
+    expect(errors).toContainEqual({
+      path: "sentences[0].components",
+      message:
+        "a single clause must be split into peer components instead of one COORDINATE_CLAUSE; COORDINATE_CLAUSE requires at least two coordinate clauses",
+    });
+  });
+
+  it("rejects two adjacent PREDICATE components and says to merge the verb group", () => {
+    // "Help turn ideas" 实测被切成 Help / turn 两个谓语——PREDICATE_SCOPE_RULE 明令禁止。
+    const sentence = sentenceOf("Help turn ideas.");
+
+    expect(
+      grammarErrors(sentence, [
+        { startToken: 0, endToken: 0, role: "PREDICATE", translation: "帮助" },
+        { startToken: 1, endToken: 1, role: "PREDICATE", translation: "转化" },
+        { startToken: 2, endToken: 3, role: "OBJECT", translation: "想法" },
+      ]),
+    ).toContainEqual({
+      path: "sentences[0].components[1]",
+      message:
+        "adjacent PREDICATE components must be merged into one PREDICATE covering the whole verb group",
+    });
+  });
+
+  it("accepts two PREDICATE components separated by another component", () => {
+    const sentence = sentenceOf("Readers read books and writers revise drafts.");
+
+    expect(
+      validateCoreBatch(
+        {
+          sentences: [
+            {
+              sentenceId: sentence.sentenceId,
+              components: [
+                { startToken: 0, endToken: 0, role: "SUBJECT", translation: "读者" },
+                { startToken: 1, endToken: 1, role: "PREDICATE", translation: "阅读" },
+                { startToken: 2, endToken: 2, role: "OBJECT", translation: "书籍" },
+                { startToken: 3, endToken: 3, role: "CONJUNCTION", translation: "并且" },
+                { startToken: 4, endToken: 4, role: "SUBJECT", translation: "作者" },
+                { startToken: 5, endToken: 5, role: "PREDICATE", translation: "修订" },
+                { startToken: 6, endToken: 7, role: "OBJECT", translation: "草稿" },
+              ],
+            },
+          ],
+        },
+        [sentence],
+        "profile-1",
+      ).ok,
+    ).toBe(true);
+  });
+
+  it("rejects a bare preposition component and says to absorb its object", () => {
+    // 实测 "into fully formed designs" 被拆成介词 + 名词短语,后者还误标 ATTRIBUTE。
+    const sentence = sentenceOf("Turn ideas into designs.");
+
+    expect(
+      grammarErrors(sentence, [
+        { startToken: 0, endToken: 0, role: "PREDICATE", translation: "转化" },
+        { startToken: 1, endToken: 1, role: "OBJECT", translation: "想法" },
+        { startToken: 2, endToken: 2, role: "ADVERBIAL", translation: "变成" },
+        { startToken: 3, endToken: 4, role: "ATTRIBUTE", translation: "设计稿" },
+      ]),
+    ).toContainEqual({
+      path: "sentences[0].components[2]",
+      message:
+        "a preposition must be merged with the phrase it governs instead of forming its own component",
+    });
+  });
+
+  it("accepts for as a coordinating CONJUNCTION instead of a bare preposition", () => {
+    const sentence = sentenceOf("I stayed, for it was raining.");
+    const result = validateCoreBatch(
+      {
+        sentences: [
+          {
+            sentenceId: sentence.sentenceId,
+            components: [
+              { startToken: 0, endToken: 1, role: "COORDINATE_CLAUSE", translation: "我留下了" },
+              { startToken: 3, endToken: 3, role: "CONJUNCTION", translation: "因为" },
+              { startToken: 4, endToken: 7, role: "COORDINATE_CLAUSE", translation: "当时在下雨" },
+            ],
+          },
+        ],
+      },
+      [sentence],
+      "profile-1",
+    );
+
+    expect(result.ok).toBe(true);
+  });
+
+  it.each([
+    [
+      "over as PREDICATIVE",
+      "The meeting is over.",
+      [
+        { startToken: 0, endToken: 1, role: "SUBJECT", translation: "会议" },
+        { startToken: 2, endToken: 2, role: "PREDICATE", translation: "结束了" },
+        { startToken: 3, endToken: 4, role: "PREDICATIVE", translation: "结束" },
+      ],
+    ],
+    [
+      "down as ADVERBIAL",
+      "Prices went down.",
+      [
+        { startToken: 0, endToken: 0, role: "SUBJECT", translation: "价格" },
+        { startToken: 1, endToken: 1, role: "PREDICATE", translation: "下降" },
+        { startToken: 2, endToken: 3, role: "ADVERBIAL", translation: "向下" },
+      ],
+    ],
+    [
+      "sentence-final since as ADVERBIAL",
+      "I have wondered since.",
+      [
+        { startToken: 0, endToken: 0, role: "SUBJECT", translation: "我" },
+        { startToken: 1, endToken: 2, role: "PREDICATE", translation: "一直想知道" },
+        { startToken: 3, endToken: 4, role: "ADVERBIAL", translation: "从那以后" },
+      ],
+    ],
+    [
+      "beneath as ADVERBIAL",
+      "The layer lies beneath.",
+      [
+        { startToken: 0, endToken: 1, role: "SUBJECT", translation: "这一层" },
+        { startToken: 2, endToken: 2, role: "PREDICATE", translation: "位于" },
+        { startToken: 3, endToken: 4, role: "ADVERBIAL", translation: "下方" },
+      ],
+    ],
+  ])("accepts %s", (_description, text, components) => {
+    const sentence = sentenceOf(text);
+    expect(
+      validateCoreBatch(
+        { sentences: [{ sentenceId: sentence.sentenceId, components }] },
+        [sentence],
+        "profile-1",
+      ).ok,
+    ).toBe(true);
+  });
+
+  it("rejects a lone COORDINATE_CLAUSE and says to split the single clause", () => {
+    const sentence = sentenceOf("Readers understand complex sentences.");
+
+    expect(
+      grammarErrors(sentence, [
+        { startToken: 0, endToken: 3, role: "COORDINATE_CLAUSE", translation: "读者理解复杂句子" },
+      ]),
+    ).toContainEqual({
+      path: "sentences[0].components",
+      message:
+        "a single clause must be split into peer components instead of one COORDINATE_CLAUSE; COORDINATE_CLAUSE requires at least two coordinate clauses",
+    });
+  });
+
+  it("rejects a CONJUNCTION that covers no coordinating conjunction", () => {
+    const sentence = sentenceOf("Readers read books.");
+
+    expect(
+      grammarErrors(sentence, [
+        { startToken: 0, endToken: 0, role: "SUBJECT", translation: "读者" },
+        { startToken: 1, endToken: 1, role: "PREDICATE", translation: "阅读" },
+        { startToken: 2, endToken: 3, role: "CONJUNCTION", translation: "书籍" },
+      ]),
+    ).toContainEqual({
+      path: "sentences[0].components[2]",
+      message:
+        "CONJUNCTION must cover a coordinating conjunction (for, and, nor, but, or, yet, so)",
+    });
+  });
 });
 
 const focus: TokenRange = { startToken: 1, endToken: 1 };

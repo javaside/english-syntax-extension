@@ -207,7 +207,7 @@
     "id": "quotation-abbreviation-long-2",
     "category": "quotation-abbreviation-long",
     "text": "The U.S. delegation arrived early, and Prof. Adams greeted them warmly.",
-    "requiredLexicalTokenCount": 12
+    "requiredLexicalTokenCount": 11
   },
   {
     "id": "quotation-abbreviation-long-3",

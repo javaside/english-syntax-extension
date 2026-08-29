@@ -126,6 +126,16 @@
 
 **测试** `chrome-plugin/src/background/service-worker.test.ts` 的 `profile capability writers` 组。
 
+### I-10.1 双端分句必须从同一批自定义候选边界出发
+
+**规则** TS 与 Kotlin 都按「句末标点串 + 可选收尾引号/括号 + 后随空白」产生候选边界。强非终结缩写（称谓等）始终向后合并；可收句缩写 `U.S.` / `Ph.D.` / `Inc.` / `Ltd.` / `Co.` / `Corp.` 只在下一片段以小写词或数字开头时合并，遇大写新句保留边界。token regex 内部空白统一使用显式 JS Unicode whitespace class（含 NBSP、U+2000–U+200A），不得用平台 `\s+`。initial、编号和无实词片段仍按双端同构规则处理；`rebuildTokens` 只对 segmentBlock 已 trim 的生产句文本无损。不得分别从平台边界后处理。
+
+**为什么** 两个平台的原始边界本来就不一致；例如编号列表文本会分别切成不同段数。后处理只能修当前已知样例，无法把两套上游边界变成同一个算法。规范化句文本、Token ID 与跨端缓存键会随之漂移。
+
+**症状** 同一段文本在 Chrome 与 IntelliJ 产生不同句数/句文本，交换缓存不命中，甚至相同模型结果落到不同 Token 区间。
+
+**守护测试** 双端 Segmenter 测试共同消费 `shared-fixtures/segmenter-vectors.json`。
+
 ## 提示词与 token 预算
 
 ### I-11 句子走 `serializeSentences`,其余 JSON 走 `serialize`
@@ -198,6 +208,16 @@
 
 ## 缓存
 
+### I-17.2 本地可判的语法粒度规则必须进入双端 validator
+
+**规则** 不能只在 prompt 里要求模型遵守；TS/Kotlin `validateCoreBatch` 必须同步执行四条可判硬门。bare-preposition 仅对 role 不是 `CONJUNCTION`、去标点后恰好一个 lexical word 且命中**保守的高把握“必须带宾语”白名单**时生效；`after/before/down/off/over/since/until/around/inside/outside` 等常见副词/表语/连词兼类词不收。grammar 是否执行只看结构可信度（全部 component 都有可用 range/role/translation、区间句内、有序不重叠、非纯标点），不得被 unknown field、translation too long、sentenceId 等非结构错误阻断；两类错误必须可同次报告。错误英文文案逐字一致。
+
+**为什么** prompt 只是生成建议，未被 validator 拒绝的违规结果会直接进入跨 profile 共用缓存。错误文案又会被 repair prompt 原样引用，因此它同时是可执行修复指令。
+
+**症状** 模型偶发把动词链/介词短语切碎或把简单句套成单个并列分句，首轮仍被当作成功缓存；双端若文案不同，同一错误会收到不同 repair 指令。
+
+**守护测试** 双端 `AnalysisValidatorTest` / `analysis-validator.test.ts` 的四类语法粒度用例。
+
 ### I-18 详解缓存键两侧必须同构
 
 **规则** 详解缓存键 = 规范化句文本 + schema 版本 + `DETAIL_PROMPT_VERSION` + focus 区间(**与 profile / 模型无关**)。预载路径与点击路径共用同一键;core 键同构,只是换成 `CORE_PROMPT_VERSION` 且 focus 为 `null`——两条提示词各自演进,改 core 规则不作废已有详解。
@@ -207,6 +227,16 @@
 **做法** 改完必须**用对方路径读回验证**。
 
 **测试** `chrome-plugin/tests/e2e/extension.spec.ts` 的 "enabling detail prefetch caches every component and a click needs no model call"。
+
+### I-18.1 Tokenization 改动必须同时提升 core 与 detail 提示词版本
+
+**规则** 任何会改变 Token 数量或 ID 的分词改动，都必须同时提升 `CORE_PROMPT_VERSION` 与 `DETAIL_PROMPT_VERSION`；本次值分别为 `6` 与 `5`，而输出契约未变，`CORE_SCHEMA_VERSION` 保持 `3`。
+
+**为什么** core span 与 detail focus 都使用 Token ID。两条缓存键虽各自带提示词版本，但 Token 坐标是共同依赖；只升一条会让另一类旧缓存仍以过期坐标命中新文本。
+
+**症状** core 卡片覆盖错词，或点击一个成分却命中旧 focus 的详解。
+
+**守护测试** `shared-fixtures/contracts.json` 的双端契约测试、缓存键向量与 `architecture-docs.test.ts` 的版本一致性断言。
 
 ### I-19 缓存值仍要过校验
 
@@ -309,6 +339,26 @@
 ### I-25 教学语料只断言结构不变量
 
 **规则** `chrome-plugin/tests/fixtures/teaching-sentences.json` 的测试只校验分句、无损分词、声明的词元数,**永不断言唯一的模型答案**——不同模型对成分的切分本就可以不同。
+
+### I-25.1 准确性修改必须用黄金集评分，CI 保持离线
+
+**规则** core 准确性变化要用 `core-gold-annotations.json` 与纯评分器比较 baseline/candidate，至少看整句 exact、span/labeled span P/R/F1、exact-span role accuracy 和逐句错误；不能只凭某一句手测。CI 只校验黄金 fixture 自洽与 scorer/runner 公共逻辑，不运行 `.superpowers/acceptance/run-core-gold-evaluation.mjs`，也不访问真实模型。
+
+**为什么** 单句手测会把随机性与样例偏差当成整体提升；反过来把真模型评测放 CI 会引入密钥、费用、网络和 provider 波动。
+
+**症状** 修好一个例句却让整体 span F1 下降，或 CI 因外部模型限流/输出漂移随机红。
+
+**守护测试** `core-gold-annotations.test.ts`、`scripts/core-evaluation.test.mjs`、`scripts/core-evaluation-runner.test.mjs`。
+
+### I-25.2 真模型 runner 的 base URL 必须先校验再使用
+
+**规则** `CORE_EVAL_BASE_URL` 只接受 HTTP(S)，拒绝 username/password、query 与 fragment；启动时必须在任何日志、Vite 初始化或网络请求前完成校验。completion 请求、控制台与 candidate artifact 统一使用去尾斜杠的规范化安全 URL。
+
+**为什么** URL credentials、query 或 fragment 可能携带密钥或改变 provider 请求语义；若网络请求与 artifact 记录不同值，评测结果将无法可靠复现，也可能在日志或文件中泄露凭据。
+
+**症状** runner 把秘密写进控制台/candidate JSON，或 artifact 声称请求了一个端点、实际请求却带了额外参数。
+
+**守护测试** `scripts/core-evaluation-runner.test.mjs` 的默认 URL、协议、credentials、query、fragment 与尾斜杠用例。
 
 ### I-26 lint 基线是恰好 1 个错误
 

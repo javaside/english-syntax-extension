@@ -67,6 +67,212 @@ class AnalysisValidatorTest {
     assertTrue(result.errors.any { it.message.contains("overlap", ignoreCase = true) || it.message.contains("covered") })
   }
 
+  /**
+   * 提示词里能本地判定的粒度规则必须在这里也变成硬校验：与 Chrome 端 `collectGrammarErrors`
+   * 逐条对应、错误文案逐字一致（两端的修复 prompt 都靠它当修复指令）。
+   */
+  @Test
+  fun `reports non structural and grammar errors together`() {
+    val adjacentRequest = sentence("Help turn ideas.")
+    val adjacent = core(
+      """
+      {"startToken":0,"endToken":0,"role":"PREDICATE","translation":"帮助","unexpected":true},
+      {"startToken":1,"endToken":1,"role":"PREDICATE","translation":"转化"},
+      {"startToken":2,"endToken":3,"role":"OBJECT","translation":"想法"}
+      """.trimIndent(),
+      sentenceId = adjacentRequest.sentenceId,
+    )
+    val adjacentErrors = validateCoreBatch(adjacent, listOf(adjacentRequest), "profile-1").errors
+    assertTrue(adjacentErrors.any { it.path == "sentences[0].components[0]" && it.message == "contains unknown fields" })
+    assertTrue(
+      adjacentErrors.any {
+        it.path == "sentences[0].components[1]" &&
+          it.message == "adjacent PREDICATE components must be merged into one PREDICATE covering the whole verb group"
+      },
+    )
+
+    val coordinateRequest = sentence("Readers understand complex sentences.")
+    val coordinate = core(
+      """{"startToken":0,"endToken":4,"role":"COORDINATE_CLAUSE","translation":"${"译".repeat(501)}"}""",
+      sentenceId = coordinateRequest.sentenceId,
+    )
+    val coordinateErrors = validateCoreBatch(coordinate, listOf(coordinateRequest), "profile-1").errors
+    assertTrue(coordinateErrors.any { it.path.endsWith("translation") && it.message == "is too long" })
+    assertTrue(
+      coordinateErrors.any {
+        it.path == "sentences[0].components" &&
+          it.message == "a single clause must be split into peer components instead of one COORDINATE_CLAUSE; COORDINATE_CLAUSE requires at least two coordinate clauses"
+      },
+    )
+  }
+
+  @Test
+  fun `rejects adjacent PREDICATE components and tells the model to merge the verb group`() {
+    val request = sentence("Help turn ideas.")
+    val raw = core(
+      """
+      {"startToken":0,"endToken":0,"role":"PREDICATE","translation":"帮助"},
+      {"startToken":1,"endToken":1,"role":"PREDICATE","translation":"转化"},
+      {"startToken":2,"endToken":3,"role":"OBJECT","translation":"想法"}
+      """.trimIndent(),
+      sentenceId = request.sentenceId,
+    )
+
+    val result = validateCoreBatch(raw, listOf(request), "profile-1")
+
+    assertFalse(result.ok)
+    assertTrue(
+      result.errors.any {
+        it.path == "sentences[0].components[1]" &&
+          it.message == "adjacent PREDICATE components must be merged into one PREDICATE covering the whole verb group"
+      },
+    )
+  }
+
+  @Test
+  fun `accepts two PREDICATE components separated by another component`() {
+    val request = sentence("Readers read books and writers revise drafts.")
+    val raw = core(
+      """
+      {"startToken":0,"endToken":0,"role":"SUBJECT","translation":"读者"},
+      {"startToken":1,"endToken":1,"role":"PREDICATE","translation":"阅读"},
+      {"startToken":2,"endToken":2,"role":"OBJECT","translation":"书籍"},
+      {"startToken":3,"endToken":3,"role":"CONJUNCTION","translation":"并且"},
+      {"startToken":4,"endToken":4,"role":"SUBJECT","translation":"作者"},
+      {"startToken":5,"endToken":5,"role":"PREDICATE","translation":"修订"},
+      {"startToken":6,"endToken":7,"role":"OBJECT","translation":"草稿"}
+      """.trimIndent(),
+      sentenceId = request.sentenceId,
+    )
+
+    assertTrue(validateCoreBatch(raw, listOf(request), "profile-1").ok)
+  }
+
+  @Test
+  fun `rejects a bare preposition component`() {
+    val request = sentence("Turn ideas into designs.")
+    val raw = core(
+      """
+      {"startToken":0,"endToken":0,"role":"PREDICATE","translation":"转化"},
+      {"startToken":1,"endToken":1,"role":"OBJECT","translation":"想法"},
+      {"startToken":2,"endToken":2,"role":"ADVERBIAL","translation":"变成"},
+      {"startToken":3,"endToken":4,"role":"ATTRIBUTE","translation":"设计稿"}
+      """.trimIndent(),
+      sentenceId = request.sentenceId,
+    )
+
+    val result = validateCoreBatch(raw, listOf(request), "profile-1")
+
+    assertFalse(result.ok)
+    assertTrue(
+      result.errors.any {
+        it.path == "sentences[0].components[2]" &&
+          it.message == "a preposition must be merged with the phrase it governs instead of forming its own component"
+      },
+    )
+  }
+
+  @Test
+  fun `accepts for as coordinating CONJUNCTION and ambiguous words as non-prepositions`() {
+    val cases = listOf(
+      Triple(
+        "I stayed, for it was raining.",
+        """
+        {"startToken":0,"endToken":1,"role":"COORDINATE_CLAUSE","translation":"我留下了"},
+        {"startToken":3,"endToken":3,"role":"CONJUNCTION","translation":"因为"},
+        {"startToken":4,"endToken":7,"role":"COORDINATE_CLAUSE","translation":"当时在下雨"}
+        """.trimIndent(),
+        "for as CONJUNCTION",
+      ),
+      Triple(
+        "The meeting is over.",
+        """
+        {"startToken":0,"endToken":1,"role":"SUBJECT","translation":"会议"},
+        {"startToken":2,"endToken":2,"role":"PREDICATE","translation":"结束了"},
+        {"startToken":3,"endToken":4,"role":"PREDICATIVE","translation":"结束"}
+        """.trimIndent(),
+        "over as PREDICATIVE",
+      ),
+      Triple(
+        "Prices went down.",
+        """
+        {"startToken":0,"endToken":0,"role":"SUBJECT","translation":"价格"},
+        {"startToken":1,"endToken":1,"role":"PREDICATE","translation":"下降"},
+        {"startToken":2,"endToken":3,"role":"ADVERBIAL","translation":"向下"}
+        """.trimIndent(),
+        "down as ADVERBIAL",
+      ),
+      Triple(
+        "I have wondered since.",
+        """
+        {"startToken":0,"endToken":0,"role":"SUBJECT","translation":"我"},
+        {"startToken":1,"endToken":2,"role":"PREDICATE","translation":"一直想知道"},
+        {"startToken":3,"endToken":4,"role":"ADVERBIAL","translation":"从那以后"}
+        """.trimIndent(),
+        "since as ADVERBIAL",
+      ),
+      Triple(
+        "The layer lies beneath.",
+        """
+        {"startToken":0,"endToken":1,"role":"SUBJECT","translation":"这一层"},
+        {"startToken":2,"endToken":2,"role":"PREDICATE","translation":"位于"},
+        {"startToken":3,"endToken":4,"role":"ADVERBIAL","translation":"下方"}
+        """.trimIndent(),
+        "beneath as ADVERBIAL",
+      ),
+    )
+
+    cases.forEach { (text, components, description) ->
+      val request = sentence(text)
+      assertTrue(
+        validateCoreBatch(core(components, sentenceId = request.sentenceId), listOf(request), "profile-1").ok,
+        description,
+      )
+    }
+  }
+
+  @Test
+  fun `rejects a lone COORDINATE_CLAUSE wrapping a simple sentence`() {
+    val request = sentence("Readers understand complex sentences.")
+    val raw = core(
+      """{"startToken":0,"endToken":4,"role":"COORDINATE_CLAUSE","translation":"读者理解复杂句子"}""",
+      sentenceId = request.sentenceId,
+    )
+
+    val result = validateCoreBatch(raw, listOf(request), "profile-1")
+
+    assertFalse(result.ok)
+    assertTrue(
+      result.errors.any {
+        it.path == "sentences[0].components" &&
+          it.message == "a single clause must be split into peer components instead of one COORDINATE_CLAUSE; COORDINATE_CLAUSE requires at least two coordinate clauses"
+      },
+    )
+  }
+
+  @Test
+  fun `rejects a CONJUNCTION that covers no coordinating conjunction`() {
+    val request = sentence("Readers read books.")
+    val raw = core(
+      """
+      {"startToken":0,"endToken":0,"role":"SUBJECT","translation":"读者"},
+      {"startToken":1,"endToken":1,"role":"PREDICATE","translation":"阅读"},
+      {"startToken":2,"endToken":3,"role":"CONJUNCTION","translation":"书籍"}
+      """.trimIndent(),
+      sentenceId = request.sentenceId,
+    )
+
+    val result = validateCoreBatch(raw, listOf(request), "profile-1")
+
+    assertFalse(result.ok)
+    assertTrue(
+      result.errors.any {
+        it.path == "sentences[0].components[2]" &&
+          it.message == "CONJUNCTION must cover a coordinating conjunction (for, and, nor, but, or, yet, so)"
+      },
+    )
+  }
+
   @Test
   fun `drops punctuation only components before core validation`() {
     val request = sentence("The service works.")

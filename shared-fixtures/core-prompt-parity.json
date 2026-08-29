@@ -1,5 +1,5 @@
 {
-  "corePromptVersion": 5,
+  "corePromptVersion": 6,
   "sentence": {
     "sentenceId": "s1",
     "text": "Help turn ideas into fully formed designs and specs."

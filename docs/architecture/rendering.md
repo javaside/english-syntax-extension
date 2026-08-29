@@ -54,14 +54,17 @@ blockCandidates(principalRoot)             在容器内收候选块
 ## 2. 切句与分词(`language/segmenter.ts`)
 
 ```
-块文本 → segmentBlock()  Intl.Segmenter("en", {granularity:"sentence"})
-                         + 缩写合并(Mr. Mrs. Ms. Dr. Prof. Sr. Jr. e.g. i.e. U.S.)
-       → tokenize()      /[\p{L}\p{N}]+(?:['’-][\p{L}\p{N}]+)*|[^\s]/gu
+块文本 → segmentBlock()  句末标点串 + 收尾引号/括号 + 空白 → 候选边界
+                         撤销白名单点号缩写 / 单字母 initial 误断
+                         链式 initials 与编号列表片段持续合并
+                         无实词前片向后、尾片向前；仅整块仍无实词时丢弃
+       → tokenize()      URL / 邮箱 → 白名单点号缩写 → 小数/千分位/语义版本号
+                         → 普通词 → 单个非空白字符（`J. R. R.` 不合成一个 Token）
                          每个 token 带 id / text / start / end / leadingWhitespace / punctuation
        → createSentenceId()  SHA-256(sessionId ␀ blockId ␀ order ␀ 规范化文本).slice(0,24)
 ```
 
-`rebuildTokens()` 能无损还原原文——`learning-block` 渲染前会用它校验"句子与 token 对得上",对不上直接抛错。
+分句与分词规则由 TS/Kotlin 独立实现但共同消费 `shared-fixtures/segmenter-vectors.json`；禁止各自从 `Intl.Segmenter` / JVM `BreakIterator` 的不同平台边界后处理。`rebuildTokens()` 能无损还原原文——`learning-block` 渲染前会用它校验"句子与 token 对得上",对不上直接抛错。
 
 注册候选时每 8ms 让一次事件循环(`yieldNow`),长页面不会卡住主线程。
 
@@ -96,13 +99,13 @@ queueVisibleBlock(blockId, force?, immediate = force)
 
 快捷键只有一个反馈通道:返回 `ExtensionError` → content script 把它交给 `pill.notice()`(SW 会丢弃页面命令的响应,快捷键也没有右键菜单那样的「已触发」反馈)。所以**每一种「这一按没有下发」都必须回一句话**,静默返回等于让用户以为键坏了。
 
-| 情形                    | 判据                                                                 | 回给页面                    |
-| ----------------------- | -------------------------------------------------------------------- | --------------------------- |
-| 鼠标停在我方卡片上      | 遍历块记录:`replacement.active` 且 `currentElement()` 命中悬停元素   | `该段已解析`                |
-| 该块已全到终态          | `ready`/`failed`/`skipped`,有失败句时带上句数                        | `该段已解析[,N 句失败…]`    |
-| 该块正在飞              | 任一句处于 `cache-check`/`requesting`/`validating`                    | `该段正在解析中…`           |
-| 同块 400ms 内的重复触发 | `PARSE_DEBOUNCE_MS`,与 IntelliJ 侧同值同语义                         | `该段正在解析中…`           |
-| 候选被静默丢掉          | `registerCandidates` 的两条 `continue`(非 HTMLElement / 切不出句子) | `这一段没有可解析的句子…`   |
+| 情形                    | 判据                                                                | 回给页面                  |
+| ----------------------- | ------------------------------------------------------------------- | ------------------------- |
+| 鼠标停在我方卡片上      | 遍历块记录:`replacement.active` 且 `currentElement()` 命中悬停元素  | `该段已解析`              |
+| 该块已全到终态          | `ready`/`failed`/`skipped`,有失败句时带上句数                       | `该段已解析[,N 句失败…]`  |
+| 该块正在飞              | 任一句处于 `cache-check`/`requesting`/`validating`                  | `该段正在解析中…`         |
+| 同块 400ms 内的重复触发 | `PARSE_DEBOUNCE_MS`,与 IntelliJ 侧同值同语义                        | `该段正在解析中…`         |
+| 候选被静默丢掉          | `registerCandidates` 的两条 `continue`(非 HTMLElement / 切不出句子) | `这一段没有可解析的句子…` |
 
 - **卡片判据必须排在最前**:替换后原文是 `display:none` 的兄弟节点,`isLayoutVisible` 会跳过它,所以第二次按键落在的一定是卡片;而卡片宿主在浅 DOM 里没有文本(内容都在影子根),`nearestSafeBlock` 一路向上只会返回 `null`——不先认卡片,用户拿到的是与事实相反的「未找到可解析的段落」(IntelliJ 侧判据同源,见本文档末尾的预览页小节)。
 - **在飞也要挡**:`immediate` 路径不进合批窗口、直接 `analyzeBlocks`,而在飞相位**不在** `queueVisibleBlock` 的终态闸门里。放行第二按就是为同一批句子再发一条 `ANALYZE_CORE`,且 `++operationVersion` 让第一条的响应整条作废——白付一次模型调用,用户从头多等一轮。

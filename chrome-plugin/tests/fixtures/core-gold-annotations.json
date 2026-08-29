@@ -1,0 +1,302 @@
+{
+  "conventions": [
+    "核心层只切短语级同层成分。普通限定词或紧密结合的单词级形容词与中心名词整体构成 SUBJECT / OBJECT / PREDICATIVE 等，不机械地把每个前置修饰都拆成 ATTRIBUTE。",
+    "ATTRIBUTE 表示名词短语内部可独立成短语的修饰语，既可以前置（如 'fully formed designs' 中短语级的 'fully formed'），也可以后置（如 'The documents signed yesterday' 中的 'signed yesterday'）；拆出后，中心名词短语承担 SUBJECT / OBJECT 等同层角色。",
+    "介词与它管辖的一切优先合为一个 ADVERBIAL 或 ATTRIBUTE；因此 'into fully formed designs and specs' 整体标 ADVERBIAL，不在介词短语内部再拆 'fully formed'。并列的副词或名词（'calmly and confidently'）也保持一个成分，其中的 and 不标 CONJUNCTION。",
+    "标点刻意不覆盖：校验规则允许标点不被任何成分覆盖，渲染层按源 Token 画回原位。",
+    "刻意排除了内部有歧义的句子（谓语被副词割开、名词后接介词短语），免得基线指标被标注争议污染。"
+  ],
+  "sentences": [
+    {
+      "id": "basic-svo-1",
+      "text": "The young engineer fixed the broken printer this morning.",
+      "components": [
+        { "startToken": 0, "endToken": 2, "role": "SUBJECT" },
+        { "startToken": 3, "endToken": 3, "role": "PREDICATE" },
+        { "startToken": 4, "endToken": 6, "role": "OBJECT" },
+        { "startToken": 7, "endToken": 8, "role": "ADVERBIAL" }
+      ]
+    },
+    {
+      "id": "basic-svo-2",
+      "text": "Maria writes detailed reports every Friday afternoon.",
+      "components": [
+        { "startToken": 0, "endToken": 0, "role": "SUBJECT" },
+        { "startToken": 1, "endToken": 1, "role": "PREDICATE" },
+        { "startToken": 2, "endToken": 3, "role": "OBJECT" },
+        { "startToken": 4, "endToken": 6, "role": "ADVERBIAL" }
+      ]
+    },
+    {
+      "id": "basic-svo-3",
+      "text": "Our neighbors planted three cherry trees last spring.",
+      "components": [
+        { "startToken": 0, "endToken": 1, "role": "SUBJECT" },
+        { "startToken": 2, "endToken": 2, "role": "PREDICATE" },
+        { "startToken": 3, "endToken": 5, "role": "OBJECT" },
+        { "startToken": 6, "endToken": 7, "role": "ADVERBIAL" }
+      ]
+    },
+    {
+      "id": "copular-2",
+      "text": "Her latest proposal sounds surprisingly practical.",
+      "components": [
+        { "startToken": 0, "endToken": 2, "role": "SUBJECT" },
+        { "startToken": 3, "endToken": 3, "role": "PREDICATE" },
+        { "startToken": 4, "endToken": 5, "role": "PREDICATIVE" }
+      ]
+    },
+    {
+      "id": "copular-3",
+      "text": "These instructions seem clear enough for beginners.",
+      "components": [
+        { "startToken": 0, "endToken": 1, "role": "SUBJECT" },
+        { "startToken": 2, "endToken": 2, "role": "PREDICATE" },
+        { "startToken": 3, "endToken": 4, "role": "PREDICATIVE" },
+        { "startToken": 5, "endToken": 6, "role": "ADVERBIAL" }
+      ]
+    },
+    {
+      "id": "passive-1",
+      "text": "The ancient bridge was rebuilt by local craftsmen in 1920.",
+      "components": [
+        { "startToken": 0, "endToken": 2, "role": "SUBJECT" },
+        { "startToken": 3, "endToken": 4, "role": "PREDICATE" },
+        { "startToken": 5, "endToken": 7, "role": "ADVERBIAL" },
+        { "startToken": 8, "endToken": 9, "role": "ADVERBIAL" }
+      ]
+    },
+    {
+      "id": "passive-2",
+      "text": "All entries are reviewed carefully before publication.",
+      "components": [
+        { "startToken": 0, "endToken": 1, "role": "SUBJECT" },
+        { "startToken": 2, "endToken": 3, "role": "PREDICATE" },
+        { "startToken": 4, "endToken": 4, "role": "ADVERBIAL" },
+        { "startToken": 5, "endToken": 6, "role": "ADVERBIAL" }
+      ]
+    },
+    {
+      "id": "attribute-1",
+      "text": "The tall glass tower dominates the crowded city skyline.",
+      "components": [
+        { "startToken": 0, "endToken": 3, "role": "SUBJECT" },
+        { "startToken": 4, "endToken": 4, "role": "PREDICATE" },
+        { "startToken": 5, "endToken": 8, "role": "OBJECT" }
+      ]
+    },
+    {
+      "id": "attribute-2",
+      "text": "A curious little fox watched the silent snowy field.",
+      "components": [
+        { "startToken": 0, "endToken": 3, "role": "SUBJECT" },
+        { "startToken": 4, "endToken": 4, "role": "PREDICATE" },
+        { "startToken": 5, "endToken": 8, "role": "OBJECT" }
+      ]
+    },
+    {
+      "id": "attribute-3",
+      "text": "The professor's handwritten notes filled two heavy notebooks.",
+      "components": [
+        { "startToken": 0, "endToken": 3, "role": "SUBJECT" },
+        { "startToken": 4, "endToken": 4, "role": "PREDICATE" },
+        { "startToken": 5, "endToken": 7, "role": "OBJECT" }
+      ]
+    },
+    {
+      "id": "adverbial-1",
+      "text": "She answered every question calmly and confidently.",
+      "components": [
+        { "startToken": 0, "endToken": 0, "role": "SUBJECT" },
+        { "startToken": 1, "endToken": 1, "role": "PREDICATE" },
+        { "startToken": 2, "endToken": 3, "role": "OBJECT" },
+        { "startToken": 4, "endToken": 6, "role": "ADVERBIAL" }
+      ]
+    },
+    {
+      "id": "adverbial-2",
+      "text": "The train arrived unusually late on Tuesday evening.",
+      "components": [
+        { "startToken": 0, "endToken": 1, "role": "SUBJECT" },
+        { "startToken": 2, "endToken": 2, "role": "PREDICATE" },
+        { "startToken": 3, "endToken": 4, "role": "ADVERBIAL" },
+        { "startToken": 5, "endToken": 7, "role": "ADVERBIAL" }
+      ]
+    },
+    {
+      "id": "adverbial-3",
+      "text": "He practices the violin diligently in the small studio.",
+      "components": [
+        { "startToken": 0, "endToken": 0, "role": "SUBJECT" },
+        { "startToken": 1, "endToken": 1, "role": "PREDICATE" },
+        { "startToken": 2, "endToken": 3, "role": "OBJECT" },
+        { "startToken": 4, "endToken": 4, "role": "ADVERBIAL" },
+        { "startToken": 5, "endToken": 8, "role": "ADVERBIAL" }
+      ]
+    },
+    {
+      "id": "complement-2",
+      "text": "Constant travel made the reporter extremely tired.",
+      "components": [
+        { "startToken": 0, "endToken": 1, "role": "SUBJECT" },
+        { "startToken": 2, "endToken": 2, "role": "PREDICATE" },
+        { "startToken": 3, "endToken": 4, "role": "OBJECT" },
+        { "startToken": 5, "endToken": 6, "role": "COMPLEMENT" }
+      ]
+    },
+    {
+      "id": "complement-3",
+      "text": "They painted the old wooden fence bright blue.",
+      "components": [
+        { "startToken": 0, "endToken": 0, "role": "SUBJECT" },
+        { "startToken": 1, "endToken": 1, "role": "PREDICATE" },
+        { "startToken": 2, "endToken": 5, "role": "OBJECT" },
+        { "startToken": 6, "endToken": 7, "role": "COMPLEMENT" }
+      ]
+    },
+    {
+      "id": "noun-clause-1",
+      "text": "What the witness remembered changed the entire investigation.",
+      "components": [
+        { "startToken": 0, "endToken": 3, "role": "SUBJECT_CLAUSE" },
+        { "startToken": 4, "endToken": 4, "role": "PREDICATE" },
+        { "startToken": 5, "endToken": 7, "role": "OBJECT" }
+      ]
+    },
+    {
+      "id": "noun-clause-2",
+      "text": "The manager announced that the factory would close in June.",
+      "components": [
+        { "startToken": 0, "endToken": 1, "role": "SUBJECT" },
+        { "startToken": 2, "endToken": 2, "role": "PREDICATE" },
+        { "startToken": 3, "endToken": 9, "role": "OBJECT_CLAUSE" }
+      ]
+    },
+    {
+      "id": "noun-clause-3",
+      "text": "Whether we leave tonight depends on the weather forecast.",
+      "components": [
+        { "startToken": 0, "endToken": 3, "role": "SUBJECT_CLAUSE" },
+        { "startToken": 4, "endToken": 4, "role": "PREDICATE" },
+        { "startToken": 5, "endToken": 8, "role": "ADVERBIAL" }
+      ]
+    },
+    {
+      "id": "relative-clause-1",
+      "text": "The novel that she recommended won a national award.",
+      "components": [
+        { "startToken": 0, "endToken": 1, "role": "SUBJECT" },
+        { "startToken": 2, "endToken": 4, "role": "ATTRIBUTIVE_CLAUSE" },
+        { "startToken": 5, "endToken": 5, "role": "PREDICATE" },
+        { "startToken": 6, "endToken": 8, "role": "OBJECT" }
+      ]
+    },
+    {
+      "id": "relative-clause-2",
+      "text": "Students who finish early may review their answers quietly.",
+      "components": [
+        { "startToken": 0, "endToken": 0, "role": "SUBJECT" },
+        { "startToken": 1, "endToken": 3, "role": "ATTRIBUTIVE_CLAUSE" },
+        { "startToken": 4, "endToken": 5, "role": "PREDICATE" },
+        { "startToken": 6, "endToken": 7, "role": "OBJECT" },
+        { "startToken": 8, "endToken": 8, "role": "ADVERBIAL" }
+      ]
+    },
+    {
+      "id": "adverbial-clause-1",
+      "text": "When the storm finally passed, the fishermen repaired their nets.",
+      "components": [
+        { "startToken": 0, "endToken": 4, "role": "ADVERBIAL_CLAUSE" },
+        { "startToken": 6, "endToken": 7, "role": "SUBJECT" },
+        { "startToken": 8, "endToken": 8, "role": "PREDICATE" },
+        { "startToken": 9, "endToken": 10, "role": "OBJECT" }
+      ]
+    },
+    {
+      "id": "adverbial-clause-2",
+      "text": "She kept practicing until the melody sounded effortless.",
+      "components": [
+        { "startToken": 0, "endToken": 0, "role": "SUBJECT" },
+        { "startToken": 1, "endToken": 2, "role": "PREDICATE" },
+        { "startToken": 3, "endToken": 7, "role": "ADVERBIAL_CLAUSE" }
+      ]
+    },
+    {
+      "id": "adverbial-clause-3",
+      "text": "Because the road was flooded, the bus took a longer route.",
+      "components": [
+        { "startToken": 0, "endToken": 4, "role": "ADVERBIAL_CLAUSE" },
+        { "startToken": 6, "endToken": 7, "role": "SUBJECT" },
+        { "startToken": 8, "endToken": 8, "role": "PREDICATE" },
+        { "startToken": 9, "endToken": 11, "role": "OBJECT" }
+      ]
+    },
+    {
+      "id": "non-finite-1",
+      "text": "Hoping to catch the sunrise, the hikers left before dawn.",
+      "components": [
+        { "startToken": 0, "endToken": 4, "role": "ADVERBIAL" },
+        { "startToken": 6, "endToken": 7, "role": "SUBJECT" },
+        { "startToken": 8, "endToken": 8, "role": "PREDICATE" },
+        { "startToken": 9, "endToken": 10, "role": "ADVERBIAL" }
+      ]
+    },
+    {
+      "id": "non-finite-2",
+      "text": "The documents signed yesterday must be archived immediately.",
+      "components": [
+        { "startToken": 0, "endToken": 1, "role": "SUBJECT" },
+        { "startToken": 2, "endToken": 3, "role": "ATTRIBUTE" },
+        { "startToken": 4, "endToken": 6, "role": "PREDICATE" },
+        { "startToken": 7, "endToken": 7, "role": "ADVERBIAL" }
+      ]
+    },
+    {
+      "id": "inversion-ellipsis-emphasis-2",
+      "text": "It was the quiet intern who discovered the accounting error.",
+      "components": [
+        { "startToken": 0, "endToken": 0, "role": "SUBJECT" },
+        { "startToken": 1, "endToken": 1, "role": "PREDICATE" },
+        { "startToken": 2, "endToken": 4, "role": "PREDICATIVE" },
+        { "startToken": 5, "endToken": 9, "role": "ATTRIBUTIVE_CLAUSE" }
+      ]
+    },
+    {
+      "id": "quotation-abbreviation-long-2",
+      "text": "The U.S. delegation arrived early, and Prof. Adams greeted them warmly.",
+      "components": [
+        { "startToken": 0, "endToken": 4, "role": "COORDINATE_CLAUSE" },
+        { "startToken": 6, "endToken": 6, "role": "CONJUNCTION" },
+        { "startToken": 7, "endToken": 11, "role": "COORDINATE_CLAUSE" }
+      ]
+    },
+    {
+      "id": "instruction-prepositional-1",
+      "text": "Help turn ideas into fully formed designs and specs through natural collaborative dialogue.",
+      "components": [
+        { "startToken": 0, "endToken": 1, "role": "PREDICATE" },
+        { "startToken": 2, "endToken": 2, "role": "OBJECT" },
+        { "startToken": 3, "endToken": 8, "role": "ADVERBIAL" },
+        { "startToken": 9, "endToken": 12, "role": "ADVERBIAL" }
+      ]
+    },
+    {
+      "id": "instruction-imperative-chain-1",
+      "text": "Ask clarifying questions, gather the constraints, then propose a design.",
+      "components": [
+        { "startToken": 0, "endToken": 2, "role": "COORDINATE_CLAUSE" },
+        { "startToken": 4, "endToken": 6, "role": "COORDINATE_CLAUSE" },
+        { "startToken": 8, "endToken": 11, "role": "COORDINATE_CLAUSE" }
+      ]
+    },
+    {
+      "id": "abbreviation-compound-1",
+      "text": "The U.S. team shipped the release, and Dr. Lee reviewed the metrics.",
+      "components": [
+        { "startToken": 0, "endToken": 5, "role": "COORDINATE_CLAUSE" },
+        { "startToken": 7, "endToken": 7, "role": "CONJUNCTION" },
+        { "startToken": 8, "endToken": 12, "role": "COORDINATE_CLAUSE" }
+      ]
+    }
+  ]
+}
