@@ -8,6 +8,8 @@ import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
+import java.nio.file.Files
+import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -49,9 +51,10 @@ class SegmenterTest {
     assertEquals(26, sentence.end)
 
     val tokens = tokenize(sentence.text)
-    assertEquals(listOf(0, 2, 4, 10, 18, 23), tokens.map { it.start })
-    assertEquals(listOf(2, 3, 9, 17, 23, 24), tokens.map { it.end })
-    assertEquals(listOf("", "", " ", " ", " ", ""), tokens.map { it.leadingWhitespace })
+    assertEquals(listOf("Dr.", "Smith", "doesn’t", "guess", "."), tokens.map { it.text })
+    assertEquals(listOf(0, 4, 10, 18, 23), tokens.map { it.start })
+    assertEquals(listOf(3, 9, 17, 23, 24), tokens.map { it.end })
+    assertEquals(listOf("", " ", " ", " ", ""), tokens.map { it.leadingWhitespace })
     assertEquals(sentence.text, rebuildTokens(tokens))
   }
 
@@ -64,6 +67,12 @@ class SegmenterTest {
     assertEquals(listOf("Alpha", "Beta", "Gamma", "Delta", "Epsilon", "Zeta"), tokens.map { it.text })
     assertEquals(listOf("", "\u00a0", "\u2003", "\u202f", "\u2028", "\u2029"), tokens.map { it.leadingWhitespace })
     assertEquals(sentence, rebuildTokens(tokens))
+  }
+
+  @Test
+  fun `uses the explicit shared JavaScript whitespace class for abbreviation internals`() {
+    val source = Files.readString(Path.of("src/main/kotlin/dev/codetui/englishsyntax/language/Segmenter.kt"))
+    assertEquals(false, Regex("jsWhitespaceClass = .*\\\\\\\\s").containsMatchIn(source))
   }
 
   @Test
@@ -88,12 +97,71 @@ class SegmenterTest {
   }
 
   @ParameterizedTest
-  @ValueSource(strings = ["Mr.", "Mrs.", "Ms.", "Dr.", "Prof.", "Sr.", "Jr.", "e.g.", "i.e.", "U.S."])
+  @ValueSource(
+    strings = [
+      "Mr.", "Mrs.", "Ms.", "Dr.", "Prof.", "Sr.", "Jr.",
+      "Rev.", "Capt.", "Lt.", "Sgt.", "Col.", "Maj.", "Gen.", "Gov.", "Sen.", "Rep.",
+      "St.", "e.g.", "i.e.",
+    ],
+  )
   fun `keeps supported abbreviations with the following clause`(abbreviation: String) {
     assertEquals(
       listOf("$abbreviation Smith arrived.", "Next sentence."),
       segmentBlock("$abbreviation Smith arrived. Next sentence.").map { it.text },
     )
+  }
+
+  @Test
+  fun `uses abbreviation class and following fragment to distinguish sentence-final uses`() {
+    val terminalCases = mapOf(
+      "She works in the U.S. She travels often." to listOf("She works in the U.S.", "She travels often."),
+      "He earned a Ph.D. He now teaches." to listOf("He earned a Ph.D.", "He now teaches."),
+      "The company is Acme Inc. It opened today." to listOf("The company is Acme Inc.", "It opened today."),
+      "The company is Acme Corp. It opened today." to listOf("The company is Acme Corp.", "It opened today."),
+    )
+    terminalCases.forEach { (block, expected) -> assertEquals(expected, segmentBlock(block).map { it.text }) }
+
+    listOf(
+      "The U.S. delegation arrived.",
+      "She has a Ph.D. in physics.",
+      "Acme Inc. reported strong results.",
+    ).forEach { block -> assertEquals(listOf(block), segmentBlock(block).map { it.text }) }
+
+    listOf("Dr.", "Prof.", "Capt.").forEach { title ->
+      assertEquals(
+        listOf("$title Smith arrived.", "Next sentence."),
+        segmentBlock("$title Smith arrived. Next sentence.").map { it.text },
+      )
+    }
+  }
+
+  @Test
+  fun `keeps initials and list markers attached instead of emitting fragments`() {
+    assertEquals(
+      listOf("J. R. R. Tolkien wrote it.", "He was British."),
+      segmentBlock("J. R. R. Tolkien wrote it. He was British.").map { it.text },
+    )
+    assertEquals(
+      listOf("1. Install the CLI.", "2. Run the setup."),
+      segmentBlock("1. Install the CLI. 2. Run the setup.").map { it.text },
+    )
+    assertEquals(
+      listOf("The rule applies. 1."),
+      segmentBlock("The rule applies. 1.").map { it.text },
+    )
+  }
+
+  @Test
+  fun `keeps abbreviations numbers and URLs as single tokens`() {
+    assertEquals(
+      listOf("The", "U.S.", "team", "cited", "https://example.com/a", "and", "1,920.50", "units", "."),
+      tokenize("The U.S. team cited https://example.com/a and 1,920.50 units.").map { it.text },
+    )
+    assertEquals(
+      listOf("Mail", "ada@example.com", "today", "."),
+      tokenize("Mail ada@example.com today.").map { it.text },
+    )
+    assertEquals(listOf("Please", "stop", "."), tokenize("Please stop.").map { it.text })
   }
 
   @Test

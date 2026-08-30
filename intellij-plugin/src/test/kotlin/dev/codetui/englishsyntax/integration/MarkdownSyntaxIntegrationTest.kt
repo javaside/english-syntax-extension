@@ -46,9 +46,16 @@ class MarkdownSyntaxIntegrationTest {
   private lateinit var cache: AnalysisCache
   private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
-  /** "The service validates every response today." = 7 个 token（含句点），0-6 全覆盖。 */
+  /**
+   * "The service validates every response today." = 7 个 token（含句点），0-6 全覆盖。
+   * 必须是真的同层划分：「单成分包住整句」已被 validator 判非法。
+   */
   private fun validCore(vararg ids: String): String {
-    val sentences = ids.joinToString(",") { """{"sentenceId":"$it","components":[{"startToken":0,"endToken":6,"role":"SUBJECT","translation":"整句"}]}""" }
+    val components = """{"startToken":0,"endToken":1,"role":"SUBJECT","translation":"该服务"},""" +
+      """{"startToken":2,"endToken":2,"role":"PREDICATE","translation":"校验"},""" +
+      """{"startToken":3,"endToken":4,"role":"OBJECT","translation":"每个响应"},""" +
+      """{"startToken":5,"endToken":6,"role":"ADVERBIAL","translation":"今天"}"""
+    val sentences = ids.joinToString(",") { """{"sentenceId":"$it","components":[$components]}""" }
     return """{"sentences":[$sentences]}"""
   }
 

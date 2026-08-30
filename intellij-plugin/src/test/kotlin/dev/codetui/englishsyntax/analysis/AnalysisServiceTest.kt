@@ -83,10 +83,20 @@ class AnalysisServiceTest {
 
   private fun sentence(id: String, text: String) = SentenceInput(id, text, tokenize(text))
 
-  /** 构造一个覆盖整句的合法 core raw envelope（单成分 SUBJECT 覆盖全部非标点 token）。 */
+  /**
+   * 构造一个覆盖整句的合法 core raw envelope。必须是真的同层划分：
+   * 「单成分包住整句」现在被 validator 判非法（那等于没有划分）。
+   * 两个用到它的句子("The service validates every response." /
+   * "Sentence number N has words.")token 布局相同：实词 0-4、句点 5。
+   */
   private fun validCoreRaw(vararg ids: String): String {
+    val components = """
+      {"startToken":0,"endToken":1,"role":"SUBJECT","translation":"该服务"},
+      {"startToken":2,"endToken":2,"role":"PREDICATE","translation":"校验"},
+      {"startToken":3,"endToken":5,"role":"OBJECT","translation":"每个响应"}
+    """.trimIndent().replace("\n", "")
     val sentences = ids.joinToString(",") { id ->
-      """{"sentenceId":"$id","components":[{"startToken":0,"endToken":5,"role":"SUBJECT","translation":"整句"}]}"""
+      """{"sentenceId":"$id","components":[$components]}"""
     }
     return """{"sentences":[$sentences]}"""
   }
@@ -124,7 +134,7 @@ class AnalysisServiceTest {
     cache.putCore(
       key,
       "other-profile",
-      json.parseToJsonElement("""{"schemaVersion":${dev.codetui.englishsyntax.domain.ContractVersions.CORE_SCHEMA},"sentenceId":"s1","components":[{"startToken":0,"endToken":5,"role":"SUBJECT","translation":"整句"}],"modelProfileId":"other-profile"}""") as JsonObject,
+      json.parseToJsonElement("""{"schemaVersion":${dev.codetui.englishsyntax.domain.ContractVersions.CORE_SCHEMA},"sentenceId":"s1","components":[{"startToken":0,"endToken":1,"role":"SUBJECT","translation":"该服务"},{"startToken":2,"endToken":2,"role":"PREDICATE","translation":"校验"},{"startToken":3,"endToken":5,"role":"OBJECT","translation":"每个响应"}],"modelProfileId":"other-profile"}""") as JsonObject,
     )
 
     val outcome = service.analyzeCore(profile(), "doc-1", listOf(sentence))
@@ -250,7 +260,7 @@ class AnalysisServiceTest {
   fun `streamed provisional components do not reach the cache`() = runBlocking {
     val sentence = sentence("s1", "The service validates every response.")
     // 带流式 sink 的请求走流式路径：假服务器需要返回 SSE 分片。
-    val first = """{"sentences":[{"sentenceId":"s1","components":[{"startToken":0,"endToken":5,"role":"SUBJECT","translation":"整句"}"""
+    val first = """{"sentences":[{"sentenceId":"s1","components":[{"startToken":0,"endToken":1,"role":"SUBJECT","translation":"该服务"},{"startToken":2,"endToken":2,"role":"PREDICATE","translation":"校验"},{"startToken":3,"endToken":5,"role":"OBJECT","translation":"每个响应"}"""
     val rest = "]}]}"
     server.enqueueSse(listOf(first, rest))
     val streamed = mutableListOf<String>()

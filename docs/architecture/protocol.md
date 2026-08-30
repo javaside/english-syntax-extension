@@ -4,14 +4,14 @@
 
 ## 1. 版本常量(`shared/versions.ts`)
 
-| 常量                    | 当前值 | 含义                                        | 改动影响                                               |
-| ----------------------- | ------ | ------------------------------------------- | ------------------------------------------------------ |
-| `MESSAGE_VERSION`       | `1`    | 消息信封版本;收发两侧都校验                 | 改了会让旧页面上残留的 content script 与新 SW 互不认账 |
-| `CORE_SCHEMA_VERSION`   | `3`    | core / detail 结果的语义契约版本;**参与缓存键** | 改了等于全量作废缓存;缓存导入也会因版本不符整体拒绝    |
-| `CORE_PROMPT_VERSION`   | `5`    | core 提示词版本;**参与 core / correction 缓存键** | 改了作废全部 core 缓存(旧粒度的成分不再复用),详解缓存不受影响 |
-| `DETAIL_PROMPT_VERSION` | `4`    | detail 提示词版本;**参与 detail 缓存键**    | 改了只作废详解缓存                                     |
+| 常量                    | 当前值 | 含义                                                         | 改动影响                                               |
+| ----------------------- | ------ | ------------------------------------------------------------ | ------------------------------------------------------ |
+| `MESSAGE_VERSION`       | `1`    | 消息信封版本;收发两侧都校验                                  | 改了会让旧页面上残留的 content script 与新 SW 互不认账 |
+| `CORE_SCHEMA_VERSION`   | `3`    | core / detail 结果的语义契约版本;**参与缓存键**              | 改了等于全量作废缓存;缓存导入也会因版本不符整体拒绝    |
+| `CORE_PROMPT_VERSION`   | `6`    | core 提示词/Token 坐标版本;**参与 core / correction 缓存键** | 改了作废全部 core 缓存                                 |
+| `DETAIL_PROMPT_VERSION` | `5`    | detail 提示词/focus Token 坐标版本;**参与 detail 缓存键**    | 改了作废全部详解缓存                                   |
 
-> 缓存键**刻意不含** profile / 模型维度——换模型不该让已有译文全部作废;但**含提示词版本**,因为同一句在不同规则下会被切成不同粒度的成分,旧结果继续复用只会让新旧质量混在一屏。IndexedDB 的 v1→v2 升级正是为清空更早的键。
+> 缓存键**刻意不含** profile / 模型维度——换模型不该让已有译文全部作废;但**含提示词版本**,因为同一句在不同规则下会被切成不同粒度的成分,旧结果继续复用只会让新旧质量混在一屏。本次 core prompt 的粒度规则与 tokenization 都发生变化，因此 `CORE_PROMPT_VERSION = 6`；tokenization 同时改变 detail focus 的 Token 坐标，因此 `DETAIL_PROMPT_VERSION = 5`。结果 JSON 形状未变，所以 `CORE_SCHEMA_VERSION` 仍为 `3`。IndexedDB 的 v1→v2 升级正是为清空更早的键。
 
 ## 2. 请求消息 `RequestMessage`
 
@@ -116,7 +116,8 @@ DetailStreamPush = { version, type: "DETAIL_STREAM", documentId, sentenceId, foc
 | `profileId?`                                      | 本会话 pin 的 profile                                 |
 
 ```ts
-isSessionComplete(s) = s.discovered > 0 && s.queued === 0 && (s.inFlight ?? 0) === 0;
+isSessionComplete(s) =
+  s.discovered > 0 && s.queued === 0 && (s.inFlight ?? 0) === 0;
 ```
 
 要求 `discovered > 0` 是因为会话刚启动时 SW 先塞一个空状态占位;少了这道保护会把"还没开始"当成"已完成"。
@@ -176,7 +177,18 @@ DetailAnalysis  = { sentenceId, focus, structures[], grammarPoints[], explanatio
 2. 成分之间**有序、不重叠**;
 3. **每个非标点 token 恰好被覆盖一次**;标点可以不被覆盖,但不得被覆盖两次;
 4. 成分**不得只含标点**(模型偶发把逗号单切成一个成分——这条由 `dropPunctuationOnlyComponents()` 在本地直接丢掉,省一整轮模型往返);
-5. `translation` 非空、无危险文本、长度不超过 `max(500, 英文长度 × 8)`。
+5. `translation` 非空、无危险文本、长度不超过 `max(500, 英文长度 × 8)`；
+6. 组件序列相邻且 Token 区间连续的两个 `PREDICATE` 必须合并；
+7. 成分去掉标点后恰好一个 lexical word、role 不是 `CONJUNCTION`，且该词命中**保守的高把握介词白名单**时，不得独立成分，必须并入其管辖短语；`after/before/down/off/over/since/until/around/inside/outside` 等常见副词、表语或连词兼类词不收；
+8. `COORDINATE_CLAUSE` 数量恰好为 1 时非法；0 或至少 2 个不触发这条门；
+9. `CONJUNCTION` 的 lexical words 必须至少含一个 FANBOYS(`for/and/nor/but/or/yet/so`)；可以同时含其他词，并非只能含 FANBOYS。
+10. `PREDICATE` 的**首个 lexical word** 不得是限定词、主格人称代词或 `that`——动词组不可能以它们开头，命中即说明主语被吞进了谓语；
+11. `PREDICATE` 的**非首位 lexical words** 不得含限定词（`the/a/an/this/these/those/my/your/his/her/its/our/their`）——限定词是名词短语的左边界，出现在动词组内部说明宾语/表语/补语被吞了进来。`that` 刻意不在这一条里，它更常作宾语从句引导词；
+12. `COORDINATE_CLAUSE` 的首个 lexical word 是从属连词（`because/although/as/if/when/while/since/until/that/…`）且整句**没有** `CONJUNCTION` 成分时非法——从属连词引导的是从句，不是并列分句。有 `CONJUNCTION` 时放行，因为 `Because A, B, and C` 里第一个并列分句本来就以从属连词开头；
+13. 单个成分覆盖了句子**全部**非标点 token 且句子实词数 ≥ 4 时非法（不论 role）——那等于没有划分，卡片会退化成一整块译文。三个实词以内的片段（标题、列表项）没有可拆的同层结构，不触发。
+14. 出现 2 个以上 `COORDINATE_CLAUSE` 时，整句必须另有一个 `CONJUNCTION` 成分或一个 `;` token——并列句的定义就是「各分句自带主语 + 并列连词或分号连接」。逗号串起来的祈使句、共享主语的并列谓语都不是并列句，包成分句块只会让卡片变成几整块译文。
+
+后九条是 TS/Kotlin validator 逐条同步的代码判据，不是 prompt 中一般语言学要求的完整实现。都只看「成分序列 + Token 文本」，不需要句法分析器；词表刻意保守（`then` 是副词不算从属连词，祈使句串的第三个分句就以它开头；缺主语本身不判，祈使句本来就没有主语，`First, install the CLI.` 这类副词开头的祈使句更常见）。grammar 诊断只要求所有 component 都有可用 range/role/translation、区间句内、有序不重叠且非纯标点；unknown field、translation too long、sentenceId 等非结构错误不阻止同轮 grammar 诊断。校验错误文案会被 repair prompt 原样引用，因此两端不仅判据要一致，英文文案也要一致；否则同一个模型输出会得到不同修复指令与缓存结果。
 
 ## 8. 错误码(`shared/errors.ts`)
 
@@ -264,12 +276,12 @@ Chrome 端协议(SW↔content)之外,IntelliJ 端定义 JCEF 页面↔Kotlin 的
 - **新增一条页面消息要同步五处,缺一不可**:① `bridge/BridgeProtocol.kt` 的 `PageMessage` 成员;② 同文件 `parsePageMessage` 的分支(键白名单);③ `session/PreviewSessionConnector` 里 `when (message)` 的分支;④ `BridgeProtocolTest`;⑤ **`resources/web/bridge.ts` 的联合类型 + `PAGE_KEYS_BY_TYPE` + `parsePageMessage` 分支(含 `bridge.test.ts`)**。第⑤处运行时并不生效——`bootstrap-entry.ts` 直接构造消息 `postToHost`,不经它校验——所以漏了**不会有任何测试变红**,Kotlin 侧全绿、功能也正常,代价是两侧白名单就此分叉、后来人照抄的是残缺样板。`PARSE_BLOCK` 就是这么漏掉的,实现到一半才发现(见 [invariants.md](./invariants.md))。
 - **Kotlin → JS 的全局入口**(不走消息信封,由 `executeJavaScript` 直接调,参数一律 JSON 序列化,绝不拼接模型文本):
 
-| 全局入口                                                     | 何时调                        | 说明                                                                                                                                                              |
-| ------------------------------------------------------------ | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `__englishSyntaxInitialize(previewId, generation, autoScan)`  | 注入末尾 / requestScan / 换代 | 第三参数决定 `rescan()` 要不要上报 `VISIBLE_BLOCKS`(手动模式只注册不上报);JS 侧默认 `true` 只为兼容既有调用方,Kotlin 侧总是显式下发 `panel.autoScan`               |
-| `__englishSyntaxReload(offset)`                              | 重新载入                      | 停可见性观察 + 重扫,再恢复滚动位置                                                                                                                                |
-| `__englishSyntaxScrollTo(offset, smooth)`                    | 滚动同步                      | 官方预览滚动联动                                                                                                                                                  |
-| `__englishSyntaxMessage(json)`                               | 每条 Kotlin→JS 消息           | 唯一的 host 消息入口,内部走 `parseHostMessage`                                                                                                                    |
-| `__englishSyntaxSetTheme(isDark)`                            | 注入时与主题变化              | 供 `roles.ts` 选色板                                                                                                                                              |
-| `__englishSyntaxParseHoveredBlock(target?)`                   | 快捷键按段解析                | 省略 `target` 时查 `:is(:hover)` 取最深元素(Kotlin 就是这么调的;裸 `:hover` 在 quirks 页面恒为空集);定位成功即回传 `PARSE_BLOCK`                                                                       |
-| `__englishSyntaxSetHotkey(descriptor)`                       | 注入时(读 keymap 之后)        | 下发页面兼底 keydown 的键位判据;**传 `null` 表示关掉兼底监听**(keymap 里没有可下发的单段字母数字绑定)                                                             |
+| 全局入口                                                     | 何时调                        | 说明                                                                                                                                                 |
+| ------------------------------------------------------------ | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `__englishSyntaxInitialize(previewId, generation, autoScan)` | 注入末尾 / requestScan / 换代 | 第三参数决定 `rescan()` 要不要上报 `VISIBLE_BLOCKS`(手动模式只注册不上报);JS 侧默认 `true` 只为兼容既有调用方,Kotlin 侧总是显式下发 `panel.autoScan` |
+| `__englishSyntaxReload(offset)`                              | 重新载入                      | 停可见性观察 + 重扫,再恢复滚动位置                                                                                                                   |
+| `__englishSyntaxScrollTo(offset, smooth)`                    | 滚动同步                      | 官方预览滚动联动                                                                                                                                     |
+| `__englishSyntaxMessage(json)`                               | 每条 Kotlin→JS 消息           | 唯一的 host 消息入口,内部走 `parseHostMessage`                                                                                                       |
+| `__englishSyntaxSetTheme(isDark)`                            | 注入时与主题变化              | 供 `roles.ts` 选色板                                                                                                                                 |
+| `__englishSyntaxParseHoveredBlock(target?)`                  | 快捷键按段解析                | 省略 `target` 时查 `:is(:hover)` 取最深元素(Kotlin 就是这么调的;裸 `:hover` 在 quirks 页面恒为空集);定位成功即回传 `PARSE_BLOCK`                     |
+| `__englishSyntaxSetHotkey(descriptor)`                       | 注入时(读 keymap 之后)        | 下发页面兼底 keydown 的键位判据;**传 `null` 表示关掉兼底监听**(keymap 里没有可下发的单段字母数字绑定)                                                |

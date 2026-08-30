@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import vectors from "../../../shared-fixtures/segmenter-vectors.json";
 import { describe, expect, it } from "vitest";
 import { createSentenceId, rebuildTokens, segmentBlock, tokenize } from "./segmenter";
@@ -49,6 +50,74 @@ describe("segmentBlock", () => {
       "Last!",
     ]);
   });
+
+  it.each([
+    ["Compare React vs. Vue frameworks."],
+    ["See p. 12 and pp. 30 for the table."],
+    ["The Rev. Green spoke first."],
+    ["Capt. Ahab sailed away."],
+    ["Lt. Dan returned home."],
+    ["Gen. Grant led the army."],
+    ["St. Paul wrote the letters."],
+    ["The office moved to Acme Corp. last spring."],
+  ])("keeps the abbreviation %s inside one sentence", (block) => {
+    expect(segmentBlock(block).map((sentence) => sentence.text)).toEqual([block]);
+  });
+
+  it.each([
+    ["She works in the U.S. She travels often.", ["She works in the U.S.", "She travels often."]],
+    ["He earned a Ph.D. He now teaches.", ["He earned a Ph.D.", "He now teaches."]],
+    ["The company is Acme Inc. It opened today.", ["The company is Acme Inc.", "It opened today."]],
+    [
+      "The company is Acme Corp. It opened today.",
+      ["The company is Acme Corp.", "It opened today."],
+    ],
+  ])("treats a context-sensitive abbreviation as sentence-final in %s", (block, expected) => {
+    expect(segmentBlock(block).map((sentence) => sentence.text)).toEqual(expected);
+  });
+
+  it.each([
+    "The U.S. delegation arrived.",
+    "She has a Ph.D. in physics.",
+    "Acme Inc. reported strong results.",
+  ])("keeps a context-sensitive abbreviation inside its sentence in %s", (block) => {
+    expect(segmentBlock(block).map((sentence) => sentence.text)).toEqual([block]);
+  });
+
+  it.each(["Dr.", "Prof.", "Capt."])(
+    "always keeps the title %s with the following name",
+    (title) => {
+      const block = `${title} Smith arrived. Next sentence.`;
+      expect(segmentBlock(block).map((sentence) => sentence.text)).toEqual([
+        `${title} Smith arrived.`,
+        "Next sentence.",
+      ]);
+    },
+  );
+
+  it("keeps initials attached to the name they introduce", () => {
+    expect(
+      segmentBlock("J. R. R. Tolkien wrote it. He was British.").map((sentence) => sentence.text),
+    ).toEqual(["J. R. R. Tolkien wrote it.", "He was British."]);
+  });
+
+  it("merges a leading list marker into the item it numbers", () => {
+    expect(
+      segmentBlock("1. Install the CLI. 2. Run the setup.").map((sentence) => sentence.text),
+    ).toEqual(["1. Install the CLI.", "2. Run the setup."]);
+  });
+
+  it("merges a trailing fragment backwards instead of emitting a lone marker", () => {
+    expect(segmentBlock("The rule applies. 1.").map((sentence) => sentence.text)).toEqual([
+      "The rule applies. 1.",
+    ]);
+  });
+
+  it("drops a segment that carries no lexical word", () => {
+    expect(segmentBlock("Readers understand it. ---").map((sentence) => sentence.text)).toEqual([
+      "Readers understand it. ---",
+    ]);
+  });
 });
 
 describe("tokenize", () => {
@@ -92,6 +161,65 @@ describe("tokenize", () => {
   it("reconstructs all whitespace between tokens exactly", () => {
     expect(rebuildTokens(tokenize("Hello,  world!"))).toBe("Hello,  world!");
     expect(rebuildTokens(tokenize("\tHello,\n\nworld!"))).toBe("\tHello,\n\nworld!");
+  });
+
+  it("uses the explicit shared JavaScript whitespace class for abbreviation internals", () => {
+    const source = readFileSync(new URL("./segmenter.ts", import.meta.url), "utf8");
+    expect(source).not.toMatch(/const JS_WHITESPACE = [^;]*\\\\s/u);
+  });
+
+  it.each([
+    ["Dr. Lee arrived.", ["Dr.", "Lee", "arrived", "."]],
+    ["The U.S. delegation left.", ["The", "U.S.", "delegation", "left", "."]],
+    ["She holds a Ph.D. degree.", ["She", "holds", "a", "Ph.D.", "degree", "."]],
+    ["Use it, e.g. here.", ["Use", "it", ",", "e.g.", "here", "."]],
+  ])("keeps the abbreviation in %s as one token", (sentence, expected) => {
+    expect(tokenize(sentence).map((token) => token.text)).toEqual(expected);
+  });
+
+  it.each([
+    ["It returns 4.5 items.", ["It", "returns", "4.5", "items", "."]],
+    ["It cost 1,920.50 dollars.", ["It", "cost", "1,920.50", "dollars", "."]],
+    ["Version 20.5.1 shipped.", ["Version", "20.5.1", "shipped", "."]],
+    ["Growth reached 12.5% today.", ["Growth", "reached", "12.5", "%", "today", "."]],
+  ])("keeps the number in %s as one token", (sentence, expected) => {
+    expect(tokenize(sentence).map((token) => token.text)).toEqual(expected);
+  });
+
+  it("keeps a URL and an email address as single tokens", () => {
+    expect(tokenize("Read https://example.com/a?b=1 now.").map((token) => token.text)).toEqual([
+      "Read",
+      "https://example.com/a?b=1",
+      "now",
+      ".",
+    ]);
+    expect(tokenize("Mail ada@example.com today.").map((token) => token.text)).toEqual([
+      "Mail",
+      "ada@example.com",
+      "today",
+      ".",
+    ]);
+  });
+
+  it("keeps a trailing sentence period out of the abbreviation token", () => {
+    expect(tokenize("They left the U.S.").map((token) => token.text)).toEqual([
+      "They",
+      "left",
+      "the",
+      "U.S.",
+    ]);
+    expect(tokenize("The value is 4.5.").map((token) => token.text)).toEqual([
+      "The",
+      "value",
+      "is",
+      "4.5",
+      ".",
+    ]);
+  });
+
+  it("still rebuilds the sentence losslessly with the compound tokens", () => {
+    const sentence = "Dr. Lee cited https://example.com/a and 1,920.50 units.";
+    expect(rebuildTokens(tokenize(sentence))).toBe(sentence);
   });
 });
 

@@ -77,19 +77,34 @@ const MINIFIED_OUTPUT =
  * "Help turn ideas into fully formed designs and specs through natural collaborative
  * dialogue." 被切成 8-9 个成分——Help / turn 两个 PREDICATE、介词 into 与其宾语
  * 拆开、拆出来的名词短语再误标 ATTRIBUTE;补上后稳定收敛到 4 个短语级成分。
- * 祈使句串更极端:6 个动词逗号串成一句时逐个动词标谓语,给出 6 个 PREDICATE /
- * 16 个成分;先定分句层级后是 0 个 PREDICATE / 12 个成分(整串按 COORDINATE_CLAUSE)。
  *
- * 判定顺序必须写死"先分句、再句内":只把祈使句串规则与 peer 规则并列摆着,
+ * 判定顺序必须写死"先分句、再句内":只把分句规则与 peer 规则并列摆着,
  * 两条会互相打架,实测同一句在两次调用之间会在两种切法之间跳。所以 peer 规则
  * 也收窄成「在单个分句之内」——它原本要挡的"谓语吞掉宾语"照旧被挡住。
+ *
+ * **`CORE_PROMPT_VERSION` 7 收紧了并列句的判据。** 此前只要「两个以上各带谓语的
+ * 分句被逗号/冒号/分号/破折号/并列连词分隔」就整句一个 `COORDINATE_CLAUSE`,并且
+ * 明令"不要分析任何分句的内部"。真实散文绝大多数是多分句的,于是卡片退化成 2-3 个
+ * 巨大色块、每块挂一整句中文——看着就是译文而不是成分划分;主从复合句还会被标成
+ * 并列句(`Because the road was flooded, …` 实测被切成两个"并列分句",语法上是错的)。
+ * 现在并列句要求**各分句自带主语**且由**并列连词或分号**连接;逗号串起来的祈使句、
+ * 共享主语的并列谓语一律按同层成分平铺。`validateCoreBatch` 有对应硬门,不是只写在
+ * 提示词里(见 protocol.md 第 12、14 条)。
+ *
+ * 当年加"祈使句串整体标 COORDINATE_CLAUSE"是为了挡碎片化(6 个动词逗号串成一句时
+ * 实测给出 6 个 `PREDICATE` / 16 个成分)。那条豁免现在去掉了,因为碎片化改由硬门
+ * 直接拦:相邻 `PREDICATE` 必须合并、谓语首词不得是限定词/主格代词、谓语内部不得
+ * 含限定词、单成分不得包住整句。
  */
 const CLAUSE_FIRST_RULE =
   "Clause-structure-first rule: decide the clause layout before anything else. " +
-  "If the sentence chains two or more clauses that each carry their own verb — separated by a comma, a colon, a semicolon, a dash, or a coordinating conjunction, " +
-  "and each able to stand alone as a sentence (this includes a series of imperatives) — emit exactly one COORDINATE_CLAUSE per clause, " +
-  "carrying the complete Chinese translation of that clause, and do not analyse the inside of any clause. " +
-  "Only when the sentence contains a single clause do you split it into peer components (subject, predicate, object, adverbial, …).";
+  "A sentence is compound only when two or more clauses each carry their own subject and are joined by a coordinating conjunction (for, and, nor, but, or, yet, so) or a semicolon; " +
+  "only then emit exactly one COORDINATE_CLAUSE per clause, carrying the complete Chinese translation of that clause plus the coordinating conjunction as its own CONJUNCTION component, and do not analyse the inside of those clauses. " +
+  "A comma, a colon, or a dash on its own never makes a sentence compound, and neither does a series of imperatives nor one subject shared by several verbs: " +
+  "analyse every one of those as peer components of a single clause (subject, predicate, object, adverbial, …). " +
+  "Tag a coordinating conjunction as CONJUNCTION only when it joins whole clauses or whole verb phrases; one inside a coordinated noun, adjective, or adverb phrase stays part of that single component (\"calmly and confidently\" is ONE ADVERBIAL). " +
+  "A clause introduced by a subordinating conjunction (because, although, if, when, while, since, until, as, …) is never a COORDINATE_CLAUSE: " +
+  "tag it with one of the five subordinate clause roles, keep it whole, and analyse the main clause as peer components.";
 
 const PREDICATE_SCOPE_RULE =
   "Predicate-scope rule: inside a single clause a PREDICATE covers only the verb group — auxiliaries plus the main verb, " +

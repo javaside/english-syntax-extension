@@ -199,15 +199,16 @@ raw → dropPunctuationOnlyComponents → validateCoreBatch
 - **修复轮与首轮共享同一份规则清单**(`CORE_ANALYSIS_RULES`)。修复 prompt 曾只带 peer + supplement 两条,覆盖率、角色枚举、并列/复合/简单句和译文要求全丢——一句进了修复轮,剩下的唯一语法指导就是"把成分拆开",实测越修越碎。
 - 纯标点成分走本地归一化:覆盖率规则本就允许标点不被覆盖,丢掉它即合法,渲染层会按源 Token 画回原位。Chrome 的 `dropPunctuationOnlyComponents` 与 IntelliJ 的 `validateCoreBatch` 都必须在角色枚举校验前处理，因此即使模型给逗号虚构 `PUNCTUATION` / `CONJUNCTION` 等角色也不会让整句失败；流式暂定成分同样读取原 Token 的 `punctuation` 标记并拒绝纯标点，避免最终校验前短暂显示成“并列连词”。
 - core / repair prompt 的 `SUPPLEMENT_RULE` 区分破折号、冒号后的补充说明或列举与真正并列句：补充跨度使用 `APPOSITIVE` / `INDEPENDENT_ELEMENT`，内部可分离谓语、宾语、状语仍按同层成分输出；名词短语不能连同其关系从句整体标成 `ATTRIBUTIVE_CLAUSE`（`the ones that matter` 中只有 `that matter` 是从句）。
+- `validateCoreBatch` 还把九条**代码实际可判的语法粒度约束**变成硬门：组件序列相邻且 Token 区间连续的两个 `PREDICATE` 必须合并；成分去掉标点后恰好一个 lexical word、role 不是 `CONJUNCTION` 且命中保守的高把握“必须带宾语”介词白名单时，必须并入其管辖短语（`after/before/down/off/over/since/until/around/inside/outside` 等常见副词、表语或连词兼类词不收）；`COORDINATE_CLAUSE` 数量恰好为 1 时非法；`CONJUNCTION` 至少含一个 FANBOYS；`PREDICATE` 首个 lexical word 是限定词、主格人称代词或 `that` 时非法；`PREDICATE` 非首位 lexical words 含限定词时非法（`that` 刻意不算，它更常是宾语从句引导词）；`COORDINATE_CLAUSE` 首词是从属连词且整句无 `CONJUNCTION` 成分时非法；单个成分覆盖全部非标点 token 且句子实词数 ≥ 4 时非法（不论 role）；出现 2 个以上 `COORDINATE_CLAUSE` 却既无 `CONJUNCTION` 成分也无 `;` token 时非法。后四条补的正是「模型给出的坏划分照样显示给用户」的那一段：实测 deepseek-chat 把 `She kept practicing until…` 整句只标成 `PREDICATE` + `ADVERBIAL_CLAUSE`（一个主语都没有），前四条一条都拦不住。**缺主语本身刻意不判**——祈使句没有主语，`First, install the CLI.` 这类副词开头的祈使句在文档里很常见，按缺主语判会大面积误拒；改判「谓语开头不可能是动词」既airtight 又覆盖这个失败。grammar 只在结构可信时执行：所有 component 都有可用 range/role/translation、区间句内、有序不重叠、非纯标点；unknown field、translation too long、sentenceId 等非结构错误不阻止同轮 grammar 诊断，两类错误同次报告。TS/Kotlin 逐条、逐文案一致，错误会原样进入 repair prompt。黄金集整份必须通过这套校验（`core-gold-annotations.test.ts`）。
 
-### 8.1 成分粒度的三条边界(`CORE_PROMPT_VERSION` 5)
+### 8.1 成分粒度的三条边界(`CORE_PROMPT_VERSION` 6)
 
 只有"别让谓语吞掉宾语"这类**下界**规则时,指令型文本会被切成词级碎片。同一模型(deepseek-v4-flash,temperature 0,兼容模式)实测:
 
-| 输入 | 只有 peer 规则 | 补齐三条边界后 |
-| --- | --- | --- |
+| 输入                                                                                          | 只有 peer 规则                                                                           | 补齐三条边界后                                                                 |
+| --------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
 | `Help turn ideas into fully formed designs and specs through natural collaborative dialogue.` | 8–9 成分:`Help` / `turn` 两个 `PREDICATE`、`into` 与其宾语拆开、宾语短语误标 `ATTRIBUTE` | 4 成分:`PREDICATE(Help turn)` + `OBJECT(ideas)` + 两个整体介词短语 `ADVERBIAL` |
-| 6 个祈使动词逗号串成的一句 | 16 成分 / 6 个 `PREDICATE` | 12 成分 / 0 个 `PREDICATE`(整串按 `COORDINATE_CLAUSE`) |
+| 6 个祈使动词逗号串成的一句                                                                    | 16 成分 / 6 个 `PREDICATE`                                                               | 12 成分 / 0 个 `PREDICATE`(整串按 `COORDINATE_CLAUSE`)                         |
 
 三条边界:
 
@@ -218,6 +219,14 @@ raw → dropPunctuationOnlyComponents → validateCoreBatch
 **顺序是规则的一部分**:分句规则必须排在 `PEER_COMPONENT_RULE` 之前,`PEER_COMPONENT_RULE` 本身也收窄为"在单个分句之内"。两条平列摆着时实测同一句会在两种切法之间跳(同一 prompt 连发两次得到 7 成分 / 0 谓语与 17 成分 / 2 谓语两种结果)。`prompts.test.ts` / `PromptsTest.kt` 用 `indexOf` 钉住这个顺序。
 
 两端提示词逐字一致由 `shared-fixtures/core-prompt-parity.json` 钉住(整段 prompt 存进 fixture,规则文本、章节顺序、分词结果任一处分叉都会红)。改提示词的姿势:两端一起改 → 更新 fixture → 升 `CORE_PROMPT_VERSION`(键会自动作废旧粒度结果)。
+
+### 8.2 Token 坐标变化与版本
+
+`tokenize()` 现在把白名单点号缩写（如 `U.S.` / `Ph.D.`）、小数/千分位/语义版本号、带 scheme 的 URL 与邮箱各作为**一个 Token**。通用姓名 initials 链（如 `J. R. R.`）不会合成一个 Token；它只在 `segmentBlock()` 的分句边界阶段持续向后合并，避免姓名中间误断。这不是显示层细节：core component span 与 detail focus 都以 Token ID 闭区间定位，任何拆分变化都会让旧缓存区间指向错误文本。因此本次 `CORE_PROMPT_VERSION = 6` 同时覆盖 core prompt 粒度规则与 tokenization 的变化；tokenization 又改变 detail focus 坐标，所以 `DETAIL_PROMPT_VERSION = 5`。结果 JSON 形状没有变化，`CORE_SCHEMA_VERSION` 保持 `3`。只升 core 会留下 focus 已漂移的详解缓存，只升 detail 则会复用 span 已漂移的 core 缓存。
+
+### 8.3 黄金集 runner 的 provider 端点
+
+手动真模型 runner 在加载 Vite、输出日志和发送请求前解析 `CORE_EVAL_BASE_URL`：只接受 HTTP(S)，拒绝 URL credentials、query 与 fragment，并把尾斜杠规范化掉。completion URL 从这份已验证 URL 构造，控制台与 candidate artifact 也只记录同一份 safe URL，避免凭据泄露或请求语义与评测记录不一致。该约束不改变 API key/provider error 脱敏，也不改变 `reasoning_effort` 与 `response_format` 的 400/422 降级。
 
 ## 9. 缓存(`analysis-cache.ts`)
 
