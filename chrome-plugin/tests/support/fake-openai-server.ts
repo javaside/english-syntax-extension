@@ -182,7 +182,15 @@ interface GeneratedComponent {
 
 /**
  * Produce a deterministic, validator-compliant core analysis: the first
- * non-punctuation token is the subject, the remaining tokens are the predicate.
+ * non-punctuation token is the subject, the remaining tokens are the object.
+ *
+ * The tail is deliberately NOT tagged PREDICATE. Two local grammar rules only
+ * apply to PREDICATE — its first lexical word may not be a determiner or a
+ * subject pronoun, and no determiner may sit inside it — and a positional
+ * split cannot honour either one for arbitrary fixture prose (`Although the
+ * passage…`, `However, you may need…` both break it). Tagging the tail OBJECT
+ * keeps this fake independent of the fixture wording; the E2E assertions are
+ * structural (component count, three rows) and never read the role label.
  */
 function autoComponents(sentence: PromptSentence, translationSuffix = ""): GeneratedComponent[] {
   const lexical = sentence.tokens.filter((token) => !token.punctuation);
@@ -209,8 +217,8 @@ function autoComponents(sentence: PromptSentence, translationSuffix = ""): Gener
     {
       startToken: second.id,
       endToken: last.id,
-      role: "PREDICATE",
-      translation: `谓语与其余成分${translationSuffix}`,
+      role: "OBJECT",
+      translation: `其余成分${translationSuffix}`,
     },
   ];
 }

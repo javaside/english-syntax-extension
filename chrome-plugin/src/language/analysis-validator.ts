@@ -62,6 +62,88 @@ const PREPOSITIONS: ReadonlySet<string> = new Set([
   "with",
   "within",
 ]);
+/**
+ * 主格人称代词。英语的动词组**绝不可能**以它开头,所以 `PREDICATE` 的首个实词命中
+ * 这里就说明主语被吞进了谓语——实测 deepseek-chat 把
+ * "She kept practicing until…" 整句只标成 `PREDICATE` + `ADVERBIAL_CLAUSE`,
+ * 一个主语都没有,而四条旧硬门一条都拦不住。
+ *
+ * 用「谓语开头」而不是「整句缺主语」判定,是因为祈使句本来就没有主语
+ * (`Help turn ideas…` 的黄金标注就是 `PREDICATE` 起头);而文档里
+ * "First, install the CLI." 这类副词开头的祈使句更是常见,按缺主语判会大面积误拒。
+ */
+const SUBJECT_PRONOUNS: ReadonlySet<string> = new Set([
+  "i",
+  "you",
+  "he",
+  "she",
+  "it",
+  "we",
+  "they",
+]);
+/**
+ * 限定词 = 名词短语的左边界。动词组内部出现它,说明宾语/ 表语 / 补语被吞了进来
+ * (`PEER_COMPONENT_RULE` 要挡的正是这个,但此前只写在提示词里)。
+ *
+ * `that` 刻意不收:它更常作宾语从句引导词,`announced that` 这种一个词的粒度差
+ * 远好过把合法分析送进修复轮。首词判定另算——谓语以 `that` 开头一定是错的。
+ */
+const DETERMINERS: ReadonlySet<string> = new Set([
+  "the",
+  "a",
+  "an",
+  "this",
+  "these",
+  "those",
+  "my",
+  "your",
+  "his",
+  "her",
+  "its",
+  "our",
+  "their",
+]);
+const PREDICATE_HEAD_BLOCKERS: ReadonlySet<string> = new Set([
+  ...SUBJECT_PRONOUNS,
+  ...DETERMINERS,
+  "that",
+]);
+/**
+ * 从属连词引导的分句是从句,不是并列分句。`CLAUSE_FIRST_RULE` 按逗号触发,主从复合句
+ * 于是被整成两个「并列分句」——旧硬门只拦「恰好 1 个 `COORDINATE_CLAUSE`」,2 个一律放过,
+ * 于是 "Because the road was flooded, the bus took a longer route." 会被标成并列句显示出去。
+ *
+ * `for` / `so` 属 FANBOYS,`then` 是副词(黄金集的祈使句串第三个分句就以它开头),都不收。
+ */
+const SUBORDINATING_CONJUNCTIONS: ReadonlySet<string> = new Set([
+  "after",
+  "although",
+  "as",
+  "because",
+  "before",
+  "if",
+  "lest",
+  "once",
+  "since",
+  "that",
+  "though",
+  "till",
+  "unless",
+  "until",
+  "when",
+  "whenever",
+  "whereas",
+  "wherever",
+  "whether",
+  "while",
+  "whilst",
+]);
+/**
+ * 低于这个实词数的片段(标题、列表项、`Detailed usage instructions.`)本来就没有可拆的
+ * 同层结构,硬拆只是噪音;到这个长度以上,一个成分包住整句就等于没有划分——卡片退化成
+ * 一整块译文,正是「看着像翻译、不像成分分析」的那种输出。
+ */
+const MIN_SPLITTABLE_LEXICAL_TOKENS = 4;
 
 function lexicalTexts(tokens: readonly Token[], range: TokenRange): string[] {
   return tokens
@@ -80,10 +162,13 @@ function collectGrammarErrors(
   path: string,
   errors: ValidationError[],
 ): void {
+  const hasConjunction = components.some((component) => component.role === GrammarRole.CONJUNCTION);
+
   components.forEach((component, index) => {
     const componentPath = `${path}.components[${index}]`;
     const previous = components[index - 1];
     const words = lexicalTexts(tokens, component);
+    const head = words[0];
 
     // PREDICATE_SCOPE_RULE:并排的动词属于同一个谓语,两个 PREDICATE 不得相邻。
     if (
@@ -95,6 +180,46 @@ function collectGrammarErrors(
         errors,
         componentPath,
         "adjacent PREDICATE components must be merged into one PREDICATE covering the whole verb group",
+      );
+    }
+
+    // 谓语必须以动词组开头。限定词与主格代词都不可能是动词,命中即说明主语被吞了进来。
+    if (
+      component.role === GrammarRole.PREDICATE &&
+      head !== undefined &&
+      PREDICATE_HEAD_BLOCKERS.has(head)
+    ) {
+      addError(
+        errors,
+        componentPath,
+        "a PREDICATE must begin with the verb group; move the leading subject or noun phrase into its own component",
+      );
+    }
+
+    // 谓语内部出现限定词 = 宾语 / 表语 / 补语被吞进了动词组。
+    if (
+      component.role === GrammarRole.PREDICATE &&
+      words.slice(1).some((word) => DETERMINERS.has(word))
+    ) {
+      addError(
+        errors,
+        componentPath,
+        "a PREDICATE must cover only the verb group; emit the noun phrase that starts at the determiner as its own OBJECT, PREDICATIVE, or COMPLEMENT component",
+      );
+    }
+
+    // 从属连词引导的是从句,不是并列分句。整句已有 CONJUNCTION 时不判——
+    // "Because A, B, and C" 里第一个并列分句本来就以从属连词开头。
+    if (
+      component.role === GrammarRole.COORDINATE_CLAUSE &&
+      head !== undefined &&
+      SUBORDINATING_CONJUNCTIONS.has(head) &&
+      !hasConjunction
+    ) {
+      addError(
+        errors,
+        componentPath,
+        "a clause introduced by a subordinating conjunction is not a COORDINATE_CLAUSE; tag it with one of the five subordinate clause roles and analyse the main clause as peer components",
       );
     }
 
@@ -123,6 +248,21 @@ function collectGrammarErrors(
       );
     }
   });
+
+  // 一个成分包住整句 = 没有划分。旧规则只认 COORDINATE_CLAUSE,换成 SUBJECT 就一路通过。
+  const lexicalTokenCount = tokens.filter((token) => !token.punctuation).length;
+  const only = components.length === 1 ? components[0] : undefined;
+  if (
+    only !== undefined &&
+    lexicalTokenCount >= MIN_SPLITTABLE_LEXICAL_TOKENS &&
+    lexicalTexts(tokens, only).length === lexicalTokenCount
+  ) {
+    addError(
+      errors,
+      `${path}.components`,
+      "one component must not cover the whole sentence; split it into peer components (subject, predicate, object, adverbial, …)",
+    );
+  }
 
   // SIMPLE_SENTENCE_RULE:并列需要至少两个分句,单主谓句不得包成 COORDINATE_CLAUSE。
   const coordinateClauses = components.filter(

@@ -273,6 +273,151 @@ class AnalysisValidatorTest {
     )
   }
 
+  private fun assertGrammarError(text: String, components: String, path: String, message: String) {
+    val request = sentence(text)
+    val result = validateCoreBatch(core(components, sentenceId = request.sentenceId), listOf(request), "profile-1")
+
+    assertFalse(result.ok, "expected invalid core output for: $text")
+    assertTrue(
+      result.errors.any { it.path == path && it.message == message },
+      "missing [$path] $message; got ${result.errors}",
+    )
+  }
+
+  private fun assertAccepted(text: String, components: String) {
+    val request = sentence(text)
+    val result = validateCoreBatch(core(components, sentenceId = request.sentenceId), listOf(request), "profile-1")
+
+    assertTrue(result.ok, "expected valid core output for: $text; got ${result.errors}")
+  }
+
+  @Test
+  fun `rejects a PREDICATE that starts with a subject pronoun`() {
+    // deepseek-chat 实测输出:整句只有 PREDICATE + 状语从句,主语 "She" 被吞进谓语。
+    assertGrammarError(
+      "She kept practicing until the melody sounded effortless.",
+      """
+      {"startToken":0,"endToken":2,"role":"PREDICATE","translation":"持续练习"},
+      {"startToken":3,"endToken":7,"role":"ADVERBIAL_CLAUSE","translation":"直到旋律毫不费力"}
+      """.trimIndent(),
+      "sentences[0].components[0]",
+      "a PREDICATE must begin with the verb group; move the leading subject or noun phrase into its own component",
+    )
+  }
+
+  @Test
+  fun `rejects a PREDICATE that starts with a determiner`() {
+    assertGrammarError(
+      "The ancient bridge was rebuilt by local craftsmen.",
+      """
+      {"startToken":0,"endToken":4,"role":"PREDICATE","translation":"古桥被重建"},
+      {"startToken":5,"endToken":7,"role":"ADVERBIAL","translation":"由当地工匠"}
+      """.trimIndent(),
+      "sentences[0].components[0]",
+      "a PREDICATE must begin with the verb group; move the leading subject or noun phrase into its own component",
+    )
+  }
+
+  @Test
+  fun `accepts an imperative clause whose PREDICATE carries no subject`() {
+    // 祈使句本来就没有主语,所以缺主语不能直接判非法——只判「谓语开头不可能是动词」。
+    assertAccepted(
+      "Help turn ideas into designs.",
+      """
+      {"startToken":0,"endToken":1,"role":"PREDICATE","translation":"帮助转化"},
+      {"startToken":2,"endToken":2,"role":"OBJECT","translation":"想法"},
+      {"startToken":3,"endToken":4,"role":"ADVERBIAL","translation":"变成设计稿"}
+      """.trimIndent(),
+    )
+  }
+
+  @Test
+  fun `accepts a multi word verb group that begins with a modal`() {
+    assertAccepted(
+      "The documents must be archived immediately.",
+      """
+      {"startToken":0,"endToken":1,"role":"SUBJECT","translation":"这些文件"},
+      {"startToken":2,"endToken":4,"role":"PREDICATE","translation":"必须被归档"},
+      {"startToken":5,"endToken":5,"role":"ADVERBIAL","translation":"立即"}
+      """.trimIndent(),
+    )
+  }
+
+  @Test
+  fun `rejects a PREDICATE that swallows the object noun phrase`() {
+    // PEER_COMPONENT_RULE 只写在提示词里时没人拦:"writes the reports" 会整体标成谓语。
+    assertGrammarError(
+      "Maria writes the reports every Friday.",
+      """
+      {"startToken":0,"endToken":0,"role":"SUBJECT","translation":"玛丽亚"},
+      {"startToken":1,"endToken":3,"role":"PREDICATE","translation":"撰写报告"},
+      {"startToken":4,"endToken":5,"role":"ADVERBIAL","translation":"每周五"}
+      """.trimIndent(),
+      "sentences[0].components[1]",
+      "a PREDICATE must cover only the verb group; emit the noun phrase that starts at the determiner as its own OBJECT, PREDICATIVE, or COMPLEMENT component",
+    )
+  }
+
+  @Test
+  fun `accepts a PREDICATE that ends with the complementizer that`() {
+    // "that" 刻意不算限定词:它更常是宾语从句引导词,误拒的代价高于让粒度差一个词。
+    assertAccepted(
+      "The manager announced that the factory would close.",
+      """
+      {"startToken":0,"endToken":1,"role":"SUBJECT","translation":"经理"},
+      {"startToken":2,"endToken":3,"role":"PREDICATE","translation":"宣布"},
+      {"startToken":4,"endToken":7,"role":"OBJECT_CLAUSE","translation":"工厂将要关闭"}
+      """.trimIndent(),
+    )
+  }
+
+  @Test
+  fun `rejects a COORDINATE_CLAUSE introduced by a subordinating conjunction`() {
+    // CLAUSE_FIRST_RULE 按逗号触发,主从复合句于是被整成两个「并列分句」——语法上是错的。
+    assertGrammarError(
+      "Because the road was flooded, the bus took a longer route.",
+      """
+      {"startToken":0,"endToken":4,"role":"COORDINATE_CLAUSE","translation":"因为道路被淹"},
+      {"startToken":6,"endToken":11,"role":"COORDINATE_CLAUSE","translation":"公交车绕了远路"}
+      """.trimIndent(),
+      "sentences[0].components[0]",
+      "a clause introduced by a subordinating conjunction is not a COORDINATE_CLAUSE; tag it with one of the five subordinate clause roles and analyse the main clause as peer components",
+    )
+  }
+
+  @Test
+  fun `accepts a subordinate clause initial COORDINATE_CLAUSE when a coordinator joins the clauses`() {
+    // "Because A, B, and C" 里第一个并列分句本来就以从属连词开头,有 CONJUNCTION 就不判它。
+    assertAccepted(
+      "Because it rained, we stayed, and we slept.",
+      """
+      {"startToken":0,"endToken":5,"role":"COORDINATE_CLAUSE","translation":"因为下雨,我们留下了"},
+      {"startToken":7,"endToken":7,"role":"CONJUNCTION","translation":"而且"},
+      {"startToken":8,"endToken":9,"role":"COORDINATE_CLAUSE","translation":"我们睡了"}
+      """.trimIndent(),
+    )
+  }
+
+  @Test
+  fun `rejects one component covering the whole sentence whatever its role`() {
+    // 现有规则只拦 COORDINATE_CLAUSE;换成 SUBJECT 就一路通过,卡片退化成一整块译文。
+    assertGrammarError(
+      "The young engineer fixed the broken printer this morning.",
+      """{"startToken":0,"endToken":8,"role":"SUBJECT","translation":"年轻的工程师今早修好了坏掉的打印机"}""",
+      "sentences[0].components",
+      "one component must not cover the whole sentence; split it into peer components (subject, predicate, object, adverbial, …)",
+    )
+  }
+
+  @Test
+  fun `accepts a short fragment covered by one component`() {
+    // 三个实词以下的片段(标题、列表项)本来就没有可拆的同层结构,拆了只是噪音。
+    assertAccepted(
+      "Detailed usage instructions.",
+      """{"startToken":0,"endToken":3,"role":"SUBJECT","translation":"详细使用说明"}""",
+    )
+  }
+
   @Test
   fun `drops punctuation only components before core validation`() {
     val request = sentence("The service works.")

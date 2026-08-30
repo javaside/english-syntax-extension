@@ -121,7 +121,7 @@ MV3 把扩展拆成互不共享内存的几个世界。**每个模块能做什�
   │            │        └─ adapter.completeJson[Streaming]()
   │            │              流式时逐分片经 CoreStreamParser 上报暂定成分
   │            │              → SW 经端口推 CORE_STREAM(已脱敏)
-  │            ├─ validateCoreBatch()  结构/覆盖率 + 四条本地语法粒度硬约束
+  │            ├─ validateCoreBatch()  结构/覆盖率 + 八条本地语法粒度硬约束
   │            ├─ 不合格 → 错误文案原样进入一次 repair pass(jumpQueue,同优先级插队)
   │            └─ 合格 → 写缓存
   │

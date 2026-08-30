@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { GrammarRole } from "../shared/grammar";
+import { validateCoreBatch } from "./analysis-validator";
 import { tokenize } from "./segmenter";
 
 interface GoldComponent {
@@ -94,5 +95,30 @@ describe("core gold annotations", () => {
       expect(presentRoles.has(role), role).toBe(true);
     }
     expect(fixture.sentences.some(({ id }) => id.startsWith("non-finite-"))).toBe(true);
+  });
+
+  // 黄金集是「正确划分」的定义,所以它必须整份通过生产校验。缺了这条,新增的本地
+  // 语法硬门可能反过来把正确答案判非法,把合法分析送进无意义的修复轮——那比漏判更糟。
+  it("passes the production core validator sentence by sentence", () => {
+    for (const sentence of fixture.sentences) {
+      const request = {
+        sentenceId: sentence.id,
+        text: sentence.text,
+        tokens: tokenize(sentence.text),
+      };
+      const raw = {
+        sentences: [
+          {
+            sentenceId: sentence.id,
+            components: sentence.components.map((component) => ({
+              ...component,
+              translation: "译文",
+            })),
+          },
+        ],
+      };
+      const result = validateCoreBatch(raw, [request], "profile-1");
+      expect(result.ok ? [] : result.errors, `${sentence.id}: ${sentence.text}`).toEqual([]);
+    }
   });
 });
