@@ -56,55 +56,6 @@ describe("core analysis validation", () => {
     expect(result).toEqual({ ok: true, value: [expectedAnalysis] });
   });
 
-  it("accepts the compound-sentence roles COORDINATE_CLAUSE and CONJUNCTION", () => {
-    // 用真的并列句：CONJUNCTION 现在必须真的盖住一个并列连词。
-    const compound: SentenceInput = {
-      sentenceId: "sentence-1",
-      text: "Learners read and writers revise.",
-      tokens: tokenize("Learners read and writers revise."),
-    };
-    const result = validateCoreBatch(
-      {
-        sentences: [
-          {
-            sentenceId: "sentence-1",
-            components: [
-              { startToken: 0, endToken: 1, role: "COORDINATE_CLAUSE", translation: "第一分句" },
-              { startToken: 2, endToken: 2, role: "CONJUNCTION", translation: "并且" },
-              { startToken: 3, endToken: 5, role: "COORDINATE_CLAUSE", translation: "第二分句" },
-            ],
-          },
-        ],
-      },
-      [compound],
-      "profile-1",
-    );
-    expect(result).toEqual({
-      ok: true,
-      value: [
-        {
-          schemaVersion: CORE_SCHEMA_VERSION,
-          sentenceId: "sentence-1",
-          components: [
-            {
-              startToken: 0,
-              endToken: 1,
-              role: GrammarRole.COORDINATE_CLAUSE,
-              translation: "第一分句",
-            },
-            { startToken: 2, endToken: 2, role: GrammarRole.CONJUNCTION, translation: "并且" },
-            {
-              startToken: 3,
-              endToken: 5,
-              role: GrammarRole.COORDINATE_CLAUSE,
-              translation: "第二分句",
-            },
-          ],
-          modelProfileId: "profile-1",
-        },
-      ],
-    });
-  });
 
   it("reports the exact path and message for an uncovered lexical token", () => {
     const raw = structuredClone(rawCore);
@@ -251,27 +202,6 @@ describe("core analysis grammar constraints", () => {
     });
   });
 
-  it("reports an overlong translation and lone COORDINATE_CLAUSE together", () => {
-    const sentence = sentenceOf("Readers understand complex sentences.");
-    const errors = grammarErrors(sentence, [
-      {
-        startToken: 0,
-        endToken: 4,
-        role: "COORDINATE_CLAUSE",
-        translation: "译".repeat(501),
-      },
-    ]);
-
-    expect(errors).toContainEqual({
-      path: "sentences[0].components[0].translation",
-      message: "is too long",
-    });
-    expect(errors).toContainEqual({
-      path: "sentences[0].components",
-      message:
-        "a single clause must be split into peer components instead of one COORDINATE_CLAUSE; COORDINATE_CLAUSE requires at least two coordinate clauses",
-    });
-  });
 
   it("rejects two adjacent PREDICATE components and says to merge the verb group", () => {
     // "Help turn ideas" 实测被切成 Help / turn 两个谓语——PREDICATE_SCOPE_RULE 明令禁止。
@@ -335,27 +265,6 @@ describe("core analysis grammar constraints", () => {
     });
   });
 
-  it("accepts for as a coordinating CONJUNCTION instead of a bare preposition", () => {
-    const sentence = sentenceOf("I stayed, for it was raining.");
-    const result = validateCoreBatch(
-      {
-        sentences: [
-          {
-            sentenceId: sentence.sentenceId,
-            components: [
-              { startToken: 0, endToken: 1, role: "COORDINATE_CLAUSE", translation: "我留下了" },
-              { startToken: 3, endToken: 3, role: "CONJUNCTION", translation: "因为" },
-              { startToken: 4, endToken: 7, role: "COORDINATE_CLAUSE", translation: "当时在下雨" },
-            ],
-          },
-        ],
-      },
-      [sentence],
-      "profile-1",
-    );
-
-    expect(result.ok).toBe(true);
-  });
 
   it.each([
     [
@@ -405,19 +314,6 @@ describe("core analysis grammar constraints", () => {
     ).toBe(true);
   });
 
-  it("rejects a lone COORDINATE_CLAUSE and says to split the single clause", () => {
-    const sentence = sentenceOf("Readers understand complex sentences.");
-
-    expect(
-      grammarErrors(sentence, [
-        { startToken: 0, endToken: 3, role: "COORDINATE_CLAUSE", translation: "读者理解复杂句子" },
-      ]),
-    ).toContainEqual({
-      path: "sentences[0].components",
-      message:
-        "a single clause must be split into peer components instead of one COORDINATE_CLAUSE; COORDINATE_CLAUSE requires at least two coordinate clauses",
-    });
-  });
 
   it("rejects a CONJUNCTION that covers no coordinating conjunction", () => {
     const sentence = sentenceOf("Readers read books.");
@@ -564,49 +460,7 @@ describe("core analysis grammar constraints", () => {
     ).toBe(true);
   });
 
-  it("rejects a COORDINATE_CLAUSE introduced by a subordinating conjunction", () => {
-    // CLAUSE_FIRST_RULE 按逗号触发,主从复合句于是被整成两个「并列分句」——语法上是错的。
-    const sentence = sentenceOf("Because the road was flooded, the bus took a longer route.");
 
-    expect(
-      grammarErrors(sentence, [
-        { startToken: 0, endToken: 4, role: "COORDINATE_CLAUSE", translation: "因为道路被淹" },
-        { startToken: 6, endToken: 11, role: "COORDINATE_CLAUSE", translation: "公交车绕了远路" },
-      ]),
-    ).toContainEqual({
-      path: "sentences[0].components[0]",
-      message: SUBORDINATE_CLAUSE_MESSAGE,
-    });
-  });
-
-  it("accepts a subordinate-clause-initial COORDINATE_CLAUSE when a coordinator joins the clauses", () => {
-    // "Because A, B, and C" 里第一个并列分句本来就以从属连词开头,有 CONJUNCTION 就不判它。
-    const sentence = sentenceOf("Because it rained, we stayed, and we slept.");
-
-    expect(
-      validateCoreBatch(
-        {
-          sentences: [
-            {
-              sentenceId: sentence.sentenceId,
-              components: [
-                {
-                  startToken: 0,
-                  endToken: 5,
-                  role: "COORDINATE_CLAUSE",
-                  translation: "因为下雨,我们留下了",
-                },
-                { startToken: 7, endToken: 7, role: "CONJUNCTION", translation: "而且" },
-                { startToken: 8, endToken: 9, role: "COORDINATE_CLAUSE", translation: "我们睡了" },
-              ],
-            },
-          ],
-        },
-        [sentence],
-        "profile-1",
-      ).ok,
-    ).toBe(true);
-  });
 
   it("rejects one component covering the whole sentence whatever its role", () => {
     // 现有规则只拦 COORDINATE_CLAUSE;换成 SUBJECT 就一路通过,卡片退化成一整块译文。
@@ -649,10 +503,9 @@ describe("core analysis grammar constraints", () => {
     ).toBe(true);
   });
 
-  const UNJOINED_COORDINATE_MESSAGE =
-    "COORDINATE_CLAUSE is only for clauses joined by a coordinating conjunction tagged as its " +
-    "own CONJUNCTION component or by a semicolon; analyse a comma-joined or shared-subject " +
-    "sequence as peer components inside one clause";
+  const DEPRECATED_COORDINATE_MESSAGE =
+    "COORDINATE_CLAUSE is deprecated; analyse compound sentences as peer components " +
+    "(subject, predicate, object, …) with the coordinating conjunction tagged separately as CONJUNCTION";
 
   it("rejects COORDINATE_CLAUSE components that only commas join", () => {
     // 祈使句串曾被整成三个「并列分句」,读者看到的就是三整块译文而不是成分划分。
@@ -668,13 +521,29 @@ describe("core analysis grammar constraints", () => {
       ]),
     ).toContainEqual({
       path: "sentences[0].components",
-      message: UNJOINED_COORDINATE_MESSAGE,
+      message: DEPRECATED_COORDINATE_MESSAGE,
     });
   });
 
-  it("accepts COORDINATE_CLAUSE components that a semicolon joins", () => {
-    // 分号连接的并列句没有 CONJUNCTION 成分,不能因此判非法。
-    const sentence = sentenceOf("Routines run in the cloud; they keep running overnight.");
+  it("rejects COORDINATE_CLAUSE even when CONJUNCTION is present", () => {
+    // 并列句约定已废弃：真正各带主语的并列分句现在也按同层成分平铺,只保留 CONJUNCTION。
+    const sentence = sentenceOf("The team shipped the code, and the client reviewed it.");
+
+    expect(
+      grammarErrors(sentence, [
+        { startToken: 0, endToken: 4, role: "COORDINATE_CLAUSE", translation: "团队发布了代码" },
+        { startToken: 6, endToken: 6, role: "CONJUNCTION", translation: "而且" },
+        { startToken: 7, endToken: 10, role: "COORDINATE_CLAUSE", translation: "客户审查了它" },
+      ]),
+    ).toContainEqual({
+      path: "sentences[0].components",
+      message: DEPRECATED_COORDINATE_MESSAGE,
+    });
+  });
+
+  it("accepts peer components with CONJUNCTION for compound structure", () => {
+    // 正确的并列句标注：各分句的 subject/predicate/object 平铺,CONJUNCTION 单独标记。
+    const sentence = sentenceOf("The team shipped the code, and the client reviewed it.");
 
     expect(
       validateCoreBatch(
@@ -683,18 +552,13 @@ describe("core analysis grammar constraints", () => {
             {
               sentenceId: sentence.sentenceId,
               components: [
-                {
-                  startToken: 0,
-                  endToken: 4,
-                  role: "COORDINATE_CLAUSE",
-                  translation: "例程在云端运行",
-                },
-                {
-                  startToken: 6,
-                  endToken: 9,
-                  role: "COORDINATE_CLAUSE",
-                  translation: "它们整夜持续运行",
-                },
+                { startToken: 0, endToken: 1, role: "SUBJECT", translation: "团队" },
+                { startToken: 2, endToken: 2, role: "PREDICATE", translation: "发布了" },
+                { startToken: 3, endToken: 4, role: "OBJECT", translation: "代码" },
+                { startToken: 6, endToken: 6, role: "CONJUNCTION", translation: "而且" },
+                { startToken: 7, endToken: 8, role: "SUBJECT", translation: "客户" },
+                { startToken: 9, endToken: 9, role: "PREDICATE", translation: "审查了" },
+                { startToken: 10, endToken: 10, role: "OBJECT", translation: "它" },
               ],
             },
           ],

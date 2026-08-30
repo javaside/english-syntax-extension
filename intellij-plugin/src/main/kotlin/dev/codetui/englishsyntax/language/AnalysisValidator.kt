@@ -239,25 +239,16 @@ private fun collectGrammarErrors(
     )
   }
 
-  // SIMPLE_SENTENCE_RULE：并列需要至少两个分句，单主谓句不得包成 COORDINATE_CLAUSE。
+  // COORDINATE_CLAUSE 已废弃：并列句现在按同层成分平铺（各分句的 subject/predicate/
+  // object 等作为句子的顶层成分），并列连词单独标 CONJUNCTION。这样卡片才能显示成分
+  // 划分而不是几整块译文。旧的"包成两个 COORDINATE_CLAUSE"约定是「看着像翻译」的
+  // 主要来源，在扩展到真实散文后实测退化严重。
   val coordinateClauses = components.count { it.role == GrammarRole.COORDINATE_CLAUSE }
-  if (coordinateClauses == 1) {
+  if (coordinateClauses >= 1) {
     errors += error(
       "$path.components",
-      "a single clause must be split into peer components instead of one COORDINATE_CLAUSE; " +
-        "COORDINATE_CLAUSE requires at least two coordinate clauses",
-    )
-  }
-
-  // 并列句的定义就是「各分句自带主语 + 并列连词或分号连接」。逗号串起来的祈使句或
-  // 共享主语的并列谓语都不是并列句——把它们包成分句块，读者看到的就是几整块译文
-  // 而不是成分划分，而这一条正是「看着像翻译」的主要来源。
-  if (coordinateClauses >= 2 && !hasConjunction && tokens.none { it.punctuation && it.text == ";" }) {
-    errors += error(
-      "$path.components",
-      "COORDINATE_CLAUSE is only for clauses joined by a coordinating conjunction tagged as its own " +
-        "CONJUNCTION component or by a semicolon; analyse a comma-joined or shared-subject sequence " +
-        "as peer components inside one clause",
+      "COORDINATE_CLAUSE is deprecated; analyse compound sentences as peer components (subject, predicate, object, …) " +
+        "with the coordinating conjunction tagged separately as CONJUNCTION",
     )
   }
 }

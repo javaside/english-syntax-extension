@@ -89,11 +89,11 @@ describe("core gold annotations", () => {
       GrammarRole.OBJECT_CLAUSE,
       GrammarRole.ATTRIBUTIVE_CLAUSE,
       GrammarRole.ADVERBIAL_CLAUSE,
-      GrammarRole.COORDINATE_CLAUSE,
       GrammarRole.CONJUNCTION,
     ]) {
       expect(presentRoles.has(role), role).toBe(true);
     }
+    // COORDINATE_CLAUSE 不再要求：并列句现在按同层成分平铺，CONJUNCTION 单独标记
     expect(fixture.sentences.some(({ id }) => id.startsWith("non-finite-"))).toBe(true);
   });
 

@@ -662,8 +662,18 @@
       "components": [
         {
           "startToken": 0,
+          "endToken": 2,
+          "role": "SUBJECT"
+        },
+        {
+          "startToken": 3,
+          "endToken": 3,
+          "role": "PREDICATE"
+        },
+        {
+          "startToken": 4,
           "endToken": 4,
-          "role": "COORDINATE_CLAUSE"
+          "role": "ADVERBIAL"
         },
         {
           "startToken": 6,
@@ -672,8 +682,23 @@
         },
         {
           "startToken": 7,
+          "endToken": 8,
+          "role": "SUBJECT"
+        },
+        {
+          "startToken": 9,
+          "endToken": 9,
+          "role": "PREDICATE"
+        },
+        {
+          "startToken": 10,
+          "endToken": 10,
+          "role": "OBJECT"
+        },
+        {
+          "startToken": 11,
           "endToken": 11,
-          "role": "COORDINATE_CLAUSE"
+          "role": "ADVERBIAL"
         }
       ]
     },
@@ -750,8 +775,18 @@
       "components": [
         {
           "startToken": 0,
+          "endToken": 2,
+          "role": "SUBJECT"
+        },
+        {
+          "startToken": 3,
+          "endToken": 3,
+          "role": "PREDICATE"
+        },
+        {
+          "startToken": 4,
           "endToken": 5,
-          "role": "COORDINATE_CLAUSE"
+          "role": "OBJECT"
         },
         {
           "startToken": 7,
@@ -760,8 +795,18 @@
         },
         {
           "startToken": 8,
+          "endToken": 9,
+          "role": "SUBJECT"
+        },
+        {
+          "startToken": 10,
+          "endToken": 10,
+          "role": "PREDICATE"
+        },
+        {
+          "startToken": 11,
           "endToken": 12,
-          "role": "COORDINATE_CLAUSE"
+          "role": "OBJECT"
         }
       ]
     },
@@ -1248,8 +1293,18 @@
       "components": [
         {
           "startToken": 0,
+          "endToken": 0,
+          "role": "SUBJECT"
+        },
+        {
+          "startToken": 1,
+          "endToken": 1,
+          "role": "PREDICATE"
+        },
+        {
+          "startToken": 2,
           "endToken": 4,
-          "role": "COORDINATE_CLAUSE"
+          "role": "ADVERBIAL"
         },
         {
           "startToken": 6,
@@ -1258,8 +1313,23 @@
         },
         {
           "startToken": 7,
+          "endToken": 7,
+          "role": "SUBJECT"
+        },
+        {
+          "startToken": 8,
+          "endToken": 9,
+          "role": "PREDICATE"
+        },
+        {
+          "startToken": 10,
+          "endToken": 10,
+          "role": "ADVERBIAL"
+        },
+        {
+          "startToken": 11,
           "endToken": 15,
-          "role": "COORDINATE_CLAUSE"
+          "role": "ADVERBIAL_CLAUSE"
         }
       ]
     },

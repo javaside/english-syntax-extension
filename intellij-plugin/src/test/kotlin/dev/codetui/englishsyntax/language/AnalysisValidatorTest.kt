@@ -429,20 +429,40 @@ class AnalysisValidatorTest {
       {"startToken":8,"endToken":11,"role":"COORDINATE_CLAUSE","translation":"然后提出设计"}
       """.trimIndent(),
       "sentences[0].components",
-      "COORDINATE_CLAUSE is only for clauses joined by a coordinating conjunction tagged as its own " +
-        "CONJUNCTION component or by a semicolon; analyse a comma-joined or shared-subject sequence " +
-        "as peer components inside one clause",
+      "COORDINATE_CLAUSE is deprecated; analyse compound sentences as peer components (subject, predicate, object, …) " +
+        "with the coordinating conjunction tagged separately as CONJUNCTION",
     )
   }
 
   @Test
-  fun `accepts COORDINATE_CLAUSE components that a semicolon joins`() {
-    // 分号连接的并列句没有 CONJUNCTION 成分，不能因此判非法。
-    assertAccepted(
-      "Routines run in the cloud; they keep running overnight.",
+  fun `rejects COORDINATE_CLAUSE even when CONJUNCTION is present`() {
+    // 并列句约定已废弃：真正各带主语的并列分句现在也按同层成分平铺，只保留 CONJUNCTION。
+    assertGrammarError(
+      "The team shipped the code, and the client reviewed it.",
       """
-      {"startToken":0,"endToken":4,"role":"COORDINATE_CLAUSE","translation":"例程在云端运行"},
-      {"startToken":6,"endToken":9,"role":"COORDINATE_CLAUSE","translation":"它们整夜持续运行"}
+      {"startToken":0,"endToken":4,"role":"COORDINATE_CLAUSE","translation":"团队发布了代码"},
+      {"startToken":6,"endToken":6,"role":"CONJUNCTION","translation":"而且"},
+      {"startToken":7,"endToken":10,"role":"COORDINATE_CLAUSE","translation":"客户审查了它"}
+      """.trimIndent(),
+      "sentences[0].components",
+      "COORDINATE_CLAUSE is deprecated; analyse compound sentences as peer components (subject, predicate, object, …) " +
+        "with the coordinating conjunction tagged separately as CONJUNCTION",
+    )
+  }
+
+  @Test
+  fun `accepts peer components with CONJUNCTION for compound structure`() {
+    // 正确的并列句标注：各分句的 subject/predicate/object 平铺，CONJUNCTION 单独标记。
+    assertAccepted(
+      "The team shipped the code, and the client reviewed it.",
+      """
+      {"startToken":0,"endToken":1,"role":"SUBJECT","translation":"团队"},
+      {"startToken":2,"endToken":2,"role":"PREDICATE","translation":"发布了"},
+      {"startToken":3,"endToken":4,"role":"OBJECT","translation":"代码"},
+      {"startToken":6,"endToken":6,"role":"CONJUNCTION","translation":"而且"},
+      {"startToken":7,"endToken":8,"role":"SUBJECT","translation":"客户"},
+      {"startToken":9,"endToken":9,"role":"PREDICATE","translation":"审查了"},
+      {"startToken":10,"endToken":10,"role":"OBJECT","translation":"它"}
       """.trimIndent(),
     )
   }
