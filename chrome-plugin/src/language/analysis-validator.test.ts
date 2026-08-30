@@ -648,6 +648,62 @@ describe("core analysis grammar constraints", () => {
       ).ok,
     ).toBe(true);
   });
+
+  const UNJOINED_COORDINATE_MESSAGE =
+    "COORDINATE_CLAUSE is only for clauses joined by a coordinating conjunction tagged as its " +
+    "own CONJUNCTION component or by a semicolon; analyse a comma-joined or shared-subject " +
+    "sequence as peer components inside one clause";
+
+  it("rejects COORDINATE_CLAUSE components that only commas join", () => {
+    // 祈使句串曾被整成三个「并列分句」,读者看到的就是三整块译文而不是成分划分。
+    const sentence = sentenceOf(
+      "Ask clarifying questions, gather the constraints, then propose a design.",
+    );
+
+    expect(
+      grammarErrors(sentence, [
+        { startToken: 0, endToken: 2, role: "COORDINATE_CLAUSE", translation: "提出澄清问题" },
+        { startToken: 4, endToken: 6, role: "COORDINATE_CLAUSE", translation: "收集约束" },
+        { startToken: 8, endToken: 11, role: "COORDINATE_CLAUSE", translation: "然后提出设计" },
+      ]),
+    ).toContainEqual({
+      path: "sentences[0].components",
+      message: UNJOINED_COORDINATE_MESSAGE,
+    });
+  });
+
+  it("accepts COORDINATE_CLAUSE components that a semicolon joins", () => {
+    // 分号连接的并列句没有 CONJUNCTION 成分,不能因此判非法。
+    const sentence = sentenceOf("Routines run in the cloud; they keep running overnight.");
+
+    expect(
+      validateCoreBatch(
+        {
+          sentences: [
+            {
+              sentenceId: sentence.sentenceId,
+              components: [
+                {
+                  startToken: 0,
+                  endToken: 4,
+                  role: "COORDINATE_CLAUSE",
+                  translation: "例程在云端运行",
+                },
+                {
+                  startToken: 6,
+                  endToken: 9,
+                  role: "COORDINATE_CLAUSE",
+                  translation: "它们整夜持续运行",
+                },
+              ],
+            },
+          ],
+        },
+        [sentence],
+        "profile-1",
+      ).ok,
+    ).toBe(true);
+  });
 });
 
 const focus: TokenRange = { startToken: 1, endToken: 1 };

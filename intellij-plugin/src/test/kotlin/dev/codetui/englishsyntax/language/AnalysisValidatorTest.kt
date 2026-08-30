@@ -419,6 +419,35 @@ class AnalysisValidatorTest {
   }
 
   @Test
+  fun `rejects COORDINATE_CLAUSE components that only commas join`() {
+    // 祈使句串曾被整成三个「并列分句」，读者看到的就是三整块译文而不是成分划分。
+    assertGrammarError(
+      "Ask clarifying questions, gather the constraints, then propose a design.",
+      """
+      {"startToken":0,"endToken":2,"role":"COORDINATE_CLAUSE","translation":"提出澄清问题"},
+      {"startToken":4,"endToken":6,"role":"COORDINATE_CLAUSE","translation":"收集约束"},
+      {"startToken":8,"endToken":11,"role":"COORDINATE_CLAUSE","translation":"然后提出设计"}
+      """.trimIndent(),
+      "sentences[0].components",
+      "COORDINATE_CLAUSE is only for clauses joined by a coordinating conjunction tagged as its own " +
+        "CONJUNCTION component or by a semicolon; analyse a comma-joined or shared-subject sequence " +
+        "as peer components inside one clause",
+    )
+  }
+
+  @Test
+  fun `accepts COORDINATE_CLAUSE components that a semicolon joins`() {
+    // 分号连接的并列句没有 CONJUNCTION 成分，不能因此判非法。
+    assertAccepted(
+      "Routines run in the cloud; they keep running overnight.",
+      """
+      {"startToken":0,"endToken":4,"role":"COORDINATE_CLAUSE","translation":"例程在云端运行"},
+      {"startToken":6,"endToken":9,"role":"COORDINATE_CLAUSE","translation":"它们整夜持续运行"}
+      """.trimIndent(),
+    )
+  }
+
+  @Test
   fun `drops punctuation only components before core validation`() {
     val request = sentence("The service works.")
     val raw = core(

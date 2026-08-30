@@ -1,0 +1,76 @@
+
+===================================================================
+$ javap -classpath lib/app-client.jar -p com.intellij.platform.backend.documentation.AsyncDocumentation
+===================================================================
+Compiled from "classes.kt"
+public final class com.intellij.platform.backend.documentation.AsyncDocumentation implements com.intellij.platform.backend.documentation.DocumentationResult {
+  private final kotlin.jvm.functions.Function1<kotlin.coroutines.Continuation<? super com.intellij.platform.backend.documentation.DocumentationResult$Documentation>, java.lang.Object> supplier;
+  public com.intellij.platform.backend.documentation.AsyncDocumentation(kotlin.jvm.functions.Function1<? super kotlin.coroutines.Continuation<? super com.intellij.platform.backend.documentation.DocumentationResult$Documentation>, ? extends java.lang.Object>);
+  public final kotlin.jvm.functions.Function1<kotlin.coroutines.Continuation<? super com.intellij.platform.backend.documentation.DocumentationResult$Documentation>, java.lang.Object> getSupplier();
+}
+--- PermittedSubclasses of DocumentationResult (sealed hierarchy evidence) ---
+  #67 = Utf8               PermittedSubclasses
+{
+  public static final com.intellij.platform.backend.documentation.DocumentationResult$Companion Companion;
+    descriptor: Lcom/intellij/platform/backend/documentation/DocumentationResult$Companion;
+    flags: (0x0019) ACC_PUBLIC, ACC_STATIC, ACC_FINAL
+--
+PermittedSubclasses:
+  com/intellij/platform/backend/documentation/AsyncDocumentation
+  com/intellij/platform/backend/documentation/DocumentationResult$Documentation
+
+===================================================================
+$ javap -classpath lib/app-client.jar -p com.intellij.lang.documentation.psi.PsiElementDocumentationTarget
+===================================================================
+Compiled from "PsiElementDocumentationTarget.kt"
+public final class com.intellij.lang.documentation.psi.PsiElementDocumentationTarget implements com.intellij.platform.backend.documentation.DocumentationTarget {
+  private final com.intellij.psi.PsiElement targetElement;
+  private final com.intellij.psi.PsiElement sourceElement;
+  private final com.intellij.lang.documentation.psi.PsiElementDocumentationTarget$PsiElementDocumentationTargetPointer pointer;
+  private com.intellij.lang.documentation.psi.PsiElementDocumentationTarget(com.intellij.psi.PsiElement, com.intellij.psi.PsiElement, com.intellij.lang.documentation.psi.PsiElementDocumentationTarget$PsiElementDocumentationTargetPointer);
+  public final com.intellij.psi.PsiElement getTargetElement();
+  public com.intellij.lang.documentation.psi.PsiElementDocumentationTarget(com.intellij.openapi.project.Project, com.intellij.psi.PsiElement);
+  public com.intellij.lang.documentation.psi.PsiElementDocumentationTarget(com.intellij.openapi.project.Project, com.intellij.psi.PsiElement, com.intellij.psi.PsiElement);
+  public com.intellij.lang.documentation.psi.PsiElementDocumentationTarget(com.intellij.openapi.project.Project, com.intellij.psi.PsiElement, com.intellij.psi.PsiElement, java.lang.String);
+  public com.intellij.model.Pointer<? extends com.intellij.platform.backend.documentation.DocumentationTarget> createPointer();
+  public com.intellij.platform.backend.presentation.TargetPresentation computePresentation();
+  public com.intellij.pom.Navigatable getNavigatable();
+  public java.lang.String computeDocumentationHint();
+  public com.intellij.platform.backend.documentation.DocumentationResult computeDocumentation();
+  private final com.intellij.platform.backend.documentation.DocumentationResult doComputeDocumentation();
+  private final com.intellij.platform.backend.documentation.DocumentationData localDoc(com.intellij.lang.documentation.DocumentationProvider);
+  private final com.intellij.lang.documentation.DocumentationProvider$DocumentationParts localDocParts(com.intellij.lang.documentation.DocumentationProvider);
+  private static final com.intellij.platform.backend.documentation.DocumentationResult computeDocumentation$lambda$0(com.intellij.lang.documentation.psi.PsiElementDocumentationTarget);
+  public com.intellij.lang.documentation.psi.PsiElementDocumentationTarget(com.intellij.psi.PsiElement, com.intellij.psi.PsiElement, com.intellij.lang.documentation.psi.PsiElementDocumentationTarget$PsiElementDocumentationTargetPointer, kotlin.jvm.internal.DefaultConstructorMarker);
+}
+--- class-level annotations ---
+RuntimeVisibleAnnotations:
+  0: #263(#264=[I#265,I#266,I#266],#267=I#268,#269=I#270,#271=[s#272],#273=[s#24,s#274,s#12,s#13,s#16,s#19,s#20,s#7,s#8,s#29,s#41,s#28,s#38,s#61,s#275,s#43,s#25,s#26,s#71,s#276,s#74,s#277,s#278,s#279,s#82,s#83,s#86,s#100,s#280,s#129,s#141,s#193,s#191,s#192,s#199,s#228,s#281,s#282,s#283])
+    kotlin.Metadata(
+      mv=[2,0,0]
+      k=1
+      xi=48
+      d1=["\u0000^\n\u0002\u0018\u0002\n\u0002\u0018\u0002\n\u0000\n\u0002\u0018\u0002\n\u0002\b\u0002\n\u0002\u0018\u0002\n\u0002\b\u0003\n\u0002\u0018\u0002\n\u0002\b\u0003\n\u0002\u0010\u000e\n\u0002\b\u0004\n\u0002\u0018\u0002\n\u0000\n\u0002\u0018\u0002\n\u0000\n\u0002\u0018\u0002\n\u0002\b\u0004\n\u0002\u0018\u0002\n\u0002\b\u0002\n\u0002\u0018\u0002\n\u0000\n\u0002\u0018\u0002\n\u0000\n\u0002\u0018\u0002\n\u0002\u0018\u0002\n\u0002\b\u0002\b\u0007\u0018\u00002\u00020\u0001:\u0001%B#\b\u0002\u0012\u0006\u0010\u0002\u001a\u00020\u0003\u0012\b\u0010\u0004\u001a\u0004\u0018\u00010\u0003\u0012\u0006\u0010\u0005\u001a\u00020\u0006¢\u0006\u0004\b\u0007\u0010\bB\u0019\b\u0010\u0012\u0006\u0010\t\u001a\u00020\n\u0012\u0006\u0010\u0002\u001a\u00020\u0003¢\u0006\u0004\b\u0007\u0010\u000bB#\b\u0010\u0012\u0006\u0010\t\u001a\u00020\n\u0012\u0006\u0010\u0002\u001a\u00020\u0003\u0012\b\u0010\u0004\u001a\u0004\u0018\u00010\u0003¢\u0006\u0004\b\u0007\u0010\fB-\b\u0010\u0012\u0006\u0010\t\u001a\u00020\n\u0012\u0006\u0010\u0002\u001a\u00020\u0003\u0012\b\u0010\u0004\u001a\u0004\u0018\u00010\u0003\u0012\b\u0010\r\u001a\u0004\u0018\u00010\u000e¢\u0006\u0004\b\u0007\u0010\u000fJ\u0010\u0010\u0012\u001a\n\u0012\u0006\b\u0001\u0012\u00020\u00010\u0013H\u0016J\b\u0010\u0014\u001a\u00020\u0015H\u0016J\n\u0010\u001a\u001a\u0004\u0018\u00010\u000eH\u0016J\n\u0010\u001b\u001a\u0004\u0018\u00010\u001cH\u0016J\n\u0010\u001d\u001a\u0004\u0018\u00010\u001cH\u0002J\u0012\u0010\u001e\u001a\u0004\u0018\u00010\u001f2\u0006\u0010 \u001a\u00020!H\u0003J\u0017\u0010\"\u001a\t\u0018\u00010#¢\u0006\u0002\b$2\u0006\u0010 \u001a\u00020!H\u0003R\u0011\u0010\u0002\u001a\u00020\u0003¢\u0006\b\n\u0000\u001a\u0004\b\u0010\u0010\u0011R\u0010\u0010\u0004\u001a\u0004\u0018\u00010\u0003X\u0082\u0004¢\u0006\u0002\n\u0000R\u000e\u0010\u0005\u001a\u00020\u0006X\u0082\u0004¢\u0006\u0002\n\u0000R\u0016\u0010\u0016\u001a\u0004\u0018\u00010\u00178VX\u0096\u0004¢\u0006\u0006\u001a\u0004\b\u0018\u0010\u0019¨\u0006&"]
+      d2=["Lcom/intellij/lang/documentation/psi/PsiElementDocumentationTarget;","Lcom/intellij/platform/backend/documentation/DocumentationTarget;","targetElement","Lcom/intellij/psi/PsiElement;","sourceElement","pointer","Lcom/intellij/lang/documentation/psi/PsiElementDocumentationTarget$PsiElementDocumentationTargetPointer;","<init>","(Lcom/intellij/psi/PsiElement;Lcom/intellij/psi/PsiElement;Lcom/intellij/lang/documentation/psi/PsiElementDocumentationTarget$PsiElementDocumentationTargetPointer;)V","project","Lcom/intellij/openapi/project/Project;","(Lcom/intellij/openapi/project/Project;Lcom/intellij/psi/PsiElement;)V","(Lcom/intellij/openapi/project/Project;Lcom/intellij/psi/PsiElement;Lcom/intellij/psi/PsiElement;)V","anchor","","(Lcom/intellij/openapi/project/Project;Lcom/intellij/psi/PsiElement;Lcom/intellij/psi/PsiElement;Ljava/lang/String;)V","getTargetElement","()Lcom/intellij/psi/PsiElement;","createPointer","Lcom/intellij/model/Pointer;","computePresentation","Lcom/intellij/platform/backend/presentation/TargetPresentation;","navigatable","Lcom/intellij/pom/Navigatable;","getNavigatable","()Lcom/intellij/pom/Navigatable;","computeDocumentationHint","computeDocumentation","Lcom/intellij/platform/backend/documentation/DocumentationResult;","doComputeDocumentation","localDoc","Lcom/intellij/platform/backend/documentation/DocumentationData;","provider","Lcom/intellij/lang/documentation/DocumentationProvider;","localDocParts","Lcom/intellij/lang/documentation/DocumentationProvider$DocumentationParts;","Lorg/jetbrains/annotations/Nls;","PsiElementDocumentationTargetPointer","intellij.platform.lang.impl"]
+    )
+RuntimeInvisibleAnnotations:
+   #31 = Utf8               kotlin/jvm/internal/Intrinsics
+   #32 = Class              #31           // kotlin/jvm/internal/Intrinsics
+   #36 = Methodref          #32.#35       // kotlin/jvm/internal/Intrinsics.checkNotNullParameter:(Ljava/lang/Object;Ljava/lang/String;)V
+  #140 = Methodref          #32.#139      // kotlin/jvm/internal/Intrinsics.checkNotNullExpressionValue:(Ljava/lang/Object;Ljava/lang/String;)V
+  #224 = Utf8               (Lcom/intellij/platform/backend/documentation/DocumentationContentData;Lcom/intellij/platform/backend/documentation/LinkData;Ljava/lang/String;Lkotlinx/coroutines/flow/Flow;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+  #225 = NameAndType        #7:#224       // "<init>":(Lcom/intellij/platform/backend/documentation/DocumentationContentData;Lcom/intellij/platform/backend/documentation/LinkData;Ljava/lang/String;Lkotlinx/coroutines/flow/Flow;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+  #226 = Methodref          #171.#225     // com/intellij/platform/backend/documentation/DocumentationData."<init>":(Lcom/intellij/platform/backend/documentation/DocumentationContentData;Lcom/intellij/platform/backend/documentation/LinkData;Ljava/lang/String;Lkotlinx/coroutines/flow/Flow;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+  #259 = Utf8               (Lcom/intellij/psi/PsiElement;Lcom/intellij/psi/PsiElement;Lcom/intellij/lang/documentation/psi/PsiElementDocumentationTarget$PsiElementDocumentationTargetPointer;Lkotlin/jvm/internal/DefaultConstructorMarker;)V
+  #261 = Utf8               Lkotlin/jvm/internal/DefaultConstructorMarker;
+  #262 = Utf8               Lorg/jetbrains/annotations/VisibleForTesting;
+
+--- package-info of com.intellij.lang.documentation.psi (Internal marker) ---
+   #8 = Utf8               Lorg/jetbrains/annotations/ApiStatus$Internal;
+  #10 = Class              #11            // org/jetbrains/annotations/ApiStatus$Internal
+  #11 = Utf8               org/jetbrains/annotations/ApiStatus$Internal
+  #12 = Class              #13            // org/jetbrains/annotations/ApiStatus
+  #13 = Utf8               org/jetbrains/annotations/ApiStatus
+  #14 = Utf8               Internal
+    org.jetbrains.annotations.ApiStatus$Internal
+  public static #14= #10 of #12;          // Internal=class org/jetbrains/annotations/ApiStatus$Internal of class org/jetbrains/annotations/ApiStatus

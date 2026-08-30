@@ -275,6 +275,21 @@ function collectGrammarErrors(
       "a single clause must be split into peer components instead of one COORDINATE_CLAUSE; COORDINATE_CLAUSE requires at least two coordinate clauses",
     );
   }
+
+  // 并列句的定义就是「各分句自带主语 + 并列连词或分号连接」。逗号串起来的祈使句或
+  // 共享主语的并列谓语都不是并列句——把它们包成分句块,读者看到的就是几整块译文
+  // 而不是成分划分,而这一条正是「看着像翻译」的主要来源。
+  if (
+    coordinateClauses.length >= 2 &&
+    !hasConjunction &&
+    !tokens.some((token) => token.punctuation && token.text === ";")
+  ) {
+    addError(
+      errors,
+      `${path}.components`,
+      "COORDINATE_CLAUSE is only for clauses joined by a coordinating conjunction tagged as its own CONJUNCTION component or by a semicolon; analyse a comma-joined or shared-subject sequence as peer components inside one clause",
+    );
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -1,27 +1,75 @@
 {
   "messageVersion": 1,
   "coreSchemaVersion": 3,
-  "corePromptVersion": 6,
+  "corePromptVersion": 7,
   "detailPromptVersion": 5,
   "maxSentencesPerRequest": 6,
   "cloudSentencesPerRequest": 2,
   "roles": [
-    { "role": "SUBJECT", "label": "主语" },
-    { "role": "PREDICATE", "label": "谓语" },
-    { "role": "OBJECT", "label": "宾语" },
-    { "role": "PREDICATIVE", "label": "表语" },
-    { "role": "ATTRIBUTE", "label": "定语" },
-    { "role": "ADVERBIAL", "label": "状语" },
-    { "role": "COMPLEMENT", "label": "补语" },
-    { "role": "APPOSITIVE", "label": "同位语" },
-    { "role": "SUBJECT_CLAUSE", "label": "主语从句" },
-    { "role": "OBJECT_CLAUSE", "label": "宾语从句" },
-    { "role": "PREDICATIVE_CLAUSE", "label": "表语从句" },
-    { "role": "ATTRIBUTIVE_CLAUSE", "label": "定语从句" },
-    { "role": "ADVERBIAL_CLAUSE", "label": "状语从句" },
-    { "role": "INDEPENDENT_ELEMENT", "label": "独立成分" },
-    { "role": "COORDINATE_CLAUSE", "label": "并列分句" },
-    { "role": "CONJUNCTION", "label": "并列连词" }
+    {
+      "role": "SUBJECT",
+      "label": "主语"
+    },
+    {
+      "role": "PREDICATE",
+      "label": "谓语"
+    },
+    {
+      "role": "OBJECT",
+      "label": "宾语"
+    },
+    {
+      "role": "PREDICATIVE",
+      "label": "表语"
+    },
+    {
+      "role": "ATTRIBUTE",
+      "label": "定语"
+    },
+    {
+      "role": "ADVERBIAL",
+      "label": "状语"
+    },
+    {
+      "role": "COMPLEMENT",
+      "label": "补语"
+    },
+    {
+      "role": "APPOSITIVE",
+      "label": "同位语"
+    },
+    {
+      "role": "SUBJECT_CLAUSE",
+      "label": "主语从句"
+    },
+    {
+      "role": "OBJECT_CLAUSE",
+      "label": "宾语从句"
+    },
+    {
+      "role": "PREDICATIVE_CLAUSE",
+      "label": "表语从句"
+    },
+    {
+      "role": "ATTRIBUTIVE_CLAUSE",
+      "label": "定语从句"
+    },
+    {
+      "role": "ADVERBIAL_CLAUSE",
+      "label": "状语从句"
+    },
+    {
+      "role": "INDEPENDENT_ELEMENT",
+      "label": "独立成分"
+    },
+    {
+      "role": "COORDINATE_CLAUSE",
+      "label": "并列分句"
+    },
+    {
+      "role": "CONJUNCTION",
+      "label": "并列连词"
+    }
   ],
   "errorCodes": [
     "CONFIG_MISSING",

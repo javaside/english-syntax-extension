@@ -210,13 +210,13 @@
 
 ### I-17.2 本地可判的语法粒度规则必须进入双端 validator
 
-**规则** 不能只在 prompt 里要求模型遵守；TS/Kotlin `validateCoreBatch` 必须同步执行八条可判硬门（见 [protocol.md](./protocol.md) 第 6–13 条）。bare-preposition 仅对 role 不是 `CONJUNCTION`、去标点后恰好一个 lexical word 且命中**保守的高把握“必须带宾语”白名单**时生效；`after/before/down/off/over/since/until/around/inside/outside` 等常见副词/表语/连词兼类词不收。grammar 是否执行只看结构可信度（全部 component 都有可用 range/role/translation、区间句内、有序不重叠、非纯标点），不得被 unknown field、translation too long、sentenceId 等非结构错误阻断；两类错误必须可同次报告。错误英文文案逐字一致。
+**规则** 不能只在 prompt 里要求模型遵守；TS/Kotlin `validateCoreBatch` 必须同步执行九条可判硬门（见 [protocol.md](./protocol.md) 第 6–14 条）。bare-preposition 仅对 role 不是 `CONJUNCTION`、去标点后恰好一个 lexical word 且命中**保守的高把握“必须带宾语”白名单**时生效；`after/before/down/off/over/since/until/around/inside/outside` 等常见副词/表语/连词兼类词不收。grammar 是否执行只看结构可信度（全部 component 都有可用 range/role/translation、区间句内、有序不重叠、非纯标点），不得被 unknown field、translation too long、sentenceId 等非结构错误阻断；两类错误必须可同次报告。错误英文文案逐字一致。
 
 **为什么** prompt 只是生成建议，未被 validator 拒绝的违规结果会直接进入跨 profile 共用缓存。错误文案又会被 repair prompt 原样引用，因此它同时是可执行修复指令。
 
 **症状** 模型偶发把动词链/介词短语切碎或把简单句套成单个并列分句，首轮仍被当作成功缓存；双端若文案不同，同一错误会收到不同 repair 指令。
 
-**守护测试** 双端 `AnalysisValidatorTest` / `analysis-validator.test.ts` 的八类语法粒度用例，正反两侧都要有（每条硬门既有 reject 用例，也有证明它不误拒的 accept 用例：祈使句无主语、以情态动词开头的动词组、`announced that`、有 `CONJUNCTION` 的从属连词起首并列分句、三实词以内的片段）。`core-gold-annotations.test.ts` 的 `passes the production core validator sentence by sentence` 再把整份黄金集压上——新硬门把正确答案判非法比漏判更糟。
+**守护测试** 双端 `AnalysisValidatorTest` / `analysis-validator.test.ts` 的九类语法粒度用例，正反两侧都要有（每条硬门既有 reject 用例，也有证明它不误拒的 accept 用例：祈使句无主语、以情态动词开头的动词组、`announced that`、有 `CONJUNCTION` 的从属连词起首并列分句、三实词以内的片段）。`core-gold-annotations.test.ts` 的 `passes the production core validator sentence by sentence` 再把整份黄金集压上——新硬门把正确答案判非法比漏判更糟。
 
 ### I-18 详解缓存键两侧必须同构
 
