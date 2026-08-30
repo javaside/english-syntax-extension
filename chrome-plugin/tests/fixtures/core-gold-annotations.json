@@ -1,14 +1,5 @@
 {
-  "conventions": [
-    "核心层只切短语级同层成分。普通限定词或紧密结合的单词级形容词与中心名词整体构成 SUBJECT / OBJECT / PREDICATIVE 等，不机械地把每个前置修饰都拆成 ATTRIBUTE。",
-    "ATTRIBUTE 表示名词短语内部可独立成短语的修饰语，既可以前置（如 'fully formed designs' 中短语级的 'fully formed'），也可以后置（如 'The documents signed yesterday' 中的 'signed yesterday'）；拆出后，中心名词短语承担 SUBJECT / OBJECT 等同层角色。",
-    "介词与它管辖的一切优先合为一个 ADVERBIAL 或 ATTRIBUTE；因此 'into fully formed designs and specs' 整体标 ADVERBIAL，不在介词短语内部再拆 'fully formed'。并列的副词或名词（'calmly and confidently'）也保持一个成分，其中的 and 不标 CONJUNCTION。",
-    "标点刻意不覆盖：校验规则允许标点不被任何成分覆盖，渲染层按源 Token 画回原位。",
-    "刻意排除了内部有歧义的句子（谓语被副词割开、名词后接介词短语），免得基线指标被标注争议污染。",
-    "id 带 doc- 前缀的句子逐字取自真实技术文档（code.claude.com/docs 的 Claude Code 概览页），用来测真实输入分布：无前缀的那批是精选教学句，句长与句式都比实际网页/文档窄，单靠它无法判断线上准确率。",
-    "共享主语的并列谓语不是并列句：'Claude Code traces the issue…, identifies…, and implements a fix.' 里三个动词共用一个主语，各谓语与其宾语按同层成分平铺，连接它们的 and / or 标 CONJUNCTION，不标 COORDINATE_CLAUSE。",
-    "只有各分句自带主语、由 FANBOYS 或分号连接时才整体标 COORDINATE_CLAUSE；逗号引导的从属分句一律标五类从句之一（'If Git for Windows is not installed, …' 里前半是 ADVERBIAL_CLAUSE，主句照旧拆同层成分）。"
-  ],
+  "contractVersion": null,
   "sentences": [
     {
       "id": "basic-svo-1",
@@ -1361,6 +1352,1206 @@
           "startToken": 10,
           "endToken": 11,
           "role": "COMPLEMENT"
+        }
+      ]
+    },
+    {
+      "sentenceId": "auto-gen-003",
+      "text": "It's something you build in from the first line of code.",
+      "components": [
+        {
+          "startToken": 0,
+          "endToken": 0,
+          "role": "SUBJECT",
+          "translation": "它"
+        },
+        {
+          "startToken": 1,
+          "endToken": 1,
+          "role": "PREDICATIVE",
+          "translation": "是某种东西"
+        },
+        {
+          "startToken": 2,
+          "endToken": 2,
+          "role": "SUBJECT",
+          "translation": "你"
+        },
+        {
+          "startToken": 3,
+          "endToken": 4,
+          "role": "PREDICATE",
+          "translation": "构建进去"
+        },
+        {
+          "startToken": 5,
+          "endToken": 10,
+          "role": "ADVERBIAL",
+          "translation": "从第一行代码开始"
+        }
+      ]
+    },
+    {
+      "sentenceId": "auto-gen-007",
+      "text": "That means building security into every phase, from planning and design to testing and deployment.",
+      "components": [
+        {
+          "startToken": 0,
+          "endToken": 0,
+          "role": "SUBJECT",
+          "translation": "那"
+        },
+        {
+          "startToken": 1,
+          "endToken": 1,
+          "role": "PREDICATE",
+          "translation": "意味着"
+        },
+        {
+          "startToken": 2,
+          "endToken": 3,
+          "role": "OBJECT",
+          "translation": "构建安全性"
+        },
+        {
+          "startToken": 4,
+          "endToken": 6,
+          "role": "ADVERBIAL",
+          "translation": "进入每个阶段"
+        },
+        {
+          "startToken": 8,
+          "endToken": 15,
+          "role": "ADVERBIAL",
+          "translation": "从规划和设计到测试和部署"
+        }
+      ]
+    },
+    {
+      "sentenceId": "auto-gen-008",
+      "text": "No amount of firewalls or patches can save bad code.",
+      "components": [
+        {
+          "startToken": 0,
+          "endToken": 1,
+          "role": "SUBJECT",
+          "translation": "再多的"
+        },
+        {
+          "startToken": 2,
+          "endToken": 5,
+          "role": "ATTRIBUTE",
+          "translation": "防火墙或补丁的"
+        },
+        {
+          "startToken": 6,
+          "endToken": 7,
+          "role": "PREDICATE",
+          "translation": "能拯救"
+        },
+        {
+          "startToken": 8,
+          "endToken": 9,
+          "role": "OBJECT",
+          "translation": "糟糕的代码"
+        }
+      ]
+    },
+    {
+      "sentenceId": "auto-gen-009",
+      "text": "If the foundation's weak, everything else cracks.",
+      "components": [
+        {
+          "startToken": 0,
+          "endToken": 3,
+          "role": "ADVERBIAL_CLAUSE",
+          "translation": "如果基础薄弱"
+        },
+        {
+          "startToken": 5,
+          "endToken": 6,
+          "role": "SUBJECT",
+          "translation": "其他一切"
+        },
+        {
+          "startToken": 7,
+          "endToken": 7,
+          "role": "PREDICATE",
+          "translation": "破裂"
+        }
+      ]
+    },
+    {
+      "sentenceId": "auto-gen-010",
+      "text": "Your APIs are the front door.",
+      "components": [
+        {
+          "startToken": 0,
+          "endToken": 1,
+          "role": "SUBJECT",
+          "translation": "你的API"
+        },
+        {
+          "startToken": 2,
+          "endToken": 2,
+          "role": "PREDICATE",
+          "translation": "是"
+        },
+        {
+          "startToken": 3,
+          "endToken": 5,
+          "role": "PREDICATIVE",
+          "translation": "前门"
+        }
+      ]
+    },
+    {
+      "sentenceId": "auto-gen-011",
+      "text": "The author prefers calling them software engineering practices rather than best practices because what works well in one context may not work elsewhere.",
+      "components": [
+        {
+          "startToken": 0,
+          "endToken": 1,
+          "role": "SUBJECT",
+          "translation": "作者"
+        },
+        {
+          "startToken": 2,
+          "endToken": 2,
+          "role": "PREDICATE",
+          "translation": "更喜欢"
+        },
+        {
+          "startToken": 3,
+          "endToken": 7,
+          "role": "OBJECT",
+          "translation": "称它们为软件工程实践"
+        },
+        {
+          "startToken": 8,
+          "endToken": 11,
+          "role": "ADVERBIAL",
+          "translation": "而不是最佳实践"
+        },
+        {
+          "startToken": 12,
+          "endToken": 22,
+          "role": "ADVERBIAL_CLAUSE",
+          "translation": "因为在一种情境下有效的方法在别处可能无效"
+        }
+      ]
+    },
+    {
+      "sentenceId": "auto-gen-012",
+      "text": "Code reviews are widely beneficial but not always optimal.",
+      "components": [
+        {
+          "startToken": 0,
+          "endToken": 1,
+          "role": "SUBJECT",
+          "translation": "代码审查"
+        },
+        {
+          "startToken": 2,
+          "endToken": 4,
+          "role": "PREDICATE",
+          "translation": "是广泛有益的"
+        },
+        {
+          "startToken": 5,
+          "endToken": 5,
+          "role": "CONJUNCTION",
+          "translation": "但是"
+        },
+        {
+          "startToken": 6,
+          "endToken": 8,
+          "role": "PREDICATIVE",
+          "translation": "并非总是最优的"
+        }
+      ]
+    },
+    {
+      "sentenceId": "auto-gen-013",
+      "text": "Every practice has tradeoffs.",
+      "components": [
+        {
+          "startToken": 0,
+          "endToken": 1,
+          "role": "SUBJECT",
+          "translation": "每种实践"
+        },
+        {
+          "startToken": 2,
+          "endToken": 2,
+          "role": "PREDICATE",
+          "translation": "有"
+        },
+        {
+          "startToken": 3,
+          "endToken": 3,
+          "role": "OBJECT",
+          "translation": "权衡取舍"
+        }
+      ]
+    },
+    {
+      "sentenceId": "auto-gen-014",
+      "text": "Be clear about current issues and their impact.",
+      "components": [
+        {
+          "startToken": 0,
+          "endToken": 1,
+          "role": "PREDICATE",
+          "translation": "要清楚"
+        },
+        {
+          "startToken": 2,
+          "endToken": 7,
+          "role": "ADVERBIAL",
+          "translation": "关于当前问题及其影响"
+        }
+      ]
+    },
+    {
+      "sentenceId": "auto-gen-015",
+      "text": "The article stresses avoiding blind adoption of practices just because they worked elsewhere.",
+      "components": [
+        {
+          "startToken": 0,
+          "endToken": 1,
+          "role": "SUBJECT",
+          "translation": "这篇文章"
+        },
+        {
+          "startToken": 2,
+          "endToken": 2,
+          "role": "PREDICATE",
+          "translation": "强调"
+        },
+        {
+          "startToken": 3,
+          "endToken": 3,
+          "role": "OBJECT",
+          "translation": "避免"
+        },
+        {
+          "startToken": 4,
+          "endToken": 5,
+          "role": "OBJECT",
+          "translation": "盲目采用"
+        },
+        {
+          "startToken": 6,
+          "endToken": 7,
+          "role": "ATTRIBUTE",
+          "translation": "实践的"
+        },
+        {
+          "startToken": 8,
+          "endToken": 12,
+          "role": "ADVERBIAL_CLAUSE",
+          "translation": "仅仅因为它们在其他地方有效"
+        }
+      ]
+    },
+    {
+      "sentenceId": "auto-gen-016",
+      "text": "Vibe coding is building a software application by prompting an LLM, telling it what to build, trying it out, prompting for changes - but without looking at any of the code that the LLM generates.",
+      "components": [
+        {
+          "startToken": 0,
+          "endToken": 1,
+          "role": "SUBJECT",
+          "translation": "氛围编码"
+        },
+        {
+          "startToken": 2,
+          "endToken": 2,
+          "role": "PREDICATE",
+          "translation": "是"
+        },
+        {
+          "startToken": 3,
+          "endToken": 3,
+          "role": "PREDICATIVE",
+          "translation": "构建"
+        },
+        {
+          "startToken": 4,
+          "endToken": 6,
+          "role": "OBJECT",
+          "translation": "一个软件应用程序"
+        },
+        {
+          "startToken": 7,
+          "endToken": 10,
+          "role": "ADVERBIAL",
+          "translation": "通过提示一个LLM"
+        },
+        {
+          "startToken": 12,
+          "endToken": 16,
+          "role": "ADVERBIAL",
+          "translation": "告诉它要构建什么"
+        },
+        {
+          "startToken": 18,
+          "endToken": 20,
+          "role": "ADVERBIAL",
+          "translation": "尝试它"
+        },
+        {
+          "startToken": 22,
+          "endToken": 24,
+          "role": "ADVERBIAL",
+          "translation": "提示更改"
+        },
+        {
+          "startToken": 26,
+          "endToken": 26,
+          "role": "CONJUNCTION",
+          "translation": "但是"
+        },
+        {
+          "startToken": 27,
+          "endToken": 33,
+          "role": "ADVERBIAL",
+          "translation": "不查看任何代码"
+        },
+        {
+          "startToken": 34,
+          "endToken": 37,
+          "role": "ATTRIBUTIVE_CLAUSE",
+          "translation": "LLM生成的"
+        }
+      ]
+    },
+    {
+      "sentenceId": "auto-gen-019",
+      "text": "The obvious way to do this is for a human to write this context, but an alternative is to use an LLM to write this context after interviewing a human.",
+      "components": [
+        {
+          "startToken": 0,
+          "endToken": 5,
+          "role": "SUBJECT",
+          "translation": "做这件事的明显方式"
+        },
+        {
+          "startToken": 6,
+          "endToken": 6,
+          "role": "PREDICATE",
+          "translation": "是"
+        },
+        {
+          "startToken": 7,
+          "endToken": 13,
+          "role": "PREDICATIVE",
+          "translation": "让人类写这个上下文"
+        },
+        {
+          "startToken": 15,
+          "endToken": 15,
+          "role": "CONJUNCTION",
+          "translation": "但是"
+        },
+        {
+          "startToken": 16,
+          "endToken": 17,
+          "role": "SUBJECT",
+          "translation": "另一种选择"
+        },
+        {
+          "startToken": 18,
+          "endToken": 18,
+          "role": "PREDICATE",
+          "translation": "是"
+        },
+        {
+          "startToken": 19,
+          "endToken": 26,
+          "role": "PREDICATIVE",
+          "translation": "使用LLM写这个上下文"
+        },
+        {
+          "startToken": 27,
+          "endToken": 30,
+          "role": "ADVERBIAL",
+          "translation": "在采访人类之后"
+        }
+      ]
+    },
+    {
+      "sentenceId": "auto-gen-021",
+      "text": "Teams that ship frequently and recover fast outperform peers on every business metric that matters.",
+      "components": [
+        {
+          "startToken": 0,
+          "endToken": 0,
+          "role": "SUBJECT",
+          "translation": "团队"
+        },
+        {
+          "startToken": 1,
+          "endToken": 6,
+          "role": "ATTRIBUTIVE_CLAUSE",
+          "translation": "频繁发布且快速恢复的"
+        },
+        {
+          "startToken": 7,
+          "endToken": 7,
+          "role": "PREDICATE",
+          "translation": "超越"
+        },
+        {
+          "startToken": 8,
+          "endToken": 8,
+          "role": "OBJECT",
+          "translation": "同行"
+        },
+        {
+          "startToken": 9,
+          "endToken": 12,
+          "role": "ADVERBIAL",
+          "translation": "在每一个业务指标上"
+        },
+        {
+          "startToken": 13,
+          "endToken": 14,
+          "role": "ATTRIBUTIVE_CLAUSE",
+          "translation": "重要的"
+        }
+      ]
+    },
+    {
+      "sentenceId": "auto-gen-022",
+      "text": "Elite performers deploy on demand and achieve a mean time to recovery under one hour.",
+      "components": [
+        {
+          "startToken": 0,
+          "endToken": 1,
+          "role": "SUBJECT",
+          "translation": "精英执行者"
+        },
+        {
+          "startToken": 2,
+          "endToken": 2,
+          "role": "PREDICATE",
+          "translation": "部署"
+        },
+        {
+          "startToken": 3,
+          "endToken": 4,
+          "role": "ADVERBIAL",
+          "translation": "按需"
+        },
+        {
+          "startToken": 5,
+          "endToken": 5,
+          "role": "CONJUNCTION",
+          "translation": "并且"
+        },
+        {
+          "startToken": 6,
+          "endToken": 6,
+          "role": "PREDICATE",
+          "translation": "实现"
+        },
+        {
+          "startToken": 7,
+          "endToken": 9,
+          "role": "OBJECT",
+          "translation": "平均时间"
+        },
+        {
+          "startToken": 10,
+          "endToken": 11,
+          "role": "ATTRIBUTE",
+          "translation": "恢复的"
+        },
+        {
+          "startToken": 12,
+          "endToken": 14,
+          "role": "ATTRIBUTE",
+          "translation": "一小时内"
+        }
+      ]
+    },
+    {
+      "sentenceId": "auto-gen-025",
+      "text": "For unit test coverage, 70–80% is the defensible target.",
+      "components": [
+        {
+          "startToken": 0,
+          "endToken": 3,
+          "role": "ADVERBIAL",
+          "translation": "为了单元测试覆盖率"
+        },
+        {
+          "startToken": 5,
+          "endToken": 8,
+          "role": "SUBJECT",
+          "translation": "70–80%"
+        },
+        {
+          "startToken": 9,
+          "endToken": 9,
+          "role": "PREDICATE",
+          "translation": "是"
+        },
+        {
+          "startToken": 10,
+          "endToken": 12,
+          "role": "PREDICATIVE",
+          "translation": "可辩护的目标"
+        }
+      ]
+    },
+    {
+      "sentenceId": "auto-gen-027",
+      "text": "A free model called Ox Alpha appeared online, performing near the frontier of what AI can do, and nobody will even say who built it.",
+      "components": [
+        {
+          "startToken": 0,
+          "endToken": 2,
+          "role": "SUBJECT",
+          "translation": "一个免费的模型"
+        },
+        {
+          "startToken": 3,
+          "endToken": 5,
+          "role": "ATTRIBUTE",
+          "translation": "被称为Ox Alpha的"
+        },
+        {
+          "startToken": 6,
+          "endToken": 6,
+          "role": "PREDICATE",
+          "translation": "出现"
+        },
+        {
+          "startToken": 7,
+          "endToken": 7,
+          "role": "ADVERBIAL",
+          "translation": "在线"
+        },
+        {
+          "startToken": 9,
+          "endToken": 9,
+          "role": "PREDICATE",
+          "translation": "表现"
+        },
+        {
+          "startToken": 10,
+          "endToken": 13,
+          "role": "ADVERBIAL",
+          "translation": "接近前沿"
+        },
+        {
+          "startToken": 14,
+          "endToken": 17,
+          "role": "OBJECT_CLAUSE",
+          "translation": "AI能做的"
+        },
+        {
+          "startToken": 19,
+          "endToken": 19,
+          "role": "CONJUNCTION",
+          "translation": "并且"
+        },
+        {
+          "startToken": 20,
+          "endToken": 20,
+          "role": "SUBJECT",
+          "translation": "没有人"
+        },
+        {
+          "startToken": 21,
+          "endToken": 23,
+          "role": "PREDICATE",
+          "translation": "甚至会说出"
+        },
+        {
+          "startToken": 24,
+          "endToken": 26,
+          "role": "OBJECT_CLAUSE",
+          "translation": "谁建造了它"
+        }
+      ]
+    },
+    {
+      "sentenceId": "auto-gen-028",
+      "text": "Intelligence, as a product, is deflating in real time.",
+      "components": [
+        {
+          "startToken": 0,
+          "endToken": 0,
+          "role": "SUBJECT",
+          "translation": "情报"
+        },
+        {
+          "startToken": 2,
+          "endToken": 4,
+          "role": "INDEPENDENT_ELEMENT",
+          "translation": "作为一种产品"
+        },
+        {
+          "startToken": 6,
+          "endToken": 7,
+          "role": "PREDICATE",
+          "translation": "正在贬值"
+        },
+        {
+          "startToken": 8,
+          "endToken": 10,
+          "role": "ADVERBIAL",
+          "translation": "实时地"
+        }
+      ]
+    },
+    {
+      "sentenceId": "auto-gen-029",
+      "text": "The trouble starts only when the arithmetic flips, when what AI sells for falls faster than the expense of building it.",
+      "components": [
+        {
+          "startToken": 0,
+          "endToken": 1,
+          "role": "SUBJECT",
+          "translation": "麻烦"
+        },
+        {
+          "startToken": 2,
+          "endToken": 2,
+          "role": "PREDICATE",
+          "translation": "开始"
+        },
+        {
+          "startToken": 3,
+          "endToken": 3,
+          "role": "ADVERBIAL",
+          "translation": "仅仅"
+        },
+        {
+          "startToken": 4,
+          "endToken": 7,
+          "role": "ADVERBIAL_CLAUSE",
+          "translation": "当算术翻转时"
+        },
+        {
+          "startToken": 9,
+          "endToken": 21,
+          "role": "ADVERBIAL_CLAUSE",
+          "translation": "当AI的售价下降快于建造它的费用时"
+        }
+      ]
+    },
+    {
+      "sentenceId": "auto-gen-030",
+      "text": "Some of Nvidia Corp.'s biggest customers have been told that the prices of servers containing its AI chips are going up more than 15% in many systems to be shipped early next year.",
+      "components": [
+        {
+          "startToken": 0,
+          "endToken": 7,
+          "role": "SUBJECT",
+          "translation": "英伟达公司的一些最大客户"
+        },
+        {
+          "startToken": 8,
+          "endToken": 10,
+          "role": "PREDICATE",
+          "translation": "已被告知"
+        },
+        {
+          "startToken": 11,
+          "endToken": 35,
+          "role": "OBJECT_CLAUSE",
+          "translation": "包含其AI芯片的服务器价格在许多将于明年初发货的系统中将上涨超过15%"
+        }
+      ]
+    },
+    {
+      "sentenceId": "auto-gen-033",
+      "text": "Chemotherapy, particularly with platinum-based drugs, is associated with substantial, rapidly detectable mutagenesis in childhood cancers.",
+      "components": [
+        {
+          "startToken": 0,
+          "endToken": 0,
+          "role": "SUBJECT",
+          "translation": "化疗"
+        },
+        {
+          "startToken": 2,
+          "endToken": 6,
+          "role": "INDEPENDENT_ELEMENT",
+          "translation": "特别是使用铂类药物的"
+        },
+        {
+          "startToken": 7,
+          "endToken": 8,
+          "role": "PREDICATE",
+          "translation": "与...相关"
+        },
+        {
+          "startToken": 9,
+          "endToken": 17,
+          "role": "ADVERBIAL",
+          "translation": "与儿童癌症中大量、快速可检测的突变发生相关"
+        }
+      ]
+    },
+    {
+      "sentenceId": "auto-gen-034",
+      "text": "Four of the biggest US technology companies together have forecast capital expenditures that will reach about $650 billion in 2026.",
+      "components": [
+        {
+          "startToken": 0,
+          "endToken": 6,
+          "role": "SUBJECT",
+          "translation": "美国最大的四家科技公司"
+        },
+        {
+          "startToken": 7,
+          "endToken": 7,
+          "role": "ADVERBIAL",
+          "translation": "共同"
+        },
+        {
+          "startToken": 8,
+          "endToken": 9,
+          "role": "PREDICATE",
+          "translation": "已经预测"
+        },
+        {
+          "startToken": 10,
+          "endToken": 11,
+          "role": "OBJECT",
+          "translation": "资本支出"
+        },
+        {
+          "startToken": 12,
+          "endToken": 14,
+          "role": "ATTRIBUTIVE_CLAUSE",
+          "translation": "将达到"
+        },
+        {
+          "startToken": 15,
+          "endToken": 18,
+          "role": "OBJECT",
+          "translation": "约6500亿美元"
+        },
+        {
+          "startToken": 19,
+          "endToken": 20,
+          "role": "ADVERBIAL",
+          "translation": "在2026年"
+        }
+      ]
+    },
+    {
+      "sentenceId": "auto-gen-035",
+      "text": "Apple tests Siri feature that handles multiple commands at once.",
+      "components": [
+        {
+          "startToken": 0,
+          "endToken": 0,
+          "role": "SUBJECT",
+          "translation": "苹果"
+        },
+        {
+          "startToken": 1,
+          "endToken": 1,
+          "role": "PREDICATE",
+          "translation": "测试"
+        },
+        {
+          "startToken": 2,
+          "endToken": 3,
+          "role": "OBJECT",
+          "translation": "Siri功能"
+        },
+        {
+          "startToken": 4,
+          "endToken": 4,
+          "role": "ATTRIBUTIVE_CLAUSE",
+          "translation": "处理"
+        },
+        {
+          "startToken": 5,
+          "endToken": 5,
+          "role": "PREDICATE",
+          "translation": "处理"
+        },
+        {
+          "startToken": 6,
+          "endToken": 7,
+          "role": "OBJECT",
+          "translation": "多个命令"
+        },
+        {
+          "startToken": 8,
+          "endToken": 9,
+          "role": "ADVERBIAL",
+          "translation": "一次"
+        }
+      ]
+    },
+    {
+      "sentenceId": "retry-003",
+      "text": "That means developers now play a frontline role.",
+      "components": [
+        {
+          "startToken": 0,
+          "endToken": 0,
+          "role": "SUBJECT",
+          "translation": "那"
+        },
+        {
+          "startToken": 1,
+          "endToken": 1,
+          "role": "PREDICATE",
+          "translation": "意味着"
+        },
+        {
+          "startToken": 2,
+          "endToken": 2,
+          "role": "SUBJECT_CLAUSE",
+          "translation": "开发者"
+        },
+        {
+          "startToken": 3,
+          "endToken": 3,
+          "role": "ADVERBIAL",
+          "translation": "现在"
+        },
+        {
+          "startToken": 4,
+          "endToken": 4,
+          "role": "PREDICATE",
+          "translation": "扮演"
+        },
+        {
+          "startToken": 5,
+          "endToken": 7,
+          "role": "OBJECT",
+          "translation": "一线角色"
+        }
+      ]
+    },
+    {
+      "sentenceId": "retry-004",
+      "text": "Whether you're writing an API, pushing to production, or fixing bugs, security needs to be part of the muscle memory.",
+      "components": [
+        {
+          "startToken": 0,
+          "endToken": 12,
+          "role": "ADVERBIAL_CLAUSE",
+          "translation": "无论你是在编写API、推送到生产环境还是修复漏洞"
+        },
+        {
+          "startToken": 14,
+          "endToken": 14,
+          "role": "SUBJECT",
+          "translation": "安全"
+        },
+        {
+          "startToken": 15,
+          "endToken": 17,
+          "role": "PREDICATE",
+          "translation": "需要成为"
+        },
+        {
+          "startToken": 18,
+          "endToken": 18,
+          "role": "PREDICATIVE",
+          "translation": "一部分"
+        },
+        {
+          "startToken": 19,
+          "endToken": 22,
+          "role": "ATTRIBUTE",
+          "translation": "肌肉记忆的"
+        }
+      ]
+    },
+    {
+      "sentenceId": "retry-008",
+      "text": "An Architecture Decision Record (ADR) is a short document that captures and explains a single decision relevant to a product or ecosystem.",
+      "components": [
+        {
+          "startToken": 0,
+          "endToken": 6,
+          "role": "SUBJECT",
+          "translation": "架构决策记录（ADR）"
+        },
+        {
+          "startToken": 7,
+          "endToken": 7,
+          "role": "PREDICATE",
+          "translation": "是"
+        },
+        {
+          "startToken": 8,
+          "endToken": 10,
+          "role": "PREDICATIVE",
+          "translation": "一份简短文档"
+        },
+        {
+          "startToken": 11,
+          "endToken": 14,
+          "role": "ATTRIBUTIVE_CLAUSE",
+          "translation": "它捕获并解释"
+        },
+        {
+          "startToken": 15,
+          "endToken": 17,
+          "role": "OBJECT",
+          "translation": "一个单一决策"
+        },
+        {
+          "startToken": 18,
+          "endToken": 23,
+          "role": "ADVERBIAL",
+          "translation": "与产品或生态系统相关"
+        }
+      ]
+    },
+    {
+      "sentenceId": "retry-009",
+      "text": "They decouple deployment from release, letting your team ship code continuously while controlling what any given user segment sees.",
+      "components": [
+        {
+          "startToken": 0,
+          "endToken": 0,
+          "role": "SUBJECT",
+          "translation": "他们"
+        },
+        {
+          "startToken": 1,
+          "endToken": 1,
+          "role": "PREDICATE",
+          "translation": "解耦"
+        },
+        {
+          "startToken": 2,
+          "endToken": 2,
+          "role": "OBJECT",
+          "translation": "部署"
+        },
+        {
+          "startToken": 3,
+          "endToken": 4,
+          "role": "ADVERBIAL",
+          "translation": "与发布"
+        },
+        {
+          "startToken": 6,
+          "endToken": 11,
+          "role": "ADVERBIAL",
+          "translation": "让你的团队持续交付代码"
+        },
+        {
+          "startToken": 12,
+          "endToken": 19,
+          "role": "ADVERBIAL_CLAUSE",
+          "translation": "同时控制任何给定用户段所看到的内容"
+        }
+      ]
+    },
+    {
+      "sentenceId": "improved-001",
+      "text": "The way we build software has changed.",
+      "components": [
+        {
+          "startToken": 0,
+          "endToken": 4,
+          "role": "SUBJECT",
+          "translation": "我们构建软件的方式"
+        },
+        {
+          "startToken": 5,
+          "endToken": 6,
+          "role": "PREDICATE",
+          "translation": "已经改变"
+        }
+      ]
+    },
+    {
+      "sentenceId": "improved-002",
+      "text": "Security isn't just something you tack on at the end.",
+      "components": [
+        {
+          "startToken": 0,
+          "endToken": 0,
+          "role": "SUBJECT",
+          "translation": "安全性"
+        },
+        {
+          "startToken": 1,
+          "endToken": 2,
+          "role": "PREDICATE",
+          "translation": "不仅仅是"
+        },
+        {
+          "startToken": 3,
+          "endToken": 3,
+          "role": "PREDICATIVE",
+          "translation": "某种东西"
+        },
+        {
+          "startToken": 4,
+          "endToken": 4,
+          "role": "SUBJECT_CLAUSE",
+          "translation": "你"
+        },
+        {
+          "startToken": 5,
+          "endToken": 6,
+          "role": "PREDICATE",
+          "translation": "附加"
+        },
+        {
+          "startToken": 7,
+          "endToken": 9,
+          "role": "ADVERBIAL",
+          "translation": "在最后"
+        }
+      ]
+    },
+    {
+      "sentenceId": "improved-003",
+      "text": "Start by adopting a secure SDLC (software development lifecycle).",
+      "components": [
+        {
+          "startToken": 0,
+          "endToken": 0,
+          "role": "PREDICATE",
+          "translation": "开始"
+        },
+        {
+          "startToken": 1,
+          "endToken": 2,
+          "role": "ADVERBIAL",
+          "translation": "通过采用"
+        },
+        {
+          "startToken": 3,
+          "endToken": 5,
+          "role": "OBJECT",
+          "translation": "一个安全的SDLC"
+        },
+        {
+          "startToken": 6,
+          "endToken": 10,
+          "role": "APPOSITIVE",
+          "translation": "（软件开发生命周期）"
+        }
+      ]
+    },
+    {
+      "sentenceId": "improved-005",
+      "text": "When we need an LLM to perform a complex task, we often need to feed it a lot of context.",
+      "components": [
+        {
+          "startToken": 0,
+          "endToken": 9,
+          "role": "ADVERBIAL_CLAUSE",
+          "translation": "当我们需要一个LLM执行复杂任务时"
+        },
+        {
+          "startToken": 11,
+          "endToken": 11,
+          "role": "SUBJECT",
+          "translation": "我们"
+        },
+        {
+          "startToken": 12,
+          "endToken": 12,
+          "role": "ADVERBIAL",
+          "translation": "经常"
+        },
+        {
+          "startToken": 13,
+          "endToken": 15,
+          "role": "PREDICATE",
+          "translation": "需要喂给"
+        },
+        {
+          "startToken": 16,
+          "endToken": 16,
+          "role": "OBJECT",
+          "translation": "它"
+        },
+        {
+          "startToken": 17,
+          "endToken": 20,
+          "role": "OBJECT",
+          "translation": "大量上下文"
+        }
+      ]
+    },
+    {
+      "sentenceId": "improved-006",
+      "text": "The test automation pyramid gives every engineering team the same structural answer: write many fast unit tests, fewer integration tests.",
+      "components": [
+        {
+          "startToken": 0,
+          "endToken": 3,
+          "role": "SUBJECT",
+          "translation": "测试自动化金字塔"
+        },
+        {
+          "startToken": 4,
+          "endToken": 4,
+          "role": "PREDICATE",
+          "translation": "给予"
+        },
+        {
+          "startToken": 5,
+          "endToken": 7,
+          "role": "OBJECT",
+          "translation": "每个工程团队"
+        },
+        {
+          "startToken": 8,
+          "endToken": 11,
+          "role": "OBJECT",
+          "translation": "相同的结构性答案"
+        },
+        {
+          "startToken": 13,
+          "endToken": 17,
+          "role": "PREDICATE",
+          "translation": "编写许多快速的单元测试"
+        },
+        {
+          "startToken": 19,
+          "endToken": 21,
+          "role": "PREDICATE",
+          "translation": "更少的集成测试。"
+        }
+      ]
+    },
+    {
+      "sentenceId": "improved-008",
+      "text": "The piezochiral effect, a new member of the family of strain-responsive functionalities alongside piezoelectricity and piezomagnetism, is introduced.",
+      "components": [
+        {
+          "startToken": 0,
+          "endToken": 2,
+          "role": "SUBJECT",
+          "translation": "压电手性效应"
+        },
+        {
+          "startToken": 3,
+          "endToken": 17,
+          "role": "APPOSITIVE",
+          "translation": "应变响应功能家族中的新成员，与压电性和压磁效应并列"
+        },
+        {
+          "startToken": 18,
+          "endToken": 19,
+          "role": "PREDICATE",
+          "translation": "被引入。"
         }
       ]
     }

@@ -107,8 +107,8 @@ const CLAUSE_FIRST_RULE =
   "tag it with one of the five subordinate clause roles, keep it whole, and analyse the main clause as peer components.";
 
 const PREDICATE_SCOPE_RULE =
-  "Predicate-scope rule: inside a single clause a PREDICATE covers only the verb group — auxiliaries plus the main verb, " +
-  'including a bare-infinitive chain that belongs to it ("Help turn" is one PREDICATE, "let go" is one PREDICATE). ' +
+  "Predicate-scope rule: inside a single clause a PREDICATE covers only the verb group — auxiliaries (can, could, may, might, must, shall, should, will, would, be, am, is, are, was, were, have, has, had, do, does, did) plus the main verb, " +
+  'including any adverbs between them and any bare-infinitive chain ("Help turn" is one PREDICATE, "let go" is one PREDICATE, "must close" is one PREDICATE, "is independently deployable" is one PREDICATE). ' +
   "Two PREDICATE components must never be adjacent: side-by-side verbs belong to a single PREDICATE.";
 
 const PREPOSITIONAL_PHRASE_RULE =
