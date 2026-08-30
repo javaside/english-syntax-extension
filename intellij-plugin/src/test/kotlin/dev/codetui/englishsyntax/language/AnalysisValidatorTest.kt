@@ -101,7 +101,7 @@ class AnalysisValidatorTest {
     assertTrue(
       coordinateErrors.any {
         it.path == "sentences[0].components" &&
-          it.message == "a single clause must be split into peer components instead of one COORDINATE_CLAUSE; COORDINATE_CLAUSE requires at least two coordinate clauses"
+          it.message == "COORDINATE_CLAUSE is deprecated; analyse compound sentences as peer components (subject, predicate, object, …) with the coordinating conjunction tagged separately as CONJUNCTION"
       },
     )
   }
@@ -172,85 +172,8 @@ class AnalysisValidatorTest {
     )
   }
 
-  @Test
-  fun `accepts for as coordinating CONJUNCTION and ambiguous words as non-prepositions`() {
-    val cases = listOf(
-      Triple(
-        "I stayed, for it was raining.",
-        """
-        {"startToken":0,"endToken":1,"role":"COORDINATE_CLAUSE","translation":"我留下了"},
-        {"startToken":3,"endToken":3,"role":"CONJUNCTION","translation":"因为"},
-        {"startToken":4,"endToken":7,"role":"COORDINATE_CLAUSE","translation":"当时在下雨"}
-        """.trimIndent(),
-        "for as CONJUNCTION",
-      ),
-      Triple(
-        "The meeting is over.",
-        """
-        {"startToken":0,"endToken":1,"role":"SUBJECT","translation":"会议"},
-        {"startToken":2,"endToken":2,"role":"PREDICATE","translation":"结束了"},
-        {"startToken":3,"endToken":4,"role":"PREDICATIVE","translation":"结束"}
-        """.trimIndent(),
-        "over as PREDICATIVE",
-      ),
-      Triple(
-        "Prices went down.",
-        """
-        {"startToken":0,"endToken":0,"role":"SUBJECT","translation":"价格"},
-        {"startToken":1,"endToken":1,"role":"PREDICATE","translation":"下降"},
-        {"startToken":2,"endToken":3,"role":"ADVERBIAL","translation":"向下"}
-        """.trimIndent(),
-        "down as ADVERBIAL",
-      ),
-      Triple(
-        "I have wondered since.",
-        """
-        {"startToken":0,"endToken":0,"role":"SUBJECT","translation":"我"},
-        {"startToken":1,"endToken":2,"role":"PREDICATE","translation":"一直想知道"},
-        {"startToken":3,"endToken":4,"role":"ADVERBIAL","translation":"从那以后"}
-        """.trimIndent(),
-        "since as ADVERBIAL",
-      ),
-      Triple(
-        "The layer lies beneath.",
-        """
-        {"startToken":0,"endToken":1,"role":"SUBJECT","translation":"这一层"},
-        {"startToken":2,"endToken":2,"role":"PREDICATE","translation":"位于"},
-        {"startToken":3,"endToken":4,"role":"ADVERBIAL","translation":"下方"}
-        """.trimIndent(),
-        "beneath as ADVERBIAL",
-      ),
-    )
 
-    cases.forEach { (text, components, description) ->
-      val request = sentence(text)
-      assertTrue(
-        validateCoreBatch(core(components, sentenceId = request.sentenceId), listOf(request), "profile-1").ok,
-        description,
-      )
-    }
-  }
 
-  @Test
-  fun `rejects a lone COORDINATE_CLAUSE wrapping a simple sentence`() {
-    val request = sentence("Readers understand complex sentences.")
-    val raw = core(
-      """{"startToken":0,"endToken":4,"role":"COORDINATE_CLAUSE","translation":"读者理解复杂句子"}""",
-      sentenceId = request.sentenceId,
-    )
-
-    val result = validateCoreBatch(raw, listOf(request), "profile-1")
-
-    assertFalse(result.ok)
-    assertTrue(
-      result.errors.any {
-        it.path == "sentences[0].components" &&
-          it.message == "a single clause must be split into peer components instead of one COORDINATE_CLAUSE; COORDINATE_CLAUSE requires at least two coordinate clauses"
-      },
-    )
-  }
-
-  @Test
   fun `rejects a CONJUNCTION that covers no coordinating conjunction`() {
     val request = sentence("Readers read books.")
     val raw = core(
@@ -371,34 +294,8 @@ class AnalysisValidatorTest {
     )
   }
 
-  @Test
-  fun `rejects a COORDINATE_CLAUSE introduced by a subordinating conjunction`() {
-    // CLAUSE_FIRST_RULE 按逗号触发,主从复合句于是被整成两个「并列分句」——语法上是错的。
-    assertGrammarError(
-      "Because the road was flooded, the bus took a longer route.",
-      """
-      {"startToken":0,"endToken":4,"role":"COORDINATE_CLAUSE","translation":"因为道路被淹"},
-      {"startToken":6,"endToken":11,"role":"COORDINATE_CLAUSE","translation":"公交车绕了远路"}
-      """.trimIndent(),
-      "sentences[0].components[0]",
-      "a clause introduced by a subordinating conjunction is not a COORDINATE_CLAUSE; tag it with one of the five subordinate clause roles and analyse the main clause as peer components",
-    )
-  }
 
-  @Test
-  fun `accepts a subordinate clause initial COORDINATE_CLAUSE when a coordinator joins the clauses`() {
-    // "Because A, B, and C" 里第一个并列分句本来就以从属连词开头,有 CONJUNCTION 就不判它。
-    assertAccepted(
-      "Because it rained, we stayed, and we slept.",
-      """
-      {"startToken":0,"endToken":5,"role":"COORDINATE_CLAUSE","translation":"因为下雨,我们留下了"},
-      {"startToken":7,"endToken":7,"role":"CONJUNCTION","translation":"而且"},
-      {"startToken":8,"endToken":9,"role":"COORDINATE_CLAUSE","translation":"我们睡了"}
-      """.trimIndent(),
-    )
-  }
 
-  @Test
   fun `rejects one component covering the whole sentence whatever its role`() {
     // 现有规则只拦 COORDINATE_CLAUSE;换成 SUBJECT 就一路通过,卡片退化成一整块译文。
     assertGrammarError(
