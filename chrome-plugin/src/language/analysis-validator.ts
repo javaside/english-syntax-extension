@@ -82,6 +82,43 @@ const SUBJECT_PRONOUNS: ReadonlySet<string> = new Set([
   "they",
 ]);
 /**
+ * 助动词与情态动词白名单。这些词在谓语中与主要动词构成动词组，不应该被拆分。
+ * 实测模型常把 "must close" / "can press" / "is stricter" 拆成两个相邻的 PREDICATE。
+ * 虽然相邻 PREDICATE 规则能拦截，但这个白名单提供更精确的错误信息。
+ *
+ * 情态动词: can, could, may, might, must, shall, should, will, would
+ * be 动词: am, is, are, was, were, be, been, being (系表结构、被动语态、进行时)
+ * have: have, has, had, having (完成时)
+ * do: do, does, did (强调、疑问、否定)
+ */
+const AUXILIARY_MODALS: ReadonlySet<string> = new Set([
+  "can",
+  "could",
+  "may",
+  "might",
+  "must",
+  "shall",
+  "should",
+  "will",
+  "would",
+  "am",
+  "is",
+  "are",
+  "was",
+  "were",
+  "be",
+  "been",
+  "being",
+  "have",
+  "has",
+  "had",
+  "having",
+  "do",
+  "does",
+  "did",
+]);
+
+/**
  * 限定词 = 名词短语的左边界。动词组内部出现它,说明宾语/ 表语 / 补语被吞了进来
  * (`PEER_COMPONENT_RULE` 要挡的正是这个,但此前只写在提示词里)。
  *
@@ -176,11 +213,23 @@ function collectGrammarErrors(
       previous?.role === GrammarRole.PREDICATE &&
       previous.endToken + 1 === component.startToken
     ) {
-      addError(
-        errors,
-        componentPath,
-        "adjacent PREDICATE components must be merged into one PREDICATE covering the whole verb group",
-      );
+      const previousWords = lexicalTexts(tokens, previous);
+      const prevHead = previousWords[previousWords.length - 1]; // 前一个谓语的最后一个词
+
+      // 如果前一个谓语只包含助动词/情态动词，给出更精确的错误信息
+      if (previousWords.length === 1 && prevHead && AUXILIARY_MODALS.has(prevHead)) {
+        addError(
+          errors,
+          componentPath,
+          `auxiliary/modal verb "${prevHead}" must be merged with the following main verb into one PREDICATE covering the complete verb group`,
+        );
+      } else {
+        addError(
+          errors,
+          componentPath,
+          "adjacent PREDICATE components must be merged into one PREDICATE covering the whole verb group",
+        );
+      }
     }
 
     // 谓语必须以动词组开头。限定词与主格代词都不可能是动词,命中即说明主语被吞了进来。
