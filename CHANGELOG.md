@@ -2,6 +2,25 @@
 
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## 1.3.1 — 2026-08-30
+
+这一版修复 1.3.0 合并后暴露的构建与契约回归，并把新增的 32 条人工复核标注正式纳入黄金集。
+
+**升级后请重新加载扩展并刷新页面。** `CORE_PROMPT_VERSION` 升为 `8`，已有 core 缓存会自动失效并按一致的新提示词重新分析；详解缓存不受影响。
+
+### 修复
+
+- 清理误提交到正式测试目录的联网评估、生成脚本和依赖本地 `test-output/` 的临时测试，恢复 CI 与 `npm run package`。
+- 恢复黄金标注 fixture 的 `conventions` 与 `id` 契约，保留并验证新增 32 条标注；当前 81 条黄金标注全部通过生产 tokenizer、覆盖规则和 validator。
+- 彻底删除双端 core/repair 提示词里要求输出已废弃 `COORDINATE_CLAUSE` 的残留旧指令。并列句现在与 validator 一致地按 `SUBJECT` / `PREDICATE` / `OBJECT` 等同层成分平铺，只把 FANBOYS 并列连词标为 `CONJUNCTION`。
+- 更新并列句假模型与 E2E 契约，避免测试绕过生产 validator 后继续断言废弃结构。
+- 为相邻谓语中的助动词/情态动词拆分提供更明确的修复提示，并在 core prompt 中明确完整动词组范围。
+
+### 测试
+
+- Chrome 单元测试、Playwright E2E、lint 基线、格式检查与扩展打包全部通过。
+- IntelliJ Web 测试、Kotlin 测试、插件构建和项目配置校验全部纳入发布前门禁。
+
 ## 1.3.0 — 2026-08-30
 
 这一版的核心改进是**废弃 COORDINATE_CLAUSE**，并列句从「几个巨大色块、每块挂一整句中文」改为**同层成分平铺**（subject/predicate/object 等），配合四条新增的本地硬门，大幅提升了真实散文的成分划分准确性与显示效果。
