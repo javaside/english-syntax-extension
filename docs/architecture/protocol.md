@@ -8,10 +8,10 @@
 | ----------------------- | ------ | ------------------------------------------------------------ | ------------------------------------------------------ |
 | `MESSAGE_VERSION`       | `1`    | 消息信封版本;收发两侧都校验                                  | 改了会让旧页面上残留的 content script 与新 SW 互不认账 |
 | `CORE_SCHEMA_VERSION`   | `3`    | core / detail 结果的语义契约版本;**参与缓存键**              | 改了等于全量作废缓存;缓存导入也会因版本不符整体拒绝    |
-| `CORE_PROMPT_VERSION`   | `6`    | core 提示词/Token 坐标版本;**参与 core / correction 缓存键** | 改了作废全部 core 缓存                                 |
+| `CORE_PROMPT_VERSION`   | `8`    | core 提示词/Token 坐标版本;**参与 core / correction 缓存键** | 改了作废全部 core 缓存                                 |
 | `DETAIL_PROMPT_VERSION` | `5`    | detail 提示词/focus Token 坐标版本;**参与 detail 缓存键**    | 改了作废全部详解缓存                                   |
 
-> 缓存键**刻意不含** profile / 模型维度——换模型不该让已有译文全部作废;但**含提示词版本**,因为同一句在不同规则下会被切成不同粒度的成分,旧结果继续复用只会让新旧质量混在一屏。本次 core prompt 的粒度规则与 tokenization 都发生变化，因此 `CORE_PROMPT_VERSION = 6`；tokenization 同时改变 detail focus 的 Token 坐标，因此 `DETAIL_PROMPT_VERSION = 5`。结果 JSON 形状未变，所以 `CORE_SCHEMA_VERSION` 仍为 `3`。IndexedDB 的 v1→v2 升级正是为清空更早的键。
+> 缓存键**刻意不含** profile / 模型维度——换模型不该让已有译文全部作废;但**含提示词版本**,因为同一句在不同规则下会被切成不同粒度的成分,旧结果继续复用只会让新旧质量混在一屏。`CORE_PROMPT_VERSION = 8` 彻底删除了要求输出 `COORDINATE_CLAUSE` 的残留旧指令，并列句与 validator 一致地按同层成分平铺；Token 坐标未变，所以 `DETAIL_PROMPT_VERSION = 5`，结果 JSON 形状也未变，`CORE_SCHEMA_VERSION` 保持 `3`。
 
 ## 2. 请求消息 `RequestMessage`
 

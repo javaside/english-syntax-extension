@@ -71,29 +71,26 @@ private const val MINIFIED_OUTPUT =
  * 互相打架，实测同一句在两次调用之间会在两种切法之间跳。所以 peer 规则也收窄成
  * 「在单个分句之内」——它原本要挡的"谓语吞掉宾语"照旧被挡住。
  *
- * **CORE_PROMPT_VERSION 7 收紧了并列句的判据。** 此前只要「两个以上各带谓语的分句被
- * 逗号/冒号/分号/破折号/并列连词分隔」就整句一个 COORDINATE_CLAUSE，并且明令"不要分析
- * 任何分句的内部"。真实散文绝大多数是多分句的，于是卡片退化成 2-3 个巨大色块、每块挂
- * 一整句中文——看着就是译文而不是成分划分；主从复合句还会被标成并列句。现在并列句要求
- * 各分句自带主语且由并列连词或分号连接；逗号串起来的祈使句、共享主语的并列谓语一律按
- * 同层成分平铺。碎片化改由硬门直接拦（相邻 PREDICATE 合并、谓语首词/内部限定词、
- * 单成分不得包住整句），不再靠"祈使句串整体标 COORDINATE_CLAUSE"这条豁免。
+ * **CORE_PROMPT_VERSION 8 彻底废弃了 COORDINATE_CLAUSE 输出。** 版本 7 虽然已经让
+ * validator 拒绝这种整块分句，提示词里却还残留「每个并列分句输出一个
+ * COORDINATE_CLAUSE」的旧指令，模型照做后必然进入修复轮。现在所有并列句都按
+ * subject/predicate/object 等同层成分平铺，只把 FANBOYS 并列连词单独标为
+ * CONJUNCTION；分号可以连接两个分句，但不需要为它生成成分。
  *
  * 与 Chrome 端 `prompts.ts` 逐字一致，由 shared-fixtures/core-prompt-parity.json 钉住。
  */
 private const val CLAUSE_FIRST_RULE =
   "Clause-structure-first rule: decide the clause layout before anything else. " +
     "A sentence is compound only when two or more clauses each carry their own subject and are joined by a coordinating conjunction (for, and, nor, but, or, yet, so) or a semicolon; " +
-    "only then emit exactly one COORDINATE_CLAUSE per clause, carrying the complete Chinese translation of that clause plus the coordinating conjunction as its own CONJUNCTION component, and do not analyse the inside of those clauses. " +
+    "analyse every compound clause as peer components (subject, predicate, object, adverbial, …), and tag only a coordinating conjunction as its own CONJUNCTION component. Never emit COORDINATE_CLAUSE. " +
     "A comma, a colon, or a dash on its own never makes a sentence compound, and neither does a series of imperatives nor one subject shared by several verbs: " +
-    "analyse every one of those as peer components of a single clause (subject, predicate, object, adverbial, …). " +
+    "analyse every one of those as peer components of a single clause. " +
     "Tag a coordinating conjunction as CONJUNCTION only when it joins whole clauses or whole verb phrases; one inside a coordinated noun, adjective, or adverb phrase stays part of that single component (\"calmly and confidently\" is ONE ADVERBIAL). " +
-    "A clause introduced by a subordinating conjunction (because, although, if, when, while, since, until, as, …) is never a COORDINATE_CLAUSE: " +
-    "tag it with one of the five subordinate clause roles, keep it whole, and analyse the main clause as peer components."
+    "A clause introduced by a subordinating conjunction (because, although, if, when, while, since, until, as, …) must use one of the five subordinate clause roles, stay whole, and leave the main clause analysed as peer components."
 
 private const val PREDICATE_SCOPE_RULE =
-  "Predicate-scope rule: inside a single clause a PREDICATE covers only the verb group — auxiliaries plus the main verb, " +
-    "including a bare-infinitive chain that belongs to it (\"Help turn\" is one PREDICATE, \"let go\" is one PREDICATE). " +
+  "Predicate-scope rule: inside a single clause a PREDICATE covers only the verb group — auxiliaries (can, could, may, might, must, shall, should, will, would, be, am, is, are, was, were, have, has, had, do, does, did) plus the main verb, " +
+    "including any adverbs between them and any bare-infinitive chain (\"Help turn\" is one PREDICATE, \"let go\" is one PREDICATE, \"must close\" is one PREDICATE, \"is independently deployable\" is one PREDICATE). " +
     "Two PREDICATE components must never be adjacent: side-by-side verbs belong to a single PREDICATE."
 
 private const val PREPOSITIONAL_PHRASE_RULE =
@@ -144,10 +141,10 @@ private val CORE_ANALYSIS_RULES: List<String> = listOf(
   PREPOSITIONAL_PHRASE_RULE,
   PEER_COMPONENT_RULE,
   SUPPLEMENT_RULE,
-  "Compound-sentence rule: when two or more clauses that could each stand alone as a sentence are joined by a coordinating conjunction (for, and, nor, but, or, yet, so) or a semicolon, tag each clause as one whole COORDINATE_CLAUSE whose translation is the complete Chinese translation of that clause, and tag the coordinating conjunction as its own separate CONJUNCTION component (in a comma-plus-conjunction pair, tag only the conjunction itself as CONJUNCTION).",
+  "Compound-sentence rule: when two or more clauses that could each stand alone as a sentence are joined by a coordinating conjunction (for, and, nor, but, or, yet, so) or a semicolon, analyse the inside of every clause as peer components and tag only the coordinating conjunction as its own CONJUNCTION component (in a comma-plus-conjunction pair, tag only the conjunction itself). Never emit COORDINATE_CLAUSE.",
   "Complex-sentence rule: keep tagging a subordinate clause as one whole component with one of the five clause roles (SUBJECT_CLAUSE, OBJECT_CLAUSE, PREDICATIVE_CLAUSE, ATTRIBUTIVE_CLAUSE, ADVERBIAL_CLAUSE); never split its internal structure.",
-  "Simple-sentence rule: never wrap a sentence with a single subject-predicate structure in COORDINATE_CLAUSE.",
-  "Give every component other than a COORDINATE_CLAUSE a concise, non-empty Chinese translation; a COORDINATE_CLAUSE keeps the complete clause translation required above.",
+  "Simple-sentence rule: analyse a sentence with a single subject-predicate structure as peer components.",
+  "Give every component a concise, non-empty Chinese translation.",
 )
 
 fun buildCorePrompt(sentences: List<SentenceInput>): String =

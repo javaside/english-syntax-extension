@@ -201,18 +201,18 @@ raw → dropPunctuationOnlyComponents → validateCoreBatch
 - core / repair prompt 的 `SUPPLEMENT_RULE` 区分破折号、冒号后的补充说明或列举与真正并列句：补充跨度使用 `APPOSITIVE` / `INDEPENDENT_ELEMENT`，内部可分离谓语、宾语、状语仍按同层成分输出；名词短语不能连同其关系从句整体标成 `ATTRIBUTIVE_CLAUSE`（`the ones that matter` 中只有 `that matter` 是从句）。
 - `validateCoreBatch` 还把九条**代码实际可判的语法粒度约束**变成硬门：组件序列相邻且 Token 区间连续的两个 `PREDICATE` 必须合并；成分去掉标点后恰好一个 lexical word、role 不是 `CONJUNCTION` 且命中保守的高把握“必须带宾语”介词白名单时，必须并入其管辖短语（`after/before/down/off/over/since/until/around/inside/outside` 等常见副词、表语或连词兼类词不收）；`COORDINATE_CLAUSE` 数量恰好为 1 时非法；`CONJUNCTION` 至少含一个 FANBOYS；`PREDICATE` 首个 lexical word 是限定词、主格人称代词或 `that` 时非法；`PREDICATE` 非首位 lexical words 含限定词时非法（`that` 刻意不算，它更常是宾语从句引导词）；`COORDINATE_CLAUSE` 首词是从属连词且整句无 `CONJUNCTION` 成分时非法；单个成分覆盖全部非标点 token 且句子实词数 ≥ 4 时非法（不论 role）；出现 2 个以上 `COORDINATE_CLAUSE` 却既无 `CONJUNCTION` 成分也无 `;` token 时非法。后四条补的正是「模型给出的坏划分照样显示给用户」的那一段：实测 deepseek-chat 把 `She kept practicing until…` 整句只标成 `PREDICATE` + `ADVERBIAL_CLAUSE`（一个主语都没有），前四条一条都拦不住。**缺主语本身刻意不判**——祈使句没有主语，`First, install the CLI.` 这类副词开头的祈使句在文档里很常见，按缺主语判会大面积误拒；改判「谓语开头不可能是动词」既airtight 又覆盖这个失败。grammar 只在结构可信时执行：所有 component 都有可用 range/role/translation、区间句内、有序不重叠、非纯标点；unknown field、translation too long、sentenceId 等非结构错误不阻止同轮 grammar 诊断，两类错误同次报告。TS/Kotlin 逐条、逐文案一致，错误会原样进入 repair prompt。黄金集整份必须通过这套校验（`core-gold-annotations.test.ts`）。
 
-### 8.1 成分粒度的三条边界(`CORE_PROMPT_VERSION` 6)
+### 8.1 成分粒度的三条边界与并列句平铺(`CORE_PROMPT_VERSION` 8)
 
 只有"别让谓语吞掉宾语"这类**下界**规则时,指令型文本会被切成词级碎片。同一模型(deepseek-v4-flash,temperature 0,兼容模式)实测:
 
 | 输入                                                                                          | 只有 peer 规则                                                                           | 补齐三条边界后                                                                 |
 | --------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
 | `Help turn ideas into fully formed designs and specs through natural collaborative dialogue.` | 8–9 成分:`Help` / `turn` 两个 `PREDICATE`、`into` 与其宾语拆开、宾语短语误标 `ATTRIBUTE` | 4 成分:`PREDICATE(Help turn)` + `OBJECT(ideas)` + 两个整体介词短语 `ADVERBIAL` |
-| 6 个祈使动词逗号串成的一句                                                                    | 16 成分 / 6 个 `PREDICATE`                                                               | 12 成分 / 0 个 `PREDICATE`(整串按 `COORDINATE_CLAUSE`)                         |
+| 6 个祈使动词逗号串成的一句                                                                    | 16 成分 / 6 个 `PREDICATE`                                                               | 按单分句内的同层成分平铺，由本地硬门拦截相邻谓语与整句包裹                     |
 
 三条边界:
 
-1. `CLAUSE_FIRST_RULE`——**先定分句层级**:两个以上各带谓语、能独立成句的分句(逗号/冒号/分号/破折号/并列连词分隔,含祈使句串)一律一句一个 `COORDINATE_CLAUSE`,不再往分句内部拆。
+1. `CLAUSE_FIRST_RULE`——**先定分句层级**:只有各自带主语、由 FANBOYS 或分号连接的才是并列句；但并列句也必须继续拆成顶层的 subject/predicate/object 等同层成分，只把 FANBOYS 标成 `CONJUNCTION`。`COORDINATE_CLAUSE` 已废弃，prompt 与 validator 都禁止输出。
 2. `PREDICATE_SCOPE_RULE`——`PREDICATE` 只覆盖动词组本身(含 `help/let` 后的原形动词链,`Help turn` 是**一个**谓语);两个 `PREDICATE` 不得相邻。
 3. `PREPOSITIONAL_PHRASE_RULE`——介词与它管辖的一切(含并列宾语)是**一个**成分;动词或介词管辖的名词短语永远不是 `ATTRIBUTE`。
 
@@ -222,7 +222,7 @@ raw → dropPunctuationOnlyComponents → validateCoreBatch
 
 ### 8.2 Token 坐标变化与版本
 
-`tokenize()` 现在把白名单点号缩写（如 `U.S.` / `Ph.D.`）、小数/千分位/语义版本号、带 scheme 的 URL 与邮箱各作为**一个 Token**。通用姓名 initials 链（如 `J. R. R.`）不会合成一个 Token；它只在 `segmentBlock()` 的分句边界阶段持续向后合并，避免姓名中间误断。这不是显示层细节：core component span 与 detail focus 都以 Token ID 闭区间定位，任何拆分变化都会让旧缓存区间指向错误文本。因此本次 `CORE_PROMPT_VERSION = 6` 同时覆盖 core prompt 粒度规则与 tokenization 的变化；tokenization 又改变 detail focus 坐标，所以 `DETAIL_PROMPT_VERSION = 5`。结果 JSON 形状没有变化，`CORE_SCHEMA_VERSION` 保持 `3`。只升 core 会留下 focus 已漂移的详解缓存，只升 detail 则会复用 span 已漂移的 core 缓存。
+`tokenize()` 现在把白名单点号缩写（如 `U.S.` / `Ph.D.`）、小数/千分位/语义版本号、带 scheme 的 URL 与邮箱各作为**一个 Token**。通用姓名 initials 链（如 `J. R. R.`）不会合成一个 Token；它只在 `segmentBlock()` 的分句边界阶段持续向后合并，避免姓名中间误断。这不是显示层细节：core component span 与 detail focus 都以 Token ID 闭区间定位，任何拆分变化都会让旧缓存区间指向错误文本。此前 `CORE_PROMPT_VERSION = 6` 同时覆盖 core prompt 粒度规则与 tokenization 的变化；当前 `CORE_PROMPT_VERSION = 8` 进一步让并列句 prompt 与已废弃 `COORDINATE_CLAUSE` 的 validator 契约一致。tokenization 没有再变，所以 `DETAIL_PROMPT_VERSION = 5`。结果 JSON 形状没有变化，`CORE_SCHEMA_VERSION` 保持 `3`。
 
 ### 8.3 黄金集 runner 的 provider 端点
 

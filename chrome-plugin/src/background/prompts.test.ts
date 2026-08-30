@@ -81,7 +81,9 @@ describe("model-facing sentence payload", () => {
     const prompt = buildCorePrompt([sentence]);
 
     expect(prompt).toContain("Clause-structure-first rule:");
-    expect(prompt).toContain("emit exactly one COORDINATE_CLAUSE per clause");
+    expect(prompt).toContain("analyse every compound clause as peer components");
+    expect(prompt).toContain("Never emit COORDINATE_CLAUSE");
+    expect(prompt).not.toContain("emit exactly one COORDINATE_CLAUSE per clause");
     expect(prompt).toContain('"Help turn" is one PREDICATE');
     expect(prompt).toContain("Two PREDICATE components must never be adjacent");
     expect(prompt).toContain("a preposition and everything it governs form exactly one component");
@@ -114,7 +116,7 @@ describe("model-facing sentence payload", () => {
       "Compound-sentence rule:",
       "Complex-sentence rule:",
       "Simple-sentence rule:",
-      "Give every component other than a COORDINATE_CLAUSE",
+      "Give every component a concise, non-empty Chinese translation",
     ]) {
       expect(core).toContain(rule);
       expect(repair).toContain(rule);

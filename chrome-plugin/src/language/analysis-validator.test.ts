@@ -56,7 +56,6 @@ describe("core analysis validation", () => {
     expect(result).toEqual({ ok: true, value: [expectedAnalysis] });
   });
 
-
   it("reports the exact path and message for an uncovered lexical token", () => {
     const raw = structuredClone(rawCore);
     raw.sentences[0]!.components.splice(2, 1);
@@ -202,7 +201,6 @@ describe("core analysis grammar constraints", () => {
     });
   });
 
-
   it("rejects two adjacent PREDICATE components and says to merge the verb group", () => {
     // "Help turn ideas" 实测被切成 Help / turn 两个谓语——PREDICATE_SCOPE_RULE 明令禁止。
     const sentence = sentenceOf("Help turn ideas.");
@@ -265,7 +263,6 @@ describe("core analysis grammar constraints", () => {
     });
   });
 
-
   it.each([
     [
       "over as PREDICATIVE",
@@ -314,7 +311,6 @@ describe("core analysis grammar constraints", () => {
     ).toBe(true);
   });
 
-
   it("rejects a CONJUNCTION that covers no coordinating conjunction", () => {
     const sentence = sentenceOf("Readers read books.");
 
@@ -337,9 +333,6 @@ describe("core analysis grammar constraints", () => {
   const PREDICATE_SWALLOW_MESSAGE =
     "a PREDICATE must cover only the verb group; emit the noun phrase that starts at the " +
     "determiner as its own OBJECT, PREDICATIVE, or COMPLEMENT component";
-  const SUBORDINATE_CLAUSE_MESSAGE =
-    "a clause introduced by a subordinating conjunction is not a COORDINATE_CLAUSE; tag it " +
-    "with one of the five subordinate clause roles and analyse the main clause as peer components";
   const WHOLE_SENTENCE_MESSAGE =
     "one component must not cover the whole sentence; split it into peer components " +
     "(subject, predicate, object, adverbial, …)";
@@ -459,8 +452,6 @@ describe("core analysis grammar constraints", () => {
       ).ok,
     ).toBe(true);
   });
-
-
 
   it("rejects one component covering the whole sentence whatever its role", () => {
     // 现有规则只拦 COORDINATE_CLAUSE;换成 SUBJECT 就一路通过,卡片退化成一整块译文。

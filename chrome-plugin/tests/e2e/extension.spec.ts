@@ -659,11 +659,11 @@ test("a progress pill appears during analysis and disappears after completion", 
   await expect(pill).toBeHidden({ timeout: 15_000 });
 });
 
-test("a compound sentence renders numbered coordinate clauses and an annotated detail panel", async ({
+test("a compound sentence renders peer components and an annotated detail panel", async ({
   harness,
 }) => {
   await seedLocalProfile(harness, "compound-model");
-  harness.fakeModel.script("compound-model", [{ kind: "compound" }, { kind: "compound-detail" }]);
+  harness.fakeModel.script("compound-model", [{ kind: "compound" }]);
   const page = await openArticle(harness, "compound-article.html");
   const originalParagraph = await page.locator("#compound").evaluate((node) => node.outerHTML);
   const tabId = await harness.tabIdFor(`${harness.pagesOrigin}/compound-article.html`);
@@ -671,8 +671,14 @@ test("a compound sentence renders numbered coordinate clauses and an annotated d
   await harness.dispatchFromUi(uiMessage("START_SESSION", { tabId, documentId }));
   await expect(learningBlocks(page)).toHaveCount(1, { timeout: 20_000 });
 
-  // 正文：并列分句①/② + 并列连词，及各自配色。
-  await expect(page.locator(".component .role")).toHaveText(["并列分句①", "并列连词", "并列分句②"]);
+  // 正文：两个分句按同层主语/谓语平铺，并列连词单独标注。
+  await expect(page.locator(".component .role")).toHaveText([
+    "主语",
+    "谓语",
+    "并列连词",
+    "主语",
+    "谓语",
+  ]);
   const componentColors = await learningBlocks(page)
     .first()
     .evaluate((host) =>
@@ -680,11 +686,11 @@ test("a compound sentence renders numbered coordinate clauses and an annotated d
         component.style.getPropertyValue("--syntax-role-color"),
       ),
     );
-  expect(componentColors).toEqual(["#0d9488", "#6b7280", "#0d9488"]);
+  expect(componentColors).toEqual(["#2563eb", "#dc2626", "#6b7280", "#2563eb", "#dc2626"]);
 
-  // 点击第一个并列分句 → 详解只拆 focus 内部的主语与谓语，不跨界重复外部连词。
-  const firstClause = page.locator(".component").first();
-  await firstClause.click();
+  // 点击第一分句的主语 → 详解只覆盖 focus，不跨界重复谓语或外部连词。
+  const firstSubject = page.locator(".component").first();
+  await firstSubject.click();
   await expect(page.locator(".detail")).toContainText("详细语法解析", { timeout: 15_000 });
   const detail = await learningBlocks(page)
     .first()
@@ -703,31 +709,20 @@ test("a compound sentence renders numbered coordinate clauses and an annotated d
   expect(detail.annotations).toEqual([
     {
       rows: [
-        ["annotation-role", "① 主语"],
+        ["annotation-role", "① 核心成分"],
         ["annotation-english", "The sun"],
-        ["annotation-translation", "太阳"],
+        ["annotation-translation", "核心成分译文"],
       ],
-      color: "#2563eb",
-    },
-    {
-      rows: [
-        ["annotation-role", "② 谓语"],
-        ["annotation-english", "rose"],
-        ["annotation-translation", "升起"],
-      ],
-      color: "#dc2626",
+      color: "#6b7280",
     },
   ]);
-  expect(detail.structures).toEqual([
-    "① 主语：The sun 是第一分句的主语。",
-    "② 谓语：rose 是第一分句的谓语动词。",
-  ]);
-  expect(detail.grammarPoints).toBe("并列句");
-  expect(detail.summary).toBe("这是针对所选并列分句的详细语法解析。");
+  expect(detail.structures).toEqual(["① 核心成分：该成分承担句子的核心语法功能。"]);
+  expect(detail.grammarPoints).toBe("示例语法点");
+  expect(detail.summary).toBe("这是针对所选成分的详细语法解析。");
   expect(harness.fakeModel.recordedOfKind("detail")).toHaveLength(1);
 
   // 再点收起。
-  await firstClause.click();
+  await firstSubject.click();
   await expect(page.locator(".detail")).toHaveCount(0);
 
   // STOP 还原零残留不回归。

@@ -1,5 +1,14 @@
 {
-  "contractVersion": null,
+  "conventions": [
+    "核心层只切短语级同层成分。普通限定词或紧密结合的单词级形容词与中心名词整体构成 SUBJECT / OBJECT / PREDICATIVE 等，不机械地把每个前置修饰都拆成 ATTRIBUTE。",
+    "ATTRIBUTE 表示名词短语内部可独立成短语的修饰语，既可以前置（如 'fully formed designs' 中短语级的 'fully formed'），也可以后置（如 'The documents signed yesterday' 中的 'signed yesterday'）；拆出后，中心名词短语承担 SUBJECT / OBJECT 等同层角色。",
+    "介词与它管辖的一切优先合为一个 ADVERBIAL 或 ATTRIBUTE；因此 'into fully formed designs and specs' 整体标 ADVERBIAL，不在介词短语内部再拆 'fully formed'。并列的副词或名词（'calmly and confidently'）也保持一个成分，其中的 and 不标 CONJUNCTION。",
+    "标点刻意不覆盖：校验规则允许标点不被任何成分覆盖，渲染层按源 Token 画回原位。",
+    "刻意排除了内部有歧义的句子（谓语被副词割开、名词后接介词短语），免得基线指标被标注争议污染。",
+    "id 带 doc- 前缀的句子逐字取自真实技术文档（code.claude.com/docs 的 Claude Code 概览页），用来测真实输入分布：无前缀的那批是精选教学句，句长与句式都比实际网页/文档窄，单靠它无法判断线上准确率。",
+    "共享主语的并列谓语不是并列句：'Claude Code traces the issue…, identifies…, and implements a fix.' 里三个动词共用一个主语，各谓语与其宾语按同层成分平铺，连接它们的 and / or 标 CONJUNCTION，不标 COORDINATE_CLAUSE。",
+    "并列句也按同层成分平铺：各分句的 SUBJECT / PREDICATE / OBJECT 等都作为顶层成分，FANBOYS 并列连词单独标 CONJUNCTION，分号可以连接分句但不单独成分；不得再输出 COORDINATE_CLAUSE。逗号引导的从属分句一律标五类从句之一（'If Git for Windows is not installed, …' 里前半是 ADVERBIAL_CLAUSE，主句照旧拆同层成分）。"
+  ],
   "sentences": [
     {
       "id": "basic-svo-1",
@@ -1356,7 +1365,7 @@
       ]
     },
     {
-      "sentenceId": "auto-gen-003",
+      "id": "auto-gen-003",
       "text": "It's something you build in from the first line of code.",
       "components": [
         {
@@ -1392,7 +1401,7 @@
       ]
     },
     {
-      "sentenceId": "auto-gen-007",
+      "id": "auto-gen-007",
       "text": "That means building security into every phase, from planning and design to testing and deployment.",
       "components": [
         {
@@ -1428,7 +1437,7 @@
       ]
     },
     {
-      "sentenceId": "auto-gen-008",
+      "id": "auto-gen-008",
       "text": "No amount of firewalls or patches can save bad code.",
       "components": [
         {
@@ -1458,7 +1467,7 @@
       ]
     },
     {
-      "sentenceId": "auto-gen-009",
+      "id": "auto-gen-009",
       "text": "If the foundation's weak, everything else cracks.",
       "components": [
         {
@@ -1482,7 +1491,7 @@
       ]
     },
     {
-      "sentenceId": "auto-gen-010",
+      "id": "auto-gen-010",
       "text": "Your APIs are the front door.",
       "components": [
         {
@@ -1506,7 +1515,7 @@
       ]
     },
     {
-      "sentenceId": "auto-gen-011",
+      "id": "auto-gen-011",
       "text": "The author prefers calling them software engineering practices rather than best practices because what works well in one context may not work elsewhere.",
       "components": [
         {
@@ -1542,7 +1551,7 @@
       ]
     },
     {
-      "sentenceId": "auto-gen-012",
+      "id": "auto-gen-012",
       "text": "Code reviews are widely beneficial but not always optimal.",
       "components": [
         {
@@ -1572,7 +1581,7 @@
       ]
     },
     {
-      "sentenceId": "auto-gen-013",
+      "id": "auto-gen-013",
       "text": "Every practice has tradeoffs.",
       "components": [
         {
@@ -1596,7 +1605,7 @@
       ]
     },
     {
-      "sentenceId": "auto-gen-014",
+      "id": "auto-gen-014",
       "text": "Be clear about current issues and their impact.",
       "components": [
         {
@@ -1614,7 +1623,7 @@
       ]
     },
     {
-      "sentenceId": "auto-gen-015",
+      "id": "auto-gen-015",
       "text": "The article stresses avoiding blind adoption of practices just because they worked elsewhere.",
       "components": [
         {
@@ -1656,7 +1665,7 @@
       ]
     },
     {
-      "sentenceId": "auto-gen-016",
+      "id": "auto-gen-016",
       "text": "Vibe coding is building a software application by prompting an LLM, telling it what to build, trying it out, prompting for changes - but without looking at any of the code that the LLM generates.",
       "components": [
         {
@@ -1728,7 +1737,7 @@
       ]
     },
     {
-      "sentenceId": "auto-gen-019",
+      "id": "auto-gen-019",
       "text": "The obvious way to do this is for a human to write this context, but an alternative is to use an LLM to write this context after interviewing a human.",
       "components": [
         {
@@ -1782,7 +1791,7 @@
       ]
     },
     {
-      "sentenceId": "auto-gen-021",
+      "id": "auto-gen-021",
       "text": "Teams that ship frequently and recover fast outperform peers on every business metric that matters.",
       "components": [
         {
@@ -1824,7 +1833,7 @@
       ]
     },
     {
-      "sentenceId": "auto-gen-022",
+      "id": "auto-gen-022",
       "text": "Elite performers deploy on demand and achieve a mean time to recovery under one hour.",
       "components": [
         {
@@ -1878,7 +1887,7 @@
       ]
     },
     {
-      "sentenceId": "auto-gen-025",
+      "id": "auto-gen-025",
       "text": "For unit test coverage, 70–80% is the defensible target.",
       "components": [
         {
@@ -1908,7 +1917,7 @@
       ]
     },
     {
-      "sentenceId": "auto-gen-027",
+      "id": "auto-gen-027",
       "text": "A free model called Ox Alpha appeared online, performing near the frontier of what AI can do, and nobody will even say who built it.",
       "components": [
         {
@@ -1980,7 +1989,7 @@
       ]
     },
     {
-      "sentenceId": "auto-gen-028",
+      "id": "auto-gen-028",
       "text": "Intelligence, as a product, is deflating in real time.",
       "components": [
         {
@@ -2010,7 +2019,7 @@
       ]
     },
     {
-      "sentenceId": "auto-gen-029",
+      "id": "auto-gen-029",
       "text": "The trouble starts only when the arithmetic flips, when what AI sells for falls faster than the expense of building it.",
       "components": [
         {
@@ -2046,7 +2055,7 @@
       ]
     },
     {
-      "sentenceId": "auto-gen-030",
+      "id": "auto-gen-030",
       "text": "Some of Nvidia Corp.'s biggest customers have been told that the prices of servers containing its AI chips are going up more than 15% in many systems to be shipped early next year.",
       "components": [
         {
@@ -2070,7 +2079,7 @@
       ]
     },
     {
-      "sentenceId": "auto-gen-033",
+      "id": "auto-gen-033",
       "text": "Chemotherapy, particularly with platinum-based drugs, is associated with substantial, rapidly detectable mutagenesis in childhood cancers.",
       "components": [
         {
@@ -2100,7 +2109,7 @@
       ]
     },
     {
-      "sentenceId": "auto-gen-034",
+      "id": "auto-gen-034",
       "text": "Four of the biggest US technology companies together have forecast capital expenditures that will reach about $650 billion in 2026.",
       "components": [
         {
@@ -2148,7 +2157,7 @@
       ]
     },
     {
-      "sentenceId": "auto-gen-035",
+      "id": "auto-gen-035",
       "text": "Apple tests Siri feature that handles multiple commands at once.",
       "components": [
         {
@@ -2196,7 +2205,7 @@
       ]
     },
     {
-      "sentenceId": "retry-003",
+      "id": "retry-003",
       "text": "That means developers now play a frontline role.",
       "components": [
         {
@@ -2238,7 +2247,7 @@
       ]
     },
     {
-      "sentenceId": "retry-004",
+      "id": "retry-004",
       "text": "Whether you're writing an API, pushing to production, or fixing bugs, security needs to be part of the muscle memory.",
       "components": [
         {
@@ -2274,7 +2283,7 @@
       ]
     },
     {
-      "sentenceId": "retry-008",
+      "id": "retry-008",
       "text": "An Architecture Decision Record (ADR) is a short document that captures and explains a single decision relevant to a product or ecosystem.",
       "components": [
         {
@@ -2316,7 +2325,7 @@
       ]
     },
     {
-      "sentenceId": "retry-009",
+      "id": "retry-009",
       "text": "They decouple deployment from release, letting your team ship code continuously while controlling what any given user segment sees.",
       "components": [
         {
@@ -2358,7 +2367,7 @@
       ]
     },
     {
-      "sentenceId": "improved-001",
+      "id": "improved-001",
       "text": "The way we build software has changed.",
       "components": [
         {
@@ -2376,7 +2385,7 @@
       ]
     },
     {
-      "sentenceId": "improved-002",
+      "id": "improved-002",
       "text": "Security isn't just something you tack on at the end.",
       "components": [
         {
@@ -2418,7 +2427,7 @@
       ]
     },
     {
-      "sentenceId": "improved-003",
+      "id": "improved-003",
       "text": "Start by adopting a secure SDLC (software development lifecycle).",
       "components": [
         {
@@ -2448,7 +2457,7 @@
       ]
     },
     {
-      "sentenceId": "improved-005",
+      "id": "improved-005",
       "text": "When we need an LLM to perform a complex task, we often need to feed it a lot of context.",
       "components": [
         {
@@ -2490,7 +2499,7 @@
       ]
     },
     {
-      "sentenceId": "improved-006",
+      "id": "improved-006",
       "text": "The test automation pyramid gives every engineering team the same structural answer: write many fast unit tests, fewer integration tests.",
       "components": [
         {
@@ -2532,7 +2541,7 @@
       ]
     },
     {
-      "sentenceId": "improved-008",
+      "id": "improved-008",
       "text": "The piezochiral effect, a new member of the family of strain-responsive functionalities alongside piezoelectricity and piezomagnetism, is introduced.",
       "components": [
         {

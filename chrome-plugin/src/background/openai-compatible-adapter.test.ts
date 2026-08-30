@@ -416,18 +416,18 @@ describe("syntax prompts", () => {
     expect(prompt).toMatch(/JSON only/i);
   });
 
-  it("states the compound-sentence rules for coordinate clauses and conjunctions", () => {
+  it("states the compound-sentence peer-component and conjunction rules", () => {
     const prompt = buildCorePrompt([sentence]);
-    expect(prompt).toContain("COORDINATE_CLAUSE");
+    expect(prompt).toContain("Never emit COORDINATE_CLAUSE");
     expect(prompt).toContain("CONJUNCTION");
     expect(prompt).toMatch(/coordinating conjunction/i);
     // The conjunction list is the closed FANBOYS set, with no open-ended
     // ellipsis a model could stretch to subordinators like "because".
     expect(prompt).toContain("(for, and, nor, but, or, yet, so)");
     expect(prompt).not.toContain("...");
-    expect(prompt).toMatch(/complete Chinese translation/i);
+    expect(prompt).toContain("analyse the inside of every clause as peer components");
     expect(prompt).toMatch(/subordinate clause.*one whole component/is);
-    expect(prompt).toMatch(/never wrap.*single subject-predicate/is);
+    expect(prompt).toContain("single subject-predicate structure as peer components");
   });
 
   it("spells out the exact output envelope so schema-free models cannot guess", () => {

@@ -63,7 +63,9 @@ class PromptsTest {
     val prompt = buildCorePrompt(listOf(sentence("Help turn ideas into fully formed designs and specs.")))
 
     assertTrue(prompt.contains("Clause-structure-first rule:"))
-    assertTrue(prompt.contains("emit exactly one COORDINATE_CLAUSE per clause"))
+    assertTrue(prompt.contains("analyse every compound clause as peer components"))
+    assertTrue(prompt.contains("Never emit COORDINATE_CLAUSE"))
+    assertFalse(prompt.contains("emit exactly one COORDINATE_CLAUSE per clause"))
     assertTrue(prompt.contains("\"Help turn\" is one PREDICATE"))
     assertTrue(prompt.contains("Two PREDICATE components must never be adjacent"))
     assertTrue(prompt.contains("a preposition and everything it governs form exactly one component"))
@@ -97,7 +99,7 @@ class PromptsTest {
       "Compound-sentence rule:",
       "Complex-sentence rule:",
       "Simple-sentence rule:",
-      "Give every component other than a COORDINATE_CLAUSE",
+      "Give every component a concise, non-empty Chinese translation",
     ).forEach { rule ->
       assertTrue(core.contains(rule), rule)
       assertTrue(repair.contains(rule), rule)

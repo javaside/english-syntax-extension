@@ -230,26 +230,30 @@ function coverageGapComponents(): GeneratedComponent[] {
 }
 
 /**
- * A deterministic compound-sentence analysis: the tokens before the first
- * coordinating conjunction form one COORDINATE_CLAUSE, the conjunction is its
- * own CONJUNCTION component, and the remaining lexical tokens form the second
- * COORDINATE_CLAUSE. A sentence without an inner conjunction falls back to
- * the automatic simple analysis so the outcome stays validator-compliant.
+ * A deterministic compound-sentence analysis for the compound E2E fixture.
+ * Compound clauses are flattened into peer subject/predicate components, with
+ * only the coordinating conjunction kept as its own CONJUNCTION component.
  */
 function compoundComponents(sentence: PromptSentence): GeneratedComponent[] {
   const conjunction = sentence.tokens.find(
     (token) => !token.punctuation && ["and", "but", "or", "so"].includes(token.text.toLowerCase()),
   );
   const lexical = sentence.tokens.filter((token) => !token.punctuation);
-  if (conjunction === undefined || conjunction === lexical[0] || conjunction === lexical.at(-1)) {
+  if (conjunction === undefined || conjunction.id < 2 || conjunction.id + 2 >= lexical.length) {
     return autoComponents(sentence);
   }
   return [
     {
       startToken: lexical[0]!.id,
+      endToken: conjunction.id - 2,
+      role: "SUBJECT",
+      translation: "第一分句的主语",
+    },
+    {
+      startToken: conjunction.id - 1,
       endToken: conjunction.id - 1,
-      role: "COORDINATE_CLAUSE",
-      translation: "第一分句的完整翻译",
+      role: "PREDICATE",
+      translation: "第一分句的谓语",
     },
     {
       startToken: conjunction.id,
@@ -259,9 +263,15 @@ function compoundComponents(sentence: PromptSentence): GeneratedComponent[] {
     },
     {
       startToken: conjunction.id + 1,
+      endToken: lexical.at(-2)!.id,
+      role: "SUBJECT",
+      translation: "第二分句的主语",
+    },
+    {
+      startToken: lexical.at(-1)!.id,
       endToken: lexical.at(-1)!.id,
-      role: "COORDINATE_CLAUSE",
-      translation: "第二分句的完整翻译",
+      role: "PREDICATE",
+      translation: "第二分句的谓语",
     },
   ];
 }
