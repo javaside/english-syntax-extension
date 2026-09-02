@@ -98,6 +98,32 @@ describe("model-facing sentence payload", () => {
   });
 
   /**
+   * 线上实测的四类错误各对应提示词里的一处漏洞或自相矛盾:定语从句只标引导词、
+   * 名词后的 of 短语误标状语、系表结构两种口径混用、译文只译中心词。
+   */
+  it("closes the four gaps behind the observed misanalyses", () => {
+    const prompt = buildCorePrompt([sentence]);
+
+    // 从句右边界:从引导词一直延伸到从句自己的宾语与状语。
+    expect(prompt).toContain("never stop a clause component at its introducing word");
+    expect(prompt).toContain('"that handles multiple commands at once" is ONE ATTRIBUTIVE_CLAUSE');
+
+    // 后置定语归 ATTRIBUTE,不是 ADVERBIAL;旧文案把 ATTRIBUTE 限死在前置修饰上。
+    expect(prompt).toContain(
+      "a prepositional phrase that directly follows the noun phrase it modifies is ATTRIBUTE",
+    );
+    expect(prompt).not.toContain("ATTRIBUTE is only a modifier sitting inside a noun phrase");
+    expect(prompt).toContain("never let a component end on a preposition");
+
+    // 系表拆开:PREDICATE 只含系动词,补足部分单独标 PREDICATIVE。
+    expect(prompt).toContain("a linking verb takes only the verb itself");
+    expect(prompt).not.toContain('"is independently deployable" is one PREDICATE');
+
+    // 译文必须覆盖整段成分,不能只译中心词。
+    expect(prompt).toContain("renders everything the component covers");
+  });
+
+  /**
    * 修复轮曾只带 peer + supplement 两条规则，覆盖率/角色枚举/复合句/译文要求全丢，
    * 于是"修一次就更碎"。core 与 repair 现在共享同一份规则清单。
    */

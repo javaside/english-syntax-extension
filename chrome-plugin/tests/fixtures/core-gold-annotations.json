@@ -4,10 +4,15 @@
     "ATTRIBUTE 表示名词短语内部可独立成短语的修饰语，既可以前置（如 'fully formed designs' 中短语级的 'fully formed'），也可以后置（如 'The documents signed yesterday' 中的 'signed yesterday'）；拆出后，中心名词短语承担 SUBJECT / OBJECT 等同层角色。",
     "介词与它管辖的一切优先合为一个 ADVERBIAL 或 ATTRIBUTE；因此 'into fully formed designs and specs' 整体标 ADVERBIAL，不在介词短语内部再拆 'fully formed'。并列的副词或名词（'calmly and confidently'）也保持一个成分，其中的 and 不标 CONJUNCTION。",
     "标点刻意不覆盖：校验规则允许标点不被任何成分覆盖，渲染层按源 Token 画回原位。",
-    "刻意排除了内部有歧义的句子（谓语被副词割开、名词后接介词短语），免得基线指标被标注争议污染。",
+    "刻意排除了内部有歧义的句子（谓语被副词割开），免得基线指标被标注争议污染。名词后接介词短语不再算歧义，已在下面定死口径——它是技术文档里最高频的结构，排除等于测不到。",
     "id 带 doc- 前缀的句子逐字取自真实技术文档（code.claude.com/docs 的 Claude Code 概览页），用来测真实输入分布：无前缀的那批是精选教学句，句长与句式都比实际网页/文档窄，单靠它无法判断线上准确率。",
     "共享主语的并列谓语不是并列句：'Claude Code traces the issue…, identifies…, and implements a fix.' 里三个动词共用一个主语，各谓语与其宾语按同层成分平铺，连接它们的 and / or 标 CONJUNCTION，不标 COORDINATE_CLAUSE。",
-    "并列句也按同层成分平铺：各分句的 SUBJECT / PREDICATE / OBJECT 等都作为顶层成分，FANBOYS 并列连词单独标 CONJUNCTION，分号可以连接分句但不单独成分；不得再输出 COORDINATE_CLAUSE。逗号引导的从属分句一律标五类从句之一（'If Git for Windows is not installed, …' 里前半是 ADVERBIAL_CLAUSE，主句照旧拆同层成分）。"
+    "并列句也按同层成分平铺：各分句的 SUBJECT / PREDICATE / OBJECT 等都作为顶层成分，FANBOYS 并列连词单独标 CONJUNCTION，分号可以连接分句但不单独成分；不得再输出 COORDINATE_CLAUSE。逗号引导的从属分句一律标五类从句之一（'If Git for Windows is not installed, …' 里前半是 ADVERBIAL_CLAUSE，主句照旧拆同层成分）。",
+    "五类从句角色（SUBJECT_CLAUSE / OBJECT_CLAUSE / PREDICATIVE_CLAUSE / ATTRIBUTIVE_CLAUSE / ADVERBIAL_CLAUSE）的成分必须覆盖整个从句：引导词加从句自己的主语、谓语、宾语与状语。既不得只标引导词（`that` 单独成分），也不得把从句的宾语或状语平铺成主句的同层成分（`that will reach` + `about $650 billion` 是错的）。省略引导词的从句同样整块标（`developers now play a frontline role` 是一个 OBJECT_CLAUSE）。",
+    "系表结构拆开：PREDICATE 只覆盖动词组（系动词，或助动词 + 主要动词），表语单独标 PREDICATIVE（`Be clear` = PREDICATE«Be» + PREDICATIVE«clear»）。被动语态、完成时、进行时里的 be / have 是动词组的一部分，仍留在同一个 PREDICATE 内（`was rebuilt`、`have been told`、`is deflating`）。",
+    "作为独立成分的名词短语后面紧跟的介词短语一律单独标 ATTRIBUTE，没有量词或部分结构的例外（`Four` + `of the biggest US technology companies`、`a lot` + `of context`、`No amount` + `of firewalls or patches`）。但介词短语或从句内部的介词短语不再拆，`without looking at any of the code` 保持一个 ADVERBIAL。",
+    "非限定动词短语（动名词、不定式、分词）与它管辖的宾语同属一个成分（`avoiding blind adoption`、`building a software application`、`performing near the frontier of what AI can do`），不拆成两个同级宾语，也不让介词悬在成分末尾。",
+    "含 `It's` 这类「主语 + 系动词」缩写的句子不纳入：分词刻意不拆缩写，整个 `It's` 是一个 Token，主语与系动词无法分到两个成分里。`isn't` / `aren't` 这类「系动词 + 否定」是一个词，不受影响。"
   ],
   "sentences": [
     {
@@ -1365,42 +1370,6 @@
       ]
     },
     {
-      "id": "auto-gen-003",
-      "text": "It's something you build in from the first line of code.",
-      "components": [
-        {
-          "startToken": 0,
-          "endToken": 0,
-          "role": "SUBJECT",
-          "translation": "它"
-        },
-        {
-          "startToken": 1,
-          "endToken": 1,
-          "role": "PREDICATIVE",
-          "translation": "是某种东西"
-        },
-        {
-          "startToken": 2,
-          "endToken": 2,
-          "role": "SUBJECT",
-          "translation": "你"
-        },
-        {
-          "startToken": 3,
-          "endToken": 4,
-          "role": "PREDICATE",
-          "translation": "构建进去"
-        },
-        {
-          "startToken": 5,
-          "endToken": 10,
-          "role": "ADVERBIAL",
-          "translation": "从第一行代码开始"
-        }
-      ]
-    },
-    {
       "id": "auto-gen-007",
       "text": "That means building security into every phase, from planning and design to testing and deployment.",
       "components": [
@@ -1557,26 +1526,27 @@
         {
           "startToken": 0,
           "endToken": 1,
-          "role": "SUBJECT",
-          "translation": "代码审查"
+          "role": "SUBJECT"
         },
         {
           "startToken": 2,
+          "endToken": 2,
+          "role": "PREDICATE"
+        },
+        {
+          "startToken": 3,
           "endToken": 4,
-          "role": "PREDICATE",
-          "translation": "是广泛有益的"
+          "role": "PREDICATIVE"
         },
         {
           "startToken": 5,
           "endToken": 5,
-          "role": "CONJUNCTION",
-          "translation": "但是"
+          "role": "CONJUNCTION"
         },
         {
           "startToken": 6,
           "endToken": 8,
-          "role": "PREDICATIVE",
-          "translation": "并非总是最优的"
+          "role": "PREDICATIVE"
         }
       ]
     },
@@ -1610,15 +1580,18 @@
       "components": [
         {
           "startToken": 0,
+          "endToken": 0,
+          "role": "PREDICATE"
+        },
+        {
+          "startToken": 1,
           "endToken": 1,
-          "role": "PREDICATE",
-          "translation": "要清楚"
+          "role": "PREDICATIVE"
         },
         {
           "startToken": 2,
           "endToken": 7,
-          "role": "ADVERBIAL",
-          "translation": "关于当前问题及其影响"
+          "role": "ADVERBIAL"
         }
       ]
     },
@@ -1629,38 +1602,27 @@
         {
           "startToken": 0,
           "endToken": 1,
-          "role": "SUBJECT",
-          "translation": "这篇文章"
+          "role": "SUBJECT"
         },
         {
           "startToken": 2,
           "endToken": 2,
-          "role": "PREDICATE",
-          "translation": "强调"
+          "role": "PREDICATE"
         },
         {
           "startToken": 3,
-          "endToken": 3,
-          "role": "OBJECT",
-          "translation": "避免"
-        },
-        {
-          "startToken": 4,
           "endToken": 5,
-          "role": "OBJECT",
-          "translation": "盲目采用"
+          "role": "OBJECT"
         },
         {
           "startToken": 6,
           "endToken": 7,
-          "role": "ATTRIBUTE",
-          "translation": "实践的"
+          "role": "ATTRIBUTE"
         },
         {
           "startToken": 8,
           "endToken": 12,
-          "role": "ADVERBIAL_CLAUSE",
-          "translation": "仅仅因为它们在其他地方有效"
+          "role": "ADVERBIAL_CLAUSE"
         }
       ]
     },
@@ -1671,68 +1633,52 @@
         {
           "startToken": 0,
           "endToken": 1,
-          "role": "SUBJECT",
-          "translation": "氛围编码"
+          "role": "SUBJECT"
         },
         {
           "startToken": 2,
           "endToken": 2,
-          "role": "PREDICATE",
-          "translation": "是"
+          "role": "PREDICATE"
         },
         {
           "startToken": 3,
-          "endToken": 3,
-          "role": "PREDICATIVE",
-          "translation": "构建"
-        },
-        {
-          "startToken": 4,
           "endToken": 6,
-          "role": "OBJECT",
-          "translation": "一个软件应用程序"
+          "role": "PREDICATIVE"
         },
         {
           "startToken": 7,
           "endToken": 10,
-          "role": "ADVERBIAL",
-          "translation": "通过提示一个LLM"
+          "role": "ADVERBIAL"
         },
         {
           "startToken": 12,
           "endToken": 16,
-          "role": "ADVERBIAL",
-          "translation": "告诉它要构建什么"
+          "role": "ADVERBIAL"
         },
         {
           "startToken": 18,
           "endToken": 20,
-          "role": "ADVERBIAL",
-          "translation": "尝试它"
+          "role": "ADVERBIAL"
         },
         {
           "startToken": 22,
           "endToken": 24,
-          "role": "ADVERBIAL",
-          "translation": "提示更改"
+          "role": "ADVERBIAL"
         },
         {
           "startToken": 26,
           "endToken": 26,
-          "role": "CONJUNCTION",
-          "translation": "但是"
+          "role": "CONJUNCTION"
         },
         {
           "startToken": 27,
           "endToken": 33,
-          "role": "ADVERBIAL",
-          "translation": "不查看任何代码"
+          "role": "ADVERBIAL"
         },
         {
           "startToken": 34,
           "endToken": 37,
-          "role": "ATTRIBUTIVE_CLAUSE",
-          "translation": "LLM生成的"
+          "role": "ATTRIBUTIVE_CLAUSE"
         }
       ]
     },
@@ -1923,68 +1869,47 @@
         {
           "startToken": 0,
           "endToken": 2,
-          "role": "SUBJECT",
-          "translation": "一个免费的模型"
+          "role": "SUBJECT"
         },
         {
           "startToken": 3,
           "endToken": 5,
-          "role": "ATTRIBUTE",
-          "translation": "被称为Ox Alpha的"
+          "role": "ATTRIBUTE"
         },
         {
           "startToken": 6,
           "endToken": 6,
-          "role": "PREDICATE",
-          "translation": "出现"
+          "role": "PREDICATE"
         },
         {
           "startToken": 7,
           "endToken": 7,
-          "role": "ADVERBIAL",
-          "translation": "在线"
+          "role": "ADVERBIAL"
         },
         {
           "startToken": 9,
-          "endToken": 9,
-          "role": "PREDICATE",
-          "translation": "表现"
-        },
-        {
-          "startToken": 10,
-          "endToken": 13,
-          "role": "ADVERBIAL",
-          "translation": "接近前沿"
-        },
-        {
-          "startToken": 14,
           "endToken": 17,
-          "role": "OBJECT_CLAUSE",
-          "translation": "AI能做的"
+          "role": "ADVERBIAL"
         },
         {
           "startToken": 19,
           "endToken": 19,
-          "role": "CONJUNCTION",
-          "translation": "并且"
+          "role": "CONJUNCTION"
         },
         {
           "startToken": 20,
           "endToken": 20,
-          "role": "SUBJECT",
-          "translation": "没有人"
+          "role": "SUBJECT"
         },
         {
           "startToken": 21,
           "endToken": 23,
-          "role": "PREDICATE",
-          "translation": "甚至会说出"
+          "role": "PREDICATE"
         },
         {
           "startToken": 24,
           "endToken": 26,
-          "role": "OBJECT_CLAUSE",
-          "translation": "谁建造了它"
+          "role": "OBJECT_CLAUSE"
         }
       ]
     },
@@ -2060,21 +1985,23 @@
       "components": [
         {
           "startToken": 0,
+          "endToken": 0,
+          "role": "SUBJECT"
+        },
+        {
+          "startToken": 1,
           "endToken": 7,
-          "role": "SUBJECT",
-          "translation": "英伟达公司的一些最大客户"
+          "role": "ATTRIBUTE"
         },
         {
           "startToken": 8,
           "endToken": 10,
-          "role": "PREDICATE",
-          "translation": "已被告知"
+          "role": "PREDICATE"
         },
         {
           "startToken": 11,
           "endToken": 35,
-          "role": "OBJECT_CLAUSE",
-          "translation": "包含其AI芯片的服务器价格在许多将于明年初发货的系统中将上涨超过15%"
+          "role": "OBJECT_CLAUSE"
         }
       ]
     },
@@ -2114,45 +2041,33 @@
       "components": [
         {
           "startToken": 0,
+          "endToken": 0,
+          "role": "SUBJECT"
+        },
+        {
+          "startToken": 1,
           "endToken": 6,
-          "role": "SUBJECT",
-          "translation": "美国最大的四家科技公司"
+          "role": "ATTRIBUTE"
         },
         {
           "startToken": 7,
           "endToken": 7,
-          "role": "ADVERBIAL",
-          "translation": "共同"
+          "role": "ADVERBIAL"
         },
         {
           "startToken": 8,
           "endToken": 9,
-          "role": "PREDICATE",
-          "translation": "已经预测"
+          "role": "PREDICATE"
         },
         {
           "startToken": 10,
           "endToken": 11,
-          "role": "OBJECT",
-          "translation": "资本支出"
+          "role": "OBJECT"
         },
         {
           "startToken": 12,
-          "endToken": 14,
-          "role": "ATTRIBUTIVE_CLAUSE",
-          "translation": "将达到"
-        },
-        {
-          "startToken": 15,
-          "endToken": 18,
-          "role": "OBJECT",
-          "translation": "约6500亿美元"
-        },
-        {
-          "startToken": 19,
           "endToken": 20,
-          "role": "ADVERBIAL",
-          "translation": "在2026年"
+          "role": "ATTRIBUTIVE_CLAUSE"
         }
       ]
     },
@@ -2163,44 +2078,22 @@
         {
           "startToken": 0,
           "endToken": 0,
-          "role": "SUBJECT",
-          "translation": "苹果"
+          "role": "SUBJECT"
         },
         {
           "startToken": 1,
           "endToken": 1,
-          "role": "PREDICATE",
-          "translation": "测试"
+          "role": "PREDICATE"
         },
         {
           "startToken": 2,
           "endToken": 3,
-          "role": "OBJECT",
-          "translation": "Siri功能"
+          "role": "OBJECT"
         },
         {
           "startToken": 4,
-          "endToken": 4,
-          "role": "ATTRIBUTIVE_CLAUSE",
-          "translation": "处理"
-        },
-        {
-          "startToken": 5,
-          "endToken": 5,
-          "role": "PREDICATE",
-          "translation": "处理"
-        },
-        {
-          "startToken": 6,
-          "endToken": 7,
-          "role": "OBJECT",
-          "translation": "多个命令"
-        },
-        {
-          "startToken": 8,
           "endToken": 9,
-          "role": "ADVERBIAL",
-          "translation": "一次"
+          "role": "ATTRIBUTIVE_CLAUSE"
         }
       ]
     },
@@ -2211,38 +2104,17 @@
         {
           "startToken": 0,
           "endToken": 0,
-          "role": "SUBJECT",
-          "translation": "那"
+          "role": "SUBJECT"
         },
         {
           "startToken": 1,
           "endToken": 1,
-          "role": "PREDICATE",
-          "translation": "意味着"
+          "role": "PREDICATE"
         },
         {
           "startToken": 2,
-          "endToken": 2,
-          "role": "SUBJECT_CLAUSE",
-          "translation": "开发者"
-        },
-        {
-          "startToken": 3,
-          "endToken": 3,
-          "role": "ADVERBIAL",
-          "translation": "现在"
-        },
-        {
-          "startToken": 4,
-          "endToken": 4,
-          "role": "PREDICATE",
-          "translation": "扮演"
-        },
-        {
-          "startToken": 5,
           "endToken": 7,
-          "role": "OBJECT",
-          "translation": "一线角色"
+          "role": "OBJECT_CLAUSE"
         }
       ]
     },
@@ -2289,38 +2161,22 @@
         {
           "startToken": 0,
           "endToken": 6,
-          "role": "SUBJECT",
-          "translation": "架构决策记录（ADR）"
+          "role": "SUBJECT"
         },
         {
           "startToken": 7,
           "endToken": 7,
-          "role": "PREDICATE",
-          "translation": "是"
+          "role": "PREDICATE"
         },
         {
           "startToken": 8,
           "endToken": 10,
-          "role": "PREDICATIVE",
-          "translation": "一份简短文档"
+          "role": "PREDICATIVE"
         },
         {
           "startToken": 11,
-          "endToken": 14,
-          "role": "ATTRIBUTIVE_CLAUSE",
-          "translation": "它捕获并解释"
-        },
-        {
-          "startToken": 15,
-          "endToken": 17,
-          "role": "OBJECT",
-          "translation": "一个单一决策"
-        },
-        {
-          "startToken": 18,
           "endToken": 23,
-          "role": "ADVERBIAL",
-          "translation": "与产品或生态系统相关"
+          "role": "ATTRIBUTIVE_CLAUSE"
         }
       ]
     },
@@ -2391,38 +2247,27 @@
         {
           "startToken": 0,
           "endToken": 0,
-          "role": "SUBJECT",
-          "translation": "安全性"
+          "role": "SUBJECT"
         },
         {
           "startToken": 1,
+          "endToken": 1,
+          "role": "PREDICATE"
+        },
+        {
+          "startToken": 2,
           "endToken": 2,
-          "role": "PREDICATE",
-          "translation": "不仅仅是"
+          "role": "ADVERBIAL"
         },
         {
           "startToken": 3,
           "endToken": 3,
-          "role": "PREDICATIVE",
-          "translation": "某种东西"
+          "role": "PREDICATIVE"
         },
         {
           "startToken": 4,
-          "endToken": 4,
-          "role": "SUBJECT_CLAUSE",
-          "translation": "你"
-        },
-        {
-          "startToken": 5,
-          "endToken": 6,
-          "role": "PREDICATE",
-          "translation": "附加"
-        },
-        {
-          "startToken": 7,
           "endToken": 9,
-          "role": "ADVERBIAL",
-          "translation": "在最后"
+          "role": "ATTRIBUTIVE_CLAUSE"
         }
       ]
     },
@@ -2433,26 +2278,17 @@
         {
           "startToken": 0,
           "endToken": 0,
-          "role": "PREDICATE",
-          "translation": "开始"
+          "role": "PREDICATE"
         },
         {
           "startToken": 1,
-          "endToken": 2,
-          "role": "ADVERBIAL",
-          "translation": "通过采用"
-        },
-        {
-          "startToken": 3,
           "endToken": 5,
-          "role": "OBJECT",
-          "translation": "一个安全的SDLC"
+          "role": "ADVERBIAL"
         },
         {
           "startToken": 6,
           "endToken": 10,
-          "role": "APPOSITIVE",
-          "translation": "（软件开发生命周期）"
+          "role": "APPOSITIVE"
         }
       ]
     },
@@ -2463,38 +2299,37 @@
         {
           "startToken": 0,
           "endToken": 9,
-          "role": "ADVERBIAL_CLAUSE",
-          "translation": "当我们需要一个LLM执行复杂任务时"
+          "role": "ADVERBIAL_CLAUSE"
         },
         {
           "startToken": 11,
           "endToken": 11,
-          "role": "SUBJECT",
-          "translation": "我们"
+          "role": "SUBJECT"
         },
         {
           "startToken": 12,
           "endToken": 12,
-          "role": "ADVERBIAL",
-          "translation": "经常"
+          "role": "ADVERBIAL"
         },
         {
           "startToken": 13,
           "endToken": 15,
-          "role": "PREDICATE",
-          "translation": "需要喂给"
+          "role": "PREDICATE"
         },
         {
           "startToken": 16,
           "endToken": 16,
-          "role": "OBJECT",
-          "translation": "它"
+          "role": "OBJECT"
         },
         {
           "startToken": 17,
+          "endToken": 18,
+          "role": "OBJECT"
+        },
+        {
+          "startToken": 19,
           "endToken": 20,
-          "role": "OBJECT",
-          "translation": "大量上下文"
+          "role": "ATTRIBUTE"
         }
       ]
     },
@@ -2505,38 +2340,37 @@
         {
           "startToken": 0,
           "endToken": 3,
-          "role": "SUBJECT",
-          "translation": "测试自动化金字塔"
+          "role": "SUBJECT"
         },
         {
           "startToken": 4,
           "endToken": 4,
-          "role": "PREDICATE",
-          "translation": "给予"
+          "role": "PREDICATE"
         },
         {
           "startToken": 5,
           "endToken": 7,
-          "role": "OBJECT",
-          "translation": "每个工程团队"
+          "role": "OBJECT"
         },
         {
           "startToken": 8,
           "endToken": 11,
-          "role": "OBJECT",
-          "translation": "相同的结构性答案"
+          "role": "OBJECT"
         },
         {
           "startToken": 13,
+          "endToken": 13,
+          "role": "PREDICATE"
+        },
+        {
+          "startToken": 14,
           "endToken": 17,
-          "role": "PREDICATE",
-          "translation": "编写许多快速的单元测试"
+          "role": "OBJECT"
         },
         {
           "startToken": 19,
           "endToken": 21,
-          "role": "PREDICATE",
-          "translation": "更少的集成测试。"
+          "role": "OBJECT"
         }
       ]
     },
@@ -2561,6 +2395,42 @@
           "endToken": 19,
           "role": "PREDICATE",
           "translation": "被引入。"
+        }
+      ]
+    },
+    {
+      "id": "doc-of-phrase-clause-1",
+      "text": "The Spring AI project aims to streamline the development of applications that incorporate artificial intelligence functionality without unnecessary complexity.",
+      "components": [
+        {
+          "startToken": 0,
+          "endToken": 3,
+          "role": "SUBJECT"
+        },
+        {
+          "startToken": 4,
+          "endToken": 6,
+          "role": "PREDICATE"
+        },
+        {
+          "startToken": 7,
+          "endToken": 8,
+          "role": "OBJECT"
+        },
+        {
+          "startToken": 9,
+          "endToken": 10,
+          "role": "ATTRIBUTE"
+        },
+        {
+          "startToken": 11,
+          "endToken": 15,
+          "role": "ATTRIBUTIVE_CLAUSE"
+        },
+        {
+          "startToken": 16,
+          "endToken": 18,
+          "role": "ADVERBIAL"
         }
       ]
     }

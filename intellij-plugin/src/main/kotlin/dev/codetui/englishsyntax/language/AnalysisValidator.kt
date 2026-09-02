@@ -142,6 +142,53 @@ private val subordinatingConjunctions = setOf(
  */
 private const val MIN_SPLITTABLE_LEXICAL_TOKENS = 4
 
+/**
+ * 五类从句角色。`Complex-sentence rule` 要求从句整块输出、不拆内部结构，
+ * 下面几条从句硬门就是那条提示词规则的本地兑现。
+ */
+private val clauseRoles = setOf(
+  GrammarRole.SUBJECT_CLAUSE,
+  GrammarRole.OBJECT_CLAUSE,
+  GrammarRole.PREDICATIVE_CLAUSE,
+  GrammarRole.ATTRIBUTIVE_CLAUSE,
+  GrammarRole.ADVERBIAL_CLAUSE,
+)
+
+/**
+ * 一个从句至少要有引导词 + 谓语，或主语 + 谓语，所以实词数 1 一定不是从句。
+ * 实测线上把 `that` 单独标成 `ATTRIBUTIVE_CLAUSE`、把 `developers` 标成
+ * `SUBJECT_CLAUSE`，从句剩下的部分平铺到主句层，页面上出现两个同级"谓语"，
+ * 引导词底下还挂着整个从句的译文——旧硬门一条都拦不住。
+ */
+private const val MIN_CLAUSE_LEXICAL_TOKENS = 2
+
+/**
+ * 定语从句修饰的名词在从句之前，主句宾语只能出现在主句谓语之后——所以紧跟在
+ * `ATTRIBUTIVE_CLAUSE` 后面的宾语 / 表语 / 补语一定是从句自己的，说明从句被切开了
+ * （实测 `that will reach` + `about $650 billion`）。主句谓语与主句状语跟在从句后面
+ * 都是合法的，不在这条里。
+ */
+private val clauseInternalFollowers = setOf(
+  GrammarRole.OBJECT,
+  GrammarRole.PREDICATIVE,
+  GrammarRole.COMPLEMENT,
+)
+
+/**
+ * 「几乎不可能悬垂」的介词。成分以它们收尾就说明介词的宾语被切了出去
+ * （实测 `near the frontier of` + 宾语从句）。
+ *
+ * `for` / `with` / `at` / `from` / `to` 刻意不收：关系从句的介词悬垂
+ * （`the tool I work with`、`the place I came from`）让它们合法地出现在成分末尾，
+ * 收进来会把正确分析送进修复轮。已有的单词介词硬门只管「整个成分就是一个介词」，
+ * 这条补的是「介词在成分末尾」。
+ */
+private val objectRequiringPrepositions = setOf(
+  "among", "between", "despite", "during", "into", "of", "onto", "toward", "towards",
+  "upon", "within",
+)
+
+
 private fun lexicalTexts(tokens: List<Token>, range: TokenRange): List<String> = tokens
   .filter { it.id in range.startToken..range.endToken }
   .filterNot { it.punctuation }
@@ -220,6 +267,40 @@ private fun collectGrammarErrors(
       errors += error(
         componentPath,
         "CONJUNCTION must cover a coordinating conjunction (for, and, nor, but, or, yet, so)",
+      )
+    }
+
+    // Complex-sentence rule 的本地兑现：从句整块输出，实词数 1 不可能是一个从句。
+    if (component.role in clauseRoles && words.size < MIN_CLAUSE_LEXICAL_TOKENS) {
+      errors += error(
+        componentPath,
+        "a clause component must cover a whole clause: extend it through the clause's own subject, " +
+          "predicate, and any objects or adverbials instead of a single word",
+      )
+    }
+
+    // 定语从句后面紧跟宾语 / 表语 / 补语 = 从句自己的成分被切了出去。
+    if (
+      component.role == GrammarRole.ATTRIBUTIVE_CLAUSE &&
+      components.getOrNull(index + 1)?.role in clauseInternalFollowers
+    ) {
+      errors += error(
+        componentPath,
+        "an ATTRIBUTIVE_CLAUSE keeps its whole internal structure in one component; absorb the " +
+          "object, predicative, or complement that follows it",
+      )
+    }
+
+    // 成分以「必带宾语的介词」收尾 = 介词的宾语被切了出去。单词介词另有专门的硬门。
+    if (
+      component.role != GrammarRole.CONJUNCTION &&
+      words.size > 1 &&
+      words.last() in objectRequiringPrepositions
+    ) {
+      errors += error(
+        componentPath,
+        "a component must not end on a preposition; merge the phrase that preposition governs " +
+          "into the same component",
       )
     }
   }

@@ -146,6 +146,16 @@
 
 **测试** `prompts.test.ts` 与 `analysis-service.test.ts` 各有一组 `/\n {2}"/` 断言钉住这点。
 
+### I-11.1 提示词的角色定义与黄金集口径必须一致
+
+**规则** 一个 role 的判定标准只能有一处定义。提示词规则、黄金集 `conventions`、黄金标注三处必须说同一件事;改任一处先对齐另两处。
+
+**为什么** `PREPOSITIONAL_PHRASE_RULE` 曾把 `ATTRIBUTE` 限死成「名词短语内部的修饰语」并只给前置修饰的例子(`"fully formed" inside "fully formed designs"`),而黄金集 conventions 明写「既可前置也可后置」;`PREDICATE_SCOPE_RULE` 曾举例 `"is independently deployable" is one PREDICATE`,而同一份规则清单里的 `PEER_COMPONENT_RULE` 禁止 `PREDICATE` 吸收可分离的 `PREDICATIVE`。两处互相矛盾时模型只能猜,同一句在两次调用之间会跳。
+
+**症状** `the development of applications` 里 `of applications` 被标成 `ADVERBIAL`(应为 `ATTRIBUTE`),译文退化成单字「的」;系表结构一半句子合成一个 `PREDICATE`、一半拆成 `PREDICATE` + `PREDICATIVE`。两者都**完全通过**当时的全部硬门,直接写进缓存长期显示在页面上。
+
+**守护测试** `prompts.test.ts` 的 "closes the four gaps behind the observed misanalyses" 钉住四条新措辞;`core-gold-annotations.test.ts` 的 "keeps every of-phrase out of the noun-phrase component it modifies" 钉住黄金集这一侧的 of 口径。
+
 ### I-12 别改 prompt 首行措辞
 
 **规则** 假模型服务器按 prompt 首行前缀识别请求类型(`chrome-plugin/tests/support/fake-openai-server.ts` 的 `detectKind`)。
@@ -359,6 +369,16 @@
 **症状** 修好一个例句却让整体 span F1 下降，或 CI 因外部模型限流/输出漂移随机红。
 
 **守护测试** `core-gold-annotations.test.ts`、`scripts/core-evaluation.test.mjs`、`scripts/core-evaluation-runner.test.mjs`。
+
+### I-25.1.1 黄金标注不得只靠 validator 收编
+
+**规则** 进 `core-gold-annotations.json` 的每一句都要人工核过语言学正确性。通过 `validateCoreBatch` 只说明结构自洽(区间在句内、有序不重叠、覆盖完整),不说明划分对。
+
+**为什么** 2026-08-30 那批 32 句(`auto-gen-*` / `retry-*` / `improved-*`)是模型批量生成后只跑结构校验就并进来的,9-02 逐句复核出 15 处错标:`that` 单独当 `ATTRIBUTIVE_CLAUSE`、`developers` 当 `SUBJECT_CLAUSE`、`near the frontier of` 介词悬空、系表结构两种口径混用、`It's` 整体当主语(整句没有谓语)。黄金集是「正确划分」的定义,错标注会让评分器**奖励**线上正在犯的错——用户截图里的错误划分与 `auto-gen-035` 的标注完全同构。
+
+**症状** 提示词改对了反而掉分;线上反复出现的某类错误在评分里看不见。
+
+**守护测试** `core-gold-annotations.test.ts` 把能机器判定的口径都钉住了(整份过生产 validator、of 短语不得藏在名词短语成分里、角色覆盖面),但**语言学正确性没有自动守护**,只能靠复核。新增句子时同时补一条能机器判定的口径断言。
 
 ### I-25.2 真模型 runner 的 base URL 必须先校验再使用
 

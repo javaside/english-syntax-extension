@@ -102,16 +102,41 @@ const CLAUSE_FIRST_RULE =
   'Tag a coordinating conjunction as CONJUNCTION only when it joins whole clauses or whole verb phrases; one inside a coordinated noun, adjective, or adverb phrase stays part of that single component ("calmly and confidently" is ONE ADVERBIAL). ' +
   "A clause introduced by a subordinating conjunction (because, although, if, when, while, since, until, as, …) must use one of the five subordinate clause roles, stay whole, and leave the main clause analysed as peer components.";
 
+/**
+ * `"is independently deployable" is one PREDICATE` 这个例子废弃了:它与
+ * `PEER_COMPONENT_RULE`（PREDICATE 不得吸收可分离的 PREDICATIVE）直接打架，
+ * 黄金集里 `are` + `the front door`、`seem` + `clear enough` 都是拆开的，
+ * 只有自动生成的两句跟着这个例子合成了一个 PREDICATE。两种口径混用时同一句在
+ * 两次调用之间会跳，所以这里把系表结构定死成「系动词单独、补足部分标 PREDICATIVE」。
+ */
 const PREDICATE_SCOPE_RULE =
   "Predicate-scope rule: inside a single clause a PREDICATE covers only the verb group — auxiliaries (can, could, may, might, must, shall, should, will, would, be, am, is, are, was, were, have, has, had, do, does, did) plus the main verb, " +
-  'including any adverbs between them and any bare-infinitive chain ("Help turn" is one PREDICATE, "let go" is one PREDICATE, "must close" is one PREDICATE, "is independently deployable" is one PREDICATE). ' +
+  'including any adverbs between them and any bare-infinitive chain ("Help turn" is one PREDICATE, "let go" is one PREDICATE, "must close" is one PREDICATE). ' +
+  'Passive, perfect, and progressive forms keep be/have inside the verb group ("was rebuilt", "have been told", "is deflating" are each one PREDICATE), ' +
+  "but a linking verb takes only the verb itself and whatever completes it becomes its own PREDICATIVE " +
+  '("Be clear" is PREDICATE "Be" plus PREDICATIVE "clear"; "are widely beneficial" is PREDICATE "are" plus PREDICATIVE "widely beneficial"). ' +
   "Two PREDICATE components must never be adjacent: side-by-side verbs belong to a single PREDICATE.";
 
+/**
+ * 旧文案把 ATTRIBUTE 限死成「名词短语内部的修饰语」并只给了前置修饰的例子
+ * （`"fully formed" inside "fully formed designs"`），后置的介词短语于是无处可归，
+ * 模型一律退回 ADVERBIAL——`the development` + `of applications` 实测就被标成
+ * 宾语 + 状语，而这正是技术文档里最高频的结构。黄金集 conventions 与手工标注
+ * （`an open standard` + `for connecting AI tools…`）本来就是 ATTRIBUTE，
+ * 提示词与黄金集不一致的那半边在这里补齐。
+ */
 const PREPOSITIONAL_PHRASE_RULE =
   "Prepositional-phrase rule: a preposition and everything it governs form exactly one component (ADVERBIAL or ATTRIBUTE), " +
   'including a coordinated object — "into fully formed designs and specs" is ONE ADVERBIAL, not a preposition plus separate noun phrases. ' +
-  "Never emit a preposition as its own component, and never tag a noun phrase governed by a verb or preposition as ATTRIBUTE; " +
-  'ATTRIBUTE is only a modifier sitting inside a noun phrase, like "fully formed" inside "fully formed designs".';
+  "Never emit a preposition as its own component and never let a component end on a preposition. " +
+  "Pick between the two roles by what the phrase modifies: a prepositional phrase that directly follows the noun phrase it modifies is ATTRIBUTE, " +
+  'so "the development" plus "of applications" is OBJECT plus ATTRIBUTE and "Four" plus "of the biggest US technology companies" is SUBJECT plus ATTRIBUTE — never ADVERBIAL; ' +
+  "a phrase that modifies the verb or the whole clause is ADVERBIAL. " +
+  'Quantity and part expressions follow the same split, with no exception for "a lot of", "some of", or "no amount of". ' +
+  'Do not split a prepositional phrase that already sits inside another one: "without looking at any of the code" stays ONE ADVERBIAL. ' +
+  "ATTRIBUTE is a modifier attached to a noun phrase, either in front of it " +
+  '("fully formed" inside "fully formed designs") or behind it ("signed yesterday" in "The documents signed yesterday"); ' +
+  "never tag a noun phrase governed by a verb or preposition as ATTRIBUTE.";
 
 const PEER_COMPONENT_RULE =
   "Peer-component rule: within a single clause, identify the coequal grammatical components rather than labeling every verb-led span as PREDICATE. " +
@@ -166,9 +191,13 @@ const CORE_ANALYSIS_RULES: readonly string[] = [
   PEER_COMPONENT_RULE,
   SUPPLEMENT_RULE,
   "Compound-sentence rule: when two or more clauses that could each stand alone as a sentence are joined by a coordinating conjunction (for, and, nor, but, or, yet, so) or a semicolon, analyse the inside of every clause as peer components and tag only the coordinating conjunction as its own CONJUNCTION component (in a comma-plus-conjunction pair, tag only the conjunction itself). Never emit COORDINATE_CLAUSE.",
-  "Complex-sentence rule: keep tagging a subordinate clause as one whole component with one of the five clause roles (SUBJECT_CLAUSE, OBJECT_CLAUSE, PREDICATIVE_CLAUSE, ATTRIBUTIVE_CLAUSE, ADVERBIAL_CLAUSE); never split its internal structure.",
+  "Complex-sentence rule: tag a subordinate clause as one whole component with one of the five clause roles (SUBJECT_CLAUSE, OBJECT_CLAUSE, PREDICATIVE_CLAUSE, ATTRIBUTIVE_CLAUSE, ADVERBIAL_CLAUSE) and never split its internal structure. " +
+    "The component runs from the introducing word through that clause's own subject, predicate, object, and adverbials, so never stop a clause component at its introducing word and never emit the clause's own predicate, object, or adverbial as a peer of the main clause: " +
+    'in "Apple tests Siri feature that handles multiple commands at once", "that handles multiple commands at once" is ONE ATTRIBUTIVE_CLAUSE — "that" on its own is wrong, and so is "that handles" followed by a separate OBJECT. ' +
+    'A clause whose introducing word is omitted is still one whole component: in "That means developers now play a frontline role", "developers now play a frontline role" is ONE OBJECT_CLAUSE.',
   "Simple-sentence rule: analyse a sentence with a single subject-predicate structure as peer components.",
-  "Give every component a concise, non-empty Chinese translation.",
+  "Give every component a concise, non-empty Chinese translation that renders everything the component covers rather than only its head word: " +
+    '"incorporate artificial intelligence functionality" is "整合人工智能功能", not "整合", and "of applications" is "应用程序的", not "的".',
 ];
 
 export function buildCorePrompt(sentences: readonly SentenceInput[]): string {

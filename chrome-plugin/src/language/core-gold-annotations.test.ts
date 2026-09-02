@@ -97,6 +97,35 @@ describe("core gold annotations", () => {
     expect(fixture.sentences.some(({ id }) => id.startsWith("non-finite-"))).toBe(true);
   });
 
+  // 名词短语后紧跟的介词短语必须自成成分(`Four` + `of the biggest US technology companies`)。
+  // 黄金集曾三句拆、三句不拆,模型于是学不到口径,把 `of applications` 标成状语;而
+  // `the development of applications` 正是技术文档里最高频的结构。
+  it("keeps every of-phrase out of the noun-phrase component it modifies", () => {
+    const nominalRoles: ReadonlySet<string> = new Set([
+      GrammarRole.SUBJECT,
+      GrammarRole.OBJECT,
+      GrammarRole.PREDICATIVE,
+      GrammarRole.COMPLEMENT,
+      GrammarRole.ATTRIBUTE,
+    ]);
+    for (const sentence of fixture.sentences) {
+      const tokens = tokenize(sentence.text);
+      for (const component of sentence.components) {
+        if (!nominalRoles.has(component.role)) continue;
+        const words = tokens
+          .filter(
+            ({ id, punctuation }) =>
+              !punctuation && id >= component.startToken && id <= component.endToken,
+          )
+          .map(({ text }) => text.toLowerCase());
+        expect(
+          words.indexOf("of"),
+          `${sentence.id}: ${component.role} ${component.startToken}-${component.endToken} hides an of-phrase`,
+        ).toBeLessThan(1);
+      }
+    }
+  });
+
   // 黄金集是「正确划分」的定义,所以它必须整份通过生产校验。缺了这条,新增的本地
   // 语法硬门可能反过来把正确答案判非法,把合法分析送进无意义的修复轮——那比漏判更糟。
   it("passes the production core validator sentence by sentence", () => {

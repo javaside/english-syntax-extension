@@ -379,6 +379,102 @@ class AnalysisValidatorTest {
   }
 
   @Test
+  fun `rejects a clause component that only covers its introducing word`() {
+    // 线上实测:"that" 被单独标成 ATTRIBUTIVE_CLAUSE,从句的谓语与宾语平铺到主句层,
+    // 页面上于是出现两个同级"谓语",引导词底下还挂着整个从句的译文。
+    assertGrammarError(
+      "Apple tests Siri feature that handles multiple commands.",
+      """
+      {"startToken":0,"endToken":0,"role":"SUBJECT","translation":"苹果"},
+      {"startToken":1,"endToken":1,"role":"PREDICATE","translation":"测试"},
+      {"startToken":2,"endToken":3,"role":"OBJECT","translation":"Siri 功能"},
+      {"startToken":4,"endToken":4,"role":"ATTRIBUTIVE_CLAUSE","translation":"处理多条指令的"},
+      {"startToken":5,"endToken":5,"role":"PREDICATE","translation":"处理"},
+      {"startToken":6,"endToken":8,"role":"OBJECT","translation":"多条指令"}
+      """.trimIndent(),
+      "sentences[0].components[3]",
+      "a clause component must cover a whole clause: extend it through the clause's own subject, " +
+        "predicate, and any objects or adverbials instead of a single word",
+    )
+  }
+
+  @Test
+  fun `rejects an ATTRIBUTIVE_CLAUSE followed immediately by the object it should contain`() {
+    // 主句宾语不可能出现在定语从句之后,出现了就说明从句自己的宾语被切了出来。
+    assertGrammarError(
+      "Apple tests Siri feature that handles multiple commands.",
+      """
+      {"startToken":0,"endToken":0,"role":"SUBJECT","translation":"苹果"},
+      {"startToken":1,"endToken":1,"role":"PREDICATE","translation":"测试"},
+      {"startToken":2,"endToken":3,"role":"OBJECT","translation":"Siri 功能"},
+      {"startToken":4,"endToken":5,"role":"ATTRIBUTIVE_CLAUSE","translation":"处理"},
+      {"startToken":6,"endToken":8,"role":"OBJECT","translation":"多条指令"}
+      """.trimIndent(),
+      "sentences[0].components[3]",
+      "an ATTRIBUTIVE_CLAUSE keeps its whole internal structure in one component; absorb the " +
+        "object, predicative, or complement that follows it",
+    )
+  }
+
+  @Test
+  fun `rejects a component that ends on a preposition whose object was split off`() {
+    // 实测 "near the frontier of what AI can do" 被切成介词悬空的状语 + 宾语从句。
+    assertGrammarError(
+      "He performed near the frontier of what AI can do.",
+      """
+      {"startToken":0,"endToken":0,"role":"SUBJECT","translation":"他"},
+      {"startToken":1,"endToken":1,"role":"PREDICATE","translation":"表现"},
+      {"startToken":2,"endToken":5,"role":"ADVERBIAL","translation":"在前沿附近"},
+      {"startToken":6,"endToken":10,"role":"OBJECT_CLAUSE","translation":"AI 能做到的事"}
+      """.trimIndent(),
+      "sentences[0].components[2]",
+      "a component must not end on a preposition; merge the phrase that preposition governs " +
+        "into the same component",
+    )
+  }
+
+  @Test
+  fun `accepts a relative clause that keeps its own object and adverbial inside one component`() {
+    assertAccepted(
+      "Apple tests Siri feature that handles multiple commands at once.",
+      """
+      {"startToken":0,"endToken":0,"role":"SUBJECT","translation":"苹果"},
+      {"startToken":1,"endToken":1,"role":"PREDICATE","translation":"测试"},
+      {"startToken":2,"endToken":3,"role":"OBJECT","translation":"Siri 功能"},
+      {"startToken":4,"endToken":10,"role":"ATTRIBUTIVE_CLAUSE","translation":"能一次处理多条指令的"}
+      """.trimIndent(),
+    )
+  }
+
+  @Test
+  fun `accepts a relative clause followed by the main clause predicate`() {
+    assertAccepted(
+      "The novel that she recommended won a national award.",
+      """
+      {"startToken":0,"endToken":1,"role":"SUBJECT","translation":"那本小说"},
+      {"startToken":2,"endToken":4,"role":"ATTRIBUTIVE_CLAUSE","translation":"她推荐的"},
+      {"startToken":5,"endToken":5,"role":"PREDICATE","translation":"获得了"},
+      {"startToken":6,"endToken":8,"role":"OBJECT","translation":"一项全国性奖项"}
+      """.trimIndent(),
+    )
+  }
+
+  @Test
+  fun `accepts a relative clause followed by a main clause adverbial`() {
+    // 定语从句修饰句中名词时,主句状语紧跟在从句后面是合法的——这条不得误拒。
+    assertAccepted(
+      "I met the man who called yesterday in the park.",
+      """
+      {"startToken":0,"endToken":0,"role":"SUBJECT","translation":"我"},
+      {"startToken":1,"endToken":1,"role":"PREDICATE","translation":"遇见"},
+      {"startToken":2,"endToken":3,"role":"OBJECT","translation":"那个男人"},
+      {"startToken":4,"endToken":6,"role":"ATTRIBUTIVE_CLAUSE","translation":"昨天打电话来的"},
+      {"startToken":7,"endToken":10,"role":"ADVERBIAL","translation":"在公园里"}
+      """.trimIndent(),
+    )
+  }
+
+  @Test
   fun `drops punctuation only components before core validation`() {
     val request = sentence("The service works.")
     val raw = core(

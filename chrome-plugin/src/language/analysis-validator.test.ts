@@ -569,6 +569,148 @@ describe("core analysis grammar constraints", () => {
       ).ok,
     ).toBe(true);
   });
+
+  const CLAUSE_INTRODUCER_ONLY_MESSAGE =
+    "a clause component must cover a whole clause: extend it through the clause's own subject, predicate, and any objects or adverbials instead of a single word";
+  const CLAUSE_SPLIT_MESSAGE =
+    "an ATTRIBUTIVE_CLAUSE keeps its whole internal structure in one component; absorb the object, predicative, or complement that follows it";
+  const DANGLING_PREPOSITION_MESSAGE =
+    "a component must not end on a preposition; merge the phrase that preposition governs into the same component";
+
+  it("rejects a clause component that only covers its introducing word", () => {
+    // 线上实测:"that" 被单独标成 ATTRIBUTIVE_CLAUSE,从句的谓语与宾语平铺到主句层,
+    // 页面上于是出现两个同级"谓语",引导词底下还挂着整个从句的译文。
+    const sentence = sentenceOf("Apple tests Siri feature that handles multiple commands.");
+
+    expect(
+      grammarErrors(sentence, [
+        { startToken: 0, endToken: 0, role: "SUBJECT", translation: "苹果" },
+        { startToken: 1, endToken: 1, role: "PREDICATE", translation: "测试" },
+        { startToken: 2, endToken: 3, role: "OBJECT", translation: "Siri 功能" },
+        { startToken: 4, endToken: 4, role: "ATTRIBUTIVE_CLAUSE", translation: "处理多条指令的" },
+        { startToken: 5, endToken: 5, role: "PREDICATE", translation: "处理" },
+        { startToken: 6, endToken: 8, role: "OBJECT", translation: "多条指令" },
+      ]),
+    ).toContainEqual({
+      path: "sentences[0].components[3]",
+      message: CLAUSE_INTRODUCER_ONLY_MESSAGE,
+    });
+  });
+
+  it("rejects an ATTRIBUTIVE_CLAUSE followed immediately by the object it should contain", () => {
+    // 从句切到谓语就收尾、宾语平铺出去:主句宾语不可能出现在定语从句之后,
+    // 出现了就说明从句自己的宾语被切了出来。
+    const sentence = sentenceOf("Apple tests Siri feature that handles multiple commands.");
+
+    expect(
+      grammarErrors(sentence, [
+        { startToken: 0, endToken: 0, role: "SUBJECT", translation: "苹果" },
+        { startToken: 1, endToken: 1, role: "PREDICATE", translation: "测试" },
+        { startToken: 2, endToken: 3, role: "OBJECT", translation: "Siri 功能" },
+        { startToken: 4, endToken: 5, role: "ATTRIBUTIVE_CLAUSE", translation: "处理" },
+        { startToken: 6, endToken: 8, role: "OBJECT", translation: "多条指令" },
+      ]),
+    ).toContainEqual({
+      path: "sentences[0].components[3]",
+      message: CLAUSE_SPLIT_MESSAGE,
+    });
+  });
+
+  it("rejects a component that ends on a preposition whose object was split off", () => {
+    // 实测 "near the frontier of what AI can do" 被切成介词悬空的状语 + 宾语从句,
+    // 于是 "of" 底下没有任何可译的内容。
+    const sentence = sentenceOf("He performed near the frontier of what AI can do.");
+
+    expect(
+      grammarErrors(sentence, [
+        { startToken: 0, endToken: 0, role: "SUBJECT", translation: "他" },
+        { startToken: 1, endToken: 1, role: "PREDICATE", translation: "表现" },
+        { startToken: 2, endToken: 5, role: "ADVERBIAL", translation: "在前沿附近" },
+        { startToken: 6, endToken: 10, role: "OBJECT_CLAUSE", translation: "AI 能做到的事" },
+      ]),
+    ).toContainEqual({
+      path: "sentences[0].components[2]",
+      message: DANGLING_PREPOSITION_MESSAGE,
+    });
+  });
+
+  it("rejects the reported Spring AI misanalysis that used to pass every gate", () => {
+    // 用户报告的原始输出:`of applications` 误标状语、`that` 单独当定语从句、
+    // 从句的谓语与宾语平铺到主句层。这个划分曾 100% 通过校验,直接写进缓存。
+    const sentence = sentenceOf(
+      "The Spring AI project aims to streamline the development of applications that " +
+        "incorporate artificial intelligence functionality without unnecessary complexity.",
+    );
+
+    expect(
+      grammarErrors(sentence, [
+        { startToken: 0, endToken: 3, role: "SUBJECT", translation: "Spring AI 项目" },
+        { startToken: 4, endToken: 6, role: "PREDICATE", translation: "旨在简化" },
+        { startToken: 7, endToken: 8, role: "OBJECT", translation: "开发" },
+        { startToken: 9, endToken: 10, role: "ADVERBIAL", translation: "的" },
+        {
+          startToken: 11,
+          endToken: 11,
+          role: "ATTRIBUTIVE_CLAUSE",
+          translation: "包含人工智能功能",
+        },
+        { startToken: 12, endToken: 15, role: "PREDICATE", translation: "整合" },
+        { startToken: 16, endToken: 19, role: "ADVERBIAL", translation: "没有不必要的复杂性" },
+      ]),
+    ).toContainEqual({
+      path: "sentences[0].components[4]",
+      message: CLAUSE_INTRODUCER_ONLY_MESSAGE,
+    });
+  });
+
+  function accepts(sentence: SentenceInput, components: readonly unknown[]): void {
+    const result = validateCoreBatch(
+      { sentences: [{ sentenceId: sentence.sentenceId, components }] },
+      [sentence],
+      "profile-1",
+    );
+    expect(result.ok ? [] : result.errors).toEqual([]);
+  }
+
+  it("accepts a relative clause that keeps its own object and adverbial inside one component", () => {
+    const sentence = sentenceOf("Apple tests Siri feature that handles multiple commands at once.");
+
+    accepts(sentence, [
+      { startToken: 0, endToken: 0, role: "SUBJECT", translation: "苹果" },
+      { startToken: 1, endToken: 1, role: "PREDICATE", translation: "测试" },
+      { startToken: 2, endToken: 3, role: "OBJECT", translation: "Siri 功能" },
+      {
+        startToken: 4,
+        endToken: 10,
+        role: "ATTRIBUTIVE_CLAUSE",
+        translation: "能一次处理多条指令的",
+      },
+    ]);
+  });
+
+  it("accepts a relative clause followed by the main-clause predicate", () => {
+    const sentence = sentenceOf("The novel that she recommended won a national award.");
+
+    accepts(sentence, [
+      { startToken: 0, endToken: 1, role: "SUBJECT", translation: "那本小说" },
+      { startToken: 2, endToken: 4, role: "ATTRIBUTIVE_CLAUSE", translation: "她推荐的" },
+      { startToken: 5, endToken: 5, role: "PREDICATE", translation: "获得了" },
+      { startToken: 6, endToken: 8, role: "OBJECT", translation: "一项全国性奖项" },
+    ]);
+  });
+
+  it("accepts a relative clause followed by a main-clause adverbial", () => {
+    // 定语从句修饰句中名词时,主句状语紧跟在从句后面是合法的——这条不得误拒。
+    const sentence = sentenceOf("I met the man who called yesterday in the park.");
+
+    accepts(sentence, [
+      { startToken: 0, endToken: 0, role: "SUBJECT", translation: "我" },
+      { startToken: 1, endToken: 1, role: "PREDICATE", translation: "遇见" },
+      { startToken: 2, endToken: 3, role: "OBJECT", translation: "那个男人" },
+      { startToken: 4, endToken: 6, role: "ATTRIBUTIVE_CLAUSE", translation: "昨天打电话来的" },
+      { startToken: 7, endToken: 10, role: "ADVERBIAL", translation: "在公园里" },
+    ]);
+  });
 });
 
 const focus: TokenRange = { startToken: 1, endToken: 1 };

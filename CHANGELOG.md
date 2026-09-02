@@ -2,6 +2,39 @@
 
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## 1.3.3 — 2026-09-02
+
+这一版修复成分划分里三类会直接显示给用户的错误：定语从句只标引导词、名词后的介词短语误标状语、系表结构两种口径混用。三类都**完全通过**此前的全部本地校验，不进修复轮就写进缓存长期显示。
+
+**升级后请重新加载扩展并刷新页面；IDEA 插件需要安装新版 zip。** `CORE_PROMPT_VERSION` 升为 `10`，已有 core 缓存会自动失效并按新规则重新分析；详解缓存不受影响。
+
+### 修复
+
+- 定语从句不再被切开。此前 `The Spring AI project aims to streamline the development of applications that incorporate…` 里 `that` 被单独标成定语从句，从句自己的谓语与宾语平铺成主句的同层成分，页面上出现两个同级「谓语」，而引导词底下挂着整个从句的译文。提示词现在写明从句从引导词一直延伸到从句自己的宾语与状语，省略引导词的从句同样整块标注。
+- 紧跟名词短语的介词短语归 `ATTRIBUTE`，不再误标 `ADVERBIAL`。`the development` + `of applications` 现在是宾语 + 定语，译文也不再退化成单字「的」。此前 `PREPOSITIONAL_PHRASE_RULE` 把 `ATTRIBUTE` 限死成「名词短语内部的修饰语」并只给前置修饰的例子，与黄金集 conventions 的「可前置也可后置」矛盾，后置介词短语于是无处可归。量词与部分结构（`a lot of`、`some of`、`no amount of`）没有例外；已经嵌在另一个介词短语里的不再拆。
+- 系表结构定死为「`PREDICATE` 只含系动词、补足部分标 `PREDICATIVE`」。此前 `PREDICATE_SCOPE_RULE` 举例 `"is independently deployable" is one PREDICATE`，而同一份规则清单里的 `PEER_COMPONENT_RULE` 禁止 `PREDICATE` 吸收 `PREDICATIVE`，同一句在两次调用之间会在两种切法之间跳。被动、完成、进行时的 be/have 仍留在动词组内。
+- 成分译文必须覆盖整段内容而不是只译中心词：`incorporate artificial intelligence functionality` 要译成「整合人工智能功能」而不是「整合」。
+
+### 校验
+
+- 双端 validator 新增三条本地硬门（TS/Kotlin 逐条、逐文案一致，错误原样进入 repair prompt）：五类从句角色的成分不得只有 1 个 lexical word；`ATTRIBUTIVE_CLAUSE` 的下一个成分不得是 `OBJECT` / `PREDICATIVE` / `COMPLEMENT`；成分不得以「几乎不可能悬垂」的介词收尾（`of/into/onto/upon/within/among/between/despite/during/toward/towards`）。`for`/`with`/`at`/`from`/`to` 刻意不收——关系从句的介词悬垂让它们合法地出现在成分末尾。
+- 主句谓语与主句状语跟在定语从句后面仍然合法（`I met the man who called yesterday in the park.`），三条新硬门在已保存的 49 句真模型预测上重放零误拒。
+
+### 黄金集
+
+- **更正 1.3.1 的说法**：当时并入的 32 句（`auto-gen-*` / `retry-*` / `improved-*`）不是「人工复核标注」，而是模型批量生成后只跑结构校验就收编的。这次逐句复核出 15 处错标并全部修正：`that` 单独当定语从句、`developers` / `you` 当主语从句、`near the frontier of` 与 `by adopting` 介词悬空、动名词短语被切成两个同级宾语、`write many fast unit tests` 整块当谓语、系表两种口径混用。
+- 移除 `auto-gen-003`（`It's something you build in…`）：分词刻意不拆缩写，整个 `It's` 是一个 Token，主语与系动词无法分到两个成分里。
+- 新增本次报告的真实文档句 `doc-of-phrase-clause-1`，它同时覆盖「名词 + of 短语后置定语」与「完整定语从句」。conventions 里「刻意排除名词后接介词短语」这条随之作废——那是技术文档里最高频的结构，排除等于测不到。
+- conventions 新增 5 条口径（从句整块、系表拆开、of 短语归属、非限定动词短语、缩写句不纳入），并新增一条机器断言钉住 of 短语不得藏在名词短语成分里。
+
+### 测试
+
+- 黄金集真模型评测重建了基线（deepseek-chat，81 句，`temperature 0`，无失败句）：整句 exact 70.37%、span exact F1 0.8780、labeled span F1 0.8727、exact-span role accuracy 99.40%。在与 8-30 基线共有的 49 句上做同尺子对比，整句 exact 从 67.35% 升到 85.71%（+18.37 pp），labeled span F1 从 0.8058 升到 0.9343（+12.84 pp）——这段增益覆盖 `CORE_PROMPT_VERSION` 8 → 10 的累积改动（1.3.2 的两轮 repair 与本版的四条提示词修复）；1.3.2 发布时没有重跑评测，两者无法再拆分。
+- 新并入黄金集的 32 句真实新闻与技术文章句明显更难（labeled span F1 0.7927 对教学句的 0.9343），81 句的整体数字才是可用的准确率参照。
+- 把这 81 句的真模型输出重放过新硬门：`auto-gen-027` 的介词悬空与 `retry-008` 的定语从句被切开各命中一次，即这两类坏划分现在会进修复轮而不是直接渲染。
+- Chrome 903 个单元测试与 34 个 Playwright E2E 全部通过；2 个商店截图用例按配置跳过，lint 保持唯一既有基线错误。
+- IntelliJ Web 74 个测试与 Kotlin 269 个测试全部通过；插件构建与项目配置校验通过。
+
 ## 1.3.2 — 2026-09-02
 
 这一版修复模型输出校验与修复链路中的误拒和失败回显问题，并让 IntelliJ IDEA Markdown 预览正确识别 `<HARD-GATE>` 等自定义标签中的英文内容。

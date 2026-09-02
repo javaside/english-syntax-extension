@@ -8,10 +8,10 @@
 | ----------------------- | ------ | ------------------------------------------------------------ | ------------------------------------------------------ |
 | `MESSAGE_VERSION`       | `1`    | 消息信封版本;收发两侧都校验                                  | 改了会让旧页面上残留的 content script 与新 SW 互不认账 |
 | `CORE_SCHEMA_VERSION`   | `3`    | core / detail 结果的语义契约版本;**参与缓存键**              | 改了等于全量作废缓存;缓存导入也会因版本不符整体拒绝    |
-| `CORE_PROMPT_VERSION`   | `9`    | core 提示词/Token 坐标版本;**参与 core / correction 缓存键** | 改了作废全部 core 缓存                                 |
+| `CORE_PROMPT_VERSION`   | `10`   | core 提示词/Token 坐标版本;**参与 core / correction 缓存键** | 改了作废全部 core 缓存                                 |
 | `DETAIL_PROMPT_VERSION` | `5`    | detail 提示词/focus Token 坐标版本;**参与 detail 缓存键**    | 改了作废全部详解缓存                                   |
 
-> 缓存键**刻意不含** profile / 模型维度——换模型不该让已有译文全部作废;但**含提示词版本**,因为同一句在不同规则下会被切成不同粒度的成分,旧结果继续复用只会让新旧质量混在一屏。版本 8 彻底删除了要求输出 `COORDINATE_CLAUSE` 的残留旧指令；当前 `CORE_PROMPT_VERSION = 9` 强化 repair prompt 的限定词切分与逐条自检，并配套 core 至多两轮修复。Token 坐标未变，所以 `DETAIL_PROMPT_VERSION = 5`，结果 JSON 形状也未变，`CORE_SCHEMA_VERSION` 保持 `3`。
+> 缓存键**刻意不含** profile / 模型维度——换模型不该让已有译文全部作废;但**含提示词版本**,因为同一句在不同规则下会被切成不同粒度的成分,旧结果继续复用只会让新旧质量混在一屏。版本 8 彻底删除了要求输出 `COORDINATE_CLAUSE` 的残留旧指令；版本 9 强化 repair prompt 的限定词切分与逐条自检，并配套 core 至多两轮修复；当前 `CORE_PROMPT_VERSION = 10` 补齐从句右边界、把后置介词短语明确归 `ATTRIBUTE`、把系表结构定死成「系动词单独 + `PREDICATIVE`」，并要求译文覆盖整段成分。Token 坐标未变，所以 `DETAIL_PROMPT_VERSION = 5`，结果 JSON 形状也未变，`CORE_SCHEMA_VERSION` 保持 `3`。
 
 ## 2. 请求消息 `RequestMessage`
 
@@ -187,27 +187,30 @@ DetailAnalysis  = { sentenceId, focus, structures[], grammarPoints[], explanatio
 12. `COORDINATE_CLAUSE` 的首个 lexical word 是从属连词（`because/although/as/if/when/while/since/until/that/…`）且整句**没有** `CONJUNCTION` 成分时非法——从属连词引导的是从句，不是并列分句。有 `CONJUNCTION` 时放行，因为 `Because A, B, and C` 里第一个并列分句本来就以从属连词开头；
 13. 单个成分覆盖了句子**全部**非标点 token 且句子实词数 ≥ 4 时非法（不论 role）——那等于没有划分，卡片会退化成一整块译文。三个实词以内的片段（标题、列表项）没有可拆的同层结构，不触发。
 14. 出现 2 个以上 `COORDINATE_CLAUSE` 时，整句必须另有一个 `CONJUNCTION` 成分或一个 `;` token——并列句的定义就是「各分句自带主语 + 并列连词或分号连接」。逗号串起来的祈使句、共享主语的并列谓语都不是并列句，包成分句块只会让卡片变成几整块译文。
+15. 五类从句角色（`SUBJECT_CLAUSE` / `OBJECT_CLAUSE` / `PREDICATIVE_CLAUSE` / `ATTRIBUTIVE_CLAUSE` / `ADVERBIAL_CLAUSE`）的成分不得只有 1 个 lexical word——从句至少是引导词 + 谓语，或主语 + 谓语。实测线上把 `that` 单独标成 `ATTRIBUTIVE_CLAUSE`、把 `developers` 标成 `SUBJECT_CLAUSE`，从句剩下的部分平铺到主句层，页面上出现两个同级"谓语"，引导词底下还挂着整个从句的译文。
+16. `ATTRIBUTIVE_CLAUSE` 的**下一个成分**不得是 `OBJECT` / `PREDICATIVE` / `COMPLEMENT`——定语从句修饰的名词在从句之前，主句宾语只能出现在主句谓语之后，所以紧跟在从句后面的宾语一定是从句自己的（实测 `that will reach` + `about $650 billion`）。主句谓语与主句状语跟在从句后面都合法（`I met the man who called yesterday in the park.`），刻意不判。
+17. 成分的**最后一个 lexical word** 不得命中「几乎不可能悬垂」的介词表（`of/into/onto/upon/within/among/between/despite/during/toward/towards`）——命中说明介词的宾语被切了出去（实测 `near the frontier of` + 宾语从句）。`for`/`with`/`at`/`from`/`to` 刻意不收：关系从句里 `the tool I work with`、`the place I came from` 让它们合法地出现在成分末尾。这一条与第 7 条互补，第 7 条只管「整个成分就是一个介词」。
 
-后九条是 TS/Kotlin validator 逐条同步的代码判据，不是 prompt 中一般语言学要求的完整实现。都只看「成分序列 + Token 文本」，不需要句法分析器；词表刻意保守（`then` 是副词不算从属连词，祈使句串的第三个分句就以它开头；缺主语本身不判，祈使句本来就没有主语，`First, install the CLI.` 这类副词开头的祈使句更常见）。grammar 诊断只要求所有 component 都有可用 range/role/translation、区间句内、有序不重叠且非纯标点；unknown field、translation too long、sentenceId 等非结构错误不阻止同轮 grammar 诊断。校验错误文案会被 repair prompt 原样引用，因此两端不仅判据要一致，英文文案也要一致；否则同一个模型输出会得到不同修复指令与缓存结果。
+后十二条是 TS/Kotlin validator 逐条同步的代码判据，不是 prompt 中一般语言学要求的完整实现。都只看「成分序列 + Token 文本」，不需要句法分析器；词表刻意保守（`then` 是副词不算从属连词，祈使句串的第三个分句就以它开头；缺主语本身不判，祈使句本来就没有主语，`First, install the CLI.` 这类副词开头的祈使句更常见）。grammar 诊断只要求所有 component 都有可用 range/role/translation、区间句内、有序不重叠且非纯标点；unknown field、translation too long、sentenceId 等非结构错误不阻止同轮 grammar 诊断。校验错误文案会被 repair prompt 原样引用，因此两端不仅判据要一致，英文文案也要一致；否则同一个模型输出会得到不同修复指令与缓存结果。
 
 ## 8. 错误码(`shared/errors.ts`)
 
-| code                     | 可重试   | 典型来源                                               | 用户可见处理                                               |
-| ------------------------ | -------- | ------------------------------------------------------ | ---------------------------------------------------------- |
-| `CONFIG_MISSING`         | ✗        | 没有可用 profile                                       | 引导去选项页                                               |
-| `HOST_PERMISSION_DENIED` | ✗        | 用户拒绝了 host 权限                                   | 提示重新授权                                               |
-| `AUTH_FAILED`            | ✗        | HTTP 401/403                                           | **暂停该 profile**;403 额外提示 Ollama 的 `OLLAMA_ORIGINS` |
-| `MODEL_NOT_FOUND`        | ✗        | HTTP 404,或 400 且响应体含 "model not exist"(DeepSeek) | 提示检查 model 名                                          |
-| `RATE_LIMITED`           | ✓        | HTTP 429                                               | 按 `Retry-After` 透明重试                                  |
-| `NETWORK_ERROR`          | 5xx 时 ✓ | 其它 HTTP 错误 / fetch 失败 / 消息通道中断             | 重试或提示检查网络                                         |
-| `REQUEST_TIMEOUT`        | ✓        | 超过 `profile.timeoutMs`                               | 重试                                                       |
+| code                     | 可重试   | 典型来源                                                | 用户可见处理                                               |
+| ------------------------ | -------- | ------------------------------------------------------- | ---------------------------------------------------------- |
+| `CONFIG_MISSING`         | ✗        | 没有可用 profile                                        | 引导去选项页                                               |
+| `HOST_PERMISSION_DENIED` | ✗        | 用户拒绝了 host 权限                                    | 提示重新授权                                               |
+| `AUTH_FAILED`            | ✗        | HTTP 401/403                                            | **暂停该 profile**;403 额外提示 Ollama 的 `OLLAMA_ORIGINS` |
+| `MODEL_NOT_FOUND`        | ✗        | HTTP 404,或 400 且响应体含 "model not exist"(DeepSeek)  | 提示检查 model 名                                          |
+| `RATE_LIMITED`           | ✓        | HTTP 429                                                | 按 `Retry-After` 透明重试                                  |
+| `NETWORK_ERROR`          | 5xx 时 ✓ | 其它 HTTP 错误 / fetch 失败 / 消息通道中断              | 重试或提示检查网络                                         |
+| `REQUEST_TIMEOUT`        | ✓        | 超过 `profile.timeoutMs`                                | 重试                                                       |
 | `INVALID_MODEL_OUTPUT`   | ✗        | 非法 JSON(截断抢救也救不回)、或 core 两轮修复后仍不合格 | 标红该句 + 重试按钮                                        |
-| `MALFORMED_MESSAGE`      | ✗        | 消息不合协议(扩展内部消息形状不对/不受支持)            | 静默丢弃;与模型输出无关,不要引向「换模型」                 |
-| `UNSUPPORTED_PAGE`       | ✗        | 发送方与目标 tab 不符                                  | —                                                          |
-| `UNSAFE_CONTENT_BLOCK`   | ✗        | 无会话时用右键菜单 / 悬停未命中段落                    | 页面内胶囊提示                                             |
-| `SENTENCE_TOO_LONG`      | ✗        | 句子超 2000 规范化字符,或超调度器上限                  | 标红该句                                                   |
-| `REQUEST_CANCELLED`      | ✗        | 会话停止 / 文档换代 / 显式 abort                       | 静默                                                       |
-| `NO_CACHE`               | ✗        | 纯缓存模式下该成分没有缓存详解                         | 面板给中文引导语,**不带错误码前缀**                        |
+| `MALFORMED_MESSAGE`      | ✗        | 消息不合协议(扩展内部消息形状不对/不受支持)             | 静默丢弃;与模型输出无关,不要引向「换模型」                 |
+| `UNSUPPORTED_PAGE`       | ✗        | 发送方与目标 tab 不符                                   | —                                                          |
+| `UNSAFE_CONTENT_BLOCK`   | ✗        | 无会话时用右键菜单 / 悬停未命中段落                     | 页面内胶囊提示                                             |
+| `SENTENCE_TOO_LONG`      | ✗        | 句子超 2000 规范化字符,或超调度器上限                   | 标红该句                                                   |
+| `REQUEST_CANCELLED`      | ✗        | 会话停止 / 文档换代 / 显式 abort                        | 静默                                                       |
+| `NO_CACHE`               | ✗        | 纯缓存模式下该成分没有缓存详解                          | 面板给中文引导语,**不带错误码前缀**                        |
 
 ## 9. 缓存键
 
