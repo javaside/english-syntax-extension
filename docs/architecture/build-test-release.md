@@ -61,7 +61,7 @@ harness 提供三个口子:`seedProfiles()`(直接写 `chrome.storage.local`)、
 
 1. **按 prompt 首行前缀识别请求类型**(`detectKind`)。前缀表见 [`model-pipeline.md` §2](./model-pipeline.md#2-提示词promptsts)。改 prompt 首行措辞 = 破坏 E2E。
 2. **任何"模型内容"都必须经 `writeContent` 出去**——core / detail / sentence-details / compound / probe 一个都不能漏。**这条踩过两次**(第一次漏了 scripted 分支,第二次漏了详解路径):直接 `response.end(completion(...))` 会让流式请求收到 JSON 体,客户端判定不支持流式后回落重发,依赖 fetch 计数的用例随之错乱。
-3. **`script()` 的队列耗尽即回落默认合法响应**,所以脚本要覆盖生产里的每一轮:一条失败路径若会进修复轮,首轮与修复轮各排一个非法响应。只排一个 = 修复轮拿到合法响应、页面渲染成功,用例从"验证失败可见"悄悄变成"验证成功渲染"(详见 [`invariants.md` I-13.1](./invariants.md))。
+3. **`script()` 的队列耗尽即回落默认合法响应**,所以脚本要覆盖生产里的每一轮:core 最终失败路径必须为首轮 + 两轮 repair 排满三份非法响应。少排任何一轮 = 后续 repair 拿到默认合法响应、页面渲染成功,用例从"验证失败可见"悄悄变成"验证成功渲染"。E2E 要同时用请求记录断言 `core = 1`、`core-repair = 2`(详见 [`invariants.md` I-13.1](./invariants.md))。
 4. **默认合法响应必须过得了本地语法硬门。** `autoComponents` 的尾段刻意标 `OBJECT` 而**不是** `PREDICATE`:两条硬门只作用于 `PREDICATE`(首词不得是限定词/主格代词、内部不得含限定词),而按位置切分对任意 fixture 散文都保证不了这两条(`Although the passage…` / `However, you may need…` 都会撞上)。同理,「单成分包住整句」现在也非法,所以 Kotlin 侧 `AnalysisServiceTest.validCoreRaw` 与 `MarkdownSyntaxIntegrationTest.validCore` 都必须给真的同层划分。E2E 断言是结构性的(成分个数、三行结构),从不读 role 文案,所以换 role 是安全的。
 
 服务器还记录每次请求(kind / model / 是否带 Authorization / 是否用了 response_format / 是否流式 / 句子文本 / 完整 prompt),并可脚本化注入错误、分片、非法输出。详解 fixture 也必须遵守生产校验:每个 structure 位于 focus 内且有序不重叠;测试并列分句内部时不能把 focus 外的并列连词塞进详解。
@@ -168,8 +168,8 @@ tag `v*` 触发,`permissions: contents: write`:
 ## IntelliJ 插件的构建、测试与发布
 
 - **门禁**:仓库根 `./gradlew :intellij-plugin:test :intellij-plugin:buildPlugin :intellij-plugin:verifyPluginProjectConfiguration`;桥协议的 TS 侧测试在 `intellij-plugin/` 里跑(`npm run test:idea-web`,即该子目录的 `vitest run src/main/resources/web`,有自己的 package.json / vitest.config.ts,不再挂在 Chrome 侧的 npm 工程下)。一键全量走仓库根 `npm run test:all`(= chrome-plugin 的 `npm test` + intellij-plugin 的 `test:idea-web` + `./gradlew intellijCheck`,见根 `package.json`)。
-- **测试分层**:Kotlin 单测(JUnit5,231 例)覆盖模型/调度/缓存/会话;集成测试(`integration/`)用 FakeOpenAiServer + 真实 AnalysisService 走全链路,断言用探针(请求计数、发送记录)不用墙钟;`SecretIsolationTest` 钉密钥隔离;`PageMessageWiringTest` 钉 JS→Kotlin 消息接线(Panel 桥接入口 → 会话)。跨端契约由仓库根 `shared-fixtures/` 双端消费(chrome-plugin 里 `npm run test:contracts`)。
-- **假模型服务器**:Kotlin 侧复用 `testsupport/FakeOpenAiServer`(本地 HTTP,FIFO 响应队列);并发分块用例的响应内容做成"任意配对都合法",不依赖 HTTP 到达顺序。
+- **测试分层**:Kotlin 单测(JUnit5)覆盖模型/调度/缓存/会话;集成测试(`integration/`)用 FakeOpenAiServer + 真实 AnalysisService 走全链路,断言用探针(请求计数、发送记录)不用墙钟;core repair 用例必须覆盖第二轮只带剩余失败句以及两轮后终止。`SecretIsolationTest` 钉密钥隔离;`PageMessageWiringTest` 钉 JS→Kotlin 消息接线(Panel 桥接入口 → 会话)。跨端契约由仓库根 `shared-fixtures/` 双端消费(chrome-plugin 里 `npm run test:contracts`)，`contracts.json` 钉版本常量，`core-prompt-parity.json` 钉两端 core 主 prompt 正文字节一致；repair-only 文案另由双端 `PromptsTest` 钉住。
+- **假模型服务器**:Kotlin 侧复用 `testsupport/FakeOpenAiServer`(本地 HTTP,FIFO 响应队列);并发分块用例的响应内容做成"任意配对都合法",不依赖 HTTP 到达顺序。验证两轮 repair 终止时 FIFO 也必须排满首轮和两轮 repair 三份非法响应。
 - **CI**:三个 job——chrome(chrome-plugin 全部前端门禁)、intellij(JDK21 + Gradle 缓存 + 插件 zip 产物,web 测试也在这个 job 里)、contracts(契约向量)。不上传 PasswordSafe/沙箱目录。
 - **发版**:与 Chrome 扩展**同版本、同一个 Release**。`intellij-plugin/build.gradle.kts` 的 `version` 由 `chrome-plugin/scripts/release.mjs` 一并改写(发版提交里落成正式版本号并一直留在那儿,不回退成 SNAPSHOT;下次发版再被改成新版本号),`buildPlugin` 产出 `intellij-plugin-<version>.zip`(约 17 MB,含 sqlite-jdbc 多平台原生库),由 release CI 附进同一个 draft;`plugin.xml` 不写 `<version>`,由 gradle 注入。Plugin Verifier 对 IC 2025.1+ 校验。JCEF 不可用的运行时里「开始句法学习」Action 不可用并提示切换 JetBrains Runtime。
 - **重启语义**:扩展点(applicationService / applicationConfigurable / notificationGroup)与 Action 都在 `plugin.xml` 声明。只改 class 内容、不碰 plugin.xml 的更新可热加载(IDE 不提示重启,日志见 `loaded without restart`);改动 plugin.xml(增删扩展点)则 IDE 提示重启——这是插件是否要求重启的判定依据。

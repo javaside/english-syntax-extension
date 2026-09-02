@@ -453,7 +453,11 @@ test("a partial batch failure isolates one sentence while its sibling renders", 
   harness,
 }) => {
   await seedLocalProfile(harness, "partial-model");
-  harness.fakeModel.script("partial-model", [{ kind: "partial" }, { kind: "coverage-gap" }]);
+  harness.fakeModel.script("partial-model", [
+    { kind: "partial" },
+    { kind: "coverage-gap" },
+    { kind: "coverage-gap" },
+  ]);
   const { page } = await startSession(harness, "error-pair.html");
 
   await expect(page.locator(".sentence-failure")).toContainText("INVALID_MODEL_OUTPUT", {
@@ -465,24 +469,28 @@ test("a partial batch failure isolates one sentence while its sibling renders", 
   await expect(page.locator("section.sentence")).toHaveCount(1);
   await expect(page.locator("section.sentence .component").first()).toBeVisible();
   expect(harness.fakeModel.recordedOfKind("core")).toHaveLength(1);
-  expect(harness.fakeModel.recordedOfKind("core-repair")).toHaveLength(1);
+  expect(harness.fakeModel.recordedOfKind("core-repair")).toHaveLength(2);
 });
 
 test("an invalid response envelope fails the block visibly instead of hanging", async ({
   harness,
 }) => {
   await seedLocalProfile(harness, "garbage-model");
-  // 两轮都给非法输出:首轮的非法不再直接判死(截断救援救不回来时按「整批无效」交修复轮),
-  // 只有修复轮也非法才轮到可见失败。少给一个,修复轮会拿到队列耗尽后的默认合法响应。
-  harness.fakeModel.script("garbage-model", [{ kind: "invalid-json" }, { kind: "invalid-json" }]);
+  // 三轮都给非法输出:首轮的非法不再直接判死(截断救援救不回来时按「整批无效」交修复轮),
+  // 两轮修复都非法才轮到可见失败。少给一个,后续轮会拿到队列耗尽后的默认合法响应。
+  harness.fakeModel.script("garbage-model", [
+    { kind: "invalid-json" },
+    { kind: "invalid-json" },
+    { kind: "invalid-json" },
+  ]);
   const { page } = await startSession(harness, "error-single.html");
 
   const failure = page.locator(".sentence-failure");
   await expect(failure).toContainText("INVALID_MODEL_OUTPUT", { timeout: 20_000 });
   await expect(failure).toContainText(SINGLE_SENTENCE);
-  // 判死之前必须真的多要过一次——否则"整批无效交修复轮"这条就退化回了旧的直接判死。
+  // 判死之前必须真的完成两轮修复——否则非确定性模型仍会因一次修复偶发不执行而失败。
   expect(harness.fakeModel.recordedOfKind("core")).toHaveLength(1);
-  expect(harness.fakeModel.recordedOfKind("core-repair")).toHaveLength(1);
+  expect(harness.fakeModel.recordedOfKind("core-repair")).toHaveLength(2);
 });
 
 test("a script-like translation renders as literal text and never executes", async ({

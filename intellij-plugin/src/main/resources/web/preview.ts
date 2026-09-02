@@ -2,8 +2,9 @@
  * Markdown 预览 DOM 扫描与可见性观察。
  *
  * 与 Chrome 端 document-scanner 的取舍不同：预览 DOM 是 Markdown 渲染产物，
- * 候选固定为 h1-h6/p/li/blockquote（blockquote 只取安全叶子），排除区覆盖
- * 代码/表格/数学/图表/脚注/交互控件。英文占比 >= 60%、最短 20 字符。
+ * 候选为 h1-h6/p/li/blockquote（blockquote 只取安全叶子），以及 Markdown 原文中的
+ * 连字符自定义标签（如 HARD-GATE）；排除区覆盖代码/表格/数学/图表/脚注/交互控件。
+ * 英文占比 >= 60%、最短 20 字符。
  */
 
 export interface PreviewBlock {
@@ -12,7 +13,17 @@ export interface PreviewBlock {
   text: string;
 }
 
-const CANDIDATE_SELECTOR = "h1,h2,h3,h4,h5,h6,p,li,blockquote";
+const STANDARD_CANDIDATE_TAGS = new Set([
+  "H1",
+  "H2",
+  "H3",
+  "H4",
+  "H5",
+  "H6",
+  "P",
+  "LI",
+  "BLOCKQUOTE",
+]);
 const EXCLUDED_SELECTOR =
   "pre,code,table,.math,.katex,.mermaid,.footnotes,[role='doc-endnotes']," +
   "button,input,textarea,select,iframe,[contenteditable],[data-english-syntax-card]";
@@ -96,7 +107,9 @@ export function nearestPreviewBlock(target: EventTarget | null): HTMLElement | n
   for (let current: Element | null = start; current !== null; current = current.parentElement) {
     if (!(current instanceof HTMLElement)) continue;
     if (isExcluded(current)) continue;
-    if (!isRendered(current)) continue;
+    // Markdown 原始 HTML 的连字符自定义标签默认 display:inline，但它本身就是作者声明的
+    // 内容边界；显式手势应认它自身，而不是继续向上撞到包住整篇文档的容器。
+    if (!isRendered(current) && !isHyphenatedCustomElement(current)) continue;
     if (!isLeafBlock(current)) continue;
     if ((current.textContent ?? "").trim().length === 0) continue;
     return current;
@@ -106,6 +119,10 @@ export function nearestPreviewBlock(target: EventTarget | null): HTMLElement | n
 
 function isExcluded(element: Element): boolean {
   return element.closest(EXCLUDED_SELECTOR) !== null;
+}
+
+function isHyphenatedCustomElement(element: Element): boolean {
+  return element.localName.includes("-");
 }
 
 function isRendered(element: HTMLElement): boolean {
@@ -143,7 +160,8 @@ function collectCandidates(element: HTMLElement, into: HTMLElement[]): void {
 
 export function scanMarkdownBlocks(root: ParentNode): PreviewBlock[] {
   const elements: HTMLElement[] = [];
-  for (const element of root.querySelectorAll<HTMLElement>(CANDIDATE_SELECTOR)) {
+  for (const element of root.querySelectorAll<HTMLElement>("*")) {
+    if (!STANDARD_CANDIDATE_TAGS.has(element.tagName) && !isHyphenatedCustomElement(element)) continue;
     collectCandidates(element, elements);
   }
   return elements

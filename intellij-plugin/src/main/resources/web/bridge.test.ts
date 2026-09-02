@@ -264,6 +264,26 @@ describe("parseHostMessage", () => {
     });
   });
 
+  it("accepts core error with source tokens for restoring failed text", () => {
+    const tokensJson = '[{"id":0,"text":"Classify","leadingWhitespace":"","punctuation":false}]';
+    const message = parseHostMessage(
+      {
+        version: 1,
+        type: "CORE_ERROR",
+        previewId: "p1",
+        generation: 3,
+        sentenceId: "s-b1-0",
+        blockId: "b1",
+        code: "INVALID_MODEL_OUTPUT",
+        message: "invalid",
+        tokensJson,
+      },
+      3,
+    );
+
+    expect(message).toMatchObject({ type: "CORE_ERROR", tokensJson });
+  });
+
   it("rejects core result without blockId", () => {
     expect(
       parseHostMessage(

@@ -172,7 +172,21 @@ class AnalysisValidatorTest {
     )
   }
 
+  @Test
+  fun `accepts throughout as an ADVERBIAL without an object`() {
+    val request = sentence("Claude uses tools throughout.")
+    val raw = core(
+      """
+      {"startToken":0,"endToken":0,"role":"SUBJECT","translation":"Claude"},
+      {"startToken":1,"endToken":1,"role":"PREDICATE","translation":"使用"},
+      {"startToken":2,"endToken":2,"role":"OBJECT","translation":"工具"},
+      {"startToken":3,"endToken":4,"role":"ADVERBIAL","translation":"全程"}
+      """.trimIndent(),
+      sentenceId = request.sentenceId,
+    )
 
+    assertTrue(validateCoreBatch(raw, listOf(request), "profile-1").ok)
+  }
 
   fun `rejects a CONJUNCTION that covers no coordinating conjunction`() {
     val request = sentence("Readers read books.")

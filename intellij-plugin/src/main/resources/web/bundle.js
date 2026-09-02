@@ -55,7 +55,8 @@
 			"sentenceId",
 			"blockId",
 			"code",
-			"message"
+			"message",
+			"tokensJson"
 		],
 		DETAIL_STREAM: [
 			"version",
@@ -161,7 +162,7 @@
 				};
 			case "CORE_ERROR":
 				if (!isNonEmptyString(value.sentenceId) || !isNonEmptyString(value.blockId) || !isNonEmptyString(value.code)) return null;
-				if (typeof value.message !== "string") return null;
+				if (typeof value.message !== "string" || typeof value.tokensJson !== "string") return null;
 				return {
 					version: 1,
 					type: "CORE_ERROR",
@@ -170,7 +171,8 @@
 					sentenceId: value.sentenceId,
 					blockId: value.blockId,
 					code: value.code,
-					message: value.message
+					message: value.message,
+					tokensJson: value.tokensJson
 				};
 			case "RESTORE_ALL": return {
 				version: 1,
@@ -183,7 +185,17 @@
 	}
 	//#endregion
 	//#region src/main/resources/web/preview.ts
-	const CANDIDATE_SELECTOR = "h1,h2,h3,h4,h5,h6,p,li,blockquote";
+	const STANDARD_CANDIDATE_TAGS = /* @__PURE__ */ new Set([
+		"H1",
+		"H2",
+		"H3",
+		"H4",
+		"H5",
+		"H6",
+		"P",
+		"LI",
+		"BLOCKQUOTE"
+	]);
 	const EXCLUDED_SELECTOR = "pre,code,table,.math,.katex,.mermaid,.footnotes,[role='doc-endnotes'],button,input,textarea,select,iframe,[contenteditable],[data-english-syntax-card]";
 	const BLOCK_ID_ATTRIBUTE = "data-english-syntax-block";
 	const MIN_TEXT_LENGTH = 20;
@@ -250,7 +262,7 @@
 		for (let current = start; current !== null; current = current.parentElement) {
 			if (!(current instanceof HTMLElement)) continue;
 			if (isExcluded(current)) continue;
-			if (!isRendered(current)) continue;
+			if (!isRendered(current) && !isHyphenatedCustomElement(current)) continue;
 			if (!isLeafBlock(current)) continue;
 			if ((current.textContent ?? "").trim().length === 0) continue;
 			return current;
@@ -259,6 +271,9 @@
 	}
 	function isExcluded(element) {
 		return element.closest(EXCLUDED_SELECTOR) !== null;
+	}
+	function isHyphenatedCustomElement(element) {
+		return element.localName.includes("-");
 	}
 	function isRendered(element) {
 		const display = element.ownerDocument.defaultView?.getComputedStyle(element).display ?? "";
@@ -287,7 +302,10 @@
 	}
 	function scanMarkdownBlocks(root) {
 		const elements = [];
-		for (const element of root.querySelectorAll(CANDIDATE_SELECTOR)) collectCandidates(element, elements);
+		for (const element of root.querySelectorAll("*")) {
+			if (!STANDARD_CANDIDATE_TAGS.has(element.tagName) && !isHyphenatedCustomElement(element)) continue;
+			collectCandidates(element, elements);
+		}
 		return elements.filter((element) => !registeredElements.has(element) && !element.hasAttribute("data-english-syntax-hidden")).map((element) => {
 			registeredElements.add(element);
 			return {
@@ -486,7 +504,7 @@
 					this.renderCoreResult(message.sentenceId, message.blockId, JSON.parse(message.analysisJson), JSON.parse(message.tokensJson ?? "[]"));
 					break;
 				case "CORE_ERROR":
-					this.renderCoreError(message.sentenceId, message.blockId, message.code, message.message);
+					this.renderCoreError(message.sentenceId, message.blockId, message.code, message.message, JSON.parse(message.tokensJson));
 					break;
 				case "DETAIL_STREAM":
 				case "DETAIL_RESULT": {
@@ -523,13 +541,17 @@
 			this.#blockSentenceOrder.set(entry.blockId, order);
 			this.#repaintBlock(entry.blockId);
 		}
-		renderCoreError(sentenceId, blockId, code, message) {
+		renderCoreError(sentenceId, blockId, code, message, tokens = []) {
 			this.#ensureSentence(blockId, sentenceId);
 			const entry = this.#sentences.get(sentenceId);
 			if (entry === void 0) return;
 			entry.record.failed = true;
 			entry.record.analysis = null;
 			entry.record.provisional = null;
+			if (tokens.length > 0) entry.record.tokens = tokens;
+			const order = this.#blockSentenceOrder.get(entry.blockId) ?? [];
+			if (!order.includes(sentenceId)) order.push(sentenceId);
+			this.#blockSentenceOrder.set(entry.blockId, order);
 			this.#repaintBlock(entry.blockId, {
 				errorSentenceId: sentenceId,
 				message: friendlyErrorMessage(code, message)
@@ -775,7 +797,7 @@
 			return retry;
 		}
 		#originalText(sentenceId) {
-			return "";
+			return (this.#sentences.get(sentenceId)?.record.tokens ?? []).map(({ leadingWhitespace, text }) => leadingWhitespace + text).join("");
 		}
 		#structureText(structure) {
 			return typeof structure.text === "string" ? structure.text : "";

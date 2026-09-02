@@ -144,6 +144,17 @@ class BridgeProtocolTest {
   }
 
   @Test
+  fun `core error carries source tokens`() {
+    val message = BridgeProtocol.parseHostMessage(
+      Json.parseToJsonElement(
+        """{"version":1,"type":"CORE_ERROR","previewId":"p1","generation":0,"sentenceId":"s-b1-0","blockId":"b1","code":"INVALID_MODEL_OUTPUT","message":"invalid","tokensJson":"[]"}""",
+      ).jsonObject,
+    ) as HostMessage.CoreError
+
+    assertEquals("[]", message.tokensJson)
+  }
+
+  @Test
   fun `core result without blockId is rejected`() {
     val message = BridgeProtocol.parseHostMessage(
       Json.parseToJsonElement(

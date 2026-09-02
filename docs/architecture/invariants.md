@@ -210,13 +210,23 @@
 
 ### I-17.2 本地可判的语法粒度规则必须进入双端 validator
 
-**规则** 不能只在 prompt 里要求模型遵守；TS/Kotlin `validateCoreBatch` 必须同步执行九条可判硬门（见 [protocol.md](./protocol.md) 第 6–14 条）。bare-preposition 仅对 role 不是 `CONJUNCTION`、去标点后恰好一个 lexical word 且命中**保守的高把握“必须带宾语”白名单**时生效；`after/before/down/off/over/since/until/around/inside/outside` 等常见副词/表语/连词兼类词不收。grammar 是否执行只看结构可信度（全部 component 都有可用 range/role/translation、区间句内、有序不重叠、非纯标点），不得被 unknown field、translation too long、sentenceId 等非结构错误阻断；两类错误必须可同次报告。错误英文文案逐字一致。
+**规则** 不能只在 prompt 里要求模型遵守；TS/Kotlin `validateCoreBatch` 必须同步执行九条可判硬门（见 [protocol.md](./protocol.md) 第 6–14 条）。bare-preposition 仅对 role 不是 `CONJUNCTION`、去标点后恰好一个 lexical word 且命中**保守的高把握“必须带宾语”白名单**时生效；`after/before/down/off/over/since/until/throughout/around/inside/outside` 等常见副词/表语/连词兼类词不收。grammar 是否执行只看结构可信度（全部 component 都有可用 range/role/translation、区间句内、有序不重叠、非纯标点），不得被 unknown field、translation too long、sentenceId 等非结构错误阻断；两类错误必须可同次报告。错误英文文案逐字一致。
 
 **为什么** prompt 只是生成建议，未被 validator 拒绝的违规结果会直接进入跨 profile 共用缓存。错误文案又会被 repair prompt 原样引用，因此它同时是可执行修复指令。
 
 **症状** 模型偶发把动词链/介词短语切碎或把简单句套成单个并列分句，首轮仍被当作成功缓存；双端若文案不同，同一错误会收到不同 repair 指令。
 
 **守护测试** 双端 `AnalysisValidatorTest` / `analysis-validator.test.ts` 的九类语法粒度用例，正反两侧都要有（每条硬门既有 reject 用例，也有证明它不误拒的 accept 用例：祈使句无主语、以情态动词开头的动词组、`announced that`、有 `CONJUNCTION` 的从属连词起首并列分句、三实词以内的片段）。`core-gold-annotations.test.ts` 的 `passes the production core validator sentence by sentence` 再把整份黄金集压上——新硬门把正确答案判非法比漏判更糟。
+
+### I-17.3 Core repair 至多两轮，且失败卡必须自带原句 Token
+
+**规则** TS/Kotlin core 编排都允许首轮后至多两轮 repair；每一轮只携带当时仍失败的句子、该轮最新的非法 JSON 子集和对应 validation errors，已经修好的兄弟句不得回流。repair prompt 对“谓语吞入限定词开头的名词短语”必须明确要求在限定词前切开，并在返回前逐条自检 validation errors。IntelliJ 的每一个 `CORE_ERROR` 构造都必须带 `tokensJson`；Kotlin/JS bridge 都以严格键白名单和必填字符串校验它，`renderCoreError` 必须登记句序并保存 Token。
+
+**为什么** DeepSeek `deepseek-v4-flash` 对真实长指令句首轮会把 `classify the request` / `say the classification out loud` 的宾语吞进 `PREDICATE`，第一轮 repair 又会偶发原样返回；只给一次修复会把可恢复输出判死。失败路径还可能一片流式成分都没产生，此时渲染器若只依赖 stream/result 留下的 Token，就没有任何来源可恢复原句。
+
+**症状** 同一句在模型偶发不执行第一轮 repair 时直接显示 `INVALID_MODEL_OUTPUT`；IDEA 失败卡只剩错误提示和重试按钮，原句整句消失，或错误句未登记进块内顺序而根本不出现。
+
+**守护测试** Chrome `analysis-service.test.ts`（第二轮只重试剩余失败句、两轮后失败）、`prompts.test.ts`（限定词切分与逐条自检）、E2E `extension.spec.ts`（首轮 + 两轮 repair 的探针计数）；IntelliJ `AnalysisServiceTest` / `PromptsTest`、`BridgeProtocolTest` / web `bridge.test.ts`（`CORE_ERROR.tokensJson` 必填且严格校验）、`PreviewSessionTest`（所有错误构造携带 Token）与 web `render.test.ts`（无流式分片仍重建原句并保留句序）。
 
 ### I-18 详解缓存键两侧必须同构
 
@@ -410,6 +420,16 @@
 
 **守护测试**:`render.test.ts`(`renders sentences in source order even when streamed messages arrive out of order`)。
 
+### IntelliJ 自动扫描必须保留连字符自定义标签的正文
+
+**规则**:`scanMarkdownBlocks` 除标准 Markdown 块 `h1-h6/p/li/blockquote` 外，还必须把标签名含连字符的自定义元素作为候选；它们仍统一经过排除区、叶子块、最短长度与英文占比校验，不能放宽成扫描任意容器。
+
+**为什么**:Markdown 中的 `<HARD-GATE>`、`<EXTREMELY-IMPORTANT>` 等原始 HTML 会被官方预览保留为自定义 DOM 元素，内部直接文本不会自动生成 `<p>`。只查询标准块标签会在进入 Kotlin 分句和模型请求前整段漏掉。
+
+**症状**:普通标题和段落均能翻译，但自定义标签起止行之间的英文完全没有翻译卡片，也没有模型错误。
+
+**守护测试**:`intellij-plugin/src/main/resources/web/preview.test.ts` 的 "collects text wrapped by hyphenated custom elements"。
+
 ### Markdown 内部 API 不出 `markdown/` 包
 
 **规则**:`org.intellij.plugins.markdown.*` 类型只允许出现在 `markdown/` 包与 `plugin.xml`;不反射访问官方 `MarkdownJCEFHtmlPanel` 私有字段。
@@ -502,13 +522,13 @@
 
 ### 显式手势不套用自动扫描的取舍(IntelliJ 侧)
 
-**规则**:`nearestPreviewBlock` 只保留四条判据——排除区、渲染盒子、叶子块、文本非空。**不得**加上 `scanMarkdownBlocks` 的 20 字符下限与英文占比 60% 门槛,也不得限定候选标签名。
+**规则**:`nearestPreviewBlock` 只保留四条判据——排除区、内容边界、叶子块、文本非空。内容边界通常是渲染盒子；但标签名含连字符的 Markdown 自定义元素即使 computed display 是 `inline`，也必须认元素自身。**不得**加上 `scanMarkdownBlocks` 的 20 字符下限与英文占比 60% 门槛；普通 `span/em` 仍按渲染盒子向上找，不能误当整段。
 
-**为什么**:`scanMarkdownBlocks` 要在整篇里躲开边栏与样板文字,那些门槛是为「自动决定翻什么」服务的;快捷键悬停解析是用户已经指明了目标,再拿统计门槛去否决用户就是纯粹的误判。按渲染盒子而非标签名认块的理由同 Chrome 端:Mintlify 一类文档站整篇正文都是 `<span>`。
+**为什么**:`scanMarkdownBlocks` 要在整篇里躲开边栏与样板文字,那些门槛是为「自动决定翻什么」服务的;快捷键悬停解析是用户已经指明了目标,再拿统计门槛去否决用户就是纯粹的误判。按渲染盒子而非标签名认普通块的理由同 Chrome 端:Mintlify 一类文档站整篇正文都是 `<span>`。但 `<HARD-GATE>` 等自定义标签在 Chromium 中默认是 `display:inline`，元素本身却是 Markdown 作者声明的内容边界；若仍要求块级显示，它会被跳过，向上又只能撞到包住全文的非叶子容器。
 
-**症状**:鼠标明明停在段落上,按快捷键却提示「未找到可解析的段落」——短段落、术语行、中英混排行、span 排版的文档站全中招。
+**症状**:鼠标明明停在段落上,按快捷键却提示「未找到可解析的段落」——短段落、术语行、中英混排行、span 排版的文档站，以及 `<HARD-GATE>` 等连字符自定义标签全中招。
 
-**守护测试**:`preview.test.ts`(`accepts short and non-english blocks that the auto scanner would skip`、`accepts a div whose only children are inline`)。
+**守护测试**:`preview.test.ts`(`accepts short and non-english blocks that the auto scanner would skip`、`accepts a div whose only children are inline`、`accepts a hovered hyphenated custom element even when the browser renders it inline`)。
 
 ### 手动扫描模式下 rescan 绝不上报
 

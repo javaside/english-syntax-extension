@@ -16,6 +16,8 @@ function fixture(): HTMLElement {
   container.innerHTML = `
     <h1 id="title">Understanding Grammar in Practice</h1>
     <p id="plain">The service validates every response before returning it.</p>
+    <hard-gate id="hard-gate">Do not implement anything until your human partner approves the design.</hard-gate>
+    <extremely-important id="important">Always preserve the complete instruction when translating this document.</extremely-important>
     <ul>
       <li id="list-item-1">Readers parse sentences quickly and accurately.</li>
       <li id="list-item-short">Too short.</li>
@@ -52,6 +54,18 @@ describe("scanMarkdownBlocks", () => {
     expect(ids).toContain("list-item-1");
     expect(ids).toContain("quote-inner");
     expect(ids).toContain("nested-inner");
+  });
+
+  it("collects text wrapped by hyphenated custom elements", () => {
+    const container = fixture();
+    const blocks = scanMarkdownBlocks(container);
+
+    expect(blocks.find((block) => block.element.id === "hard-gate")?.text).toBe(
+      "Do not implement anything until your human partner approves the design.",
+    );
+    expect(blocks.find((block) => block.element.id === "important")?.text).toBe(
+      "Always preserve the complete instruction when translating this document.",
+    );
   });
 
   it("skips code, tables, math, mermaid, footnotes, and interactive controls", () => {
@@ -181,6 +195,13 @@ describe("nearestPreviewBlock", () => {
     container.append(el("p", "para", "The service validates every response before returning it."));
     container.append(el("p", "short", "Too short."));
     container.append(el("p", "chinese", "这一段几乎没有英文单词，只有少量 API 术语。"));
+    container.append(
+      el(
+        "hard-gate",
+        "hard-gate-hover",
+        "Do not implement anything until your human partner approves the design.",
+      ),
+    );
 
     const inlineHost = el("p", "inline-host", "Wrapped ");
     inlineHost.append(el("em", "em", "emphasis"));
@@ -229,6 +250,12 @@ describe("nearestPreviewBlock", () => {
     hoverFixture();
     expect(nearestPreviewBlock(at("span-inner"))?.id).toBe("span-block");
   });
+
+  it("accepts a hovered hyphenated custom element even when the browser renders it inline", () => {
+    hoverFixture();
+    expect(nearestPreviewBlock(at("hard-gate-hover"))?.id).toBe("hard-gate-hover");
+  });
+
   it("accepts short and non-english blocks that the auto scanner would skip", () => {
     // 显式手势不套用自动扫描的 20 字符 / 英文占比门槛。
     hoverFixture();

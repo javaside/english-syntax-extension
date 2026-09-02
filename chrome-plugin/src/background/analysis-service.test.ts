@@ -338,7 +338,7 @@ describe("CachedAnalysisService core orchestration", () => {
     expect(repairWork[1][0]!.content).toContain("must be a non-empty array");
   });
 
-  it("still runs the one repair round when the first output cannot be parsed at all", async () => {
+  it("still enters the repair loop when the first output cannot be parsed at all", async () => {
     // 回归:此前首轮 INVALID_MODEL_OUTPUT 直接把整块判死,修复轮压根不跑(core-repair 0 → 0)。
     const { adapter, cache, service } = harness([
       new ModelRequestError(
@@ -377,9 +377,33 @@ describe("CachedAnalysisService core orchestration", () => {
     }
   });
 
-  it("returns INVALID_MODEL_OUTPUT and does not cache after one failed repair", async () => {
+  it("retries only the sentences that remain invalid after the first repair", async () => {
     const invalid = { sentences: [{ ...rawCore(sentenceOne), components: [] }] };
-    const { adapter, cache, service } = harness([invalid, invalid]);
+    const { adapter, cache, service } = harness([
+      invalid,
+      invalid,
+      { sentences: [rawCore(sentenceOne)] },
+    ]);
+
+    const outcome = await service.analyzeCore(coreInput(), new AbortController().signal);
+
+    expect(outcome).toMatchObject({ result: [coreAnalysis(sentenceOne)], failures: [] });
+    expect(adapter.completeJson).toHaveBeenCalledTimes(3);
+    const secondRepairWork = adapter.completeJson.mock.calls[2] as [
+      ModelProfile,
+      AnalysisModelWork["messages"],
+    ];
+    expect(secondRepairWork[1][0]!.content).toContain("must be a non-empty array");
+    expect(cache.core.size).toBe(1);
+  });
+
+  it("returns INVALID_MODEL_OUTPUT and does not cache after two unparseable repairs", async () => {
+    const invalidOutput = new ModelRequestError(
+      "INVALID_MODEL_OUTPUT",
+      "Model stream content is not valid JSON",
+      false,
+    );
+    const { adapter, cache, service } = harness([invalidOutput, invalidOutput, invalidOutput]);
 
     const outcome = await service.analyzeCore(coreInput(), new AbortController().signal);
 
@@ -390,7 +414,7 @@ describe("CachedAnalysisService core orchestration", () => {
       code: "INVALID_MODEL_OUTPUT",
       retryable: false,
     });
-    expect(adapter.completeJson).toHaveBeenCalledTimes(2);
+    expect(adapter.completeJson).toHaveBeenCalledTimes(3);
     expect(cache.core.size).toBe(0);
   });
 

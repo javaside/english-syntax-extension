@@ -432,7 +432,7 @@ function invalidOutput(errors: readonly ValidationError[]): ModelRequestError {
   const summary = errors.map(({ path, message }) => `${path || "output"}: ${message}`).join("; ");
   return new ModelRequestError(
     "INVALID_MODEL_OUTPUT",
-    `模型输出经一轮修复后仍不合格${summary.length === 0 ? "" : `：${summary}`}`,
+    `模型输出经两轮修复后仍不合格${summary.length === 0 ? "" : `：${summary}`}`,
     false,
   );
 }
@@ -673,7 +673,7 @@ export class CachedAnalysisService implements AnalysisService {
     };
   }
 
-  /** 一块的首轮 + 至多一次修复;块之间互不影响,各自并行经调度器。 */
+  /** 一块的首轮 + 至多两次修复;每轮只携带仍失败的句子，块之间互不影响。 */
   private async analyzeCoreChunk(
     input: CoreBatchInput,
     chunk: readonly { sentence: SentenceInput; key: string }[],
@@ -706,29 +706,36 @@ export class CachedAnalysisService implements AnalysisService {
     const valid = [...firstPass.valid];
 
     let remaining = firstPass.invalid;
-    if (remaining.length > 0) {
+    let invalidRaw = firstRaw;
+    const keysById = new Map(chunk.map(({ sentence, key }) => [sentence.sentenceId, key]));
+    for (let repairRound = 1; repairRound <= 2 && remaining.length > 0; repairRound += 1) {
       const failedIds = new Set(remaining.map(({ sentence }) => sentence.sentenceId));
-      const repairRaw = await this.requestModel(
-        input.profile,
-        input.documentId,
-        priority,
-        `${chunkKey}:repair`,
-        remaining.length,
-        [
-          {
-            role: "user",
-            content: buildRepairPrompt(
-              remaining.map(({ sentence }) => sentence),
-              remaining.flatMap(({ errors }) => errors),
-              invalidRawSubset(firstRaw, failedIds),
-            ),
-          },
-        ],
-        CORE_SCHEMA,
-        signal,
-        true,
-      );
-      const keysById = new Map(chunk.map(({ sentence, key }) => [sentence.sentenceId, key]));
+      let repairRaw: unknown;
+      try {
+        repairRaw = await this.requestModel(
+          input.profile,
+          input.documentId,
+          priority,
+          `${chunkKey}:repair:${repairRound}`,
+          remaining.length,
+          [
+            {
+              role: "user",
+              content: buildRepairPrompt(
+                remaining.map(({ sentence }) => sentence),
+                remaining.flatMap(({ errors }) => errors),
+                invalidRawSubset(invalidRaw, failedIds),
+              ),
+            },
+          ],
+          CORE_SCHEMA,
+          signal,
+          true,
+        );
+      } catch (error) {
+        if (asModelRequestError(error).code !== "INVALID_MODEL_OUTPUT") throw error;
+        repairRaw = { sentences: [] };
+      }
       const repairEntries = remaining.map(({ sentence }) => ({
         sentence,
         key: keysById.get(sentence.sentenceId)!,
@@ -736,6 +743,7 @@ export class CachedAnalysisService implements AnalysisService {
       const repaired = await this.validateAndCacheCore(input.profile, repairEntries, repairRaw);
       valid.push(...repaired.valid);
       remaining = repaired.invalid;
+      invalidRaw = repairRaw;
     }
     return { valid, invalid: remaining };
   }

@@ -518,7 +518,8 @@ class PreviewSessionTest {
         cacheHit = false,
       ),
     )
-    assertEquals(1, sender.of("CORE_ERROR").size)
+    val error = sender.of("CORE_ERROR").single()
+    assertTrue(error["tokensJson"]?.jsonPrimitive?.content?.contains("The") == true)
     assertEquals(SentencePhase.FAILED, session.sentences[firstSentence.sentenceId]?.phase)
   }
 

@@ -18,7 +18,8 @@ CachedAnalysisService.analyzeCore(input, signal)
   │     │     └─ adapter.completeJson() 或 completeJsonStreaming()
   │     ├─ dropPunctuationOnlyComponents()   本地修掉纯标点成分
   │     ├─ validateCoreBatch() 逐句判定
-  │     ├─ 不合格句 → buildRepairPrompt → 再来一次(jumpQueue)
+  │     ├─ 不合格句 → buildRepairPrompt → 至多两轮修复(jumpQueue)
+  │     │                                      每轮只带仍失败句
   │     └─ 合格句 → putCore()
   │
   └─ 4. 汇总 { result[], failures[], cacheHit }
@@ -189,19 +190,21 @@ fetch(stream:true) → ReadableStream
 ```
 raw → dropPunctuationOnlyComponents → validateCoreBatch
         ok  → putCore
-        !ok → buildRepairPrompt(原句 + 校验错误 + 非法 JSON 子集) → 再请求一次(jumpQueue)
+        !ok → buildRepairPrompt(原句 + 校验错误 + 非法 JSON 子集) → 修复 1(jumpQueue)
                 ok  → putCore
-                !ok → INVALID_MODEL_OUTPUT(带错误摘要)
+                !ok → 只保留仍失败句与本轮非法 JSON → 修复 2(jumpQueue)
+                        ok  → putCore
+                        !ok → INVALID_MODEL_OUTPUT(带错误摘要)
 ```
 
-- **只修一次。** 第二次仍不合格就作为失败上报。
-- 修复请求只带**失败的那几句**(`invalidRawSubset`),不重发整块。
-- **修复轮与首轮共享同一份规则清单**(`CORE_ANALYSIS_RULES`)。修复 prompt 曾只带 peer + supplement 两条,覆盖率、角色枚举、并列/复合/简单句和译文要求全丢——一句进了修复轮,剩下的唯一语法指导就是"把成分拆开",实测越修越碎。
+- **core 至多修复两轮。** 第二轮之后仍不合格才作为失败上报；detail / sentence-details / correction 仍各至多一轮。
+- 每一轮修复请求都只带**当时仍失败的那几句**(`invalidRawSubset`),不重发整块，也不把上一轮已经修好的兄弟句带回模型。首轮或任一 repair 的响应若连 JSON 都无法解析，只把 `INVALID_MODEL_OUTPUT` 转成“该批全无效”的空 envelope 继续下一轮；网络、鉴权、超时与取消仍立即上抛。
+- **修复轮与首轮共享同一份规则清单**(`CORE_ANALYSIS_RULES`)。修复 prompt 曾只带 peer + supplement 两条,覆盖率、角色枚举、并列/复合/简单句和译文要求全丢——一句进了修复轮,剩下的唯一语法指导就是"把成分拆开",实测越修越碎。它还明确要求：若 `PREDICATE` 内出现限定词，就在限定词前立即切开，把后续名词短语输出为 `OBJECT` / `PREDICATIVE` / `COMPLEMENT`；返回前逐条对照本轮 validation errors 自检，所有列出的错误都处理完才能返回。
 - 纯标点成分走本地归一化:覆盖率规则本就允许标点不被覆盖,丢掉它即合法,渲染层会按源 Token 画回原位。Chrome 的 `dropPunctuationOnlyComponents` 与 IntelliJ 的 `validateCoreBatch` 都必须在角色枚举校验前处理，因此即使模型给逗号虚构 `PUNCTUATION` / `CONJUNCTION` 等角色也不会让整句失败；流式暂定成分同样读取原 Token 的 `punctuation` 标记并拒绝纯标点，避免最终校验前短暂显示成“并列连词”。
 - core / repair prompt 的 `SUPPLEMENT_RULE` 区分破折号、冒号后的补充说明或列举与真正并列句：补充跨度使用 `APPOSITIVE` / `INDEPENDENT_ELEMENT`，内部可分离谓语、宾语、状语仍按同层成分输出；名词短语不能连同其关系从句整体标成 `ATTRIBUTIVE_CLAUSE`（`the ones that matter` 中只有 `that matter` 是从句）。
-- `validateCoreBatch` 还把九条**代码实际可判的语法粒度约束**变成硬门：组件序列相邻且 Token 区间连续的两个 `PREDICATE` 必须合并；成分去掉标点后恰好一个 lexical word、role 不是 `CONJUNCTION` 且命中保守的高把握“必须带宾语”介词白名单时，必须并入其管辖短语（`after/before/down/off/over/since/until/around/inside/outside` 等常见副词、表语或连词兼类词不收）；`COORDINATE_CLAUSE` 数量恰好为 1 时非法；`CONJUNCTION` 至少含一个 FANBOYS；`PREDICATE` 首个 lexical word 是限定词、主格人称代词或 `that` 时非法；`PREDICATE` 非首位 lexical words 含限定词时非法（`that` 刻意不算，它更常是宾语从句引导词）；`COORDINATE_CLAUSE` 首词是从属连词且整句无 `CONJUNCTION` 成分时非法；单个成分覆盖全部非标点 token 且句子实词数 ≥ 4 时非法（不论 role）；出现 2 个以上 `COORDINATE_CLAUSE` 却既无 `CONJUNCTION` 成分也无 `;` token 时非法。后四条补的正是「模型给出的坏划分照样显示给用户」的那一段：实测 deepseek-chat 把 `She kept practicing until…` 整句只标成 `PREDICATE` + `ADVERBIAL_CLAUSE`（一个主语都没有），前四条一条都拦不住。**缺主语本身刻意不判**——祈使句没有主语，`First, install the CLI.` 这类副词开头的祈使句在文档里很常见，按缺主语判会大面积误拒；改判「谓语开头不可能是动词」既airtight 又覆盖这个失败。grammar 只在结构可信时执行：所有 component 都有可用 range/role/translation、区间句内、有序不重叠、非纯标点；unknown field、translation too long、sentenceId 等非结构错误不阻止同轮 grammar 诊断，两类错误同次报告。TS/Kotlin 逐条、逐文案一致，错误会原样进入 repair prompt。黄金集整份必须通过这套校验（`core-gold-annotations.test.ts`）。
+- `validateCoreBatch` 还把九条**代码实际可判的语法粒度约束**变成硬门：组件序列相邻且 Token 区间连续的两个 `PREDICATE` 必须合并；成分去掉标点后恰好一个 lexical word、role 不是 `CONJUNCTION` 且命中保守的高把握“必须带宾语”介词白名单时，必须并入其管辖短语（`after/before/down/off/over/since/until/throughout/around/inside/outside` 等常见副词、表语或连词兼类词不收）；`COORDINATE_CLAUSE` 数量恰好为 1 时非法；`CONJUNCTION` 至少含一个 FANBOYS；`PREDICATE` 首个 lexical word 是限定词、主格人称代词或 `that` 时非法；`PREDICATE` 非首位 lexical words 含限定词时非法（`that` 刻意不算，它更常是宾语从句引导词）；`COORDINATE_CLAUSE` 首词是从属连词且整句无 `CONJUNCTION` 成分时非法；单个成分覆盖全部非标点 token 且句子实词数 ≥ 4 时非法（不论 role）；出现 2 个以上 `COORDINATE_CLAUSE` 却既无 `CONJUNCTION` 成分也无 `;` token 时非法。后四条补的正是「模型给出的坏划分照样显示给用户」的那一段：实测 deepseek-chat 把 `She kept practicing until…` 整句只标成 `PREDICATE` + `ADVERBIAL_CLAUSE`（一个主语都没有），前四条一条都拦不住。**缺主语本身刻意不判**——祈使句没有主语，`First, install the CLI.` 这类副词开头的祈使句在文档里很常见，按缺主语判会大面积误拒；改判「谓语开头不可能是动词」既airtight 又覆盖这个失败。grammar 只在结构可信时执行：所有 component 都有可用 range/role/translation、区间句内、有序不重叠、非纯标点；unknown field、translation too long、sentenceId 等非结构错误不阻止同轮 grammar 诊断，两类错误同次报告。TS/Kotlin 逐条、逐文案一致，错误会原样进入 repair prompt。黄金集整份必须通过这套校验（`core-gold-annotations.test.ts`）。
 
-### 8.1 成分粒度的三条边界与并列句平铺(`CORE_PROMPT_VERSION` 8)
+### 8.1 成分粒度的三条边界与并列句平铺(`CORE_PROMPT_VERSION` 8；repair 契约当前为 9)
 
 只有"别让谓语吞掉宾语"这类**下界**规则时,指令型文本会被切成词级碎片。同一模型(deepseek-v4-flash,temperature 0,兼容模式)实测:
 
@@ -222,7 +225,7 @@ raw → dropPunctuationOnlyComponents → validateCoreBatch
 
 ### 8.2 Token 坐标变化与版本
 
-`tokenize()` 现在把白名单点号缩写（如 `U.S.` / `Ph.D.`）、小数/千分位/语义版本号、带 scheme 的 URL 与邮箱各作为**一个 Token**。通用姓名 initials 链（如 `J. R. R.`）不会合成一个 Token；它只在 `segmentBlock()` 的分句边界阶段持续向后合并，避免姓名中间误断。这不是显示层细节：core component span 与 detail focus 都以 Token ID 闭区间定位，任何拆分变化都会让旧缓存区间指向错误文本。此前 `CORE_PROMPT_VERSION = 6` 同时覆盖 core prompt 粒度规则与 tokenization 的变化；当前 `CORE_PROMPT_VERSION = 8` 进一步让并列句 prompt 与已废弃 `COORDINATE_CLAUSE` 的 validator 契约一致。tokenization 没有再变，所以 `DETAIL_PROMPT_VERSION = 5`。结果 JSON 形状没有变化，`CORE_SCHEMA_VERSION` 保持 `3`。
+`tokenize()` 现在把白名单点号缩写（如 `U.S.` / `Ph.D.`）、小数/千分位/语义版本号、带 scheme 的 URL 与邮箱各作为**一个 Token**。通用姓名 initials 链（如 `J. R. R.`）不会合成一个 Token；它只在 `segmentBlock()` 的分句边界阶段持续向后合并，避免姓名中间误断。这不是显示层细节：core component span 与 detail focus 都以 Token ID 闭区间定位，任何拆分变化都会让旧缓存区间指向错误文本。此前 `CORE_PROMPT_VERSION = 6` 同时覆盖 core prompt 粒度规则与 tokenization 的变化；版本 8 让并列句 prompt 与已废弃 `COORDINATE_CLAUSE` 的 validator 契约一致；当前 `CORE_PROMPT_VERSION = 9` 强化 repair prompt 的限定词切分与逐条自检，并配套 core 至多两轮修复。tokenization 没有再变，所以 `DETAIL_PROMPT_VERSION = 5`。结果 JSON 形状没有变化，`CORE_SCHEMA_VERSION` 保持 `3`。
 
 ### 8.3 黄金集 runner 的 provider 端点
 

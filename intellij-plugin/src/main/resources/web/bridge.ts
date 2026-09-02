@@ -68,7 +68,7 @@ export type HostMessage =
   | ({ type: "SESSION_STATE"; state: string; ready: number; discovered: number; failed: number } & PageMessageBase)
   | ({ type: "CORE_STREAM"; sentenceId: string; blockId: string; componentsJson: string; tokensJson: string } & PageMessageBase)
   | ({ type: "CORE_RESULT"; sentenceId: string; blockId: string; analysisJson: string; tokensJson: string } & PageMessageBase)
-  | ({ type: "CORE_ERROR"; sentenceId: string; blockId: string; code: string; message: string } & PageMessageBase)
+  | ({ type: "CORE_ERROR"; sentenceId: string; blockId: string; code: string; message: string; tokensJson: string } & PageMessageBase)
   | ({ type: "DETAIL_STREAM"; sentenceId: string; focusStart: number; focusEnd: number; structuresJson: string } & PageMessageBase)
   | ({ type: "DETAIL_RESULT"; sentenceId: string; analysisJson: string } & PageMessageBase)
   | ({ type: "RESTORE_ALL" } & PageMessageBase);
@@ -201,7 +201,7 @@ const HOST_KEYS_BY_TYPE: Readonly<Record<string, readonly string[]>> = {
   SESSION_STATE: ["version", "type", "previewId", "generation", "state", "ready", "discovered", "failed"],
   CORE_STREAM: ["version", "type", "previewId", "generation", "sentenceId", "blockId", "componentsJson", "tokensJson"],
   CORE_RESULT: ["version", "type", "previewId", "generation", "sentenceId", "blockId", "analysisJson", "tokensJson"],
-  CORE_ERROR: ["version", "type", "previewId", "generation", "sentenceId", "blockId", "code", "message"],
+  CORE_ERROR: ["version", "type", "previewId", "generation", "sentenceId", "blockId", "code", "message", "tokensJson"],
   DETAIL_STREAM: ["version", "type", "previewId", "generation", "sentenceId", "focusStart", "focusEnd", "structuresJson"],
   DETAIL_RESULT: ["version", "type", "previewId", "generation", "sentenceId", "analysisJson"],
   RESTORE_ALL: ["version", "type", "previewId", "generation"],
@@ -296,7 +296,7 @@ export function parseHostMessage(value: unknown, currentGeneration: number): Hos
         !isNonEmptyString(value.code)
       )
         return null;
-      if (typeof value.message !== "string") return null;
+      if (typeof value.message !== "string" || typeof value.tokensJson !== "string") return null;
       return {
         version: BRIDGE_VERSION,
         type: "CORE_ERROR",
@@ -306,6 +306,7 @@ export function parseHostMessage(value: unknown, currentGeneration: number): Hos
         blockId: value.blockId,
         code: value.code,
         message: value.message,
+        tokensJson: value.tokensJson,
       };
     case "RESTORE_ALL":
       return {

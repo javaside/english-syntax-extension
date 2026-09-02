@@ -8,10 +8,10 @@
 | ----------------------- | ------ | ------------------------------------------------------------ | ------------------------------------------------------ |
 | `MESSAGE_VERSION`       | `1`    | 消息信封版本;收发两侧都校验                                  | 改了会让旧页面上残留的 content script 与新 SW 互不认账 |
 | `CORE_SCHEMA_VERSION`   | `3`    | core / detail 结果的语义契约版本;**参与缓存键**              | 改了等于全量作废缓存;缓存导入也会因版本不符整体拒绝    |
-| `CORE_PROMPT_VERSION`   | `8`    | core 提示词/Token 坐标版本;**参与 core / correction 缓存键** | 改了作废全部 core 缓存                                 |
+| `CORE_PROMPT_VERSION`   | `9`    | core 提示词/Token 坐标版本;**参与 core / correction 缓存键** | 改了作废全部 core 缓存                                 |
 | `DETAIL_PROMPT_VERSION` | `5`    | detail 提示词/focus Token 坐标版本;**参与 detail 缓存键**    | 改了作废全部详解缓存                                   |
 
-> 缓存键**刻意不含** profile / 模型维度——换模型不该让已有译文全部作废;但**含提示词版本**,因为同一句在不同规则下会被切成不同粒度的成分,旧结果继续复用只会让新旧质量混在一屏。`CORE_PROMPT_VERSION = 8` 彻底删除了要求输出 `COORDINATE_CLAUSE` 的残留旧指令，并列句与 validator 一致地按同层成分平铺；Token 坐标未变，所以 `DETAIL_PROMPT_VERSION = 5`，结果 JSON 形状也未变，`CORE_SCHEMA_VERSION` 保持 `3`。
+> 缓存键**刻意不含** profile / 模型维度——换模型不该让已有译文全部作废;但**含提示词版本**,因为同一句在不同规则下会被切成不同粒度的成分,旧结果继续复用只会让新旧质量混在一屏。版本 8 彻底删除了要求输出 `COORDINATE_CLAUSE` 的残留旧指令；当前 `CORE_PROMPT_VERSION = 9` 强化 repair prompt 的限定词切分与逐条自检，并配套 core 至多两轮修复。Token 坐标未变，所以 `DETAIL_PROMPT_VERSION = 5`，结果 JSON 形状也未变，`CORE_SCHEMA_VERSION` 保持 `3`。
 
 ## 2. 请求消息 `RequestMessage`
 
@@ -179,7 +179,7 @@ DetailAnalysis  = { sentenceId, focus, structures[], grammarPoints[], explanatio
 4. 成分**不得只含标点**(模型偶发把逗号单切成一个成分——这条由 `dropPunctuationOnlyComponents()` 在本地直接丢掉,省一整轮模型往返);
 5. `translation` 非空、无危险文本、长度不超过 `max(500, 英文长度 × 8)`；
 6. 组件序列相邻且 Token 区间连续的两个 `PREDICATE` 必须合并；
-7. 成分去掉标点后恰好一个 lexical word、role 不是 `CONJUNCTION`，且该词命中**保守的高把握介词白名单**时，不得独立成分，必须并入其管辖短语；`after/before/down/off/over/since/until/around/inside/outside` 等常见副词、表语或连词兼类词不收；
+7. 成分去掉标点后恰好一个 lexical word、role 不是 `CONJUNCTION`，且该词命中**保守的高把握介词白名单**时，不得独立成分，必须并入其管辖短语；`after/before/down/off/over/since/until/throughout/around/inside/outside` 等常见副词、表语或连词兼类词不收；
 8. `COORDINATE_CLAUSE` 数量恰好为 1 时非法；0 或至少 2 个不触发这条门；
 9. `CONJUNCTION` 的 lexical words 必须至少含一个 FANBOYS(`for/and/nor/but/or/yet/so`)；可以同时含其他词，并非只能含 FANBOYS。
 10. `PREDICATE` 的**首个 lexical word** 不得是限定词、主格人称代词或 `that`——动词组不可能以它们开头，命中即说明主语被吞进了谓语；
@@ -201,7 +201,7 @@ DetailAnalysis  = { sentenceId, focus, structures[], grammarPoints[], explanatio
 | `RATE_LIMITED`           | ✓        | HTTP 429                                               | 按 `Retry-After` 透明重试                                  |
 | `NETWORK_ERROR`          | 5xx 时 ✓ | 其它 HTTP 错误 / fetch 失败 / 消息通道中断             | 重试或提示检查网络                                         |
 | `REQUEST_TIMEOUT`        | ✓        | 超过 `profile.timeoutMs`                               | 重试                                                       |
-| `INVALID_MODEL_OUTPUT`   | ✗        | 非法 JSON(截断抢救也救不回)、或修复后仍不合格          | 标红该句 + 重试按钮                                        |
+| `INVALID_MODEL_OUTPUT`   | ✗        | 非法 JSON(截断抢救也救不回)、或 core 两轮修复后仍不合格 | 标红该句 + 重试按钮                                        |
 | `MALFORMED_MESSAGE`      | ✗        | 消息不合协议(扩展内部消息形状不对/不受支持)            | 静默丢弃;与模型输出无关,不要引向「换模型」                 |
 | `UNSUPPORTED_PAGE`       | ✗        | 发送方与目标 tab 不符                                  | —                                                          |
 | `UNSAFE_CONTENT_BLOCK`   | ✗        | 无会话时用右键菜单 / 悬停未命中段落                    | 页面内胶囊提示                                             |
@@ -270,7 +270,7 @@ Chrome 端协议(SW↔content)之外,IntelliJ 端定义 JCEF 页面↔Kotlin 的
 
 - **JS→Kotlin**:`PREVIEW_READY`、`VISIBLE_BLOCKS`(≤2000 块,每块 ≤20,000 字符)、`DETAIL_REQUEST`(focus 非负闭区间)、`RETRY_SENTENCE`、`PREVIEW_RENDERED`(官方预览整体重渲染,带 previewId/generation,四键白名单)、`PARSE_BLOCK`(显式手势按段解析)。
 - **`PARSE_BLOCK`**:六键白名单 `version` / `type` / `previewId` / `generation` / `blockId` / `text`,`blockId` 非空、`text` 长度受 `MAX_BLOCK_TEXT`(20,000)限制。由 `PreviewSessionConnector` 的 `when` 派发到 `PreviewSession.parseExplicitBlock(blockId, text)`。**与 `VISIBLE_BLOCKS` 刻意分开**:后者是自动扫描的批量上报(进 120ms 合批窗口、`PAUSED` 时进 `pausedBlocks` 等 resume);前者是用户手势——单块直派不合批、`offscreen = false` 拿 `ACTIVE_VISIBLE_CORE` 最高可见优先级、`allowPaused = true` 穿透暂停、会话 `STOPPED` 时置 `RUNNING` 轻量启动(不触发全文扫描)。两者共用 `registerFresh`,已出结果的句子照旧被过滤掉,所以对同一段连按快捷键不会重复请求。`bypassCache` 不置位:按段解析要的是"翻这一段",不是"重新翻这一段"。
-- **Kotlin→JS**:`SESSION_STATE`、`CORE_STREAM`、`CORE_RESULT`、`CORE_ERROR`、`DETAIL_STREAM`、`DETAIL_RESULT`、`RESTORE_ALL`。`CORE_STREAM`/`CORE_RESULT` 必带 `blockId` 与精简 `tokensJson`；JS 侧靠 `blockId` **惰性注册句子**，靠 Token 的 `text` / `leadingWhitespace` / `punctuation` 恢复模型未覆盖的破折号、逗号和句末标点。`CORE_ERROR` 只需 `blockId`；`DETAIL_*` 不带 blockId(句子在详解前必已注册)。
+- **Kotlin→JS**:`SESSION_STATE`、`CORE_STREAM`、`CORE_RESULT`、`CORE_ERROR`、`DETAIL_STREAM`、`DETAIL_RESULT`、`RESTORE_ALL`。`CORE_STREAM`/`CORE_RESULT`/`CORE_ERROR` 都必带 `blockId` 与精简 `tokensJson`；JS 侧靠 `blockId` **惰性注册句子**，靠 Token 的 `text` / `leadingWhitespace` / `punctuation` 恢复模型未覆盖的破折号、逗号和句末标点。`CORE_ERROR.tokensJson` 不是可选兜底：没有任何流式分片时，失败卡也必须从它重建准确原句。`DETAIL_*` 不带 blockId(句子在详解前必已注册)。
 - 公共字段:`version=1`、`previewId`、`generation`;句子消息再加 `sentenceId`。
 - **键白名单**:每类型一组允许键,多余键整体拒绝;`apiKey`/`headers`/`baseUrl` 永远禁止。JS 侧对 Kotlin 回调复检 generation,旧代次丢弃。
 - **新增一条页面消息要同步五处,缺一不可**:① `bridge/BridgeProtocol.kt` 的 `PageMessage` 成员;② 同文件 `parsePageMessage` 的分支(键白名单);③ `session/PreviewSessionConnector` 里 `when (message)` 的分支;④ `BridgeProtocolTest`;⑤ **`resources/web/bridge.ts` 的联合类型 + `PAGE_KEYS_BY_TYPE` + `parsePageMessage` 分支(含 `bridge.test.ts`)**。第⑤处运行时并不生效——`bootstrap-entry.ts` 直接构造消息 `postToHost`,不经它校验——所以漏了**不会有任何测试变红**,Kotlin 侧全绿、功能也正常,代价是两侧白名单就此分叉、后来人照抄的是残缺样板。`PARSE_BLOCK` 就是这么漏掉的,实现到一半才发现(见 [invariants.md](./invariants.md))。

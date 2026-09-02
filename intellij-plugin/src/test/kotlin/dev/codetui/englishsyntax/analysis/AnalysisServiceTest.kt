@@ -208,7 +208,7 @@ class AnalysisServiceTest {
   }
 
   @Test
-  fun `unsalvageable first round still spends its one repair round`() = runBlocking {
+  fun `unsalvageable first round still enters the repair loop`() = runBlocking {
     // 回归:此前首轮 INVALID_MODEL_OUTPUT 直接把整块判死，修复轮压根不跑。
     val sentence = sentence("s1", "The service validates every response.")
     server.enqueueJson("对不起，我无法解析这句话。")
@@ -222,14 +222,30 @@ class AnalysisServiceTest {
   }
 
   @Test
-  fun `repair failure becomes invalid model output`() = runBlocking {
+  fun `sentence still invalid after first repair gets a second repair`() = runBlocking {
     val sentence = sentence("s1", "The service validates every response.")
-    server.enqueueJson("""{"sentences":[{"sentenceId":"s1","components":[{"startToken":0,"endToken":1,"role":"SUBJECT","translation":"部分"}]}]}""")
-    server.enqueueJson("""{"sentences":[{"sentenceId":"s1","components":[{"startToken":0,"endToken":1,"role":"SUBJECT","translation":"仍部分"}]}]}""")
+    val invalid = """{"sentences":[{"sentenceId":"s1","components":[{"startToken":0,"endToken":1,"role":"SUBJECT","translation":"部分"}]}]}"""
+    server.enqueueJson(invalid)
+    server.enqueueJson(invalid)
+    server.enqueueJson(validCoreRaw("s1"))
 
     val outcome = service.analyzeCore(profile(), "doc-1", listOf(sentence))
 
-    assertEquals(2, server.requests.size)
+    assertEquals(3, server.requests.size)
+    assertTrue(outcome.failures.isEmpty())
+    assertEquals(1, outcome.result.size)
+  }
+
+  @Test
+  fun `two unparseable repair responses become invalid model output`() = runBlocking {
+    val sentence = sentence("s1", "The service validates every response.")
+    server.enqueueJson("not-json-first")
+    server.enqueueJson("not-json-repair-one")
+    server.enqueueJson("not-json-repair-two")
+
+    val outcome = service.analyzeCore(profile(), "doc-1", listOf(sentence))
+
+    assertEquals(3, server.requests.size)
     assertEquals(1, outcome.failures.size)
     assertEquals(
       dev.codetui.englishsyntax.domain.ErrorCode.INVALID_MODEL_OUTPUT,

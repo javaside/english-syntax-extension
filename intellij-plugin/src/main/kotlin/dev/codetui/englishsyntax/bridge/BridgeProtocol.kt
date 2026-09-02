@@ -96,6 +96,7 @@ sealed interface HostMessage {
     val blockId: String,
     val code: String,
     val message: String,
+    val tokensJson: String,
   ) : HostMessage
 
   data class DetailStream(
@@ -239,13 +240,14 @@ object BridgeProtocol {
         HostMessage.DetailStream(previewId, generation, sentenceId, focusStart, focusEnd, value.string("structuresJson") ?: return null)
       }
       "CORE_ERROR" -> {
-        if (!hasOnlyKeys(value, "version", "type", "previewId", "generation", "sentenceId", "blockId", "code", "message")) return null
+        if (!hasOnlyKeys(value, "version", "type", "previewId", "generation", "sentenceId", "blockId", "code", "message", "tokensJson")) return null
         val sentenceId = value.string("sentenceId")?.takeIf { it.isNotEmpty() } ?: return null
         val blockId = value.string("blockId")?.takeIf { it.isNotEmpty() } ?: return null
         HostMessage.CoreError(
           previewId, generation, sentenceId, blockId,
           value.string("code") ?: return null,
           value.string("message") ?: return null,
+          value.string("tokensJson") ?: return null,
         )
       }
       "RESTORE_ALL" -> {

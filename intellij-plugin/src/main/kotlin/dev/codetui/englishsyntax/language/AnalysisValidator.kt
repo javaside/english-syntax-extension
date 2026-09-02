@@ -87,14 +87,14 @@ private val coordinatingConjunctions = setOf("for", "and", "nor", "but", "or", "
 
 /**
  * 保守的单词介词表。只收缺少宾语时几乎不可能独立作副词、表语或连词的词；
- * `after` / `before` / `down` / `off` / `over` / `since` / `until` 以及
+ * `after` / `before` / `down` / `off` / `over` / `since` / `until` / `throughout` 以及
  * `around` / `inside` / `outside` / `against` / `beneath` / `beside` 等常见兼类词刻意不收。
  * 误放一次只影响粒度，
  * 误拒则会把合法分析送进无意义的修复轮，所以 accuracy 优先于召回率。
  */
 private val prepositions = setOf(
   "among", "at", "between", "despite", "during", "for", "from", "into", "of", "onto",
-  "throughout", "toward", "towards", "upon",
+  "toward", "towards", "upon",
   "with", "within",
 )
 

@@ -188,7 +188,13 @@ export class PreviewRenderer {
         );
         break;
       case "CORE_ERROR":
-        this.renderCoreError(message.sentenceId, message.blockId, message.code, message.message);
+        this.renderCoreError(
+          message.sentenceId,
+          message.blockId,
+          message.code,
+          message.message,
+          JSON.parse(message.tokensJson) as TokenPayload[],
+        );
         break;
       case "DETAIL_STREAM":
       case "DETAIL_RESULT": {
@@ -253,13 +259,23 @@ export class PreviewRenderer {
     this.#repaintBlock(entry.blockId);
   }
 
-  renderCoreError(sentenceId: string, blockId: string, code: string, message: string): void {
+  renderCoreError(
+    sentenceId: string,
+    blockId: string,
+    code: string,
+    message: string,
+    tokens: TokenPayload[] = [],
+  ): void {
     this.#ensureSentence(blockId, sentenceId);
     const entry = this.#sentences.get(sentenceId);
     if (entry === undefined) return;
     entry.record.failed = true;
     entry.record.analysis = null;
     entry.record.provisional = null;
+    if (tokens.length > 0) entry.record.tokens = tokens;
+    const order = this.#blockSentenceOrder.get(entry.blockId) ?? [];
+    if (!order.includes(sentenceId)) order.push(sentenceId);
+    this.#blockSentenceOrder.set(entry.blockId, order);
     this.#repaintBlock(entry.blockId, {
       errorSentenceId: sentenceId,
       message: friendlyErrorMessage(code, message),
@@ -624,9 +640,8 @@ export class PreviewRenderer {
   }
 
   #originalText(sentenceId: string): string {
-    // 失败句保留原文：从该块已注册的句子文本兜底（Kotlin 侧未提供原文时退化为空串）。
-    void sentenceId;
-    return "";
+    const tokens = this.#sentences.get(sentenceId)?.record.tokens ?? [];
+    return tokens.map(({ leadingWhitespace, text }) => leadingWhitespace + text).join("");
   }
 
   #structureText(structure: { startToken: number; endToken: number; text?: string }): string {

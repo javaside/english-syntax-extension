@@ -123,6 +123,23 @@ describe("model-facing sentence payload", () => {
     }
   });
 
+  it("tells repair to split a predicate before an absorbed determiner phrase and self-check errors", () => {
+    const repair = buildRepairPrompt(
+      [sentence],
+      [
+        {
+          path: "sentences[0].components[1]",
+          message:
+            "a PREDICATE must cover only the verb group; emit the noun phrase that starts at the determiner as its own OBJECT, PREDICATIVE, or COMPLEMENT component",
+        },
+      ],
+      {},
+    );
+
+    expect(repair).toContain("split that component immediately before the determiner");
+    expect(repair).toContain("Check the repaired JSON against every listed validation error");
+  });
+
   it("treats dash supplements as explanations instead of coordination", () => {
     const dashSentence: SentenceInput = {
       sentenceId: "dash-1",

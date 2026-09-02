@@ -190,6 +190,8 @@ export function buildRepairPrompt(
   return [
     PROMPT_FIRST_LINES.coreRepair,
     "Do not change sentence IDs or Tokens. Do not add sentences and do not reinterpret the source text.",
+    "For each PREDICATE error caused by a determiner inside the component, split that component immediately before the determiner and emit the resulting noun phrase as its own OBJECT, PREDICATIVE, or COMPLEMENT component.",
+    "Check the repaired JSON against every listed validation error before returning it; do not return until each listed error has been addressed.",
     "Return the repaired JSON only, without a Markdown fence or prose.",
     ...CORE_ANALYSIS_RULES,
     CORE_OUTPUT_SHAPE,

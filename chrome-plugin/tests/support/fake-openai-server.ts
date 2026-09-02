@@ -225,7 +225,7 @@ function autoComponents(sentence: PromptSentence, translationSuffix = ""): Gener
 
 function coverageGapComponents(): GeneratedComponent[] {
   // Covering only token 0 leaves later lexical tokens uncovered, so the
-  // extension's validator rejects the sentence and requests one repair.
+  // extension's validator rejects the sentence and enters the repair loop.
   return [{ startToken: 0, endToken: 0, role: "SUBJECT", translation: "占位" }];
 }
 

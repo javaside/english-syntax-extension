@@ -107,6 +107,23 @@ class PromptsTest {
   }
 
   @Test
+  fun `repair prompt explains determiner split and requires an error self-check`() {
+    val prompt = buildRepairPrompt(
+      listOf(sentence("Classify the request.")),
+      listOf(
+        ValidationError(
+          "sentences[0].components[0]",
+          "a PREDICATE must cover only the verb group; emit the noun phrase that starts at the determiner as its own OBJECT, PREDICATIVE, or COMPLEMENT component",
+        ),
+      ),
+      buildJsonObject { put("sentences", buildJsonArray { }) },
+    )
+
+    assertTrue(prompt.contains("split that component immediately before the determiner"))
+    assertTrue(prompt.contains("Check the repaired JSON against every listed validation error"))
+  }
+
+  @Test
   fun `dash supplements remain explanations and keep relative clause boundaries`() {
     val input = sentence("Ask clarifying questions — one at a time, the ones that matter.")
     val prompts = listOf(

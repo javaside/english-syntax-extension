@@ -300,6 +300,16 @@ describe("core analysis grammar constraints", () => {
         { startToken: 3, endToken: 4, role: "ADVERBIAL", translation: "下方" },
       ],
     ],
+    [
+      "throughout as ADVERBIAL",
+      "Claude uses tools throughout.",
+      [
+        { startToken: 0, endToken: 0, role: "SUBJECT", translation: "Claude" },
+        { startToken: 1, endToken: 1, role: "PREDICATE", translation: "使用" },
+        { startToken: 2, endToken: 2, role: "OBJECT", translation: "工具" },
+        { startToken: 3, endToken: 4, role: "ADVERBIAL", translation: "全程" },
+      ],
+    ],
   ])("accepts %s", (_description, text, components) => {
     const sentence = sentenceOf(text);
     expect(

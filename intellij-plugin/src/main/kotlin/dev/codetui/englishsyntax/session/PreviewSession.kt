@@ -391,6 +391,7 @@ class PreviewSession(
         put("blockId", sentences[failure.sentenceId]?.blockId ?: "")
         put("code", failure.error.code.name)
         put("message", failure.error.message ?: "failed")
+        put("tokensJson", tokensJson(failure.sentenceId))
       })
     }
     // 进度回推：每批结果落地后同步一句 SESSION_STATE，让预览页浮层能显示
@@ -461,6 +462,7 @@ class PreviewSession(
             put("blockId", sentences[sentenceId]?.blockId ?: "")
             put("code", "DETAIL_FAILED")
             put("message", error.message ?: "detail request failed")
+            put("tokensJson", tokensJson(sentenceId))
           })
         }
     }

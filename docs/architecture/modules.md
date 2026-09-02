@@ -30,7 +30,7 @@
 | 文件                           | 职责                                                                                                                                                                    |
 | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `service-worker.ts`            | 消息路由、来源与权限门、脱敏、`activeTabs` 持久化、端口管理、右键菜单 / 快捷键 / 图标点击的监听器注册、依赖装配                                                         |
-| `analysis-service.ts`          | **核心编排**:缓存查找 → 按端点分块 → 提示词 → 调度 → 校验 → 一次修复 pass → 写缓存。同时实现 `lookupCore` / `lookupDetail`(纯缓存)与 `analyzeSentenceDetails`(整句预载) |
+| `analysis-service.ts`          | **核心编排**:缓存查找 → 按端点分块 → 提示词 → 调度 → 校验 → core 至多两轮修复(每轮仅剩余失败句) → 写缓存。同时实现 `lookupCore` / `lookupDetail`(纯缓存)与 `analyzeSentenceDetails`(整句预载) |
 | `openai-compatible-adapter.ts` | HTTP 层:请求体构造、鉴权头、超时(流式为静默超时)、HTTP 错误映射、**三种能力降级**、流式读取                                                                             |
 | `request-scheduler.ts`         | 通用优先级调度器:5 档优先级、`concurrency` / `backgroundConcurrency`、同 key 去重、可重试错误的指数退避、按 `documentId` 批量取消                                       |
 | `analysis-cache.ts`            | IndexedDB(`english-syntax-learning-v1`,v2,三个 store:core/detail/correction)+ LRU 限额 + 导入导出;缓存键工厂 `createCoreCacheKey` / `createCorrectionCacheKey`          |
@@ -92,7 +92,7 @@
 | `cache/CacheKeys.kt`                                  | 跨端一致的缓存键(SHA-256,共享向量钉住)                                                                                                                                                                                           |
 | `cache/AnalysisCache.kt`                              | SQLite 缓存:跨 store LRU、单调时间戳、导入合并                                                                                                                                                                                   |
 | `cache/CacheTransfer.kt`                              | 与 Chrome 扩展互通的导出/导入(格式头/schema 校验)                                                                                                                                                                                |
-| `analysis/AnalysisService.kt`                         | 编排:查缓存→分块→调度→校验→一次修复→写缓存;AnalysisServicePort 供测试替换                                                                                                                                                        |
+| `analysis/AnalysisService.kt`                         | 编排:查缓存→分块→调度→校验→core 至多两轮修复(每轮仅剩余失败句)→写缓存;AnalysisServicePort 供测试替换                                                                                                                                                        |
 | `bridge/BridgeProtocol.kt`                            | JCEF 桥协议:键白名单严格校验,apiKey/headers/baseUrl 一律拒绝                                                                                                                                                                     |
 | `bridge/HotkeyDescriptor.kt`                          | 兼底 keydown 的键位判据:IDEA keymap 的 KeyStroke → 浏览器 event.code + 四个修饰键;没有可下发的绑定(未绑定 / 只有两段式 chord / 非字母数字键)时返回 null,页面兼底监听整条关掉,不回退 Alt+T 幻影键位                               |
 | `markdown/EnglishSyntaxPreviewPanel.kt`               | 官方 MarkdownJCEFHtmlPanel 的能力层包装:复用官方 JCEF 预览(不注册自建 provider),注入 web 资源、previewId/generation、PREVIEW_RENDERED 换代、桥接入口、dispose 语义                                                               |

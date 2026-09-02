@@ -109,7 +109,7 @@ interface AnalysisServicePort {
 }
 
 /**
- * 核心编排：查缓存 → 按端点分块 → Prompt → 调度 → 校验 → 一次修复 → 写缓存。
+ * 核心编排：查缓存 → 按端点分块 → Prompt → 调度 → 校验 → 至多两轮 core 修复 → 写缓存。
  * 与 Chrome 端 `analysis-service.ts` 同一骨架。
  */
 class AnalysisService(
@@ -382,36 +382,46 @@ class AnalysisService(
       EMPTY_CORE_OUTPUT
     }
     val firstPass = validateAndCacheCore(profile, chunk, raw)
+    val valid = firstPass.valid.toMutableList()
     var invalid = firstPass.invalid
-    if (invalid.isNotEmpty()) {
-      val repairRaw = request(
-        profile,
-        documentId,
-        priority,
-        "${chunk.joinToString(":") { it.second }}:repair",
-        listOf(
-          ChatMessage(
-            "user",
-            buildRepairPrompt(
-              invalid.map { it.first },
-              invalid.flatMap { it.second },
-              invalidRawSubset(raw, invalid.map { it.first.sentenceId }.toSet()),
+    var invalidRaw = raw
+    val keysById = chunk.associate { (sentence, key) -> sentence.sentenceId to key }
+    for (repairRound in 1..2) {
+      if (invalid.isEmpty()) break
+      val repairRaw = try {
+        request(
+          profile,
+          documentId,
+          priority,
+          "${chunk.joinToString(":") { it.second }}:repair:$repairRound",
+          listOf(
+            ChatMessage(
+              "user",
+              buildRepairPrompt(
+                invalid.map { it.first },
+                invalid.flatMap { it.second },
+                invalidRawSubset(invalidRaw, invalid.map { it.first.sentenceId }.toSet()),
+              ),
             ),
           ),
-        ),
-        coreSchema,
-        sentenceCount = invalid.size,
-        jumpQueue = true,
-      )
-      val keysById = chunk.associate { (sentence, key) -> sentence.sentenceId to key }
+          coreSchema,
+          sentenceCount = invalid.size,
+          jumpQueue = true,
+        )
+      } catch (failure: ExtensionFailure) {
+        if (failure.code != ErrorCode.INVALID_MODEL_OUTPUT) throw failure
+        EMPTY_CORE_OUTPUT
+      }
       val repaired = validateAndCacheCore(
         profile,
         invalid.map { it.first to (keysById[it.first.sentenceId] ?: error("missing key")) },
         repairRaw,
       )
-      return ChunkOutcome(firstPass.valid + repaired.valid, repaired.invalid)
+      valid += repaired.valid
+      invalid = repaired.invalid
+      invalidRaw = repairRaw
     }
-    return ChunkOutcome(firstPass.valid, invalid)
+    return ChunkOutcome(valid, invalid)
   }
 
   private data class ChunkOutcome(
@@ -514,7 +524,7 @@ class AnalysisService(
     private val promptJson = Json { prettyPrint = false; encodeDefaults = true }
     private const val CACHE_ONLY_PROFILE_ID = "cached"
 
-    /** 首轮完全解析不了时充当「这一批全无效」的替身，让那一轮修复真的会跑。 */
+    /** 首轮完全解析不了时充当「这一批全无效」的替身，让 core 修复循环真的会跑。 */
     private val EMPTY_CORE_OUTPUT: JsonElement = buildJsonObject { put("sentences", JsonArray(emptyList())) }
 
     private fun List<ValidationError>.toJsonElement(): JsonElement = buildJsonArray {
@@ -549,10 +559,10 @@ class AnalysisService(
 
     private fun invalidOutput(errors: List<ValidationError>): ExtensionFailure {
       val summary = errors.joinToString("; ") { "${it.path.ifEmpty { "output" }}: ${it.message}" }
-      LOGGER.warn("Model output remained invalid after repair: $summary")
+      LOGGER.warn("Model output remained invalid after two repairs: $summary")
       return ExtensionFailure(
         ErrorCode.INVALID_MODEL_OUTPUT,
-        "Model output remained invalid after one repair${if (summary.isEmpty()) "" else ": $summary"}",
+        "Model output remained invalid after two repairs${if (summary.isEmpty()) "" else ": $summary"}",
         false,
       )
     }
