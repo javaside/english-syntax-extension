@@ -461,6 +461,23 @@ describe("core-evaluation-trace/v1 contract", () => {
       candidate.run.hashes.messages = baseline.run.hashes.messages;
       return { baseline, candidate };
     };
+    const mutatePairArtifacts = (pair, mutate) => {
+      for (const artifact of [pair.baseline, pair.candidate]) {
+        mutate(artifact);
+        refreshArtifactHashes(artifact);
+      }
+    };
+    const reorderArtifactByTrace = (artifact) => {
+      artifact.traces.reverse();
+      const sentenceOrder = artifact.traces.flatMap(({ inputSentenceIds }) => inputSentenceIds);
+      const order = new Map(sentenceOrder.map((id, index) => [id, index]));
+      artifact.corpus.sentences.sort((left, right) => order.get(left.id) - order.get(right.id));
+      artifact.corpus.denominatorSentenceIds = sentenceOrder;
+      artifact.tokenizerSnapshot.sentences.sort(
+        (left, right) => order.get(left.id ?? left.sentenceId) - order.get(right.id ?? right.sentenceId),
+      );
+      artifact.run.sentenceOrder = sentenceOrder;
+    };
 
     it.each([
       ["endpoint", (config) => (config.endpoint = "https://other.example.com/v1")],
@@ -511,6 +528,35 @@ describe("core-evaluation-trace/v1 contract", () => {
       expect(() =>
         validateComparableCoreEvaluationArtifactsV1(reordered.baseline, reordered.candidate),
       ).toThrow(/sentenceOrder/iu);
+    });
+
+    it.each([
+      [
+        "corpus snapshot",
+        (pair) =>
+          mutatePairArtifacts(pair, (artifact) => {
+            artifact.corpus.id = "other-corpus";
+          }),
+        /corpus snapshots/iu,
+      ],
+      [
+        "sentenceOrder",
+        (pair) => mutatePairArtifacts(pair, reorderArtifactByTrace),
+        /sentenceOrder/iu,
+      ],
+      [
+        "comparisonConfig",
+        (pair) =>
+          mutatePairArtifacts(pair, (artifact) => {
+            artifact.run.comparisonConfig.endpoint = "https://other.example.com/v1";
+          }),
+        /comparisonConfig/iu,
+      ],
+    ])("rejects cross-pair %s drift", (_label, mutate, expectedError) => {
+      const pairs = [comparablePair(1), comparablePair(2), comparablePair(3)];
+      mutate(pairs[1]);
+
+      expect(() => scoreCoreEvaluationArtifactPairs(pairs)).toThrow(expectedError);
     });
 
     it("requires exactly three pairs and aggregates final metrics plus transition IDs", () => {

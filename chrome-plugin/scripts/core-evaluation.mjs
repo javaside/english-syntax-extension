@@ -582,8 +582,24 @@ export function scoreCoreEvaluationArtifactPairs(pairs) {
   if (!Array.isArray(pairs) || pairs.length !== 3) {
     throw new Error("Core evaluation comparison requires exactly three pairs");
   }
+  const reference = pairs[0]?.baseline;
   const scoredPairs = pairs.map(({ baseline, candidate }, index) => {
     validateComparableCoreEvaluationArtifactsV1(baseline, candidate);
+    if (index > 0) {
+      requireValue(
+        JSON.stringify(baseline.run.sentenceOrder) === JSON.stringify(reference.run.sentenceOrder),
+        "artifact pairs sentenceOrder must match",
+      );
+      requireValue(
+        JSON.stringify(baseline.corpus) === JSON.stringify(reference.corpus),
+        "artifact pairs corpus snapshots must match",
+      );
+      requireValue(
+        JSON.stringify(baseline.run.comparisonConfig) ===
+          JSON.stringify(reference.run.comparisonConfig),
+        "artifact pairs comparisonConfig must match",
+      );
+    }
     const scores = scoreCoreEvaluationArtifacts(baseline, candidate);
     return {
       pair: index + 1,
