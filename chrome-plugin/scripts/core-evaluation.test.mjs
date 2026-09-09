@@ -9,7 +9,9 @@ import {
   scoreCorePredictions,
   scorePipelineTrace,
   createCoreEvaluationReportV1,
+  scoreCoreEvaluationArtifactPairs,
   scoreCoreEvaluationArtifacts,
+  validateComparableCoreEvaluationArtifactsV1,
   validateCoreEvaluationArtifactV1,
   validateCoreEvaluationCorpusV1,
 } from "./core-evaluation.mjs";
@@ -427,6 +429,121 @@ describe("core-evaluation-trace/v1 contract", () => {
     artifact.report.final.exactSentence[0] += 1;
 
     expect(() => validateCoreEvaluationArtifactV1(artifact)).toThrow(/report/iu);
+  });
+
+  describe("paired run comparability", () => {
+    const comparisonConfig = () => ({
+      endpoint: "https://api.example.com/v1",
+      model: "example-model",
+      mode: "pipeline",
+      batchSize: 6,
+      temperature: 0,
+      reasoning: { requested: "none", effective: "none", fallback: false },
+      responseFormat: { requested: "json_object", effective: "json_object", fallback: false },
+      timeout: { strategy: "per-request", valueMs: 120_000 },
+    });
+    const comparablePair = (index = 1) => {
+      const baseline = loadArtifact();
+      const candidate = cloneJson(baseline);
+      baseline.run.comparisonConfig = comparisonConfig();
+      candidate.run.comparisonConfig = comparisonConfig();
+      baseline.run.model = baseline.run.comparisonConfig.model;
+      candidate.run.model = candidate.run.comparisonConfig.model;
+      baseline.run.batchSize = baseline.run.comparisonConfig.batchSize;
+      candidate.run.batchSize = candidate.run.comparisonConfig.batchSize;
+      baseline.run.parameters.temperature = baseline.run.comparisonConfig.temperature;
+      candidate.run.parameters.temperature = candidate.run.comparisonConfig.temperature;
+      baseline.run.createdAt = `2026-09-0${index}T00:00:00.000Z`;
+      candidate.run.createdAt = `2026-09-1${index}T00:00:00.000Z`;
+      baseline.run.commit = `baseline-${index}`;
+      candidate.run.commit = `candidate-${index}`;
+      candidate.run.hashes.prompt = baseline.run.hashes.prompt;
+      candidate.run.hashes.messages = baseline.run.hashes.messages;
+      return { baseline, candidate };
+    };
+
+    it.each([
+      ["endpoint", (config) => (config.endpoint = "https://other.example.com/v1")],
+      ["model", (config) => (config.model = "other-model")],
+      ["mode", (config) => (config.mode = "first-pass")],
+      ["batchSize", (config) => (config.batchSize = 3)],
+      ["temperature", (config) => (config.temperature = 0.2)],
+      ["reasoning requested", (config) => (config.reasoning.requested = "low")],
+      ["reasoning effective", (config) => (config.reasoning.effective = "omitted")],
+      ["reasoning fallback", (config) => (config.reasoning.fallback = true)],
+      ["response format requested", (config) => (config.responseFormat.requested = "none")],
+      ["response format effective", (config) => (config.responseFormat.effective = "none")],
+      ["response format fallback", (config) => (config.responseFormat.fallback = true)],
+      ["timeout strategy", (config) => (config.timeout.strategy = "whole-run")],
+      ["timeout value", (config) => (config.timeout.valueMs = 60_000)],
+    ])("rejects %s drift", (_label, mutate) => {
+      const { baseline, candidate } = comparablePair();
+      mutate(candidate.run.comparisonConfig);
+
+      expect(() => validateComparableCoreEvaluationArtifactsV1(baseline, candidate)).toThrow(
+        /comparisonConfig/iu,
+      );
+    });
+
+    it("allows timestamps, commits, and prompt/message hashes to differ", () => {
+      const { baseline, candidate } = comparablePair();
+      candidate.traces[0].firstPass.messages[0].content += "\nCandidate run marker.";
+      refreshArtifactHashes(candidate);
+
+      expect(validateComparableCoreEvaluationArtifactsV1(baseline, candidate)).toEqual({
+        baseline,
+        candidate,
+      });
+    });
+
+    it("rejects non-pipeline pairs and sentence order drift", () => {
+      const nonPipeline = comparablePair();
+      nonPipeline.baseline.run.mode = "first-pass";
+      nonPipeline.candidate.run.mode = "first-pass";
+      nonPipeline.baseline.run.comparisonConfig.mode = "first-pass";
+      nonPipeline.candidate.run.comparisonConfig.mode = "first-pass";
+      expect(() =>
+        validateComparableCoreEvaluationArtifactsV1(nonPipeline.baseline, nonPipeline.candidate),
+      ).toThrow(/pipeline/iu);
+
+      const reordered = comparablePair();
+      reordered.candidate.run.sentenceOrder.reverse();
+      expect(() =>
+        validateComparableCoreEvaluationArtifactsV1(reordered.baseline, reordered.candidate),
+      ).toThrow(/sentenceOrder/iu);
+    });
+
+    it("requires exactly three pairs and aggregates final metrics plus transition IDs", () => {
+      const pairs = [comparablePair(1), comparablePair(2), comparablePair(3)];
+
+      expect(() => scoreCoreEvaluationArtifactPairs(pairs.slice(0, 2))).toThrow(/exactly three/iu);
+      const summary = scoreCoreEvaluationArtifactPairs(pairs);
+
+      const expected = scoreCoreEvaluationArtifacts(pairs[0].baseline, pairs[0].candidate);
+      expect(summary.pairs).toHaveLength(3);
+      expect(summary.pairs[0]).toMatchObject({
+        pair: 1,
+        transitions: {
+          baseline: expected.baseline.transitions,
+          candidate: expected.candidate.transitions,
+        },
+      });
+      expect(summary.aggregate.baseline.finalExact).toEqual({
+        mean: expected.baseline.final.exactSentence.rate,
+        min: expected.baseline.final.exactSentence.rate,
+        max: expected.baseline.final.exactSentence.rate,
+      });
+      expect(summary.aggregate.candidate.labeledSpanF1).toEqual({
+        mean: expected.candidate.final.labeledSpan.f1,
+        min: expected.candidate.final.labeledSpan.f1,
+        max: expected.candidate.final.labeledSpan.f1,
+      });
+      expect(summary.aggregate.candidate.finalFailures).toEqual({
+        mean: expected.candidate.transitions.finalFailures.count,
+        min: expected.candidate.transitions.finalFailures.count,
+        max: expected.candidate.transitions.finalFailures.count,
+      });
+    });
   });
 
   it("compares saved artifacts in character coordinates across tokenizer snapshots", () => {

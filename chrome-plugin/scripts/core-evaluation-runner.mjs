@@ -22,6 +22,22 @@ export function parseRunnerBaseUrl(value) {
   return { requestBaseUrl: normalizedBaseUrl, safeBaseUrl: normalizedBaseUrl };
 }
 
+export function loadEvaluationCorpus(document) {
+  if (document?.schemaVersion === "core-evaluation-trace/v1" && document.corpus) {
+    return document.corpus;
+  }
+  if (
+    document &&
+    typeof document.id === "string" &&
+    Number.isInteger(document.version) &&
+    Array.isArray(document.denominatorSentenceIds) &&
+    Array.isArray(document.sentences)
+  ) {
+    return document;
+  }
+  throw new Error("Evaluation JSON must be a complete artifact or a corpus-only document");
+}
+
 export function predictionList(document) {
   if (Array.isArray(document)) return document;
   if (Array.isArray(document?.sentences)) return document.sentences;
@@ -57,7 +73,10 @@ function rejectedField(status, text, body) {
 
 export async function requestChatCompletion(options, fetchImplementation = globalThis.fetch) {
   const body = { ...options.body };
+  const removedFields = [];
+  let attemptCount = 0;
   while (true) {
+    attemptCount += 1;
     const response = await fetchImplementation(options.url, {
       method: "POST",
       headers: {
@@ -68,11 +87,17 @@ export async function requestChatCompletion(options, fetchImplementation = globa
       signal: globalThis.AbortSignal.timeout(options.timeoutMs),
     });
     const text = await response.text();
-    if (response.ok) return JSON.parse(text);
+    if (response.ok) {
+      return {
+        completion: JSON.parse(text),
+        compatibility: { removedFields, attemptCount },
+      };
+    }
 
     const field = rejectedField(response.status, text, body);
     if (field) {
       delete body[field];
+      removedFields.push(field);
       continue;
     }
 

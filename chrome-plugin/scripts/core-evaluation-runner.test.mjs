@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  loadEvaluationCorpus,
   parseRunnerBaseUrl,
   predictionList,
   requestChatCompletion,
@@ -69,6 +70,24 @@ describe("parseRunnerBaseUrl", () => {
   });
 });
 
+describe("loadEvaluationCorpus", () => {
+  const corpus = { id: "page", version: 1, denominatorSentenceIds: [], sentences: [] };
+
+  it("loads a corpus-only document", () => {
+    expect(loadEvaluationCorpus(corpus)).toBe(corpus);
+  });
+
+  it("loads the embedded corpus from a complete artifact", () => {
+    expect(loadEvaluationCorpus({ schemaVersion: "core-evaluation-trace/v1", corpus })).toBe(
+      corpus,
+    );
+  });
+
+  it("rejects documents without an evaluation corpus", () => {
+    expect(() => loadEvaluationCorpus({ sentences: [] })).toThrow(/corpus/iu);
+  });
+});
+
 describe("predictionList", () => {
   it("accepts the production core prompt sentences envelope", () => {
     const sentences = [{ sentenceId: "s1", components: [] }];
@@ -125,6 +144,41 @@ describe("requestChatCompletion", () => {
     );
   });
 
+  it("returns compatibility metadata when no downgrade is needed", async () => {
+    const result = await requestChatCompletion(
+      {
+        url: "https://provider.invalid/chat/completions",
+        apiKey: "secret-key",
+        timeoutMs: 1_000,
+        body: { reasoning_effort: "none", response_format: { type: "json_object" } },
+      },
+      vi.fn().mockResolvedValueOnce(completion()),
+    );
+
+    expect(result.compatibility).toEqual({ removedFields: [], attemptCount: 1 });
+  });
+
+  it("masks provider errors after both compatibility downgrades", async () => {
+    const apiKey = "actual-secret-key";
+    const fetchImplementation = vi
+      .fn()
+      .mockResolvedValueOnce(rejection(400, "reasoning_effort rejected"))
+      .mockResolvedValueOnce(rejection(422, "response_format json_object rejected"))
+      .mockResolvedValueOnce(rejection(500, `Authorization: Bearer ${apiKey}`));
+
+    await expect(
+      requestChatCompletion(
+        {
+          url: "https://provider.invalid/chat/completions",
+          apiKey,
+          timeoutMs: 1_000,
+          body: { reasoning_effort: "none", response_format: { type: "json_object" } },
+        },
+        fetchImplementation,
+      ),
+    ).rejects.toThrow("HTTP 500: Authorization: <masked>");
+  });
+
   it("applies each compatibility downgrade at most once", async () => {
     const fetchImplementation = vi
       .fn()
@@ -132,7 +186,7 @@ describe("requestChatCompletion", () => {
       .mockResolvedValueOnce(rejection(422, "response_format json_object rejected"))
       .mockResolvedValueOnce(completion());
 
-    await requestChatCompletion(
+    const result = await requestChatCompletion(
       {
         url: "https://provider.invalid/chat/completions",
         apiKey: "secret-key",
@@ -144,6 +198,13 @@ describe("requestChatCompletion", () => {
 
     expect(fetchImplementation).toHaveBeenCalledTimes(3);
     expect(JSON.parse(fetchImplementation.mock.calls[2][1].body)).toEqual({});
+    expect(result).toEqual({
+      completion: { choices: [{ message: { content: '{"sentences":[]}' } }] },
+      compatibility: {
+        removedFields: ["reasoning_effort", "response_format"],
+        attemptCount: 3,
+      },
+    });
   });
 });
 

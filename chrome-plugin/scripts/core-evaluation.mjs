@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 
+import { parseRunnerBaseUrl } from "./core-evaluation-runner.mjs";
+
 const ARTIFACT_SCHEMA_VERSION = "core-evaluation-trace/v1";
 const GRAMMAR_ROLES = new Set([
   "SUBJECT",
@@ -132,10 +134,7 @@ function validateRound(round, inputIds, expectedRound) {
 }
 
 export function validateCoreEvaluationCorpusV1(corpus) {
-  requireValue(
-    corpus && typeof corpus.id === "string" && corpus.id.trim().length > 0,
-    "corpus id",
-  );
+  requireValue(corpus && typeof corpus.id === "string" && corpus.id.trim().length > 0, "corpus id");
   requireValue(Number.isInteger(corpus.version) && corpus.version > 0, "corpus version");
   requireUniqueStrings(corpus.denominatorSentenceIds, "corpus denominatorSentenceIds");
   requireValue(Array.isArray(corpus.sentences) && corpus.sentences.length > 0, "corpus sentences");
@@ -479,6 +478,86 @@ function scoreArtifact(artifact) {
   return scorePipelineTrace(gold, trace, options);
 }
 
+function validateComparisonConfig(config, run) {
+  requireValue(config && typeof config === "object", "run comparisonConfig");
+  const parsedEndpoint = parseRunnerBaseUrl(config.endpoint);
+  requireValue(parsedEndpoint.safeBaseUrl === config.endpoint, "run comparisonConfig endpoint");
+  requireValue(
+    typeof config.model === "string" && config.model.length > 0,
+    "run comparisonConfig model",
+  );
+  requireValue(config.mode === "pipeline", "run comparisonConfig mode must be pipeline");
+  requireValue(
+    Number.isInteger(config.batchSize) && config.batchSize > 0,
+    "run comparisonConfig batchSize",
+  );
+  requireValue(
+    typeof config.temperature === "number" && Number.isFinite(config.temperature),
+    "run comparisonConfig temperature",
+  );
+  for (const [label, value] of [
+    ["reasoning", config.reasoning],
+    ["responseFormat", config.responseFormat],
+  ]) {
+    requireValue(
+      value &&
+        typeof value.requested === "string" &&
+        value.requested.length > 0 &&
+        typeof value.effective === "string" &&
+        value.effective.length > 0 &&
+        typeof value.fallback === "boolean",
+      `run comparisonConfig ${label}`,
+    );
+  }
+  requireValue(
+    config.timeout &&
+      typeof config.timeout.strategy === "string" &&
+      config.timeout.strategy.length > 0 &&
+      Number.isInteger(config.timeout.valueMs) &&
+      config.timeout.valueMs > 0,
+    "run comparisonConfig timeout",
+  );
+  requireValue(config.model === run.model, "run comparisonConfig model consistency");
+  requireValue(config.mode === run.mode, "run comparisonConfig mode consistency");
+  requireValue(config.batchSize === run.batchSize, "run comparisonConfig batchSize consistency");
+  requireValue(
+    config.temperature === run.parameters.temperature,
+    "run comparisonConfig temperature consistency",
+  );
+  return config;
+}
+
+export function validateComparableCoreEvaluationArtifactsV1(baselineArtifact, candidateArtifact) {
+  validateCoreEvaluationArtifactV1(baselineArtifact);
+  validateCoreEvaluationArtifactV1(candidateArtifact);
+  requireValue(
+    baselineArtifact.run.mode === "pipeline" && candidateArtifact.run.mode === "pipeline",
+    "comparable artifacts must use pipeline mode",
+  );
+  requireValue(
+    JSON.stringify(baselineArtifact.corpus) === JSON.stringify(candidateArtifact.corpus),
+    "baseline and candidate corpus snapshots must match",
+  );
+  requireValue(
+    JSON.stringify(baselineArtifact.run.sentenceOrder) ===
+      JSON.stringify(candidateArtifact.run.sentenceOrder),
+    "baseline and candidate sentenceOrder must match",
+  );
+  const baselineConfig = validateComparisonConfig(
+    baselineArtifact.run.comparisonConfig,
+    baselineArtifact.run,
+  );
+  const candidateConfig = validateComparisonConfig(
+    candidateArtifact.run.comparisonConfig,
+    candidateArtifact.run,
+  );
+  requireValue(
+    JSON.stringify(baselineConfig) === JSON.stringify(candidateConfig),
+    "baseline and candidate comparisonConfig must match",
+  );
+  return { baseline: baselineArtifact, candidate: candidateArtifact };
+}
+
 export function scoreCoreEvaluationArtifacts(baselineArtifact, candidateArtifact) {
   validateCoreEvaluationArtifactV1(baselineArtifact);
   validateCoreEvaluationArtifactV1(candidateArtifact);
@@ -487,6 +566,46 @@ export function scoreCoreEvaluationArtifacts(baselineArtifact, candidateArtifact
     "baseline and candidate corpus snapshots must match",
   );
   return { baseline: scoreArtifact(baselineArtifact), candidate: scoreArtifact(candidateArtifact) };
+}
+
+function metricSummary(values) {
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  return {
+    mean: min === max ? min : values.reduce((sum, value) => sum + value, 0) / values.length,
+    min,
+    max,
+  };
+}
+
+export function scoreCoreEvaluationArtifactPairs(pairs) {
+  if (!Array.isArray(pairs) || pairs.length !== 3) {
+    throw new Error("Core evaluation comparison requires exactly three pairs");
+  }
+  const scoredPairs = pairs.map(({ baseline, candidate }, index) => {
+    validateComparableCoreEvaluationArtifactsV1(baseline, candidate);
+    const scores = scoreCoreEvaluationArtifacts(baseline, candidate);
+    return {
+      pair: index + 1,
+      baseline: scores.baseline,
+      candidate: scores.candidate,
+      transitions: {
+        baseline: scores.baseline.transitions,
+        candidate: scores.candidate.transitions,
+      },
+    };
+  });
+  const aggregateSide = (side) => ({
+    finalExact: metricSummary(scoredPairs.map((pair) => pair[side].final.exactSentence.rate)),
+    labeledSpanF1: metricSummary(scoredPairs.map((pair) => pair[side].final.labeledSpan.f1)),
+    finalFailures: metricSummary(
+      scoredPairs.map((pair) => pair[side].transitions.finalFailures.count),
+    ),
+  });
+  return {
+    pairs: scoredPairs,
+    aggregate: { baseline: aggregateSide("baseline"), candidate: aggregateSide("candidate") },
+  };
 }
 
 function ratio(numerator, denominator) {
