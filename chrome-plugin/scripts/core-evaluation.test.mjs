@@ -11,6 +11,7 @@ import {
   createCoreEvaluationReportV1,
   scoreCoreEvaluationArtifacts,
   validateCoreEvaluationArtifactV1,
+  validateCoreEvaluationCorpusV1,
 } from "./core-evaluation.mjs";
 
 const component = (startToken, endToken, role) => ({ startToken, endToken, role });
@@ -34,6 +35,90 @@ const refreshArtifactHashes = (artifact) => {
 const refreshArtifactReport = (artifact) => {
   artifact.report = createCoreEvaluationReportV1(artifact);
 };
+
+describe("core evaluation corpus validation", () => {
+  const pageTargetCorpus = () => ({
+    id: "page-target",
+    version: 1,
+    denominatorSentenceIds: ["page-1", "page-2"],
+    sentences: [
+      {
+        id: "page-1",
+        text: "English is visible.",
+        split: "page-target",
+        category: "prose",
+        source: "page fixture",
+        annotationRationale: "Simple clause coverage.",
+        boundaries: [
+          { startChar: 0, endChar: 7, role: "SUBJECT" },
+          { startChar: 8, endChar: 10, role: "PREDICATE" },
+          { startChar: 11, endChar: 18, role: "PREDICATIVE" },
+        ],
+      },
+      {
+        id: "page-2",
+        text: "Read the guide.",
+        split: "page-target",
+        category: "instruction",
+        source: "page fixture",
+        annotationRationale: "Imperative coverage.",
+        boundaries: [
+          { startChar: 0, endChar: 4, role: "PREDICATE" },
+          { startChar: 5, endChar: 14, role: "OBJECT" },
+        ],
+      },
+    ],
+  });
+
+  it("accepts a two-sentence page-target corpus without the legacy matrix", () => {
+    const corpus = pageTargetCorpus();
+
+    expect(validateCoreEvaluationCorpusV1(corpus)).toBe(corpus);
+  });
+
+  it.each([
+    [
+      "duplicate sentence IDs",
+      (corpus) => {
+        corpus.sentences[1].id = corpus.sentences[0].id;
+      },
+      /corpus sentence IDs.*unique/iu,
+    ],
+    [
+      "denominator order differences",
+      (corpus) => {
+        corpus.denominatorSentenceIds.reverse();
+      },
+      /denominator.*sentence order/iu,
+    ],
+    [
+      "an empty source",
+      (corpus) => {
+        corpus.sentences[0].source = " ";
+      },
+      /metadata/iu,
+    ],
+    [
+      "an empty rationale",
+      (corpus) => {
+        corpus.sentences[0].annotationRationale = "";
+      },
+      /metadata/iu,
+    ],
+    [
+      "overlapping boundaries",
+      (corpus) => {
+        corpus.sentences[0].boundaries[1].startChar = 6;
+      },
+      /boundary range/iu,
+    ],
+  ])("rejects %s", (_label, mutate, expectedError) => {
+    const corpus = pageTargetCorpus();
+    mutate(corpus);
+
+    expect(() => validateCoreEvaluationCorpusV1(corpus)).toThrow(expectedError);
+  });
+});
 
 describe("core-evaluation-trace/v1 contract", () => {
   it("validates the shared synthetic artifact and its complete 40-sentence corpus", () => {

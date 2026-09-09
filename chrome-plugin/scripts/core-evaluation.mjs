@@ -131,15 +131,16 @@ function validateRound(round, inputIds, expectedRound) {
   return new Set(round.validatorErrors.map(({ sentenceId }) => sentenceId));
 }
 
-export function validateCoreEvaluationArtifactV1(artifact) {
-  requireValue(artifact?.schemaVersion === ARTIFACT_SCHEMA_VERSION, "schemaVersion");
-  requireValue(typeof artifact.synthetic === "boolean", "synthetic");
-  const corpus = artifact.corpus;
-  requireValue(corpus && typeof corpus.id === "string" && corpus.id.length > 0, "corpus id");
+export function validateCoreEvaluationCorpusV1(corpus) {
+  requireValue(
+    corpus && typeof corpus.id === "string" && corpus.id.trim().length > 0,
+    "corpus id",
+  );
   requireValue(Number.isInteger(corpus.version) && corpus.version > 0, "corpus version");
   requireUniqueStrings(corpus.denominatorSentenceIds, "corpus denominatorSentenceIds");
   requireValue(Array.isArray(corpus.sentences) && corpus.sentences.length > 0, "corpus sentences");
   const corpusIds = corpus.sentences.map(({ id }) => id);
+  requireUniqueStrings(corpusIds, "corpus sentence IDs");
   requireValue(
     JSON.stringify(corpus.denominatorSentenceIds) === JSON.stringify(corpusIds),
     "corpus denominator must exactly match sentence order",
@@ -175,30 +176,13 @@ export function validateCoreEvaluationArtifactV1(artifact) {
       previousEnd = boundary.endChar;
     }
   }
-  const allowedSplits = new Set(["rule-regression", "independent-holdout"]);
-  const allowedCategories = new Set([
-    "fragment",
-    "clause",
-    "object-complement",
-    "prepositional-attachment",
-    "coordination",
-  ]);
-  requireValue(
-    corpus.sentences.every(
-      ({ split, category }) => allowedSplits.has(split) && allowedCategories.has(category),
-    ),
-    "corpus split/category",
-  );
-  for (const split of allowedSplits) {
-    for (const category of allowedCategories) {
-      requireValue(
-        corpus.sentences.filter(
-          (sentence) => sentence.split === split && sentence.category === category,
-        ).length >= 4,
-        `corpus matrix ${split}/${category}`,
-      );
-    }
-  }
+  return corpus;
+}
+
+export function validateCoreEvaluationArtifactV1(artifact) {
+  requireValue(artifact?.schemaVersion === ARTIFACT_SCHEMA_VERSION, "schemaVersion");
+  requireValue(typeof artifact.synthetic === "boolean", "synthetic");
+  const corpus = validateCoreEvaluationCorpusV1(artifact.corpus);
   const snapshot = artifact.tokenizerSnapshot;
   requireValue(
     snapshot && typeof snapshot.id === "string" && typeof snapshot.version === "string",
