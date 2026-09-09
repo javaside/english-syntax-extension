@@ -95,7 +95,7 @@ harness 提供三个口子:`seedProfiles()`(直接写 `chrome.storage.local`)、
 
 `shared-fixtures/core-evaluation-traces.json` 是 versioned、synthetic、脱敏的离线契约，固定验证首轮合法、错→对、语法 exact 但非语法字段错后修坏、三轮失败、两句逐轮收窄，以及双端最终 span/role、成功/失败集合和 repair subset 一致。该 fixture 同时冻结 40 句人工复核 corpus：两个 split × 五个 category × 每格四句，每句都有非空字符半开区间、role、来源与标注理由；Task 21 的两处裁定只在这里体现，不提前修改正式黄金集。synthetic fixture 与真实 artifact 共用 `core-evaluation-trace/v1` 校验器和 `traces[]` 形状，不再另设不兼容的 replay schema。每个 production batch 是一个 trace，保存 `callId`、完整输入 ID、实际 adapter messages、首轮 raw/validator errors、最多两轮局部编号 repair 及最终 outcome；错误逐条带 `grammar` / `non-grammar` 分类。真实模型 artifact 只存 gitignored `.superpowers/acceptance/`，保存完整 corpus/tokenizer 快照、commit、模型参数、批大小/顺序，以及实际 messages/prompt/corpus/tokenizer 的 SHA-256，不含密钥。正确首轮分母为 0 时拒绝率展示 `N/A`。
 
-手动 runner 默认仍是首轮模式；`--mode pipeline` 才走生产链路，且明确消费上述固定 40 句 corpus，要求显式给独立 `--candidate` 文件。`--baseline` 永远只读，禁止和 candidate 同路径；载入保存 artifact 时先过同一个 v1 validator。首轮、pipeline 首轮/最终与 baseline/candidate 比较全部强制按各自 tokenizer snapshot 映射到字符坐标；token 缺失、ID 重复、range 反转或无法映射立即失败，绝不退回 Token ID 比较。固定分母必须与 corpus ID 一一对应且唯一，未知、重复、漏句均拒绝；报告总指标、两个 split 和五个 category 的首轮/最终全指标与转移，空组为 N/A。上线判断以同配置、同句集三次配对运行的最终整句 exact 与 labeled-span F1 均值为主，同时检查范围、类别与逐句 repair 修坏；只有离线合成轨迹通过不能宣称真实准确性验收完成。
+手动 runner 默认仍是首轮模式；`--mode pipeline` 才走生产链路，要求显式给独立 `--candidate` 文件。默认 corpus 是上述固定 40 句，也可用 `--corpus <path>` 载入通过 `loadEvaluationCorpus` 校验的 corpus-only JSON 或完整 artifact 中的 corpus；页面目标题型另冻结在 `shared-fixtures/visible-page-core-evaluation-corpus.json`，不能与 40 句 corpus 的总分直接比较。artifact 保存完整 corpus snapshot、生产 tokenizer snapshot、trace/report，以及 `comparisonConfig` 和每次 provider 兼容降级记录，不保存 key 或请求 header。`--baseline` 永远只读，禁止和 candidate 同路径；载入保存 artifact 时先过同一个 v1 validator。`--compare-manifest <path>` 在读取任何 provider 配置或密钥前离线加载恰好三对 `{baseline,candidate}` artifact，逐对校验完整 corpus、sentenceOrder 和 endpoint/model/mode/batch/temperature/reasoning/response-format/timeout 配置一致，再汇总 final exact、labeled-span F1、final failure 的 mean/min/max 和逐 pair transition IDs。首轮、pipeline 首轮/最终与 baseline/candidate 比较全部强制按各自 tokenizer snapshot 映射到字符坐标；token 缺失、ID 重复、range 反转或无法映射立即失败，绝不退回 Token ID 比较。固定分母必须与 corpus ID 一一对应且唯一，未知、重复、漏句均拒绝；报告总指标及 corpus 实际 split/category 的首轮/最终全指标与转移，空组为 N/A。上线判断以同配置、同句集三次配对运行的最终整句 exact 与 labeled-span F1 均值为主，同时检查范围、类别与逐句 repair 修坏；只有离线合成轨迹通过不能宣称真实准确性验收完成。
 
 ### 商店截图
 
@@ -115,11 +115,17 @@ CORE_EVAL_API_KEY="$DEEPSEEK_API_KEY" \
 CORE_EVAL_BASE_URL="https://api.deepseek.com/v1" \
 CORE_EVAL_MODEL="deepseek-chat" \
 node .superpowers/acceptance/run-core-gold-evaluation.mjs \
-  --baseline .superpowers/acceptance/core-eval-baseline.json \
-  --candidate .superpowers/acceptance/core-eval-candidate.json
+  --mode pipeline \
+  --corpus shared-fixtures/visible-page-core-evaluation-corpus.json \
+  --baseline .superpowers/acceptance/visible-page-baseline-run1.json \
+  --candidate .superpowers/acceptance/visible-page-candidate-run1.json
+
+# 三对都生成后纯离线比较；manifest 内路径相对 manifest 自身解析
+node .superpowers/acceptance/run-core-gold-evaluation.mjs \
+  --compare-manifest .superpowers/acceptance/visible-page-comparison-manifest.json
 ```
 
-还可用 `CORE_EVAL_TIMEOUT_MS`、`CORE_EVAL_BASELINE_PATH`、`CORE_EVAL_CANDIDATE_PATH`。runner 逐句使用生产 tokenizer 与 core prompt，保存预测、失败与完整评分报告，再打印 candidate-minus-baseline；默认发送 `reasoning_effort: "none"` 与 JSON `response_format`，provider 以 400/422 明确拒绝对应字段时逐项删除后重试。API key 只从环境变量读取，控制台固定显示 `key <masked>`，provider 错误会替换 key/Bearer/Authorization 并截断。
+还可用 `CORE_EVAL_TIMEOUT_MS`、`CORE_EVAL_BASELINE_PATH`、`CORE_EVAL_CANDIDATE_PATH`。runner 逐句使用生产 tokenizer 与 core prompt，保存预测、失败与完整评分报告，再打印 candidate-minus-baseline；默认发送 `reasoning_effort: "none"` 与 JSON `response_format`，provider 以 400/422 明确拒绝对应字段时逐项删除后重试，并把 requested/effective/fallback 与逐调用 attemptCount 记入 artifact。API key 只从环境变量读取，控制台固定显示 `key <masked>`，provider 错误会替换 key/Bearer/Authorization 并截断。
 
 ## 5. CI(`.github/workflows/ci.yml`)
 

@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { URL } from "node:url";
 
+import { tokenize } from "../src/language/segmenter.ts";
 import {
   formatPipelineTransition,
   scoreCorePredictions,
@@ -20,6 +21,10 @@ const component = (startToken, endToken, role) => ({ startToken, endToken, role 
 const sentence = (sentenceId, components) => ({ sentenceId, components });
 const cloneJson = (value) => JSON.parse(JSON.stringify(value));
 const fixtureUrl = new URL("../../shared-fixtures/core-evaluation-traces.json", import.meta.url);
+const pageCorpusUrl = new URL(
+  "../../shared-fixtures/visible-page-core-evaluation-corpus.json",
+  import.meta.url,
+);
 const loadArtifact = () => JSON.parse(readFileSync(fixtureUrl, "utf8"));
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 const sha256Json = (value) => sha256(JSON.stringify(value));
@@ -37,6 +42,156 @@ const refreshArtifactHashes = (artifact) => {
 const refreshArtifactReport = (artifact) => {
   artifact.report = createCoreEvaluationReportV1(artifact);
 };
+
+describe("visible page core evaluation corpus v1", () => {
+  const loadPageCorpus = () => JSON.parse(readFileSync(pageCorpusUrl, "utf8"));
+
+  it("freezes the complete ordered denominator and character-boundary metadata", () => {
+    const corpus = loadPageCorpus();
+
+    expect(corpus).toMatchObject({
+      schemaVersion: "core-evaluation-corpus/v1",
+      id: "visible-english-pages-spring-ai-arxiv",
+      version: 1,
+    });
+    expect(validateCoreEvaluationCorpusV1(corpus)).toBe(corpus);
+    expect(corpus.denominatorSentenceIds).toEqual(corpus.sentences.map(({ id }) => id));
+    expect(new Set(corpus.denominatorSentenceIds).size).toBe(corpus.sentences.length);
+    expect(
+      corpus.sentences.every(
+        ({ source, annotationRationale }) => source.trim() && annotationRationale.trim(),
+      ),
+    ).toBe(true);
+    for (const item of corpus.sentences) {
+      const tokens = tokenize(item.text);
+      const tokenStarts = new Set(tokens.map(({ start }) => start));
+      const tokenEnds = new Set(tokens.map(({ end }) => end));
+      for (const boundary of item.boundaries) {
+        expect(item.text.slice(boundary.startChar, boundary.endChar).trim()).not.toBe("");
+        expect(tokenStarts.has(boundary.startChar), `${item.id} start ${boundary.startChar}`).toBe(
+          true,
+        );
+        expect(tokenEnds.has(boundary.endChar), `${item.id} end ${boundary.endChar}`).toBe(true);
+      }
+    }
+  });
+
+  it("pins every manually reviewed sentence ID, source class, and role sequence", () => {
+    const corpus = loadPageCorpus();
+    const expected = {
+      "spring-features-lead": ["spring-ai", "SUBJECT", "PREDICATE", "OBJECT"],
+      "spring-portable-api-fragment": ["spring-ai", "FRAGMENT_HEAD", "ATTRIBUTE"],
+      "spring-fragment-relative": ["spring-ai", "FRAGMENT_HEAD", "ATTRIBUTE", "ATTRIBUTIVE_CLAUSE"],
+      "full-relative-counterexample": [
+        "controlled-contrast",
+        "SUBJECT",
+        "ATTRIBUTIVE_CLAUSE",
+        "PREDICATE",
+        "PREDICATIVE",
+      ],
+      "arxiv-dark-siren-title": ["arxiv", "FRAGMENT_HEAD", "ATTRIBUTE", "APPOSITIVE", "ATTRIBUTE"],
+      "colon-complete-clause-counterexample": [
+        "controlled-contrast",
+        "SUBJECT",
+        "PREDICATE",
+        "PREDICATIVE",
+        "SUBJECT",
+        "PREDICATE",
+        "OBJECT",
+      ],
+      "finite-when-clause": ["spring-ai", "SUBJECT", "PREDICATE", "ADVERBIAL_CLAUSE"],
+      "nonfinite-when-phrase": ["spring-ai", "SUBJECT", "PREDICATE", "ADVERBIAL"],
+      "finite-before-clause": [
+        "controlled-contrast",
+        "SUBJECT",
+        "PREDICATE",
+        "OBJECT",
+        "ADVERBIAL_CLAUSE",
+      ],
+      "nonfinite-before-phrase": [
+        "controlled-contrast",
+        "SUBJECT",
+        "PREDICATE",
+        "OBJECT",
+        "ADVERBIAL",
+      ],
+      "spring-vp-coordination": [
+        "spring-ai",
+        "SUBJECT",
+        "PREDICATE",
+        "OBJECT",
+        "ATTRIBUTE",
+        "CONJUNCTION",
+        "PREDICATE",
+        "OBJECT",
+      ],
+      "spring-np-coordination": [
+        "spring-ai",
+        "SUBJECT",
+        "ATTRIBUTE",
+        "PREDICATE",
+        "ADVERBIAL",
+        "ADVERBIAL_CLAUSE",
+      ],
+      "spring-object-control": [
+        "spring-ai",
+        "SUBJECT",
+        "PREDICATE",
+        "OBJECT",
+        "COMPLEMENT",
+        "ADVERBIAL",
+        "ADVERBIAL",
+      ],
+      "spring-zero-relative": [
+        "spring-ai",
+        "SUBJECT",
+        "PREDICATE",
+        "OBJECT",
+        "SUBJECT",
+        "PREDICATE",
+        "COMPLEMENT",
+        "ADVERBIAL",
+        "CONJUNCTION",
+        "SUBJECT",
+        "PREDICATE",
+        "OBJECT",
+        "ADVERBIAL",
+        "ATTRIBUTIVE_CLAUSE",
+      ],
+      "spring-noun-pp": ["controlled-contrast", "SUBJECT", "ATTRIBUTE", "PREDICATE", "OBJECT"],
+      "spring-verb-nested-pp": ["spring-ai", "SUBJECT", "PREDICATE", "ADVERBIAL", "ADVERBIAL"],
+      "arxiv-figure-caption": ["arxiv", "FRAGMENT_HEAD", "ATTRIBUTE", "ATTRIBUTE"],
+      "arxiv-table-definition": ["arxiv", "FRAGMENT_HEAD", "ATTRIBUTE"],
+      "arxiv-inline-h0": ["arxiv", "ADVERBIAL", "SUBJECT", "ATTRIBUTE", "PREDICATE", "PREDICATIVE"],
+      "arxiv-short-heading": ["arxiv", "FRAGMENT_HEAD"],
+    };
+
+    expect(Object.keys(expected)).toEqual(corpus.denominatorSentenceIds);
+    expect(
+      Object.fromEntries(
+        corpus.sentences.map(({ id, split, boundaries }) => [
+          id,
+          [split, ...boundaries.map(({ role }) => role)],
+        ]),
+      ),
+    ).toEqual(expected);
+  });
+
+  it("pins the arXiv title as four manually reviewed half-open spans", () => {
+    const corpus = loadPageCorpus();
+    const title = corpus.sentences.find(({ id }) => id === "arxiv-dark-siren-title");
+
+    expect(title?.text).toBe(
+      "Expanding the scope of dark siren cosmology: Inferring the population properties of gravitational wave-hosting galaxies",
+    );
+    expect(title?.boundaries).toEqual([
+      { startChar: 0, endChar: 19, role: "FRAGMENT_HEAD" },
+      { startChar: 20, endChar: 43, role: "ATTRIBUTE" },
+      { startChar: 45, endChar: 80, role: "APPOSITIVE" },
+      { startChar: 81, endChar: 119, role: "ATTRIBUTE" },
+    ]);
+  });
+});
 
 describe("core evaluation corpus validation", () => {
   const pageTargetCorpus = () => ({
@@ -474,7 +629,8 @@ describe("core-evaluation-trace/v1 contract", () => {
       artifact.corpus.sentences.sort((left, right) => order.get(left.id) - order.get(right.id));
       artifact.corpus.denominatorSentenceIds = sentenceOrder;
       artifact.tokenizerSnapshot.sentences.sort(
-        (left, right) => order.get(left.id ?? left.sentenceId) - order.get(right.id ?? right.sentenceId),
+        (left, right) =>
+          order.get(left.id ?? left.sentenceId) - order.get(right.id ?? right.sentenceId),
       );
       artifact.run.sentenceOrder = sentenceOrder;
     };
