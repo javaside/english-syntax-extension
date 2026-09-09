@@ -76,105 +76,260 @@ describe("visible page core evaluation corpus v1", () => {
     }
   });
 
-  it("pins every manually reviewed sentence ID, source class, and role sequence", () => {
+  it("pins independent text, source class, category, and complete boundaries for all 20 sentences", () => {
     const corpus = loadPageCorpus();
     const expected = {
-      "spring-features-lead": ["spring-ai", "SUBJECT", "PREDICATE", "OBJECT"],
-      "spring-portable-api-fragment": ["spring-ai", "FRAGMENT_HEAD", "ATTRIBUTE"],
-      "spring-fragment-relative": ["spring-ai", "FRAGMENT_HEAD", "ATTRIBUTE", "ATTRIBUTIVE_CLAUSE"],
-      "full-relative-counterexample": [
-        "controlled-contrast",
-        "SUBJECT",
-        "ATTRIBUTIVE_CLAUSE",
-        "PREDICATE",
-        "PREDICATIVE",
-      ],
-      "arxiv-dark-siren-title": ["arxiv", "FRAGMENT_HEAD", "ATTRIBUTE", "APPOSITIVE", "ATTRIBUTE"],
-      "colon-complete-clause-counterexample": [
-        "controlled-contrast",
-        "SUBJECT",
-        "PREDICATE",
-        "PREDICATIVE",
-        "SUBJECT",
-        "PREDICATE",
-        "OBJECT",
-      ],
-      "finite-when-clause": ["spring-ai", "SUBJECT", "PREDICATE", "ADVERBIAL_CLAUSE"],
-      "nonfinite-when-phrase": ["spring-ai", "SUBJECT", "PREDICATE", "ADVERBIAL"],
-      "finite-before-clause": [
-        "controlled-contrast",
-        "SUBJECT",
-        "PREDICATE",
-        "OBJECT",
-        "ADVERBIAL_CLAUSE",
-      ],
-      "nonfinite-before-phrase": [
-        "controlled-contrast",
-        "SUBJECT",
-        "PREDICATE",
-        "OBJECT",
-        "ADVERBIAL",
-      ],
-      "spring-vp-coordination": [
-        "spring-ai",
-        "SUBJECT",
-        "PREDICATE",
-        "OBJECT",
-        "ATTRIBUTE",
-        "CONJUNCTION",
-        "PREDICATE",
-        "OBJECT",
-      ],
-      "spring-np-coordination": [
-        "spring-ai",
-        "SUBJECT",
-        "ATTRIBUTE",
-        "PREDICATE",
-        "ADVERBIAL",
-        "ADVERBIAL_CLAUSE",
-      ],
-      "spring-object-control": [
-        "spring-ai",
-        "SUBJECT",
-        "PREDICATE",
-        "OBJECT",
-        "COMPLEMENT",
-        "ADVERBIAL",
-        "ADVERBIAL",
-      ],
-      "spring-zero-relative": [
-        "spring-ai",
-        "SUBJECT",
-        "PREDICATE",
-        "OBJECT",
-        "SUBJECT",
-        "PREDICATE",
-        "COMPLEMENT",
-        "ADVERBIAL",
-        "CONJUNCTION",
-        "SUBJECT",
-        "PREDICATE",
-        "OBJECT",
-        "ADVERBIAL",
-        "ATTRIBUTIVE_CLAUSE",
-      ],
-      "spring-noun-pp": ["controlled-contrast", "SUBJECT", "ATTRIBUTE", "PREDICATE", "OBJECT"],
-      "spring-verb-nested-pp": ["spring-ai", "SUBJECT", "PREDICATE", "ADVERBIAL", "ADVERBIAL"],
-      "arxiv-figure-caption": ["arxiv", "FRAGMENT_HEAD", "ATTRIBUTE", "ATTRIBUTE"],
-      "arxiv-table-definition": ["arxiv", "FRAGMENT_HEAD", "ATTRIBUTE"],
-      "arxiv-inline-h0": ["arxiv", "ADVERBIAL", "SUBJECT", "ATTRIBUTE", "PREDICATE", "PREDICATIVE"],
-      "arxiv-short-heading": ["arxiv", "FRAGMENT_HEAD"],
+      "spring-features-lead": {
+        text: "Spring AI provides the following features:",
+        split: "spring-ai",
+        category: "clause",
+        boundaries: [
+          { startChar: 0, endChar: 9, role: "SUBJECT" },
+          { startChar: 10, endChar: 18, role: "PREDICATE" },
+          { startChar: 19, endChar: 41, role: "OBJECT" },
+        ],
+      },
+      "spring-portable-api-fragment": {
+        text: "Portable API support across AI providers for Chat, text-to-image, and Embedding models.",
+        split: "spring-ai",
+        category: "fragment",
+        boundaries: [
+          { startChar: 0, endChar: 20, role: "FRAGMENT_HEAD" },
+          { startChar: 21, endChar: 40, role: "ATTRIBUTE" },
+          { startChar: 41, endChar: 87, role: "ATTRIBUTE" },
+        ],
+      },
+      "spring-fragment-relative": {
+        text: "List of sequences that the model will use to stop generating further tokens.",
+        split: "spring-ai",
+        category: "fragment",
+        boundaries: [
+          { startChar: 0, endChar: 4, role: "FRAGMENT_HEAD" },
+          { startChar: 5, endChar: 17, role: "ATTRIBUTE" },
+          { startChar: 18, endChar: 75, role: "ATTRIBUTIVE_CLAUSE" },
+        ],
+      },
+      "full-relative-counterexample": {
+        text: "The API that returns JSON responses remains stable.",
+        split: "controlled-contrast",
+        category: "clause",
+        boundaries: [
+          { startChar: 0, endChar: 7, role: "SUBJECT" },
+          { startChar: 8, endChar: 35, role: "ATTRIBUTIVE_CLAUSE" },
+          { startChar: 36, endChar: 43, role: "PREDICATE" },
+          { startChar: 44, endChar: 50, role: "PREDICATIVE" },
+        ],
+      },
+      "arxiv-dark-siren-title": {
+        text: "Expanding the scope of dark siren cosmology: Inferring the population properties of gravitational wave-hosting galaxies",
+        split: "arxiv",
+        category: "fragment",
+        boundaries: [
+          { startChar: 0, endChar: 19, role: "FRAGMENT_HEAD" },
+          { startChar: 20, endChar: 43, role: "ATTRIBUTE" },
+          { startChar: 45, endChar: 80, role: "APPOSITIVE" },
+          { startChar: 81, endChar: 119, role: "ATTRIBUTE" },
+        ],
+      },
+      "colon-complete-clause-counterexample": {
+        text: "The result is clear: the sampled prior reduces uncertainty.",
+        split: "controlled-contrast",
+        category: "clause",
+        boundaries: [
+          { startChar: 0, endChar: 10, role: "SUBJECT" },
+          { startChar: 11, endChar: 13, role: "PREDICATE" },
+          { startChar: 14, endChar: 19, role: "PREDICATIVE" },
+          { startChar: 21, endChar: 38, role: "SUBJECT" },
+          { startChar: 39, endChar: 46, role: "PREDICATE" },
+          { startChar: 47, endChar: 58, role: "OBJECT" },
+        ],
+      },
+      "finite-when-clause": {
+        text: "The actual AI model invocation occurs when methods such as content(), chatResponse(), and responseEntity() are called.",
+        split: "spring-ai",
+        category: "clause",
+        boundaries: [
+          { startChar: 0, endChar: 30, role: "SUBJECT" },
+          { startChar: 31, endChar: 37, role: "PREDICATE" },
+          { startChar: 38, endChar: 117, role: "ADVERBIAL_CLAUSE" },
+        ],
+      },
+      "nonfinite-when-phrase": {
+        text: "The spring.ai.tool observations are recorded when performing tool calling in the context of a chat model interaction.",
+        split: "spring-ai",
+        category: "clause",
+        boundaries: [
+          { startChar: 0, endChar: 31, role: "SUBJECT" },
+          { startChar: 32, endChar: 44, role: "PREDICATE" },
+          { startChar: 45, endChar: 116, role: "ADVERBIAL" },
+        ],
+      },
+      "finite-before-clause": {
+        text: "The client validates the request before the model returns a response.",
+        split: "controlled-contrast",
+        category: "clause",
+        boundaries: [
+          { startChar: 0, endChar: 10, role: "SUBJECT" },
+          { startChar: 11, endChar: 20, role: "PREDICATE" },
+          { startChar: 21, endChar: 32, role: "OBJECT" },
+          { startChar: 33, endChar: 68, role: "ADVERBIAL_CLAUSE" },
+        ],
+      },
+      "nonfinite-before-phrase": {
+        text: "The client validates the request before sending it.",
+        split: "controlled-contrast",
+        category: "clause",
+        boundaries: [
+          { startChar: 0, endChar: 10, role: "SUBJECT" },
+          { startChar: 11, endChar: 20, role: "PREDICATE" },
+          { startChar: 21, endChar: 32, role: "OBJECT" },
+          { startChar: 33, endChar: 50, role: "ADVERBIAL" },
+        ],
+      },
+      "spring-vp-coordination": {
+        text: "They measure the time spent performing the invocation and propagate the related tracing information.",
+        split: "spring-ai",
+        category: "coordination",
+        boundaries: [
+          { startChar: 0, endChar: 4, role: "SUBJECT" },
+          { startChar: 5, endChar: 12, role: "PREDICATE" },
+          { startChar: 13, endChar: 21, role: "OBJECT" },
+          { startChar: 22, endChar: 53, role: "ATTRIBUTE" },
+          { startChar: 54, endChar: 57, role: "CONJUNCTION" },
+          { startChar: 58, endChar: 67, role: "PREDICATE" },
+          { startChar: 68, endChar: 99, role: "OBJECT" },
+        ],
+      },
+      "spring-np-coordination": {
+        text: "The input arguments and result from the tool call are not exported by default, as they can be potentially sensitive.",
+        split: "spring-ai",
+        category: "coordination",
+        boundaries: [
+          { startChar: 0, endChar: 30, role: "SUBJECT" },
+          { startChar: 31, endChar: 49, role: "ATTRIBUTE" },
+          { startChar: 50, endChar: 66, role: "PREDICATE" },
+          { startChar: 67, endChar: 77, role: "ADVERBIAL" },
+          { startChar: 79, endChar: 116, role: "ADVERBIAL_CLAUSE" },
+        ],
+      },
+      "spring-object-control": {
+        text: "This configuration allows Maven to access Spring snapshot repositories directly while still using your mirror for other dependencies.",
+        split: "spring-ai",
+        category: "object-complement",
+        boundaries: [
+          { startChar: 0, endChar: 18, role: "SUBJECT" },
+          { startChar: 19, endChar: 25, role: "PREDICATE" },
+          { startChar: 26, endChar: 31, role: "OBJECT" },
+          { startChar: 32, endChar: 70, role: "COMPLEMENT" },
+          { startChar: 71, endChar: 79, role: "ADVERBIAL" },
+          { startChar: 80, endChar: 132, role: "ADVERBIAL" },
+        ],
+      },
+      "spring-zero-relative": {
+        text: "Structured output bridges that gap: the model is steered to produce text conforming to a schema, and the application parses it back into a typed object the rest of the codebase can treat like any other domain type.",
+        split: "spring-ai",
+        category: "clause",
+        boundaries: [
+          { startChar: 0, endChar: 17, role: "SUBJECT" },
+          { startChar: 18, endChar: 25, role: "PREDICATE" },
+          { startChar: 26, endChar: 34, role: "OBJECT" },
+          { startChar: 36, endChar: 45, role: "SUBJECT" },
+          { startChar: 46, endChar: 56, role: "PREDICATE" },
+          { startChar: 57, endChar: 67, role: "COMPLEMENT" },
+          { startChar: 68, endChar: 72, role: "OBJECT" },
+          { startChar: 73, endChar: 95, role: "ATTRIBUTE" },
+          { startChar: 97, endChar: 100, role: "CONJUNCTION" },
+          { startChar: 101, endChar: 116, role: "SUBJECT" },
+          { startChar: 117, endChar: 123, role: "PREDICATE" },
+          { startChar: 124, endChar: 126, role: "OBJECT" },
+          { startChar: 127, endChar: 151, role: "ADVERBIAL" },
+          { startChar: 152, endChar: 214, role: "ATTRIBUTIVE_CLAUSE" },
+        ],
+      },
+      "spring-noun-pp": {
+        text: "The sequence of their execution determines the result.",
+        split: "controlled-contrast",
+        category: "prepositional-attachment",
+        boundaries: [
+          { startChar: 0, endChar: 12, role: "SUBJECT" },
+          { startChar: 13, endChar: 31, role: "ATTRIBUTE" },
+          { startChar: 32, endChar: 42, role: "PREDICATE" },
+          { startChar: 43, endChar: 53, role: "OBJECT" },
+        ],
+      },
+      "spring-verb-nested-pp": {
+        text: "Spring AI builds upon the observability features in the Spring ecosystem to provide insights into AI-related operations.",
+        split: "spring-ai",
+        category: "prepositional-attachment",
+        boundaries: [
+          { startChar: 0, endChar: 9, role: "SUBJECT" },
+          { startChar: 10, endChar: 16, role: "PREDICATE" },
+          { startChar: 17, endChar: 72, role: "ADVERBIAL" },
+          { startChar: 73, endChar: 119, role: "ADVERBIAL" },
+        ],
+      },
+      "arxiv-figure-caption": {
+        text: "Comparison of six nside 64 GOOD pixels generated using the gridded LOS prior method and the sampled LOS prior method.",
+        split: "arxiv",
+        category: "fragment",
+        boundaries: [
+          { startChar: 0, endChar: 10, role: "FRAGMENT_HEAD" },
+          { startChar: 11, endChar: 38, role: "ATTRIBUTE" },
+          { startChar: 39, endChar: 116, role: "ATTRIBUTE" },
+        ],
+      },
+      "arxiv-table-definition": {
+        text: "A list of parameters appearing in the dark siren methodology and their definitions",
+        split: "arxiv",
+        category: "fragment",
+        boundaries: [
+          { startChar: 0, endChar: 6, role: "FRAGMENT_HEAD" },
+          { startChar: 7, endChar: 82, role: "ATTRIBUTE" },
+        ],
+      },
+      "arxiv-inline-h0": {
+        text: "With a clear path forward, the goal of reaching a 2% measurement of H0 by the mid-2030s is tantalisingly close.",
+        split: "controlled-contrast",
+        category: "prepositional-attachment",
+        boundaries: [
+          { startChar: 0, endChar: 25, role: "ADVERBIAL" },
+          { startChar: 27, endChar: 35, role: "SUBJECT" },
+          { startChar: 36, endChar: 87, role: "ATTRIBUTE" },
+          { startChar: 88, endChar: 90, role: "PREDICATE" },
+          { startChar: 91, endChar: 110, role: "PREDICATIVE" },
+        ],
+      },
+      "arxiv-short-heading": {
+        text: "Abstract",
+        split: "arxiv",
+        category: "fragment",
+        boundaries: [{ startChar: 0, endChar: 8, role: "FRAGMENT_HEAD" }],
+      },
     };
 
     expect(Object.keys(expected)).toEqual(corpus.denominatorSentenceIds);
     expect(
       Object.fromEntries(
-        corpus.sentences.map(({ id, split, boundaries }) => [
+        corpus.sentences.map(({ id, text, split, category, boundaries }) => [
           id,
-          [split, ...boundaries.map(({ role }) => role)],
+          { text, split, category, boundaries },
         ]),
       ),
     ).toEqual(expected);
+  });
+
+  it("freezes verifiable immutable evidence for every floating Spring excerpt", () => {
+    const corpus = loadPageCorpus();
+    const springSentences = corpus.sentences.filter(({ split }) => split === "spring-ai");
+
+    expect(springSentences).not.toHaveLength(0);
+    for (const item of springSentences) {
+      expect(item.sourceEvidence).toEqual({
+        verifiedAt: "2026-09-08",
+        exactExcerpt: item.text,
+        contentHash: sha256(item.text),
+      });
+    }
   });
 
   it("pins the arXiv title as four manually reviewed half-open spans", () => {
@@ -190,6 +345,61 @@ describe("visible page core evaluation corpus v1", () => {
       { startChar: 45, endChar: 80, role: "APPOSITIVE" },
       { startChar: 81, endChar: 119, role: "ATTRIBUTE" },
     ]);
+  });
+
+  it("derives artifact report splits from the actual page corpus", () => {
+    const artifact = loadArtifact();
+    const corpus = loadPageCorpus();
+    artifact.corpus = corpus;
+    artifact.tokenizerSnapshot.sentences = corpus.sentences.map(({ id, text }) => ({
+      id,
+      text,
+      textHash: sha256(text),
+      tokens: tokenize(text),
+    }));
+    artifact.traces = corpus.sentences.map(({ id, boundaries }, index) => {
+      const tokens = artifact.tokenizerSnapshot.sentences[index].tokens;
+      const components = boundaries.map(({ startChar, endChar, role }) => ({
+        startToken: tokens.find(({ start }) => start === startChar).id,
+        endToken: tokens.find(({ end }) => end === endChar).id,
+        role,
+      }));
+      const analysis = { sentenceId: id, components };
+      return {
+        callId: `page-${index}`,
+        inputSentenceIds: [id],
+        firstPass: {
+          messages: [{ role: "user", content: `sentenceId ${id}` }],
+          raw: { sentences: [analysis] },
+          predictions: [analysis],
+          subsetSentenceIds: [id],
+          serializedSubset: id,
+          validatorErrors: [],
+        },
+        repairs: [],
+        final: {
+          status: "success",
+          successSentenceIds: [id],
+          failureSentenceIds: [],
+          analyses: [analysis],
+          failures: [],
+        },
+      };
+    });
+    artifact.run.mode = "pipeline";
+    artifact.run.sentenceOrder = corpus.denominatorSentenceIds;
+    refreshArtifactHashes(artifact);
+    artifact.report = createCoreEvaluationReportV1(artifact);
+
+    expect(
+      Object.fromEntries(
+        Object.entries(artifact.report.bySplit).map(([key, value]) => [key, value.denominator]),
+      ),
+    ).toEqual({
+      "spring-ai": 10,
+      "controlled-contrast": 6,
+      arxiv: 4,
+    });
   });
 });
 
@@ -231,6 +441,22 @@ describe("core evaluation corpus validation", () => {
     const corpus = pageTargetCorpus();
 
     expect(validateCoreEvaluationCorpusV1(corpus)).toBe(corpus);
+  });
+
+  it("validates immutable source evidence when a corpus sentence provides it", () => {
+    const corpus = pageTargetCorpus();
+    corpus.sentences[0].sourceEvidence = {
+      verifiedAt: "2026-09-08",
+      exactExcerpt: corpus.sentences[0].text,
+      contentHash: sha256(corpus.sentences[0].text),
+    };
+
+    expect(validateCoreEvaluationCorpusV1(corpus)).toBe(corpus);
+    for (const field of ["verifiedAt", "exactExcerpt", "contentHash"]) {
+      const invalid = cloneJson(corpus);
+      invalid.sentences[0].sourceEvidence[field] = "invalid";
+      expect(() => validateCoreEvaluationCorpusV1(invalid)).toThrow(/source evidence/iu);
+    }
   });
 
   it.each([
@@ -633,6 +859,7 @@ describe("core-evaluation-trace/v1 contract", () => {
           order.get(left.id ?? left.sentenceId) - order.get(right.id ?? right.sentenceId),
       );
       artifact.run.sentenceOrder = sentenceOrder;
+      refreshArtifactReport(artifact);
     };
 
     it.each([

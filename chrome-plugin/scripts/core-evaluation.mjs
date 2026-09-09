@@ -156,6 +156,17 @@ export function validateCoreEvaluationCorpusV1(corpus) {
       ].every((value) => typeof value === "string" && value.trim().length > 0),
       `corpus sentence metadata ${sentence.id}`,
     );
+    if (sentence.sourceEvidence !== undefined) {
+      const evidence = sentence.sourceEvidence;
+      requireValue(
+        evidence &&
+          typeof evidence.verifiedAt === "string" &&
+          /^\d{4}-\d{2}-\d{2}$/u.test(evidence.verifiedAt) &&
+          evidence.exactExcerpt === sentence.text &&
+          evidence.contentHash === sha256Text(evidence.exactExcerpt),
+        `source evidence ${sentence.id}`,
+      );
+    }
     requireValue(
       Array.isArray(sentence.boundaries) && sentence.boundaries.length > 0,
       `boundaries ${sentence.id}`,
@@ -458,14 +469,8 @@ function scoreArtifact(artifact) {
   const options = {
     coordinateSystem: "characters",
     corpusMetadata: artifact.corpus.sentences,
-    splits: ["rule-regression", "independent-holdout"],
-    categories: [
-      "fragment",
-      "clause",
-      "object-complement",
-      "prepositional-attachment",
-      "coordination",
-    ],
+    splits: [...new Set(artifact.corpus.sentences.map(({ split }) => split))],
+    categories: [...new Set(artifact.corpus.sentences.map(({ category }) => category))],
   };
   const trace = {
     denominatorSentenceIds: artifact.corpus.denominatorSentenceIds,
