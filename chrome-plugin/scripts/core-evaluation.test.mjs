@@ -837,7 +837,7 @@ describe("core-evaluation-trace/v1 contract", () => {
     it("accepts an exact missing-ID padding adaptation", () => {
       const artifact = adaptedArtifact();
 
-      expect(() => validateCoreEvaluationArtifactV1(artifact, { validateCoreBatch })).not.toThrow();
+      expect(() => validateCoreEvaluationArtifactV1(artifact)).not.toThrow();
     });
 
     it.each([
@@ -893,6 +893,167 @@ describe("core-evaluation-trace/v1 contract", () => {
         validateCoreEvaluationArtifactV1(adaptationOnly, { validateCoreBatch }),
       ).toThrow();
     });
+  });
+
+  const productionValidatedArtifact = () => {
+    const text = "English works.";
+    const tokens = tokenize(text);
+    const invalid = { sentenceId: "production-check", components: [] };
+    const valid = {
+      sentenceId: "production-check",
+      components: [
+        {
+          startToken: tokens[0].id,
+          endToken: tokens[0].id,
+          role: "SUBJECT",
+          translation: "英语",
+        },
+        {
+          startToken: tokens[1].id,
+          endToken: tokens[1].id,
+          role: "PREDICATE",
+          translation: "有效",
+        },
+      ],
+    };
+    const input = { sentenceId: "production-check", text, tokens };
+    const firstErrors = productionValidationErrorsFor(
+      { sentences: [invalid] },
+      [input],
+      "core-evaluation",
+      validateCoreBatch,
+    );
+    const artifact = {
+      schemaVersion: "core-evaluation-trace/v1",
+      synthetic: true,
+      corpus: {
+        id: "production-validation-test",
+        version: 1,
+        denominatorSentenceIds: ["production-check"],
+        sentences: [
+          {
+            id: "production-check",
+            text,
+            split: "test",
+            category: "clause",
+            source: "committed evaluator test",
+            annotationRationale: "Exercises production validator propagation.",
+            boundaries: [
+              { startChar: tokens[0].start, endChar: tokens[0].end, role: "SUBJECT" },
+              { startChar: tokens[1].start, endChar: tokens[1].end, role: "PREDICATE" },
+            ],
+          },
+        ],
+      },
+      tokenizerSnapshot: {
+        id: "production-tokenizer",
+        version: "test",
+        hash: "",
+        sentences: [{ id: "production-check", text, textHash: sha256(text), tokens }],
+      },
+      run: {
+        mode: "pipeline",
+        createdAt: "2026-09-08T00:00:00.000Z",
+        commit: "test",
+        model: "example-model",
+        parameters: { temperature: 0 },
+        batchSize: 1,
+        comparisonConfig: {
+          endpoint: "https://api.example.com/v1",
+          model: "example-model",
+          mode: "pipeline",
+          batchSize: 1,
+          temperature: 0,
+          reasoning: { requested: "none", effective: "none", fallback: false },
+          responseFormat: {
+            requested: "json_schema",
+            effective: "json_schema",
+            fallback: false,
+          },
+          timeout: { strategy: "per-request", valueMs: 120_000 },
+        },
+        sentenceOrder: ["production-check"],
+        hashes: { prompt: "", corpus: "", tokenizer: "", messages: "" },
+      },
+      traces: [
+        {
+          callId: "production-validation",
+          inputSentenceIds: ["production-check"],
+          firstPass: {
+            messages: [{ role: "user", content: '{"sentenceId":"production-check"}' }],
+            raw: { sentences: [invalid] },
+            predictions: [invalid],
+            subsetSentenceIds: ["production-check"],
+            serializedSubset: '{"sentenceId":"production-check"}',
+            validatorErrors: firstErrors,
+          },
+          repairs: [
+            {
+              round: 1,
+              messages: [{ role: "user", content: '{"sentenceId":"production-check"}' }],
+              raw: { sentences: [valid] },
+              subsetSentenceIds: ["production-check"],
+              serializedSubset: '{"sentenceId":"production-check"}',
+              validatorErrors: [],
+            },
+          ],
+          final: {
+            status: "success",
+            successSentenceIds: ["production-check"],
+            failureSentenceIds: [],
+            analyses: [valid],
+            failures: [],
+          },
+        },
+      ],
+      report: undefined,
+    };
+    refreshArtifactHashes(artifact);
+    refreshArtifactReport(artifact);
+    return artifact;
+  };
+
+  it("rejects forged ordinary first-pass and repair diagnostics with production validation", () => {
+    for (const roundName of ["firstPass", "repair"]) {
+      const artifact = productionValidatedArtifact();
+      const round =
+        roundName === "firstPass" ? artifact.traces[0].firstPass : artifact.traces[0].repairs[0];
+      round.validatorErrors =
+        roundName === "firstPass"
+          ? []
+          : [
+              {
+                sentenceId: "production-check",
+                errors: [{ path: "sentences[9]", message: "forged", kind: "grammar" }],
+              },
+            ];
+
+      expect(() => validateCoreEvaluationArtifactV1(artifact, { validateCoreBatch })).toThrow(
+        /validatorErrors must exactly match production diagnostics/iu,
+      );
+    }
+  });
+
+  it("forces comparable, scoring, and three-pair APIs to propagate production validation", () => {
+    const forgedPair = () => {
+      const baseline = productionValidatedArtifact();
+      const candidate = cloneJson(baseline);
+      baseline.traces[0].firstPass.validatorErrors = [];
+      return { baseline, candidate };
+    };
+    const options = { validateCoreBatch };
+
+    expect(() => {
+      const { baseline, candidate } = forgedPair();
+      validateComparableCoreEvaluationArtifactsV1(baseline, candidate, options);
+    }).toThrow(/production diagnostics/iu);
+    expect(() => {
+      const { baseline, candidate } = forgedPair();
+      scoreCoreEvaluationArtifacts(baseline, candidate, options);
+    }).toThrow(/production diagnostics/iu);
+    expect(() =>
+      scoreCoreEvaluationArtifactPairs([forgedPair(), forgedPair(), forgedPair()], options),
+    ).toThrow(/production diagnostics/iu);
   });
 
   it("recomputes production diagnostics one sentence at a time with local paths", () => {

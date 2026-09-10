@@ -208,7 +208,7 @@ function validateRound(round, inputIds, expectedRound, validationContext) {
     round.validatorErrors.map(({ sentenceId }) => sentenceId),
     `round ${expectedRound} validator error sentence IDs`,
   );
-  if (validationContext?.validateCoreBatch && round.traceRawAdaptation) {
+  if (validationContext?.validateCoreBatch && round.raw.malformedWholeRound !== true) {
     const subsetInputs = round.subsetSentenceIds.map((sentenceId) => {
       const input = validationContext.inputById.get(sentenceId);
       requireValue(input !== undefined, `round ${expectedRound} validator input ${sentenceId}`);
@@ -659,9 +659,13 @@ function validateComparisonConfig(config, run) {
   return config;
 }
 
-export function validateComparableCoreEvaluationArtifactsV1(baselineArtifact, candidateArtifact) {
-  validateCoreEvaluationArtifactV1(baselineArtifact);
-  validateCoreEvaluationArtifactV1(candidateArtifact);
+export function validateComparableCoreEvaluationArtifactsV1(
+  baselineArtifact,
+  candidateArtifact,
+  options = {},
+) {
+  validateCoreEvaluationArtifactV1(baselineArtifact, options);
+  validateCoreEvaluationArtifactV1(candidateArtifact, options);
   requireValue(
     baselineArtifact.run.mode === "pipeline" && candidateArtifact.run.mode === "pipeline",
     "comparable artifacts must use pipeline mode",
@@ -690,9 +694,9 @@ export function validateComparableCoreEvaluationArtifactsV1(baselineArtifact, ca
   return { baseline: baselineArtifact, candidate: candidateArtifact };
 }
 
-export function scoreCoreEvaluationArtifacts(baselineArtifact, candidateArtifact) {
-  validateCoreEvaluationArtifactV1(baselineArtifact);
-  validateCoreEvaluationArtifactV1(candidateArtifact);
+export function scoreCoreEvaluationArtifacts(baselineArtifact, candidateArtifact, options = {}) {
+  validateCoreEvaluationArtifactV1(baselineArtifact, options);
+  validateCoreEvaluationArtifactV1(candidateArtifact, options);
   requireValue(
     JSON.stringify(baselineArtifact.corpus) === JSON.stringify(candidateArtifact.corpus),
     "baseline and candidate corpus snapshots must match",
@@ -710,13 +714,13 @@ function metricSummary(values) {
   };
 }
 
-export function scoreCoreEvaluationArtifactPairs(pairs) {
+export function scoreCoreEvaluationArtifactPairs(pairs, options = {}) {
   if (!Array.isArray(pairs) || pairs.length !== 3) {
     throw new Error("Core evaluation comparison requires exactly three pairs");
   }
   const reference = pairs[0]?.baseline;
   const scoredPairs = pairs.map(({ baseline, candidate }, index) => {
-    validateComparableCoreEvaluationArtifactsV1(baseline, candidate);
+    validateComparableCoreEvaluationArtifactsV1(baseline, candidate, options);
     if (index > 0) {
       requireValue(
         JSON.stringify(baseline.run.sentenceOrder) === JSON.stringify(reference.run.sentenceOrder),
@@ -732,7 +736,7 @@ export function scoreCoreEvaluationArtifactPairs(pairs) {
         "artifact pairs comparisonConfig must match",
       );
     }
-    const scores = scoreCoreEvaluationArtifacts(baseline, candidate);
+    const scores = scoreCoreEvaluationArtifacts(baseline, candidate, options);
     return {
       pair: index + 1,
       baseline: scores.baseline,
