@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { URL } from "node:url";
 
+import { validateCoreBatch } from "../src/language/analysis-validator.ts";
 import { tokenize } from "../src/language/segmenter.ts";
 import {
   formatPipelineTransition,
@@ -12,6 +13,7 @@ import {
   createCoreEvaluationReportV1,
   scoreCoreEvaluationArtifactPairs,
   scoreCoreEvaluationArtifacts,
+  productionValidationErrorsFor,
   validateComparableCoreEvaluationArtifactsV1,
   validateCoreEvaluationArtifactV1,
   validateCoreEvaluationCorpusV1,
@@ -803,6 +805,123 @@ describe("core-evaluation-trace/v1 contract", () => {
     refreshArtifactHashes(artifact);
 
     expect(() => validateCoreEvaluationArtifactV1(artifact)).toThrow();
+  });
+
+  describe("production raw adaptation", () => {
+    const adaptedArtifact = () => {
+      const artifact = loadArtifact();
+      const round = artifact.traces[0].firstPass;
+      const missingId = round.subsetSentenceIds.at(-1);
+      round.productionRaw = cloneJson(round.raw);
+      round.productionRaw.sentences.pop();
+      round.raw.sentences.at(-1).components = [];
+      round.traceRawAdaptation = {
+        kind: "pad-missing-sentence-ids",
+        sentenceIds: [missingId],
+      };
+      const inputById = new Map(
+        artifact.tokenizerSnapshot.sentences.map(({ id, text, tokens }) => [
+          id,
+          { sentenceId: id, text, tokens },
+        ]),
+      );
+      round.validatorErrors = productionValidationErrorsFor(
+        round.productionRaw,
+        round.subsetSentenceIds.map((sentenceId) => inputById.get(sentenceId)),
+        "core-evaluation",
+        validateCoreBatch,
+      );
+      return artifact;
+    };
+
+    it("accepts an exact missing-ID padding adaptation", () => {
+      const artifact = adaptedArtifact();
+
+      expect(() => validateCoreEvaluationArtifactV1(artifact, { validateCoreBatch })).not.toThrow();
+    });
+
+    it.each([
+      [
+        "a damaged productionRaw payload",
+        (round) => {
+          round.productionRaw = { sentences: [] };
+        },
+      ],
+      [
+        "an unknown adaptation kind",
+        (round) => {
+          round.traceRawAdaptation.kind = "invented-adaptation";
+        },
+      ],
+      [
+        "adaptation sentence IDs outside the exact missing set",
+        (round) => {
+          round.traceRawAdaptation.sentenceIds = [round.subsetSentenceIds[0]];
+        },
+      ],
+      [
+        "padding records with non-empty components",
+        (round) => {
+          round.raw.sentences.at(-1).components = [{ startToken: 0 }];
+        },
+      ],
+      [
+        "forged validator errors",
+        (round) => {
+          round.validatorErrors.at(-1).errors = [
+            { path: "sentences[9]", message: "forged", kind: "grammar" },
+          ];
+        },
+      ],
+    ])("rejects %s", (_label, mutate) => {
+      const artifact = adaptedArtifact();
+      mutate(artifact.traces[0].firstPass);
+
+      expect(() => validateCoreEvaluationArtifactV1(artifact, { validateCoreBatch })).toThrow();
+    });
+
+    it("rejects productionRaw or adaptation metadata when its counterpart is absent", () => {
+      const productionRawOnly = adaptedArtifact();
+      delete productionRawOnly.traces[0].firstPass.traceRawAdaptation;
+      const adaptationOnly = adaptedArtifact();
+      delete adaptationOnly.traces[0].firstPass.productionRaw;
+
+      expect(() =>
+        validateCoreEvaluationArtifactV1(productionRawOnly, { validateCoreBatch }),
+      ).toThrow();
+      expect(() =>
+        validateCoreEvaluationArtifactV1(adaptationOnly, { validateCoreBatch }),
+      ).toThrow();
+    });
+  });
+
+  it("recomputes production diagnostics one sentence at a time with local paths", () => {
+    const raw = {
+      sentences: [
+        {
+          sentenceId: "first",
+          components: [{ startToken: 0, endToken: 0, role: "FRAGMENT_HEAD", translation: "第一" }],
+        },
+        { sentenceId: "second", components: [] },
+      ],
+    };
+    const inputs = ["first", "second"].map((sentenceId) => ({
+      sentenceId,
+      text: sentenceId,
+      tokens: tokenize(sentenceId),
+    }));
+    expect(productionValidationErrorsFor(raw, inputs, "profile", validateCoreBatch)).toEqual([
+      {
+        sentenceId: "second",
+        errors: [
+          {
+            path: "sentences[0].components",
+            message: "must be a non-empty array",
+            kind: "grammar",
+          },
+        ],
+      },
+    ]);
   });
 
   it("rejects a corrupted deterministic report metric", () => {

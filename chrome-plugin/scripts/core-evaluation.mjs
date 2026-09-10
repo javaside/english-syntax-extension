@@ -36,6 +36,103 @@ function requireUniqueStrings(values, label) {
   requireValue(new Set(values).size === values.length, `${label} must be unique`);
 }
 
+function classifyProductionValidationError(error) {
+  return {
+    ...error,
+    kind: /unknown fields|translation|sentenceId|must be an object|must be an array/iu.test(
+      error.message,
+    )
+      ? "non-grammar"
+      : "grammar",
+  };
+}
+
+export function productionValidationErrorsFor(raw, inputs, modelProfileId, validateCoreBatch) {
+  const rawSentences =
+    raw && typeof raw === "object" && Array.isArray(raw.sentences) ? raw.sentences : [];
+  const rejections = [];
+  for (const input of inputs) {
+    const matching = rawSentences.filter(
+      (candidate) =>
+        candidate && typeof candidate === "object" && candidate.sentenceId === input.sentenceId,
+    );
+    const result = validateCoreBatch({ sentences: matching }, [input], modelProfileId);
+    if (!result.ok) {
+      rejections.push({
+        sentenceId: input.sentenceId,
+        errors: result.errors.map(classifyProductionValidationError),
+      });
+    }
+  }
+  return rejections;
+}
+
+function validateRawAdaptation(round, expectedRound, subsetSentenceIds) {
+  const hasProductionRaw = Object.hasOwn(round, "productionRaw");
+  const hasAdaptation = Object.hasOwn(round, "traceRawAdaptation");
+  requireValue(
+    hasProductionRaw === hasAdaptation,
+    `round ${expectedRound} productionRaw and traceRawAdaptation must occur together`,
+  );
+  if (!hasAdaptation) return;
+
+  const adaptation = round.traceRawAdaptation;
+  requireValue(
+    adaptation && adaptation.kind === "pad-missing-sentence-ids",
+    `round ${expectedRound} traceRawAdaptation kind`,
+  );
+  requireUniqueStrings(
+    adaptation.sentenceIds,
+    `round ${expectedRound} traceRawAdaptation sentenceIds`,
+  );
+  requireValue(
+    adaptation.sentenceIds.length > 0,
+    `round ${expectedRound} traceRawAdaptation sentenceIds must not be empty`,
+  );
+  requireValue(
+    round.productionRaw &&
+      typeof round.productionRaw === "object" &&
+      Object.keys(round.productionRaw).length === 1 &&
+      Array.isArray(round.productionRaw.sentences),
+    `round ${expectedRound} productionRaw shape`,
+  );
+  const productionIds = round.productionRaw.sentences.map(normalizedSentenceId);
+  requireUniqueStrings(productionIds, `round ${expectedRound} productionRaw sentence IDs`);
+  requireValue(
+    productionIds.every((id) => subsetSentenceIds.includes(id)),
+    `round ${expectedRound} productionRaw sentence IDs must belong to subset`,
+  );
+  const exactMissingIds = subsetSentenceIds.filter((id) => !productionIds.includes(id));
+  requireValue(
+    JSON.stringify(adaptation.sentenceIds) === JSON.stringify(exactMissingIds),
+    `round ${expectedRound} adaptation sentence IDs must exactly match productionRaw omissions`,
+  );
+  const expectedRaw = {
+    sentences: [
+      ...round.productionRaw.sentences,
+      ...exactMissingIds.map((sentenceId) => ({ sentenceId, components: [] })),
+    ],
+  };
+  requireValue(
+    JSON.stringify(round.raw) === JSON.stringify(expectedRaw),
+    `round ${expectedRound} raw must be the exact empty-components padding of productionRaw`,
+  );
+  for (const sentenceId of exactMissingIds) {
+    const rejection = round.validatorErrors.find((item) => item.sentenceId === sentenceId);
+    requireValue(
+      JSON.stringify(rejection?.errors) ===
+        JSON.stringify([
+          {
+            path: "sentences",
+            message: `requested sentence ${sentenceId} is missing`,
+            kind: "grammar",
+          },
+        ]),
+      `round ${expectedRound} missing-sentence validatorErrors must match production diagnostics`,
+    );
+  }
+}
+
 function rawRoundIds(raw, expectedRound, subsetSentenceIds) {
   requireValue(raw && typeof raw === "object", `round ${expectedRound} raw`);
   if (raw.malformedWholeRound === true) {
@@ -51,7 +148,7 @@ function rawRoundIds(raw, expectedRound, subsetSentenceIds) {
   return ids;
 }
 
-function validateRound(round, inputIds, expectedRound) {
+function validateRound(round, inputIds, expectedRound, validationContext) {
   requireValue(round && typeof round === "object", `round ${expectedRound}`);
   if (expectedRound > 0)
     requireValue(round.round === expectedRound, `repair round ${expectedRound}`);
@@ -106,10 +203,28 @@ function validateRound(round, inputIds, expectedRound) {
     `round ${expectedRound} raw sentence IDs must exactly match subset`,
   );
   requireValue(Array.isArray(round.validatorErrors), `round ${expectedRound} validatorErrors`);
+  validateRawAdaptation(round, expectedRound, round.subsetSentenceIds);
   requireUniqueStrings(
     round.validatorErrors.map(({ sentenceId }) => sentenceId),
     `round ${expectedRound} validator error sentence IDs`,
   );
+  if (validationContext?.validateCoreBatch && round.traceRawAdaptation) {
+    const subsetInputs = round.subsetSentenceIds.map((sentenceId) => {
+      const input = validationContext.inputById.get(sentenceId);
+      requireValue(input !== undefined, `round ${expectedRound} validator input ${sentenceId}`);
+      return input;
+    });
+    const expectedErrors = productionValidationErrorsFor(
+      round.productionRaw ?? round.raw,
+      subsetInputs,
+      validationContext.modelProfileId,
+      validationContext.validateCoreBatch,
+    );
+    requireValue(
+      JSON.stringify(round.validatorErrors) === JSON.stringify(expectedErrors),
+      `round ${expectedRound} validatorErrors must exactly match production diagnostics`,
+    );
+  }
   for (const rejection of round.validatorErrors) {
     requireValue(
       round.subsetSentenceIds.includes(rejection.sentenceId),
@@ -189,7 +304,7 @@ export function validateCoreEvaluationCorpusV1(corpus) {
   return corpus;
 }
 
-export function validateCoreEvaluationArtifactV1(artifact) {
+export function validateCoreEvaluationArtifactV1(artifact, options = {}) {
   requireValue(artifact?.schemaVersion === ARTIFACT_SCHEMA_VERSION, "schemaVersion");
   requireValue(typeof artifact.synthetic === "boolean", "synthetic");
   const corpus = validateCoreEvaluationCorpusV1(artifact.corpus);
@@ -277,6 +392,18 @@ export function validateCoreEvaluationArtifactV1(artifact) {
     "run hashes",
   );
   requireValue(Array.isArray(artifact.traces) && artifact.traces.length > 0, "traces");
+  const validationContext = options.validateCoreBatch
+    ? {
+        validateCoreBatch: options.validateCoreBatch,
+        modelProfileId: options.modelProfileId ?? "core-evaluation",
+        inputById: new Map(
+          snapshot.sentences.map(({ id, sentenceId, text, tokens }) => {
+            const normalizedId = id ?? sentenceId;
+            return [normalizedId, { sentenceId: normalizedId, text, tokens }];
+          }),
+        ),
+      }
+    : undefined;
   const traceIds = new Set();
   const coveredTraceIds = [];
   for (const trace of artifact.traces) {
@@ -288,7 +415,7 @@ export function validateCoreEvaluationArtifactV1(artifact) {
     requireUniqueStrings(trace.inputSentenceIds, "trace inputSentenceIds");
     coveredTraceIds.push(...trace.inputSentenceIds);
     const inputIds = new Set(trace.inputSentenceIds);
-    let priorFailedIds = validateRound(trace.firstPass, inputIds, 0);
+    let priorFailedIds = validateRound(trace.firstPass, inputIds, 0, validationContext);
     requireValue(
       JSON.stringify(trace.firstPass.subsetSentenceIds) === JSON.stringify(trace.inputSentenceIds),
       "first-pass subset must equal trace input",
@@ -300,7 +427,7 @@ export function validateCoreEvaluationArtifactV1(artifact) {
           round.subsetSentenceIds.length === priorFailedIds.size,
         `repair round ${index + 1} subset must exactly equal immediately prior failed set`,
       );
-      priorFailedIds = validateRound(round, inputIds, index + 1);
+      priorFailedIds = validateRound(round, inputIds, index + 1, validationContext);
     });
     requireValue(
       trace.final && ["success", "partial", "failure"].includes(trace.final.status),
