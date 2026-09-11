@@ -10,6 +10,8 @@ interface GoldComponent {
   startToken: number;
   endToken: number;
   role: string;
+  // teaching/doc 两批历史句子刻意不存 translation,replay 时注入占位译文。
+  translation?: string;
 }
 
 interface GoldSentence {
@@ -178,8 +180,7 @@ describe("core gold annotations", () => {
         { startToken: 3, endToken: 4, role: GrammarRole.OBJECT },
         { startToken: 6, endToken: 7, role: GrammarRole.SUBJECT },
         { startToken: 8, endToken: 9, role: GrammarRole.PREDICATE },
-        { startToken: 10, endToken: 11, role: GrammarRole.COMPLEMENT },
-        { startToken: 12, endToken: 12, role: GrammarRole.OBJECT },
+        { startToken: 10, endToken: 12, role: GrammarRole.COMPLEMENT },
         { startToken: 13, endToken: 16, role: GrammarRole.ATTRIBUTE },
         { startToken: 18, endToken: 18, role: GrammarRole.CONJUNCTION },
         { startToken: 19, endToken: 20, role: GrammarRole.SUBJECT },
@@ -203,6 +204,25 @@ describe("core gold annotations", () => {
         .find((sentence) => sentence.id === id)
         ?.components.map(({ startToken, endToken, role }) => ({ startToken, endToken, role })),
     ).toEqual(components);
+  });
+
+  // spec §5.2:自然语言成分的译文必须带中文释义,专有名词只原样保留、不得整词回显。
+  // 「Maven」曾整词回显,正确的形态是「Maven 构建工具」——专名 + 中文类型名。
+  // span/role 表是黄金集的契约核心,teaching/doc 两批历史句子刻意不存 translation
+  // (replay 注入占位译文),所以全量扫描只约束「写了 translation 的成分」。
+  it("does not let a proper-name component echo itself without a Chinese gloss", () => {
+    const control = fixture.sentences.find(({ id }) => id === "page-object-control");
+    expect(control?.components.find(({ startToken }) => startToken === 3)?.translation).toBe(
+      "Maven 构建工具",
+    );
+    for (const sentence of fixture.sentences) {
+      for (const { translation } of sentence.components) {
+        if (typeof translation === "string") {
+          // 数字/符号区间（'70–80%'）不含汉字属刻意保留,不算回显。
+          expect(translation, `${sentence.id}: ${translation}`).toMatch(/\p{Script=Han}|\p{N}/u);
+        }
+      }
+    }
   });
 
   it("keeps the fixed arXiv title colon uncovered and its four segments separate", () => {
