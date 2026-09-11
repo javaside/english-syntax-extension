@@ -3599,10 +3599,10 @@
       "ho-coordination-4"
     ],
     "hashes": {
-      "prompt": "a22fe46272325ada5fa41558d6c083c18a3f1babcacc89b18ee2414a96bce1fb",
+      "prompt": "5815d8a27f07bb3f1516e00125b76835e8bc9a2d9bb03cda8ced23e9863a0031",
       "corpus": "33731fed7713615f8b0ce058710e084253720a532ae54bb189923bbab919572e",
       "tokenizer": "26753d28f96a6b05a62a6a4ce320c28c13fdf509a6f513d6f8896f85fa2d7a45",
-      "messages": "421c74ff1aaa8952db597d65b4ab949dcb45b3728ea9d77e5a34726b6fe0858d"
+      "messages": "07d8af93248b5faa4bc2f3467d5e1686e9a3bd2c29091de533c6d1e60e087299"
     }
   },
   "traces": [
@@ -3632,13 +3632,13 @@
                   "startToken": 0,
                   "endToken": 2,
                   "role": "FRAGMENT_HEAD",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 3,
                   "endToken": 4,
                   "role": "ATTRIBUTE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 }
               ]
             },
@@ -3653,13 +3653,13 @@
                   "startToken": 0,
                   "endToken": 2,
                   "role": "FRAGMENT_HEAD",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 3,
                   "endToken": 4,
                   "role": "ATTRIBUTE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 }
               ],
               "unexpected": true
@@ -3746,7 +3746,7 @@
           "messages": [
             {
               "role": "user",
-              "content": "Repair only the structure of the invalid core-analysis JSON so it satisfies every validation error.\n\nDo not change sentence IDs or Tokens. Do not add sentences and do not reinterpret the source text.\n\nFor each PREDICATE error caused by a determiner inside the component, split that component immediately before the determiner and emit the resulting noun phrase as its own OBJECT, PREDICATIVE, or COMPLEMENT component.\n\nCheck the repaired JSON against every listed validation error before returning it; do not return until each listed error has been addressed.\n\nReturn the repaired JSON only, without a Markdown fence or prose.\n\nThe role field is a closed 17-role enum: SUBJECT, PREDICATE, OBJECT, PREDICATIVE, ATTRIBUTE, ADVERBIAL, COMPLEMENT, APPOSITIVE, FRAGMENT_HEAD, SUBJECT_CLAUSE, OBJECT_CLAUSE, PREDICATIVE_CLAUSE, ATTRIBUTIVE_CLAUSE, ADVERBIAL_CLAUSE, INDEPENDENT_ELEMENT, COORDINATE_CLAUSE, CONJUNCTION.\n\nEvery component uses a closed Token interval [startToken, endToken]; both endpoints are inclusive Token IDs from the supplied sentence.\n\nEach supplied Token is {\"id\",\"text\"}; a Token is punctuation only when it carries \"punctuation\": true.\n\nCoverage rule: every non-punctuation Token must be covered exactly once. Components must be ordered, non-overlapping, and may include punctuation but may not contain punctuation only.\n\nCompleteness-first rule: before assigning clause roles, decide whether the input forms a clause. An input with an explicit finite predicate, or an imperative with an omitted subject, is a clause and uses the existing clause-level roles. A heading, list item, noun phrase, adjective phrase, or non-finite verb phrase that does not form a clause must contain exactly one FRAGMENT_HEAD; never invent SUBJECT, PREDICATE, OBJECT, PREDICATIVE, or ADVERBIAL merely to force a fragment into a clause pattern. Keep ordinary determiners and tightly bound single-word premodifiers with the FRAGMENT_HEAD, and emit separable postmodifying prepositional, participial, or infinitive phrases as ATTRIBUTE. \"Portable API support across AI providers for Chat, text-to-image, and Embedding models\" is FRAGMENT_HEAD \"Portable API support\" plus ATTRIBUTE \"across AI providers\" plus ATTRIBUTE \"for Chat, text-to-image, and Embedding models\". An imperative is a clause, not a fragment: \"Install the CLI\" is PREDICATE \"Install\" plus OBJECT \"the CLI\".\n\nClause-structure-first rule: decide the clause layout before anything else. A sentence is compound only when two or more clauses each carry their own subject and are joined by a coordinating conjunction (for, and, nor, but, or, yet, so) or a semicolon; analyse every compound clause as peer components (subject, predicate, object, adverbial, …), and tag only a coordinating conjunction as its own CONJUNCTION component. Never emit COORDINATE_CLAUSE. A comma, a colon, or a dash on its own never makes a sentence compound, and neither does a series of imperatives nor one subject shared by several verbs: analyse every one of those as peer components of a single clause. Tag a coordinating conjunction as CONJUNCTION only when it joins whole clauses or whole verb phrases; one inside a coordinated noun, adjective, or adverb phrase stays part of that single component (\"calmly and confidently\" is ONE ADVERBIAL). A clause introduced by a subordinating conjunction (because, although, if, when, while, since, until, as, …) must use one of the five subordinate clause roles, stay whole, and leave the main clause analysed as peer components.\n\nPredicate-scope rule: inside a single clause a PREDICATE covers only the verb group — auxiliaries (can, could, may, might, must, shall, should, will, would, be, am, is, are, was, were, have, has, had, do, does, did) plus the main verb, including any adverbs between them and any bare-infinitive chain (\"Help turn\" is one PREDICATE, \"let go\" is one PREDICATE, \"must close\" is one PREDICATE). Passive, perfect, and progressive forms keep be/have inside the verb group (\"was rebuilt\", \"have been told\", \"is deflating\" are each one PREDICATE), but a linking verb takes only the verb itself and whatever completes it becomes its own PREDICATIVE (\"Be clear\" is PREDICATE \"Be\" plus PREDICATIVE \"clear\"; \"are widely beneficial\" is PREDICATE \"are\" plus PREDICATIVE \"widely beneficial\"). Two PREDICATE components must never be adjacent: side-by-side verbs belong to a single PREDICATE.\n\nPrepositional-phrase rule: a preposition and everything it governs form exactly one component (ADVERBIAL or ATTRIBUTE), including a coordinated object — \"into fully formed designs and specs\" is ONE ADVERBIAL, not a preposition plus separate noun phrases. Never emit a preposition as its own component and never let a component end on a preposition. Pick between the two roles by what the phrase modifies: a prepositional phrase that directly follows the noun phrase it modifies is ATTRIBUTE, so \"the development\" plus \"of applications\" is OBJECT plus ATTRIBUTE and \"Four\" plus \"of the biggest US technology companies\" is SUBJECT plus ATTRIBUTE — never ADVERBIAL; a phrase that modifies the verb or the whole clause is ADVERBIAL. Quantity and part expressions follow the same split, with no exception for \"a lot of\", \"some of\", or \"no amount of\". Do not split a prepositional phrase that already sits inside another one: \"without looking at any of the code\" stays ONE ADVERBIAL. ATTRIBUTE is a modifier attached to a noun phrase, either in front of it (\"fully formed\" inside \"fully formed designs\") or behind it (\"signed yesterday\" in \"The documents signed yesterday\"); never tag a noun phrase governed by a verb or preposition as ATTRIBUTE.\n\nPeer-component rule: within a single clause, identify the coequal grammatical components rather than labeling every verb-led span as PREDICATE. A PREDICATE must not absorb a separable OBJECT, PREDICATIVE, COMPLEMENT, or ADVERBIAL; emit each such span as its own component.\n\nSupplement rule: text after an em dash or colon is often an explanation, reformulation, or list, not a coordinate clause and not a conjunction. Keep the output flat and non-overlapping: use APPOSITIVE or INDEPENDENT_ELEMENT for an indivisible supplement, but when it contains separable predicate, object, or adverbial peers, emit those internal peers instead of an overlapping outer supplement. Do not label a whole noun phrase plus its relative clause as ATTRIBUTIVE_CLAUSE: in 'the ones that matter', 'the ones' is the noun phrase and only 'that matter' is ATTRIBUTIVE_CLAUSE.\n\nCompound-sentence rule: when two or more clauses that could each stand alone as a sentence are joined by a coordinating conjunction (for, and, nor, but, or, yet, so) or a semicolon, analyse the inside of every clause as peer components and tag only the coordinating conjunction as its own CONJUNCTION component (in a comma-plus-conjunction pair, tag only the conjunction itself). Never emit COORDINATE_CLAUSE.\n\nComplex-sentence rule: tag a subordinate clause as one whole component with one of the five clause roles (SUBJECT_CLAUSE, OBJECT_CLAUSE, PREDICATIVE_CLAUSE, ATTRIBUTIVE_CLAUSE, ADVERBIAL_CLAUSE) and never split its internal structure. The component runs from the introducing word through that clause's own subject, predicate, object, and adverbials, so never stop a clause component at its introducing word and never emit the clause's own predicate, object, or adverbial as a peer of the main clause: in \"Apple tests Siri feature that handles multiple commands at once\", \"that handles multiple commands at once\" is ONE ATTRIBUTIVE_CLAUSE — \"that\" on its own is wrong, and so is \"that handles\" followed by a separate OBJECT. A clause whose introducing word is omitted is still one whole component: in \"That means developers now play a frontline role\", \"developers now play a frontline role\" is ONE OBJECT_CLAUSE.\n\nSimple-sentence rule: analyse a sentence with a single subject-predicate structure as peer components.\n\nGive every component a concise, non-empty Chinese translation that renders everything the component covers rather than only its head word: \"incorporate artificial intelligence functionality\" is \"整合人工智能功能\", not \"整合\", and \"of applications\" is \"应用程序的\", not \"的\".\n\nOutput exactly one JSON object of this shape, not a top-level array:\n{\"sentences\": [{\"sentenceId\": string, \"components\": [{\"startToken\": number, \"endToken\": number, \"role\": string, \"translation\": string}]}]}\nA component must never contain only punctuation Tokens; attach punctuation to an adjacent component or leave it uncovered.\nOutput minified JSON on a single line: no newlines, no indentation, no spaces after ':' or ','. Do not wrap it in a Markdown code fence.\n\nOriginal sentence IDs and Tokens:\n\n[{\"sentenceId\":\"rr-fragment-2\",\"text\":\"Compatible with existing clients.\",\"tokens\":[{\"id\":0,\"text\":\"Compatible\"},{\"id\":1,\"text\":\"with\"},{\"id\":2,\"text\":\"existing\"},{\"id\":3,\"text\":\"clients\"},{\"id\":4,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"rr-fragment-3\",\"text\":\"Building reliable agents at scale.\",\"tokens\":[{\"id\":0,\"text\":\"Building\"},{\"id\":1,\"text\":\"reliable\"},{\"id\":2,\"text\":\"agents\"},{\"id\":3,\"text\":\"at\"},{\"id\":4,\"text\":\"scale\"},{\"id\":5,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"rr-fragment-4\",\"text\":\"Detailed setup instructions.\",\"tokens\":[{\"id\":0,\"text\":\"Detailed\"},{\"id\":1,\"text\":\"setup\"},{\"id\":2,\"text\":\"instructions\"},{\"id\":3,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"rr-clause-1\",\"text\":\"The problem is that the cache is stale.\",\"tokens\":[{\"id\":0,\"text\":\"The\"},{\"id\":1,\"text\":\"problem\"},{\"id\":2,\"text\":\"is\"},{\"id\":3,\"text\":\"that\"},{\"id\":4,\"text\":\"the\"},{\"id\":5,\"text\":\"cache\"},{\"id\":6,\"text\":\"is\"},{\"id\":7,\"text\":\"stale\"},{\"id\":8,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"rr-clause-2\",\"text\":\"Whoever wins gets the prize.\",\"tokens\":[{\"id\":0,\"text\":\"Whoever\"},{\"id\":1,\"text\":\"wins\"},{\"id\":2,\"text\":\"gets\"},{\"id\":3,\"text\":\"the\"},{\"id\":4,\"text\":\"prize\"},{\"id\":5,\"text\":\".\",\"punctuation\":true}]}]\n\nValidation errors:\n\n[{\"path\":\"sentences[0].components\",\"message\":\"must be a non-empty array\"},{\"path\":\"sentences[0]\",\"message\":\"contains unknown fields\"},{\"path\":\"sentences[0].components\",\"message\":\"must be a non-empty array\"},{\"path\":\"sentences[0].components\",\"message\":\"must be a non-empty array\"},{\"path\":\"sentences[0].components\",\"message\":\"must be a non-empty array\"}]\n\nInvalid JSON:\n\n{\"sentences\":[{\"sentenceId\":\"rr-fragment-2\",\"components\":[]},{\"sentenceId\":\"rr-fragment-3\",\"components\":[{\"startToken\":0,\"endToken\":2,\"role\":\"FRAGMENT_HEAD\",\"translation\":\"synthetic\"},{\"startToken\":3,\"endToken\":4,\"role\":\"ATTRIBUTE\",\"translation\":\"synthetic\"}],\"unexpected\":true},{\"sentenceId\":\"rr-fragment-4\",\"components\":[]},{\"sentenceId\":\"rr-clause-1\",\"components\":[]},{\"sentenceId\":\"rr-clause-2\",\"components\":[]}]}"
+              "content": "Repair only the structure of the invalid core-analysis JSON so it satisfies every validation error.\n\nDo not change sentence IDs or Tokens. Do not add sentences and do not reinterpret the source text.\n\nFor each PREDICATE error caused by a determiner inside the component, split that component immediately before the determiner and emit the resulting noun phrase as its own OBJECT, PREDICATIVE, or COMPLEMENT component.\n\nCheck the repaired JSON against every listed validation error before returning it; do not return until each listed error has been addressed.\n\nReturn the repaired JSON only, without a Markdown fence or prose.\n\nThe role field is a closed 17-role enum: SUBJECT, PREDICATE, OBJECT, PREDICATIVE, ATTRIBUTE, ADVERBIAL, COMPLEMENT, APPOSITIVE, FRAGMENT_HEAD, SUBJECT_CLAUSE, OBJECT_CLAUSE, PREDICATIVE_CLAUSE, ATTRIBUTIVE_CLAUSE, ADVERBIAL_CLAUSE, INDEPENDENT_ELEMENT, COORDINATE_CLAUSE, CONJUNCTION.\n\nEvery component uses a closed Token interval [startToken, endToken]; both endpoints are inclusive Token IDs from the supplied sentence.\n\nEach supplied Token is {\"id\",\"text\"}; a Token is punctuation only when it carries \"punctuation\": true.\n\nCoverage rule: every non-punctuation Token must be covered exactly once. Components must be ordered, non-overlapping, and may include punctuation but may not contain punctuation only.\n\nCompleteness-first rule: before assigning clause roles, decide whether the input forms a clause. An input with an explicit finite predicate, or an imperative with an omitted subject, is a clause and uses the existing clause-level roles. A heading, list item, noun phrase, adjective phrase, or non-finite verb phrase that does not form a clause must contain exactly one FRAGMENT_HEAD; never invent SUBJECT, PREDICATE, OBJECT, PREDICATIVE, or ADVERBIAL merely to force a fragment into a clause pattern. Keep ordinary determiners and tightly bound single-word premodifiers with the FRAGMENT_HEAD, and emit separable postmodifying prepositional, participial, or infinitive phrases as ATTRIBUTE. \"Portable API support across AI providers for Chat, text-to-image, and Embedding models\" is FRAGMENT_HEAD \"Portable API support\" plus ATTRIBUTE \"across AI providers\" plus ATTRIBUTE \"for Chat, text-to-image, and Embedding models\". An imperative is a clause, not a fragment: \"Install the CLI\" is PREDICATE \"Install\" plus OBJECT \"the CLI\".\n\nClause-structure-first rule: decide the clause layout before anything else. A sentence is compound only when two or more clauses each carry their own subject and are joined by a coordinating conjunction (for, and, nor, but, or, yet, so) or a semicolon; analyse every compound clause as peer components (subject, predicate, object, adverbial, …), and tag only a coordinating conjunction as its own CONJUNCTION component. Never emit COORDINATE_CLAUSE. A comma, a colon, or a dash on its own never makes a sentence compound, and neither does a series of imperatives nor one subject shared by several verbs: analyse every one of those as peer components of a single clause. Tag a coordinating conjunction as CONJUNCTION only when it joins whole clauses or whole verb phrases; one inside a coordinated noun, adjective, or adverb phrase stays part of that single component (\"calmly and confidently\" is ONE ADVERBIAL). A clause introduced by a subordinating conjunction (because, although, if, when, while, since, until, as, …) must use one of the five subordinate clause roles, stay whole, and leave the main clause analysed as peer components.\n\nPredicate-scope rule: inside a single clause a PREDICATE covers only the verb group — auxiliaries (can, could, may, might, must, shall, should, will, would, be, am, is, are, was, were, have, has, had, do, does, did) plus the main verb, including any adverbs between them and any bare-infinitive chain (\"Help turn\" is one PREDICATE, \"let go\" is one PREDICATE, \"must close\" is one PREDICATE). Passive, perfect, and progressive forms keep be/have inside the verb group (\"was rebuilt\", \"have been told\", \"is deflating\" are each one PREDICATE), but a linking verb takes only the verb itself and whatever completes it becomes its own PREDICATIVE (\"Be clear\" is PREDICATE \"Be\" plus PREDICATIVE \"clear\"; \"are widely beneficial\" is PREDICATE \"are\" plus PREDICATIVE \"widely beneficial\"). Two PREDICATE components must never be adjacent: side-by-side verbs belong to a single PREDICATE.\n\nPrepositional-phrase rule: a preposition and everything it governs form exactly one component (ADVERBIAL or ATTRIBUTE), including a coordinated object — \"into fully formed designs and specs\" is ONE ADVERBIAL, not a preposition plus separate noun phrases. Never emit a preposition as its own component and never let a component end on a preposition. Pick between the two roles by what the phrase modifies: a prepositional phrase that directly follows the noun phrase it modifies is ATTRIBUTE, so \"the development\" plus \"of applications\" is OBJECT plus ATTRIBUTE and \"Four\" plus \"of the biggest US technology companies\" is SUBJECT plus ATTRIBUTE — never ADVERBIAL; a phrase that modifies the verb or the whole clause is ADVERBIAL. Quantity and part expressions follow the same split, with no exception for \"a lot of\", \"some of\", or \"no amount of\". Do not split a prepositional phrase that already sits inside another one: \"without looking at any of the code\" stays ONE ADVERBIAL. ATTRIBUTE is a modifier attached to a noun phrase, either in front of it (\"fully formed\" inside \"fully formed designs\") or behind it (\"signed yesterday\" in \"The documents signed yesterday\"); never tag a noun phrase governed by a verb or preposition as ATTRIBUTE.\n\nPeer-component rule: within a single clause, identify the coequal grammatical components rather than labeling every verb-led span as PREDICATE. A PREDICATE must not absorb a separable OBJECT, PREDICATIVE, COMPLEMENT, or ADVERBIAL; emit each such span as its own component.\n\nSupplement rule: text after an em dash or colon is often an explanation, reformulation, or list, not a coordinate clause and not a conjunction. Keep the output flat and non-overlapping: use APPOSITIVE or INDEPENDENT_ELEMENT for an indivisible supplement, but when it contains separable predicate, object, or adverbial peers, emit those internal peers instead of an overlapping outer supplement. Do not label a whole noun phrase plus its relative clause as ATTRIBUTIVE_CLAUSE: in 'the ones that matter', 'the ones' is the noun phrase and only 'that matter' is ATTRIBUTIVE_CLAUSE.\n\nCompound-sentence rule: when two or more clauses that could each stand alone as a sentence are joined by a coordinating conjunction (for, and, nor, but, or, yet, so) or a semicolon, analyse the inside of every clause as peer components and tag only the coordinating conjunction as its own CONJUNCTION component (in a comma-plus-conjunction pair, tag only the conjunction itself). Never emit COORDINATE_CLAUSE.\n\nComplex-sentence rule: tag a subordinate clause as one whole component with one of the five clause roles (SUBJECT_CLAUSE, OBJECT_CLAUSE, PREDICATIVE_CLAUSE, ATTRIBUTIVE_CLAUSE, ADVERBIAL_CLAUSE) and never split its internal structure. The component runs from the introducing word through that clause's own subject, predicate, object, and adverbials, so never stop a clause component at its introducing word and never emit the clause's own predicate, object, or adverbial as a peer of the main clause: in \"Apple tests Siri feature that handles multiple commands at once\", \"that handles multiple commands at once\" is ONE ATTRIBUTIVE_CLAUSE — \"that\" on its own is wrong, and so is \"that handles\" followed by a separate OBJECT. A clause whose introducing word is omitted is still one whole component: in \"That means developers now play a frontline role\", \"developers now play a frontline role\" is ONE OBJECT_CLAUSE.\n\nSimple-sentence rule: analyse a sentence with a single subject-predicate structure as peer components.\n\nGive every component a concise, non-empty Chinese translation that renders everything the component covers rather than only its head word: \"incorporate artificial intelligence functionality\" is \"整合人工智能功能\", not \"整合\", and \"of applications\" is \"应用程序的\", not \"的\".\n\nOutput exactly one JSON object of this shape, not a top-level array:\n{\"sentences\": [{\"sentenceId\": string, \"components\": [{\"startToken\": number, \"endToken\": number, \"role\": string, \"translation\": string}]}]}\nA component must never contain only punctuation Tokens; attach punctuation to an adjacent component or leave it uncovered.\nOutput minified JSON on a single line: no newlines, no indentation, no spaces after ':' or ','. Do not wrap it in a Markdown code fence.\n\nOriginal sentence IDs and Tokens:\n\n[{\"sentenceId\":\"rr-fragment-2\",\"text\":\"Compatible with existing clients.\",\"tokens\":[{\"id\":0,\"text\":\"Compatible\"},{\"id\":1,\"text\":\"with\"},{\"id\":2,\"text\":\"existing\"},{\"id\":3,\"text\":\"clients\"},{\"id\":4,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"rr-fragment-3\",\"text\":\"Building reliable agents at scale.\",\"tokens\":[{\"id\":0,\"text\":\"Building\"},{\"id\":1,\"text\":\"reliable\"},{\"id\":2,\"text\":\"agents\"},{\"id\":3,\"text\":\"at\"},{\"id\":4,\"text\":\"scale\"},{\"id\":5,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"rr-fragment-4\",\"text\":\"Detailed setup instructions.\",\"tokens\":[{\"id\":0,\"text\":\"Detailed\"},{\"id\":1,\"text\":\"setup\"},{\"id\":2,\"text\":\"instructions\"},{\"id\":3,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"rr-clause-1\",\"text\":\"The problem is that the cache is stale.\",\"tokens\":[{\"id\":0,\"text\":\"The\"},{\"id\":1,\"text\":\"problem\"},{\"id\":2,\"text\":\"is\"},{\"id\":3,\"text\":\"that\"},{\"id\":4,\"text\":\"the\"},{\"id\":5,\"text\":\"cache\"},{\"id\":6,\"text\":\"is\"},{\"id\":7,\"text\":\"stale\"},{\"id\":8,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"rr-clause-2\",\"text\":\"Whoever wins gets the prize.\",\"tokens\":[{\"id\":0,\"text\":\"Whoever\"},{\"id\":1,\"text\":\"wins\"},{\"id\":2,\"text\":\"gets\"},{\"id\":3,\"text\":\"the\"},{\"id\":4,\"text\":\"prize\"},{\"id\":5,\"text\":\".\",\"punctuation\":true}]}]\n\nValidation errors:\n\n[{\"path\":\"sentences[0].components\",\"message\":\"must be a non-empty array\"},{\"path\":\"sentences[0]\",\"message\":\"contains unknown fields\"},{\"path\":\"sentences[0].components\",\"message\":\"must be a non-empty array\"},{\"path\":\"sentences[0].components\",\"message\":\"must be a non-empty array\"},{\"path\":\"sentences[0].components\",\"message\":\"must be a non-empty array\"}]\n\nInvalid JSON:\n\n{\"sentences\":[{\"sentenceId\":\"rr-fragment-2\",\"components\":[]},{\"sentenceId\":\"rr-fragment-3\",\"components\":[{\"startToken\":0,\"endToken\":2,\"role\":\"FRAGMENT_HEAD\",\"translation\":\"合成译文\"},{\"startToken\":3,\"endToken\":4,\"role\":\"ATTRIBUTE\",\"translation\":\"合成译文\"}],\"unexpected\":true},{\"sentenceId\":\"rr-fragment-4\",\"components\":[]},{\"sentenceId\":\"rr-clause-1\",\"components\":[]},{\"sentenceId\":\"rr-clause-2\",\"components\":[]}]}"
             }
           ],
           "raw": {
@@ -3758,7 +3758,7 @@
                     "startToken": 0,
                     "endToken": 3,
                     "role": "FRAGMENT_HEAD",
-                    "translation": "synthetic"
+                    "translation": "合成译文"
                   }
                 ]
               },
@@ -3769,7 +3769,7 @@
                     "startToken": 0,
                     "endToken": 4,
                     "role": "FRAGMENT_HEAD",
-                    "translation": "synthetic"
+                    "translation": "合成译文"
                   }
                 ]
               },
@@ -3784,19 +3784,19 @@
                     "startToken": 0,
                     "endToken": 1,
                     "role": "SUBJECT",
-                    "translation": "synthetic"
+                    "translation": "合成译文"
                   },
                   {
                     "startToken": 2,
                     "endToken": 2,
                     "role": "PREDICATE",
-                    "translation": "synthetic"
+                    "translation": "合成译文"
                   },
                   {
                     "startToken": 3,
                     "endToken": 7,
                     "role": "PREDICATIVE_CLAUSE",
-                    "translation": "synthetic"
+                    "translation": "合成译文"
                   }
                 ]
               },
@@ -3858,25 +3858,28 @@
                     "startToken": 0,
                     "endToken": 1,
                     "role": "SUBJECT_CLAUSE",
-                    "translation": "synthetic"
+                    "translation": "合成译文"
                   },
                   {
                     "startToken": 2,
                     "endToken": 2,
                     "role": "PREDICATE",
-                    "translation": "synthetic"
+                    "translation": "合成译文"
                   },
                   {
                     "startToken": 3,
                     "endToken": 4,
                     "role": "OBJECT",
-                    "translation": "synthetic"
+                    "translation": "合成译文"
                   }
                 ]
               }
             ]
           },
-          "subsetSentenceIds": ["rr-fragment-4", "rr-clause-2"],
+          "subsetSentenceIds": [
+            "rr-fragment-4",
+            "rr-clause-2"
+          ],
           "validatorErrors": [
             {
               "sentenceId": "rr-fragment-4",
@@ -3901,7 +3904,9 @@
           "rr-clause-1",
           "rr-clause-2"
         ],
-        "failureSentenceIds": ["rr-fragment-4"],
+        "failureSentenceIds": [
+          "rr-fragment-4"
+        ],
         "analyses": [
           {
             "sentenceId": "rr-fragment-1",
@@ -4001,7 +4006,7 @@
         "messages": [
           {
             "role": "user",
-            "content": "Analyze the supplied sentences and return the schema.\nCore analysis serialized subset:\n[\"rr-clause-3\",\"rr-clause-4\",\"rr-complement-1\",\"rr-complement-2\",\"rr-complement-3\",\"rr-complement-4\"]\n\nOriginal sentence IDs and Tokens:\n\n[{\"sentenceId\":\"rr-clause-3\",\"text\":\"Because the road flooded, we waited.\",\"tokens\":[{\"id\":0,\"text\":\"Because\"},{\"id\":1,\"text\":\"the\"},{\"id\":2,\"text\":\"road\"},{\"id\":3,\"text\":\"flooded\"},{\"id\":4,\"text\":\",\",\"punctuation\":true},{\"id\":5,\"text\":\"we\"},{\"id\":6,\"text\":\"waited\"},{\"id\":7,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"rr-clause-4\",\"text\":\"The tool that she built works.\",\"tokens\":[{\"id\":0,\"text\":\"The\"},{\"id\":1,\"text\":\"tool\"},{\"id\":2,\"text\":\"that\"},{\"id\":3,\"text\":\"she\"},{\"id\":4,\"text\":\"built\"},{\"id\":5,\"text\":\"works\"},{\"id\":6,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"rr-complement-1\",\"text\":\"The change helps developers work faster.\",\"tokens\":[{\"id\":0,\"text\":\"The\"},{\"id\":1,\"text\":\"change\"},{\"id\":2,\"text\":\"helps\"},{\"id\":3,\"text\":\"developers\"},{\"id\":4,\"text\":\"work\"},{\"id\":5,\"text\":\"faster\"},{\"id\":6,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"rr-complement-2\",\"text\":\"We consider the tool essential.\",\"tokens\":[{\"id\":0,\"text\":\"We\"},{\"id\":1,\"text\":\"consider\"},{\"id\":2,\"text\":\"the\"},{\"id\":3,\"text\":\"tool\"},{\"id\":4,\"text\":\"essential\"},{\"id\":5,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"rr-complement-3\",\"text\":\"They made the process simple.\",\"tokens\":[{\"id\":0,\"text\":\"They\"},{\"id\":1,\"text\":\"made\"},{\"id\":2,\"text\":\"the\"},{\"id\":3,\"text\":\"process\"},{\"id\":4,\"text\":\"simple\"},{\"id\":5,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"rr-complement-4\",\"text\":\"The flag keeps requests isolated.\",\"tokens\":[{\"id\":0,\"text\":\"The\"},{\"id\":1,\"text\":\"flag\"},{\"id\":2,\"text\":\"keeps\"},{\"id\":3,\"text\":\"requests\"},{\"id\":4,\"text\":\"isolated\"},{\"id\":5,\"text\":\".\",\"punctuation\":true}]}]"
+            "content": "Analyze the numbered English sentences below into core grammatical components.\n\nThe role field is a closed 17-role enum: SUBJECT, PREDICATE, OBJECT, PREDICATIVE, ATTRIBUTE, ADVERBIAL, COMPLEMENT, APPOSITIVE, FRAGMENT_HEAD, SUBJECT_CLAUSE, OBJECT_CLAUSE, PREDICATIVE_CLAUSE, ATTRIBUTIVE_CLAUSE, ADVERBIAL_CLAUSE, INDEPENDENT_ELEMENT, COORDINATE_CLAUSE, CONJUNCTION.\n\nEvery component uses a closed Token interval [startToken, endToken]; both endpoints are inclusive Token IDs from the supplied sentence.\n\nEach supplied Token is {\"id\",\"text\"}; a Token is punctuation only when it carries \"punctuation\": true.\n\nCoverage rule: every non-punctuation Token must be covered exactly once. Components must be ordered, non-overlapping, and may include punctuation but may not contain punctuation only.\n\nCompleteness-first rule: before assigning clause roles, decide whether the input forms a clause. An input with an explicit finite predicate, or an imperative with an omitted subject, is a clause and uses the existing clause-level roles. A heading, list item, noun phrase, adjective phrase, or non-finite verb phrase that does not form a clause must contain exactly one FRAGMENT_HEAD; never invent SUBJECT, PREDICATE, OBJECT, PREDICATIVE, or ADVERBIAL merely to force a fragment into a clause pattern. Keep ordinary determiners and tightly bound single-word premodifiers with the FRAGMENT_HEAD, and emit separable postmodifying prepositional, participial, or infinitive phrases as ATTRIBUTE. \"Portable API support across AI providers for Chat, text-to-image, and Embedding models\" is FRAGMENT_HEAD \"Portable API support\" plus ATTRIBUTE \"across AI providers\" plus ATTRIBUTE \"for Chat, text-to-image, and Embedding models\". An imperative is a clause, not a fragment: \"Install the CLI\" is PREDICATE \"Install\" plus OBJECT \"the CLI\".\n\nClause-structure-first rule: decide the clause layout before anything else. A sentence is compound only when two or more clauses each carry their own subject and are joined by a coordinating conjunction (for, and, nor, but, or, yet, so) or a semicolon; analyse every compound clause as peer components (subject, predicate, object, adverbial, …), and tag only a coordinating conjunction as its own CONJUNCTION component. Never emit COORDINATE_CLAUSE. A comma, a colon, or a dash on its own never makes a sentence compound, and neither does a series of imperatives nor one subject shared by several verbs: analyse every one of those as peer components of a single clause. Tag a coordinating conjunction as CONJUNCTION only when it joins whole clauses or whole verb phrases; one inside a coordinated noun, adjective, or adverb phrase stays part of that single component (\"calmly and confidently\" is ONE ADVERBIAL). A clause introduced by a subordinating conjunction (because, although, if, when, while, since, until, as, …) must use one of the five subordinate clause roles, stay whole, and leave the main clause analysed as peer components.\n\nPredicate-scope rule: inside a single clause a PREDICATE covers only the verb group — auxiliaries (can, could, may, might, must, shall, should, will, would, be, am, is, are, was, were, have, has, had, do, does, did) plus the main verb, including any adverbs between them and any bare-infinitive chain (\"Help turn\" is one PREDICATE, \"let go\" is one PREDICATE, \"must close\" is one PREDICATE). Passive, perfect, and progressive forms keep be/have inside the verb group (\"was rebuilt\", \"have been told\", \"is deflating\" are each one PREDICATE), but a linking verb takes only the verb itself and whatever completes it becomes its own PREDICATIVE (\"Be clear\" is PREDICATE \"Be\" plus PREDICATIVE \"clear\"; \"are widely beneficial\" is PREDICATE \"are\" plus PREDICATIVE \"widely beneficial\"). Two PREDICATE components must never be adjacent: side-by-side verbs belong to a single PREDICATE.\n\nPrepositional-phrase rule: a preposition and everything it governs form exactly one component (ADVERBIAL or ATTRIBUTE), including a coordinated object — \"into fully formed designs and specs\" is ONE ADVERBIAL, not a preposition plus separate noun phrases. Never emit a preposition as its own component and never let a component end on a preposition. Pick between the two roles by what the phrase modifies: a prepositional phrase that directly follows the noun phrase it modifies is ATTRIBUTE, so \"the development\" plus \"of applications\" is OBJECT plus ATTRIBUTE and \"Four\" plus \"of the biggest US technology companies\" is SUBJECT plus ATTRIBUTE — never ADVERBIAL; a phrase that modifies the verb or the whole clause is ADVERBIAL. Quantity and part expressions follow the same split, with no exception for \"a lot of\", \"some of\", or \"no amount of\". Do not split a prepositional phrase that already sits inside another one: \"without looking at any of the code\" stays ONE ADVERBIAL. ATTRIBUTE is a modifier attached to a noun phrase, either in front of it (\"fully formed\" inside \"fully formed designs\") or behind it (\"signed yesterday\" in \"The documents signed yesterday\"); never tag a noun phrase governed by a verb or preposition as ATTRIBUTE.\n\nPeer-component rule: within a single clause, identify the coequal grammatical components rather than labeling every verb-led span as PREDICATE. A PREDICATE must not absorb a separable OBJECT, PREDICATIVE, COMPLEMENT, or ADVERBIAL; emit each such span as its own component.\n\nSupplement rule: text after an em dash or colon is often an explanation, reformulation, or list, not a coordinate clause and not a conjunction. Keep the output flat and non-overlapping: use APPOSITIVE or INDEPENDENT_ELEMENT for an indivisible supplement, but when it contains separable predicate, object, or adverbial peers, emit those internal peers instead of an overlapping outer supplement. Do not label a whole noun phrase plus its relative clause as ATTRIBUTIVE_CLAUSE: in 'the ones that matter', 'the ones' is the noun phrase and only 'that matter' is ATTRIBUTIVE_CLAUSE.\n\nCompound-sentence rule: when two or more clauses that could each stand alone as a sentence are joined by a coordinating conjunction (for, and, nor, but, or, yet, so) or a semicolon, analyse the inside of every clause as peer components and tag only the coordinating conjunction as its own CONJUNCTION component (in a comma-plus-conjunction pair, tag only the conjunction itself). Never emit COORDINATE_CLAUSE.\n\nComplex-sentence rule: tag a subordinate clause as one whole component with one of the five clause roles (SUBJECT_CLAUSE, OBJECT_CLAUSE, PREDICATIVE_CLAUSE, ATTRIBUTIVE_CLAUSE, ADVERBIAL_CLAUSE) and never split its internal structure. The component runs from the introducing word through that clause's own subject, predicate, object, and adverbials, so never stop a clause component at its introducing word and never emit the clause's own predicate, object, or adverbial as a peer of the main clause: in \"Apple tests Siri feature that handles multiple commands at once\", \"that handles multiple commands at once\" is ONE ATTRIBUTIVE_CLAUSE — \"that\" on its own is wrong, and so is \"that handles\" followed by a separate OBJECT. A clause whose introducing word is omitted is still one whole component: in \"That means developers now play a frontline role\", \"developers now play a frontline role\" is ONE OBJECT_CLAUSE.\n\nSimple-sentence rule: analyse a sentence with a single subject-predicate structure as peer components.\n\nGive every component a concise, non-empty Chinese translation that renders everything the component covers rather than only its head word: \"incorporate artificial intelligence functionality\" is \"整合人工智能功能\", not \"整合\", and \"of applications\" is \"应用程序的\", not \"的\".\n\nKeep every sentenceId and every supplied Token unchanged. Return JSON only, with no Markdown or explanatory prose.\n\nOutput exactly one JSON object of this shape, not a top-level array:\n{\"sentences\": [{\"sentenceId\": string, \"components\": [{\"startToken\": number, \"endToken\": number, \"role\": string, \"translation\": string}]}]}\nA component must never contain only punctuation Tokens; attach punctuation to an adjacent component or leave it uncovered.\nOutput minified JSON on a single line: no newlines, no indentation, no spaces after ':' or ','. Do not wrap it in a Markdown code fence.\n\nNumbered sentence requests:\n\n[{\"sentenceId\":\"rr-clause-3\",\"text\":\"Because the road flooded, we waited.\",\"tokens\":[{\"id\":0,\"text\":\"Because\"},{\"id\":1,\"text\":\"the\"},{\"id\":2,\"text\":\"road\"},{\"id\":3,\"text\":\"flooded\"},{\"id\":4,\"text\":\",\",\"punctuation\":true},{\"id\":5,\"text\":\"we\"},{\"id\":6,\"text\":\"waited\"},{\"id\":7,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"rr-clause-4\",\"text\":\"The tool that she built works.\",\"tokens\":[{\"id\":0,\"text\":\"The\"},{\"id\":1,\"text\":\"tool\"},{\"id\":2,\"text\":\"that\"},{\"id\":3,\"text\":\"she\"},{\"id\":4,\"text\":\"built\"},{\"id\":5,\"text\":\"works\"},{\"id\":6,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"rr-complement-1\",\"text\":\"The change helps developers work faster.\",\"tokens\":[{\"id\":0,\"text\":\"The\"},{\"id\":1,\"text\":\"change\"},{\"id\":2,\"text\":\"helps\"},{\"id\":3,\"text\":\"developers\"},{\"id\":4,\"text\":\"work\"},{\"id\":5,\"text\":\"faster\"},{\"id\":6,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"rr-complement-2\",\"text\":\"We consider the tool essential.\",\"tokens\":[{\"id\":0,\"text\":\"We\"},{\"id\":1,\"text\":\"consider\"},{\"id\":2,\"text\":\"the\"},{\"id\":3,\"text\":\"tool\"},{\"id\":4,\"text\":\"essential\"},{\"id\":5,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"rr-complement-3\",\"text\":\"They made the process simple.\",\"tokens\":[{\"id\":0,\"text\":\"They\"},{\"id\":1,\"text\":\"made\"},{\"id\":2,\"text\":\"the\"},{\"id\":3,\"text\":\"process\"},{\"id\":4,\"text\":\"simple\"},{\"id\":5,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"rr-complement-4\",\"text\":\"The flag keeps requests isolated.\",\"tokens\":[{\"id\":0,\"text\":\"The\"},{\"id\":1,\"text\":\"flag\"},{\"id\":2,\"text\":\"keeps\"},{\"id\":3,\"text\":\"requests\"},{\"id\":4,\"text\":\"isolated\"},{\"id\":5,\"text\":\".\",\"punctuation\":true}]}]"
           }
         ],
         "raw": {
@@ -4013,19 +4018,19 @@
                   "startToken": 0,
                   "endToken": 3,
                   "role": "ADVERBIAL_CLAUSE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 5,
                   "endToken": 5,
                   "role": "SUBJECT",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 6,
                   "endToken": 6,
                   "role": "PREDICATE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 }
               ]
             },
@@ -4036,19 +4041,19 @@
                   "startToken": 0,
                   "endToken": 1,
                   "role": "SUBJECT",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 2,
                   "endToken": 4,
                   "role": "ATTRIBUTIVE_CLAUSE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 5,
                   "endToken": 5,
                   "role": "PREDICATE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 }
               ]
             },
@@ -4059,25 +4064,25 @@
                   "startToken": 0,
                   "endToken": 1,
                   "role": "SUBJECT",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 2,
                   "endToken": 2,
                   "role": "PREDICATE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 3,
                   "endToken": 3,
                   "role": "OBJECT",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 4,
                   "endToken": 5,
                   "role": "COMPLEMENT",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 }
               ]
             },
@@ -4088,25 +4093,25 @@
                   "startToken": 0,
                   "endToken": 0,
                   "role": "SUBJECT",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 1,
                   "endToken": 1,
                   "role": "PREDICATE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 2,
                   "endToken": 3,
                   "role": "OBJECT",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 4,
                   "endToken": 4,
                   "role": "COMPLEMENT",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 }
               ]
             },
@@ -4117,25 +4122,25 @@
                   "startToken": 0,
                   "endToken": 0,
                   "role": "SUBJECT",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 1,
                   "endToken": 1,
                   "role": "PREDICATE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 2,
                   "endToken": 3,
                   "role": "OBJECT",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 4,
                   "endToken": 4,
                   "role": "COMPLEMENT",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 }
               ]
             },
@@ -4146,25 +4151,25 @@
                   "startToken": 0,
                   "endToken": 1,
                   "role": "SUBJECT",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 2,
                   "endToken": 2,
                   "role": "PREDICATE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 3,
                   "endToken": 3,
                   "role": "OBJECT",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 4,
                   "endToken": 4,
                   "role": "COMPLEMENT",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 }
               ]
             }
@@ -4352,7 +4357,7 @@
         "messages": [
           {
             "role": "user",
-            "content": "Analyze the supplied sentences and return the schema.\nCore analysis serialized subset:\n[\"rr-preposition-1\",\"rr-preposition-2\",\"rr-preposition-3\",\"rr-preposition-4\",\"rr-coordination-1\",\"rr-coordination-2\"]\n\nOriginal sentence IDs and Tokens:\n\n[{\"sentenceId\":\"rr-preposition-1\",\"text\":\"Support for local models.\",\"tokens\":[{\"id\":0,\"text\":\"Support\"},{\"id\":1,\"text\":\"for\"},{\"id\":2,\"text\":\"local\"},{\"id\":3,\"text\":\"models\"},{\"id\":4,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"rr-preposition-2\",\"text\":\"Four of the largest services failed.\",\"tokens\":[{\"id\":0,\"text\":\"Four\"},{\"id\":1,\"text\":\"of\"},{\"id\":2,\"text\":\"the\"},{\"id\":3,\"text\":\"largest\"},{\"id\":4,\"text\":\"services\"},{\"id\":5,\"text\":\"failed\"},{\"id\":6,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"rr-preposition-3\",\"text\":\"She worked without looking at the code.\",\"tokens\":[{\"id\":0,\"text\":\"She\"},{\"id\":1,\"text\":\"worked\"},{\"id\":2,\"text\":\"without\"},{\"id\":3,\"text\":\"looking\"},{\"id\":4,\"text\":\"at\"},{\"id\":5,\"text\":\"the\"},{\"id\":6,\"text\":\"code\"},{\"id\":7,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"rr-preposition-4\",\"text\":\"The guide for beginners arrived.\",\"tokens\":[{\"id\":0,\"text\":\"The\"},{\"id\":1,\"text\":\"guide\"},{\"id\":2,\"text\":\"for\"},{\"id\":3,\"text\":\"beginners\"},{\"id\":4,\"text\":\"arrived\"},{\"id\":5,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"rr-coordination-1\",\"text\":\"The system boots, runs, and stops.\",\"tokens\":[{\"id\":0,\"text\":\"The\"},{\"id\":1,\"text\":\"system\"},{\"id\":2,\"text\":\"boots\"},{\"id\":3,\"text\":\",\",\"punctuation\":true},{\"id\":4,\"text\":\"runs\"},{\"id\":5,\"text\":\",\",\"punctuation\":true},{\"id\":6,\"text\":\"and\"},{\"id\":7,\"text\":\"stops\"},{\"id\":8,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"rr-coordination-2\",\"text\":\"The team shipped and users tested it.\",\"tokens\":[{\"id\":0,\"text\":\"The\"},{\"id\":1,\"text\":\"team\"},{\"id\":2,\"text\":\"shipped\"},{\"id\":3,\"text\":\"and\"},{\"id\":4,\"text\":\"users\"},{\"id\":5,\"text\":\"tested\"},{\"id\":6,\"text\":\"it\"},{\"id\":7,\"text\":\".\",\"punctuation\":true}]}]"
+            "content": "Analyze the numbered English sentences below into core grammatical components.\n\nThe role field is a closed 17-role enum: SUBJECT, PREDICATE, OBJECT, PREDICATIVE, ATTRIBUTE, ADVERBIAL, COMPLEMENT, APPOSITIVE, FRAGMENT_HEAD, SUBJECT_CLAUSE, OBJECT_CLAUSE, PREDICATIVE_CLAUSE, ATTRIBUTIVE_CLAUSE, ADVERBIAL_CLAUSE, INDEPENDENT_ELEMENT, COORDINATE_CLAUSE, CONJUNCTION.\n\nEvery component uses a closed Token interval [startToken, endToken]; both endpoints are inclusive Token IDs from the supplied sentence.\n\nEach supplied Token is {\"id\",\"text\"}; a Token is punctuation only when it carries \"punctuation\": true.\n\nCoverage rule: every non-punctuation Token must be covered exactly once. Components must be ordered, non-overlapping, and may include punctuation but may not contain punctuation only.\n\nCompleteness-first rule: before assigning clause roles, decide whether the input forms a clause. An input with an explicit finite predicate, or an imperative with an omitted subject, is a clause and uses the existing clause-level roles. A heading, list item, noun phrase, adjective phrase, or non-finite verb phrase that does not form a clause must contain exactly one FRAGMENT_HEAD; never invent SUBJECT, PREDICATE, OBJECT, PREDICATIVE, or ADVERBIAL merely to force a fragment into a clause pattern. Keep ordinary determiners and tightly bound single-word premodifiers with the FRAGMENT_HEAD, and emit separable postmodifying prepositional, participial, or infinitive phrases as ATTRIBUTE. \"Portable API support across AI providers for Chat, text-to-image, and Embedding models\" is FRAGMENT_HEAD \"Portable API support\" plus ATTRIBUTE \"across AI providers\" plus ATTRIBUTE \"for Chat, text-to-image, and Embedding models\". An imperative is a clause, not a fragment: \"Install the CLI\" is PREDICATE \"Install\" plus OBJECT \"the CLI\".\n\nClause-structure-first rule: decide the clause layout before anything else. A sentence is compound only when two or more clauses each carry their own subject and are joined by a coordinating conjunction (for, and, nor, but, or, yet, so) or a semicolon; analyse every compound clause as peer components (subject, predicate, object, adverbial, …), and tag only a coordinating conjunction as its own CONJUNCTION component. Never emit COORDINATE_CLAUSE. A comma, a colon, or a dash on its own never makes a sentence compound, and neither does a series of imperatives nor one subject shared by several verbs: analyse every one of those as peer components of a single clause. Tag a coordinating conjunction as CONJUNCTION only when it joins whole clauses or whole verb phrases; one inside a coordinated noun, adjective, or adverb phrase stays part of that single component (\"calmly and confidently\" is ONE ADVERBIAL). A clause introduced by a subordinating conjunction (because, although, if, when, while, since, until, as, …) must use one of the five subordinate clause roles, stay whole, and leave the main clause analysed as peer components.\n\nPredicate-scope rule: inside a single clause a PREDICATE covers only the verb group — auxiliaries (can, could, may, might, must, shall, should, will, would, be, am, is, are, was, were, have, has, had, do, does, did) plus the main verb, including any adverbs between them and any bare-infinitive chain (\"Help turn\" is one PREDICATE, \"let go\" is one PREDICATE, \"must close\" is one PREDICATE). Passive, perfect, and progressive forms keep be/have inside the verb group (\"was rebuilt\", \"have been told\", \"is deflating\" are each one PREDICATE), but a linking verb takes only the verb itself and whatever completes it becomes its own PREDICATIVE (\"Be clear\" is PREDICATE \"Be\" plus PREDICATIVE \"clear\"; \"are widely beneficial\" is PREDICATE \"are\" plus PREDICATIVE \"widely beneficial\"). Two PREDICATE components must never be adjacent: side-by-side verbs belong to a single PREDICATE.\n\nPrepositional-phrase rule: a preposition and everything it governs form exactly one component (ADVERBIAL or ATTRIBUTE), including a coordinated object — \"into fully formed designs and specs\" is ONE ADVERBIAL, not a preposition plus separate noun phrases. Never emit a preposition as its own component and never let a component end on a preposition. Pick between the two roles by what the phrase modifies: a prepositional phrase that directly follows the noun phrase it modifies is ATTRIBUTE, so \"the development\" plus \"of applications\" is OBJECT plus ATTRIBUTE and \"Four\" plus \"of the biggest US technology companies\" is SUBJECT plus ATTRIBUTE — never ADVERBIAL; a phrase that modifies the verb or the whole clause is ADVERBIAL. Quantity and part expressions follow the same split, with no exception for \"a lot of\", \"some of\", or \"no amount of\". Do not split a prepositional phrase that already sits inside another one: \"without looking at any of the code\" stays ONE ADVERBIAL. ATTRIBUTE is a modifier attached to a noun phrase, either in front of it (\"fully formed\" inside \"fully formed designs\") or behind it (\"signed yesterday\" in \"The documents signed yesterday\"); never tag a noun phrase governed by a verb or preposition as ATTRIBUTE.\n\nPeer-component rule: within a single clause, identify the coequal grammatical components rather than labeling every verb-led span as PREDICATE. A PREDICATE must not absorb a separable OBJECT, PREDICATIVE, COMPLEMENT, or ADVERBIAL; emit each such span as its own component.\n\nSupplement rule: text after an em dash or colon is often an explanation, reformulation, or list, not a coordinate clause and not a conjunction. Keep the output flat and non-overlapping: use APPOSITIVE or INDEPENDENT_ELEMENT for an indivisible supplement, but when it contains separable predicate, object, or adverbial peers, emit those internal peers instead of an overlapping outer supplement. Do not label a whole noun phrase plus its relative clause as ATTRIBUTIVE_CLAUSE: in 'the ones that matter', 'the ones' is the noun phrase and only 'that matter' is ATTRIBUTIVE_CLAUSE.\n\nCompound-sentence rule: when two or more clauses that could each stand alone as a sentence are joined by a coordinating conjunction (for, and, nor, but, or, yet, so) or a semicolon, analyse the inside of every clause as peer components and tag only the coordinating conjunction as its own CONJUNCTION component (in a comma-plus-conjunction pair, tag only the conjunction itself). Never emit COORDINATE_CLAUSE.\n\nComplex-sentence rule: tag a subordinate clause as one whole component with one of the five clause roles (SUBJECT_CLAUSE, OBJECT_CLAUSE, PREDICATIVE_CLAUSE, ATTRIBUTIVE_CLAUSE, ADVERBIAL_CLAUSE) and never split its internal structure. The component runs from the introducing word through that clause's own subject, predicate, object, and adverbials, so never stop a clause component at its introducing word and never emit the clause's own predicate, object, or adverbial as a peer of the main clause: in \"Apple tests Siri feature that handles multiple commands at once\", \"that handles multiple commands at once\" is ONE ATTRIBUTIVE_CLAUSE — \"that\" on its own is wrong, and so is \"that handles\" followed by a separate OBJECT. A clause whose introducing word is omitted is still one whole component: in \"That means developers now play a frontline role\", \"developers now play a frontline role\" is ONE OBJECT_CLAUSE.\n\nSimple-sentence rule: analyse a sentence with a single subject-predicate structure as peer components.\n\nGive every component a concise, non-empty Chinese translation that renders everything the component covers rather than only its head word: \"incorporate artificial intelligence functionality\" is \"整合人工智能功能\", not \"整合\", and \"of applications\" is \"应用程序的\", not \"的\".\n\nKeep every sentenceId and every supplied Token unchanged. Return JSON only, with no Markdown or explanatory prose.\n\nOutput exactly one JSON object of this shape, not a top-level array:\n{\"sentences\": [{\"sentenceId\": string, \"components\": [{\"startToken\": number, \"endToken\": number, \"role\": string, \"translation\": string}]}]}\nA component must never contain only punctuation Tokens; attach punctuation to an adjacent component or leave it uncovered.\nOutput minified JSON on a single line: no newlines, no indentation, no spaces after ':' or ','. Do not wrap it in a Markdown code fence.\n\nNumbered sentence requests:\n\n[{\"sentenceId\":\"rr-preposition-1\",\"text\":\"Support for local models.\",\"tokens\":[{\"id\":0,\"text\":\"Support\"},{\"id\":1,\"text\":\"for\"},{\"id\":2,\"text\":\"local\"},{\"id\":3,\"text\":\"models\"},{\"id\":4,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"rr-preposition-2\",\"text\":\"Four of the largest services failed.\",\"tokens\":[{\"id\":0,\"text\":\"Four\"},{\"id\":1,\"text\":\"of\"},{\"id\":2,\"text\":\"the\"},{\"id\":3,\"text\":\"largest\"},{\"id\":4,\"text\":\"services\"},{\"id\":5,\"text\":\"failed\"},{\"id\":6,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"rr-preposition-3\",\"text\":\"She worked without looking at the code.\",\"tokens\":[{\"id\":0,\"text\":\"She\"},{\"id\":1,\"text\":\"worked\"},{\"id\":2,\"text\":\"without\"},{\"id\":3,\"text\":\"looking\"},{\"id\":4,\"text\":\"at\"},{\"id\":5,\"text\":\"the\"},{\"id\":6,\"text\":\"code\"},{\"id\":7,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"rr-preposition-4\",\"text\":\"The guide for beginners arrived.\",\"tokens\":[{\"id\":0,\"text\":\"The\"},{\"id\":1,\"text\":\"guide\"},{\"id\":2,\"text\":\"for\"},{\"id\":3,\"text\":\"beginners\"},{\"id\":4,\"text\":\"arrived\"},{\"id\":5,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"rr-coordination-1\",\"text\":\"The system boots, runs, and stops.\",\"tokens\":[{\"id\":0,\"text\":\"The\"},{\"id\":1,\"text\":\"system\"},{\"id\":2,\"text\":\"boots\"},{\"id\":3,\"text\":\",\",\"punctuation\":true},{\"id\":4,\"text\":\"runs\"},{\"id\":5,\"text\":\",\",\"punctuation\":true},{\"id\":6,\"text\":\"and\"},{\"id\":7,\"text\":\"stops\"},{\"id\":8,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"rr-coordination-2\",\"text\":\"The team shipped and users tested it.\",\"tokens\":[{\"id\":0,\"text\":\"The\"},{\"id\":1,\"text\":\"team\"},{\"id\":2,\"text\":\"shipped\"},{\"id\":3,\"text\":\"and\"},{\"id\":4,\"text\":\"users\"},{\"id\":5,\"text\":\"tested\"},{\"id\":6,\"text\":\"it\"},{\"id\":7,\"text\":\".\",\"punctuation\":true}]}]"
           }
         ],
         "raw": {
@@ -4364,13 +4369,13 @@
                   "startToken": 0,
                   "endToken": 0,
                   "role": "FRAGMENT_HEAD",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 1,
                   "endToken": 3,
                   "role": "ATTRIBUTE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 }
               ]
             },
@@ -4381,19 +4386,19 @@
                   "startToken": 0,
                   "endToken": 0,
                   "role": "SUBJECT",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 1,
                   "endToken": 4,
                   "role": "ATTRIBUTE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 5,
                   "endToken": 5,
                   "role": "PREDICATE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 }
               ]
             },
@@ -4404,19 +4409,19 @@
                   "startToken": 0,
                   "endToken": 0,
                   "role": "SUBJECT",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 1,
                   "endToken": 1,
                   "role": "PREDICATE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 2,
                   "endToken": 6,
                   "role": "ADVERBIAL",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 }
               ]
             },
@@ -4427,19 +4432,19 @@
                   "startToken": 0,
                   "endToken": 1,
                   "role": "SUBJECT",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 2,
                   "endToken": 3,
                   "role": "ATTRIBUTE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 4,
                   "endToken": 4,
                   "role": "PREDICATE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 }
               ]
             },
@@ -4450,31 +4455,31 @@
                   "startToken": 0,
                   "endToken": 1,
                   "role": "SUBJECT",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 2,
                   "endToken": 2,
                   "role": "PREDICATE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 4,
                   "endToken": 4,
                   "role": "PREDICATE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 6,
                   "endToken": 6,
                   "role": "CONJUNCTION",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 7,
                   "endToken": 7,
                   "role": "PREDICATE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 }
               ]
             },
@@ -4485,37 +4490,37 @@
                   "startToken": 0,
                   "endToken": 1,
                   "role": "SUBJECT",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 2,
                   "endToken": 2,
                   "role": "PREDICATE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 3,
                   "endToken": 3,
                   "role": "CONJUNCTION",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 4,
                   "endToken": 4,
                   "role": "SUBJECT",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 5,
                   "endToken": 5,
                   "role": "PREDICATE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 6,
                   "endToken": 6,
                   "role": "OBJECT",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 }
               ]
             }
@@ -4703,7 +4708,7 @@
         "messages": [
           {
             "role": "user",
-            "content": "Analyze the supplied sentences and return the schema.\nCore analysis serialized subset:\n[\"rr-coordination-3\",\"rr-coordination-4\",\"ho-fragment-1\",\"ho-fragment-2\",\"ho-fragment-3\",\"ho-fragment-4\"]\n\nOriginal sentence IDs and Tokens:\n\n[{\"sentenceId\":\"rr-coordination-3\",\"text\":\"Read the guide or run the demo.\",\"tokens\":[{\"id\":0,\"text\":\"Read\"},{\"id\":1,\"text\":\"the\"},{\"id\":2,\"text\":\"guide\"},{\"id\":3,\"text\":\"or\"},{\"id\":4,\"text\":\"run\"},{\"id\":5,\"text\":\"the\"},{\"id\":6,\"text\":\"demo\"},{\"id\":7,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"rr-coordination-4\",\"text\":\"The cache is small but effective.\",\"tokens\":[{\"id\":0,\"text\":\"The\"},{\"id\":1,\"text\":\"cache\"},{\"id\":2,\"text\":\"is\"},{\"id\":3,\"text\":\"small\"},{\"id\":4,\"text\":\"but\"},{\"id\":5,\"text\":\"effective\"},{\"id\":6,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"ho-fragment-1\",\"text\":\"Secure defaults for remote workspaces.\",\"tokens\":[{\"id\":0,\"text\":\"Secure\"},{\"id\":1,\"text\":\"defaults\"},{\"id\":2,\"text\":\"for\"},{\"id\":3,\"text\":\"remote\"},{\"id\":4,\"text\":\"workspaces\"},{\"id\":5,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"ho-fragment-2\",\"text\":\"Ready for production use.\",\"tokens\":[{\"id\":0,\"text\":\"Ready\"},{\"id\":1,\"text\":\"for\"},{\"id\":2,\"text\":\"production\"},{\"id\":3,\"text\":\"use\"},{\"id\":4,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"ho-fragment-3\",\"text\":\"Deploying updates without downtime.\",\"tokens\":[{\"id\":0,\"text\":\"Deploying\"},{\"id\":1,\"text\":\"updates\"},{\"id\":2,\"text\":\"without\"},{\"id\":3,\"text\":\"downtime\"},{\"id\":4,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"ho-fragment-4\",\"text\":\"A compact command reference.\",\"tokens\":[{\"id\":0,\"text\":\"A\"},{\"id\":1,\"text\":\"compact\"},{\"id\":2,\"text\":\"command\"},{\"id\":3,\"text\":\"reference\"},{\"id\":4,\"text\":\".\",\"punctuation\":true}]}]"
+            "content": "Analyze the numbered English sentences below into core grammatical components.\n\nThe role field is a closed 17-role enum: SUBJECT, PREDICATE, OBJECT, PREDICATIVE, ATTRIBUTE, ADVERBIAL, COMPLEMENT, APPOSITIVE, FRAGMENT_HEAD, SUBJECT_CLAUSE, OBJECT_CLAUSE, PREDICATIVE_CLAUSE, ATTRIBUTIVE_CLAUSE, ADVERBIAL_CLAUSE, INDEPENDENT_ELEMENT, COORDINATE_CLAUSE, CONJUNCTION.\n\nEvery component uses a closed Token interval [startToken, endToken]; both endpoints are inclusive Token IDs from the supplied sentence.\n\nEach supplied Token is {\"id\",\"text\"}; a Token is punctuation only when it carries \"punctuation\": true.\n\nCoverage rule: every non-punctuation Token must be covered exactly once. Components must be ordered, non-overlapping, and may include punctuation but may not contain punctuation only.\n\nCompleteness-first rule: before assigning clause roles, decide whether the input forms a clause. An input with an explicit finite predicate, or an imperative with an omitted subject, is a clause and uses the existing clause-level roles. A heading, list item, noun phrase, adjective phrase, or non-finite verb phrase that does not form a clause must contain exactly one FRAGMENT_HEAD; never invent SUBJECT, PREDICATE, OBJECT, PREDICATIVE, or ADVERBIAL merely to force a fragment into a clause pattern. Keep ordinary determiners and tightly bound single-word premodifiers with the FRAGMENT_HEAD, and emit separable postmodifying prepositional, participial, or infinitive phrases as ATTRIBUTE. \"Portable API support across AI providers for Chat, text-to-image, and Embedding models\" is FRAGMENT_HEAD \"Portable API support\" plus ATTRIBUTE \"across AI providers\" plus ATTRIBUTE \"for Chat, text-to-image, and Embedding models\". An imperative is a clause, not a fragment: \"Install the CLI\" is PREDICATE \"Install\" plus OBJECT \"the CLI\".\n\nClause-structure-first rule: decide the clause layout before anything else. A sentence is compound only when two or more clauses each carry their own subject and are joined by a coordinating conjunction (for, and, nor, but, or, yet, so) or a semicolon; analyse every compound clause as peer components (subject, predicate, object, adverbial, …), and tag only a coordinating conjunction as its own CONJUNCTION component. Never emit COORDINATE_CLAUSE. A comma, a colon, or a dash on its own never makes a sentence compound, and neither does a series of imperatives nor one subject shared by several verbs: analyse every one of those as peer components of a single clause. Tag a coordinating conjunction as CONJUNCTION only when it joins whole clauses or whole verb phrases; one inside a coordinated noun, adjective, or adverb phrase stays part of that single component (\"calmly and confidently\" is ONE ADVERBIAL). A clause introduced by a subordinating conjunction (because, although, if, when, while, since, until, as, …) must use one of the five subordinate clause roles, stay whole, and leave the main clause analysed as peer components.\n\nPredicate-scope rule: inside a single clause a PREDICATE covers only the verb group — auxiliaries (can, could, may, might, must, shall, should, will, would, be, am, is, are, was, were, have, has, had, do, does, did) plus the main verb, including any adverbs between them and any bare-infinitive chain (\"Help turn\" is one PREDICATE, \"let go\" is one PREDICATE, \"must close\" is one PREDICATE). Passive, perfect, and progressive forms keep be/have inside the verb group (\"was rebuilt\", \"have been told\", \"is deflating\" are each one PREDICATE), but a linking verb takes only the verb itself and whatever completes it becomes its own PREDICATIVE (\"Be clear\" is PREDICATE \"Be\" plus PREDICATIVE \"clear\"; \"are widely beneficial\" is PREDICATE \"are\" plus PREDICATIVE \"widely beneficial\"). Two PREDICATE components must never be adjacent: side-by-side verbs belong to a single PREDICATE.\n\nPrepositional-phrase rule: a preposition and everything it governs form exactly one component (ADVERBIAL or ATTRIBUTE), including a coordinated object — \"into fully formed designs and specs\" is ONE ADVERBIAL, not a preposition plus separate noun phrases. Never emit a preposition as its own component and never let a component end on a preposition. Pick between the two roles by what the phrase modifies: a prepositional phrase that directly follows the noun phrase it modifies is ATTRIBUTE, so \"the development\" plus \"of applications\" is OBJECT plus ATTRIBUTE and \"Four\" plus \"of the biggest US technology companies\" is SUBJECT plus ATTRIBUTE — never ADVERBIAL; a phrase that modifies the verb or the whole clause is ADVERBIAL. Quantity and part expressions follow the same split, with no exception for \"a lot of\", \"some of\", or \"no amount of\". Do not split a prepositional phrase that already sits inside another one: \"without looking at any of the code\" stays ONE ADVERBIAL. ATTRIBUTE is a modifier attached to a noun phrase, either in front of it (\"fully formed\" inside \"fully formed designs\") or behind it (\"signed yesterday\" in \"The documents signed yesterday\"); never tag a noun phrase governed by a verb or preposition as ATTRIBUTE.\n\nPeer-component rule: within a single clause, identify the coequal grammatical components rather than labeling every verb-led span as PREDICATE. A PREDICATE must not absorb a separable OBJECT, PREDICATIVE, COMPLEMENT, or ADVERBIAL; emit each such span as its own component.\n\nSupplement rule: text after an em dash or colon is often an explanation, reformulation, or list, not a coordinate clause and not a conjunction. Keep the output flat and non-overlapping: use APPOSITIVE or INDEPENDENT_ELEMENT for an indivisible supplement, but when it contains separable predicate, object, or adverbial peers, emit those internal peers instead of an overlapping outer supplement. Do not label a whole noun phrase plus its relative clause as ATTRIBUTIVE_CLAUSE: in 'the ones that matter', 'the ones' is the noun phrase and only 'that matter' is ATTRIBUTIVE_CLAUSE.\n\nCompound-sentence rule: when two or more clauses that could each stand alone as a sentence are joined by a coordinating conjunction (for, and, nor, but, or, yet, so) or a semicolon, analyse the inside of every clause as peer components and tag only the coordinating conjunction as its own CONJUNCTION component (in a comma-plus-conjunction pair, tag only the conjunction itself). Never emit COORDINATE_CLAUSE.\n\nComplex-sentence rule: tag a subordinate clause as one whole component with one of the five clause roles (SUBJECT_CLAUSE, OBJECT_CLAUSE, PREDICATIVE_CLAUSE, ATTRIBUTIVE_CLAUSE, ADVERBIAL_CLAUSE) and never split its internal structure. The component runs from the introducing word through that clause's own subject, predicate, object, and adverbials, so never stop a clause component at its introducing word and never emit the clause's own predicate, object, or adverbial as a peer of the main clause: in \"Apple tests Siri feature that handles multiple commands at once\", \"that handles multiple commands at once\" is ONE ATTRIBUTIVE_CLAUSE — \"that\" on its own is wrong, and so is \"that handles\" followed by a separate OBJECT. A clause whose introducing word is omitted is still one whole component: in \"That means developers now play a frontline role\", \"developers now play a frontline role\" is ONE OBJECT_CLAUSE.\n\nSimple-sentence rule: analyse a sentence with a single subject-predicate structure as peer components.\n\nGive every component a concise, non-empty Chinese translation that renders everything the component covers rather than only its head word: \"incorporate artificial intelligence functionality\" is \"整合人工智能功能\", not \"整合\", and \"of applications\" is \"应用程序的\", not \"的\".\n\nKeep every sentenceId and every supplied Token unchanged. Return JSON only, with no Markdown or explanatory prose.\n\nOutput exactly one JSON object of this shape, not a top-level array:\n{\"sentences\": [{\"sentenceId\": string, \"components\": [{\"startToken\": number, \"endToken\": number, \"role\": string, \"translation\": string}]}]}\nA component must never contain only punctuation Tokens; attach punctuation to an adjacent component or leave it uncovered.\nOutput minified JSON on a single line: no newlines, no indentation, no spaces after ':' or ','. Do not wrap it in a Markdown code fence.\n\nNumbered sentence requests:\n\n[{\"sentenceId\":\"rr-coordination-3\",\"text\":\"Read the guide or run the demo.\",\"tokens\":[{\"id\":0,\"text\":\"Read\"},{\"id\":1,\"text\":\"the\"},{\"id\":2,\"text\":\"guide\"},{\"id\":3,\"text\":\"or\"},{\"id\":4,\"text\":\"run\"},{\"id\":5,\"text\":\"the\"},{\"id\":6,\"text\":\"demo\"},{\"id\":7,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"rr-coordination-4\",\"text\":\"The cache is small but effective.\",\"tokens\":[{\"id\":0,\"text\":\"The\"},{\"id\":1,\"text\":\"cache\"},{\"id\":2,\"text\":\"is\"},{\"id\":3,\"text\":\"small\"},{\"id\":4,\"text\":\"but\"},{\"id\":5,\"text\":\"effective\"},{\"id\":6,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"ho-fragment-1\",\"text\":\"Secure defaults for remote workspaces.\",\"tokens\":[{\"id\":0,\"text\":\"Secure\"},{\"id\":1,\"text\":\"defaults\"},{\"id\":2,\"text\":\"for\"},{\"id\":3,\"text\":\"remote\"},{\"id\":4,\"text\":\"workspaces\"},{\"id\":5,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"ho-fragment-2\",\"text\":\"Ready for production use.\",\"tokens\":[{\"id\":0,\"text\":\"Ready\"},{\"id\":1,\"text\":\"for\"},{\"id\":2,\"text\":\"production\"},{\"id\":3,\"text\":\"use\"},{\"id\":4,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"ho-fragment-3\",\"text\":\"Deploying updates without downtime.\",\"tokens\":[{\"id\":0,\"text\":\"Deploying\"},{\"id\":1,\"text\":\"updates\"},{\"id\":2,\"text\":\"without\"},{\"id\":3,\"text\":\"downtime\"},{\"id\":4,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"ho-fragment-4\",\"text\":\"A compact command reference.\",\"tokens\":[{\"id\":0,\"text\":\"A\"},{\"id\":1,\"text\":\"compact\"},{\"id\":2,\"text\":\"command\"},{\"id\":3,\"text\":\"reference\"},{\"id\":4,\"text\":\".\",\"punctuation\":true}]}]"
           }
         ],
         "raw": {
@@ -4715,31 +4720,31 @@
                   "startToken": 0,
                   "endToken": 0,
                   "role": "PREDICATE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 1,
                   "endToken": 2,
                   "role": "OBJECT",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 3,
                   "endToken": 3,
                   "role": "CONJUNCTION",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 4,
                   "endToken": 4,
                   "role": "PREDICATE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 5,
                   "endToken": 6,
                   "role": "OBJECT",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 }
               ]
             },
@@ -4750,31 +4755,31 @@
                   "startToken": 0,
                   "endToken": 1,
                   "role": "SUBJECT",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 2,
                   "endToken": 2,
                   "role": "PREDICATE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 3,
                   "endToken": 3,
                   "role": "PREDICATIVE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 4,
                   "endToken": 4,
                   "role": "CONJUNCTION",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 5,
                   "endToken": 5,
                   "role": "PREDICATIVE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 }
               ]
             },
@@ -4785,13 +4790,13 @@
                   "startToken": 0,
                   "endToken": 1,
                   "role": "FRAGMENT_HEAD",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 2,
                   "endToken": 4,
                   "role": "ATTRIBUTE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 }
               ]
             },
@@ -4802,7 +4807,7 @@
                   "startToken": 0,
                   "endToken": 3,
                   "role": "FRAGMENT_HEAD",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 }
               ]
             },
@@ -4813,13 +4818,13 @@
                   "startToken": 0,
                   "endToken": 1,
                   "role": "FRAGMENT_HEAD",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 2,
                   "endToken": 3,
                   "role": "ATTRIBUTE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 }
               ]
             },
@@ -4830,7 +4835,7 @@
                   "startToken": 0,
                   "endToken": 3,
                   "role": "FRAGMENT_HEAD",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 }
               ]
             }
@@ -4988,7 +4993,7 @@
         "messages": [
           {
             "role": "user",
-            "content": "Analyze the supplied sentences and return the schema.\nCore analysis serialized subset:\n[\"ho-clause-1\",\"ho-clause-2\",\"ho-clause-3\",\"ho-clause-4\",\"ho-complement-1\",\"ho-complement-2\"]\n\nOriginal sentence IDs and Tokens:\n\n[{\"sentenceId\":\"ho-clause-1\",\"text\":\"It is obvious that the cache is stale.\",\"tokens\":[{\"id\":0,\"text\":\"It\"},{\"id\":1,\"text\":\"is\"},{\"id\":2,\"text\":\"obvious\"},{\"id\":3,\"text\":\"that\"},{\"id\":4,\"text\":\"the\"},{\"id\":5,\"text\":\"cache\"},{\"id\":6,\"text\":\"is\"},{\"id\":7,\"text\":\"stale\"},{\"id\":8,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"ho-clause-2\",\"text\":\"Whether it succeeds remains uncertain.\",\"tokens\":[{\"id\":0,\"text\":\"Whether\"},{\"id\":1,\"text\":\"it\"},{\"id\":2,\"text\":\"succeeds\"},{\"id\":3,\"text\":\"remains\"},{\"id\":4,\"text\":\"uncertain\"},{\"id\":5,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"ho-clause-3\",\"text\":\"The endpoint that failed recovered.\",\"tokens\":[{\"id\":0,\"text\":\"The\"},{\"id\":1,\"text\":\"endpoint\"},{\"id\":2,\"text\":\"that\"},{\"id\":3,\"text\":\"failed\"},{\"id\":4,\"text\":\"recovered\"},{\"id\":5,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"ho-clause-4\",\"text\":\"Although logs were sparse, we diagnosed it.\",\"tokens\":[{\"id\":0,\"text\":\"Although\"},{\"id\":1,\"text\":\"logs\"},{\"id\":2,\"text\":\"were\"},{\"id\":3,\"text\":\"sparse\"},{\"id\":4,\"text\":\",\",\"punctuation\":true},{\"id\":5,\"text\":\"we\"},{\"id\":6,\"text\":\"diagnosed\"},{\"id\":7,\"text\":\"it\"},{\"id\":8,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"ho-complement-1\",\"text\":\"The patch made startup reliable.\",\"tokens\":[{\"id\":0,\"text\":\"The\"},{\"id\":1,\"text\":\"patch\"},{\"id\":2,\"text\":\"made\"},{\"id\":3,\"text\":\"startup\"},{\"id\":4,\"text\":\"reliable\"},{\"id\":5,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"ho-complement-2\",\"text\":\"We found the migration painless.\",\"tokens\":[{\"id\":0,\"text\":\"We\"},{\"id\":1,\"text\":\"found\"},{\"id\":2,\"text\":\"the\"},{\"id\":3,\"text\":\"migration\"},{\"id\":4,\"text\":\"painless\"},{\"id\":5,\"text\":\".\",\"punctuation\":true}]}]"
+            "content": "Analyze the numbered English sentences below into core grammatical components.\n\nThe role field is a closed 17-role enum: SUBJECT, PREDICATE, OBJECT, PREDICATIVE, ATTRIBUTE, ADVERBIAL, COMPLEMENT, APPOSITIVE, FRAGMENT_HEAD, SUBJECT_CLAUSE, OBJECT_CLAUSE, PREDICATIVE_CLAUSE, ATTRIBUTIVE_CLAUSE, ADVERBIAL_CLAUSE, INDEPENDENT_ELEMENT, COORDINATE_CLAUSE, CONJUNCTION.\n\nEvery component uses a closed Token interval [startToken, endToken]; both endpoints are inclusive Token IDs from the supplied sentence.\n\nEach supplied Token is {\"id\",\"text\"}; a Token is punctuation only when it carries \"punctuation\": true.\n\nCoverage rule: every non-punctuation Token must be covered exactly once. Components must be ordered, non-overlapping, and may include punctuation but may not contain punctuation only.\n\nCompleteness-first rule: before assigning clause roles, decide whether the input forms a clause. An input with an explicit finite predicate, or an imperative with an omitted subject, is a clause and uses the existing clause-level roles. A heading, list item, noun phrase, adjective phrase, or non-finite verb phrase that does not form a clause must contain exactly one FRAGMENT_HEAD; never invent SUBJECT, PREDICATE, OBJECT, PREDICATIVE, or ADVERBIAL merely to force a fragment into a clause pattern. Keep ordinary determiners and tightly bound single-word premodifiers with the FRAGMENT_HEAD, and emit separable postmodifying prepositional, participial, or infinitive phrases as ATTRIBUTE. \"Portable API support across AI providers for Chat, text-to-image, and Embedding models\" is FRAGMENT_HEAD \"Portable API support\" plus ATTRIBUTE \"across AI providers\" plus ATTRIBUTE \"for Chat, text-to-image, and Embedding models\". An imperative is a clause, not a fragment: \"Install the CLI\" is PREDICATE \"Install\" plus OBJECT \"the CLI\".\n\nClause-structure-first rule: decide the clause layout before anything else. A sentence is compound only when two or more clauses each carry their own subject and are joined by a coordinating conjunction (for, and, nor, but, or, yet, so) or a semicolon; analyse every compound clause as peer components (subject, predicate, object, adverbial, …), and tag only a coordinating conjunction as its own CONJUNCTION component. Never emit COORDINATE_CLAUSE. A comma, a colon, or a dash on its own never makes a sentence compound, and neither does a series of imperatives nor one subject shared by several verbs: analyse every one of those as peer components of a single clause. Tag a coordinating conjunction as CONJUNCTION only when it joins whole clauses or whole verb phrases; one inside a coordinated noun, adjective, or adverb phrase stays part of that single component (\"calmly and confidently\" is ONE ADVERBIAL). A clause introduced by a subordinating conjunction (because, although, if, when, while, since, until, as, …) must use one of the five subordinate clause roles, stay whole, and leave the main clause analysed as peer components.\n\nPredicate-scope rule: inside a single clause a PREDICATE covers only the verb group — auxiliaries (can, could, may, might, must, shall, should, will, would, be, am, is, are, was, were, have, has, had, do, does, did) plus the main verb, including any adverbs between them and any bare-infinitive chain (\"Help turn\" is one PREDICATE, \"let go\" is one PREDICATE, \"must close\" is one PREDICATE). Passive, perfect, and progressive forms keep be/have inside the verb group (\"was rebuilt\", \"have been told\", \"is deflating\" are each one PREDICATE), but a linking verb takes only the verb itself and whatever completes it becomes its own PREDICATIVE (\"Be clear\" is PREDICATE \"Be\" plus PREDICATIVE \"clear\"; \"are widely beneficial\" is PREDICATE \"are\" plus PREDICATIVE \"widely beneficial\"). Two PREDICATE components must never be adjacent: side-by-side verbs belong to a single PREDICATE.\n\nPrepositional-phrase rule: a preposition and everything it governs form exactly one component (ADVERBIAL or ATTRIBUTE), including a coordinated object — \"into fully formed designs and specs\" is ONE ADVERBIAL, not a preposition plus separate noun phrases. Never emit a preposition as its own component and never let a component end on a preposition. Pick between the two roles by what the phrase modifies: a prepositional phrase that directly follows the noun phrase it modifies is ATTRIBUTE, so \"the development\" plus \"of applications\" is OBJECT plus ATTRIBUTE and \"Four\" plus \"of the biggest US technology companies\" is SUBJECT plus ATTRIBUTE — never ADVERBIAL; a phrase that modifies the verb or the whole clause is ADVERBIAL. Quantity and part expressions follow the same split, with no exception for \"a lot of\", \"some of\", or \"no amount of\". Do not split a prepositional phrase that already sits inside another one: \"without looking at any of the code\" stays ONE ADVERBIAL. ATTRIBUTE is a modifier attached to a noun phrase, either in front of it (\"fully formed\" inside \"fully formed designs\") or behind it (\"signed yesterday\" in \"The documents signed yesterday\"); never tag a noun phrase governed by a verb or preposition as ATTRIBUTE.\n\nPeer-component rule: within a single clause, identify the coequal grammatical components rather than labeling every verb-led span as PREDICATE. A PREDICATE must not absorb a separable OBJECT, PREDICATIVE, COMPLEMENT, or ADVERBIAL; emit each such span as its own component.\n\nSupplement rule: text after an em dash or colon is often an explanation, reformulation, or list, not a coordinate clause and not a conjunction. Keep the output flat and non-overlapping: use APPOSITIVE or INDEPENDENT_ELEMENT for an indivisible supplement, but when it contains separable predicate, object, or adverbial peers, emit those internal peers instead of an overlapping outer supplement. Do not label a whole noun phrase plus its relative clause as ATTRIBUTIVE_CLAUSE: in 'the ones that matter', 'the ones' is the noun phrase and only 'that matter' is ATTRIBUTIVE_CLAUSE.\n\nCompound-sentence rule: when two or more clauses that could each stand alone as a sentence are joined by a coordinating conjunction (for, and, nor, but, or, yet, so) or a semicolon, analyse the inside of every clause as peer components and tag only the coordinating conjunction as its own CONJUNCTION component (in a comma-plus-conjunction pair, tag only the conjunction itself). Never emit COORDINATE_CLAUSE.\n\nComplex-sentence rule: tag a subordinate clause as one whole component with one of the five clause roles (SUBJECT_CLAUSE, OBJECT_CLAUSE, PREDICATIVE_CLAUSE, ATTRIBUTIVE_CLAUSE, ADVERBIAL_CLAUSE) and never split its internal structure. The component runs from the introducing word through that clause's own subject, predicate, object, and adverbials, so never stop a clause component at its introducing word and never emit the clause's own predicate, object, or adverbial as a peer of the main clause: in \"Apple tests Siri feature that handles multiple commands at once\", \"that handles multiple commands at once\" is ONE ATTRIBUTIVE_CLAUSE — \"that\" on its own is wrong, and so is \"that handles\" followed by a separate OBJECT. A clause whose introducing word is omitted is still one whole component: in \"That means developers now play a frontline role\", \"developers now play a frontline role\" is ONE OBJECT_CLAUSE.\n\nSimple-sentence rule: analyse a sentence with a single subject-predicate structure as peer components.\n\nGive every component a concise, non-empty Chinese translation that renders everything the component covers rather than only its head word: \"incorporate artificial intelligence functionality\" is \"整合人工智能功能\", not \"整合\", and \"of applications\" is \"应用程序的\", not \"的\".\n\nKeep every sentenceId and every supplied Token unchanged. Return JSON only, with no Markdown or explanatory prose.\n\nOutput exactly one JSON object of this shape, not a top-level array:\n{\"sentences\": [{\"sentenceId\": string, \"components\": [{\"startToken\": number, \"endToken\": number, \"role\": string, \"translation\": string}]}]}\nA component must never contain only punctuation Tokens; attach punctuation to an adjacent component or leave it uncovered.\nOutput minified JSON on a single line: no newlines, no indentation, no spaces after ':' or ','. Do not wrap it in a Markdown code fence.\n\nNumbered sentence requests:\n\n[{\"sentenceId\":\"ho-clause-1\",\"text\":\"It is obvious that the cache is stale.\",\"tokens\":[{\"id\":0,\"text\":\"It\"},{\"id\":1,\"text\":\"is\"},{\"id\":2,\"text\":\"obvious\"},{\"id\":3,\"text\":\"that\"},{\"id\":4,\"text\":\"the\"},{\"id\":5,\"text\":\"cache\"},{\"id\":6,\"text\":\"is\"},{\"id\":7,\"text\":\"stale\"},{\"id\":8,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"ho-clause-2\",\"text\":\"Whether it succeeds remains uncertain.\",\"tokens\":[{\"id\":0,\"text\":\"Whether\"},{\"id\":1,\"text\":\"it\"},{\"id\":2,\"text\":\"succeeds\"},{\"id\":3,\"text\":\"remains\"},{\"id\":4,\"text\":\"uncertain\"},{\"id\":5,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"ho-clause-3\",\"text\":\"The endpoint that failed recovered.\",\"tokens\":[{\"id\":0,\"text\":\"The\"},{\"id\":1,\"text\":\"endpoint\"},{\"id\":2,\"text\":\"that\"},{\"id\":3,\"text\":\"failed\"},{\"id\":4,\"text\":\"recovered\"},{\"id\":5,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"ho-clause-4\",\"text\":\"Although logs were sparse, we diagnosed it.\",\"tokens\":[{\"id\":0,\"text\":\"Although\"},{\"id\":1,\"text\":\"logs\"},{\"id\":2,\"text\":\"were\"},{\"id\":3,\"text\":\"sparse\"},{\"id\":4,\"text\":\",\",\"punctuation\":true},{\"id\":5,\"text\":\"we\"},{\"id\":6,\"text\":\"diagnosed\"},{\"id\":7,\"text\":\"it\"},{\"id\":8,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"ho-complement-1\",\"text\":\"The patch made startup reliable.\",\"tokens\":[{\"id\":0,\"text\":\"The\"},{\"id\":1,\"text\":\"patch\"},{\"id\":2,\"text\":\"made\"},{\"id\":3,\"text\":\"startup\"},{\"id\":4,\"text\":\"reliable\"},{\"id\":5,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"ho-complement-2\",\"text\":\"We found the migration painless.\",\"tokens\":[{\"id\":0,\"text\":\"We\"},{\"id\":1,\"text\":\"found\"},{\"id\":2,\"text\":\"the\"},{\"id\":3,\"text\":\"migration\"},{\"id\":4,\"text\":\"painless\"},{\"id\":5,\"text\":\".\",\"punctuation\":true}]}]"
           }
         ],
         "raw": {
@@ -5000,25 +5005,25 @@
                   "startToken": 0,
                   "endToken": 0,
                   "role": "SUBJECT",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 1,
                   "endToken": 1,
                   "role": "PREDICATE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 2,
                   "endToken": 2,
                   "role": "PREDICATIVE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 3,
                   "endToken": 7,
                   "role": "SUBJECT_CLAUSE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 }
               ]
             },
@@ -5029,19 +5034,19 @@
                   "startToken": 0,
                   "endToken": 2,
                   "role": "SUBJECT_CLAUSE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 3,
                   "endToken": 3,
                   "role": "PREDICATE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 4,
                   "endToken": 4,
                   "role": "PREDICATIVE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 }
               ]
             },
@@ -5052,19 +5057,19 @@
                   "startToken": 0,
                   "endToken": 1,
                   "role": "SUBJECT",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 2,
                   "endToken": 3,
                   "role": "ATTRIBUTIVE_CLAUSE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 4,
                   "endToken": 4,
                   "role": "PREDICATE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 }
               ]
             },
@@ -5075,25 +5080,25 @@
                   "startToken": 0,
                   "endToken": 3,
                   "role": "ADVERBIAL_CLAUSE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 5,
                   "endToken": 5,
                   "role": "SUBJECT",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 6,
                   "endToken": 6,
                   "role": "PREDICATE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 7,
                   "endToken": 7,
                   "role": "OBJECT",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 }
               ]
             },
@@ -5104,25 +5109,25 @@
                   "startToken": 0,
                   "endToken": 1,
                   "role": "SUBJECT",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 2,
                   "endToken": 2,
                   "role": "PREDICATE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 3,
                   "endToken": 3,
                   "role": "OBJECT",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 4,
                   "endToken": 4,
                   "role": "COMPLEMENT",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 }
               ]
             },
@@ -5133,25 +5138,25 @@
                   "startToken": 0,
                   "endToken": 0,
                   "role": "SUBJECT",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 1,
                   "endToken": 1,
                   "role": "PREDICATE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 2,
                   "endToken": 3,
                   "role": "OBJECT",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 4,
                   "endToken": 4,
                   "role": "COMPLEMENT",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 }
               ]
             }
@@ -5339,7 +5344,7 @@
         "messages": [
           {
             "role": "user",
-            "content": "Analyze the supplied sentences and return the schema.\nCore analysis serialized subset:\n[\"ho-complement-3\",\"ho-complement-4\",\"ho-preposition-1\",\"ho-preposition-2\",\"ho-preposition-3\",\"ho-preposition-4\"]\n\nOriginal sentence IDs and Tokens:\n\n[{\"sentenceId\":\"ho-complement-3\",\"text\":\"Retries keep connections healthy.\",\"tokens\":[{\"id\":0,\"text\":\"Retries\"},{\"id\":1,\"text\":\"keep\"},{\"id\":2,\"text\":\"connections\"},{\"id\":3,\"text\":\"healthy\"},{\"id\":4,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"ho-complement-4\",\"text\":\"They named the channel stable.\",\"tokens\":[{\"id\":0,\"text\":\"They\"},{\"id\":1,\"text\":\"named\"},{\"id\":2,\"text\":\"the\"},{\"id\":3,\"text\":\"channel\"},{\"id\":4,\"text\":\"stable\"},{\"id\":5,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"ho-preposition-1\",\"text\":\"A bridge between the runtimes failed.\",\"tokens\":[{\"id\":0,\"text\":\"A\"},{\"id\":1,\"text\":\"bridge\"},{\"id\":2,\"text\":\"between\"},{\"id\":3,\"text\":\"the\"},{\"id\":4,\"text\":\"runtimes\"},{\"id\":5,\"text\":\"failed\"},{\"id\":6,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"ho-preposition-2\",\"text\":\"No amount of retries helped.\",\"tokens\":[{\"id\":0,\"text\":\"No\"},{\"id\":1,\"text\":\"amount\"},{\"id\":2,\"text\":\"of\"},{\"id\":3,\"text\":\"retries\"},{\"id\":4,\"text\":\"helped\"},{\"id\":5,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"ho-preposition-3\",\"text\":\"The worker ran within strict limits.\",\"tokens\":[{\"id\":0,\"text\":\"The\"},{\"id\":1,\"text\":\"worker\"},{\"id\":2,\"text\":\"ran\"},{\"id\":3,\"text\":\"within\"},{\"id\":4,\"text\":\"strict\"},{\"id\":5,\"text\":\"limits\"},{\"id\":6,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"ho-preposition-4\",\"text\":\"The request from the editor arrived.\",\"tokens\":[{\"id\":0,\"text\":\"The\"},{\"id\":1,\"text\":\"request\"},{\"id\":2,\"text\":\"from\"},{\"id\":3,\"text\":\"the\"},{\"id\":4,\"text\":\"editor\"},{\"id\":5,\"text\":\"arrived\"},{\"id\":6,\"text\":\".\",\"punctuation\":true}]}]"
+            "content": "Analyze the numbered English sentences below into core grammatical components.\n\nThe role field is a closed 17-role enum: SUBJECT, PREDICATE, OBJECT, PREDICATIVE, ATTRIBUTE, ADVERBIAL, COMPLEMENT, APPOSITIVE, FRAGMENT_HEAD, SUBJECT_CLAUSE, OBJECT_CLAUSE, PREDICATIVE_CLAUSE, ATTRIBUTIVE_CLAUSE, ADVERBIAL_CLAUSE, INDEPENDENT_ELEMENT, COORDINATE_CLAUSE, CONJUNCTION.\n\nEvery component uses a closed Token interval [startToken, endToken]; both endpoints are inclusive Token IDs from the supplied sentence.\n\nEach supplied Token is {\"id\",\"text\"}; a Token is punctuation only when it carries \"punctuation\": true.\n\nCoverage rule: every non-punctuation Token must be covered exactly once. Components must be ordered, non-overlapping, and may include punctuation but may not contain punctuation only.\n\nCompleteness-first rule: before assigning clause roles, decide whether the input forms a clause. An input with an explicit finite predicate, or an imperative with an omitted subject, is a clause and uses the existing clause-level roles. A heading, list item, noun phrase, adjective phrase, or non-finite verb phrase that does not form a clause must contain exactly one FRAGMENT_HEAD; never invent SUBJECT, PREDICATE, OBJECT, PREDICATIVE, or ADVERBIAL merely to force a fragment into a clause pattern. Keep ordinary determiners and tightly bound single-word premodifiers with the FRAGMENT_HEAD, and emit separable postmodifying prepositional, participial, or infinitive phrases as ATTRIBUTE. \"Portable API support across AI providers for Chat, text-to-image, and Embedding models\" is FRAGMENT_HEAD \"Portable API support\" plus ATTRIBUTE \"across AI providers\" plus ATTRIBUTE \"for Chat, text-to-image, and Embedding models\". An imperative is a clause, not a fragment: \"Install the CLI\" is PREDICATE \"Install\" plus OBJECT \"the CLI\".\n\nClause-structure-first rule: decide the clause layout before anything else. A sentence is compound only when two or more clauses each carry their own subject and are joined by a coordinating conjunction (for, and, nor, but, or, yet, so) or a semicolon; analyse every compound clause as peer components (subject, predicate, object, adverbial, …), and tag only a coordinating conjunction as its own CONJUNCTION component. Never emit COORDINATE_CLAUSE. A comma, a colon, or a dash on its own never makes a sentence compound, and neither does a series of imperatives nor one subject shared by several verbs: analyse every one of those as peer components of a single clause. Tag a coordinating conjunction as CONJUNCTION only when it joins whole clauses or whole verb phrases; one inside a coordinated noun, adjective, or adverb phrase stays part of that single component (\"calmly and confidently\" is ONE ADVERBIAL). A clause introduced by a subordinating conjunction (because, although, if, when, while, since, until, as, …) must use one of the five subordinate clause roles, stay whole, and leave the main clause analysed as peer components.\n\nPredicate-scope rule: inside a single clause a PREDICATE covers only the verb group — auxiliaries (can, could, may, might, must, shall, should, will, would, be, am, is, are, was, were, have, has, had, do, does, did) plus the main verb, including any adverbs between them and any bare-infinitive chain (\"Help turn\" is one PREDICATE, \"let go\" is one PREDICATE, \"must close\" is one PREDICATE). Passive, perfect, and progressive forms keep be/have inside the verb group (\"was rebuilt\", \"have been told\", \"is deflating\" are each one PREDICATE), but a linking verb takes only the verb itself and whatever completes it becomes its own PREDICATIVE (\"Be clear\" is PREDICATE \"Be\" plus PREDICATIVE \"clear\"; \"are widely beneficial\" is PREDICATE \"are\" plus PREDICATIVE \"widely beneficial\"). Two PREDICATE components must never be adjacent: side-by-side verbs belong to a single PREDICATE.\n\nPrepositional-phrase rule: a preposition and everything it governs form exactly one component (ADVERBIAL or ATTRIBUTE), including a coordinated object — \"into fully formed designs and specs\" is ONE ADVERBIAL, not a preposition plus separate noun phrases. Never emit a preposition as its own component and never let a component end on a preposition. Pick between the two roles by what the phrase modifies: a prepositional phrase that directly follows the noun phrase it modifies is ATTRIBUTE, so \"the development\" plus \"of applications\" is OBJECT plus ATTRIBUTE and \"Four\" plus \"of the biggest US technology companies\" is SUBJECT plus ATTRIBUTE — never ADVERBIAL; a phrase that modifies the verb or the whole clause is ADVERBIAL. Quantity and part expressions follow the same split, with no exception for \"a lot of\", \"some of\", or \"no amount of\". Do not split a prepositional phrase that already sits inside another one: \"without looking at any of the code\" stays ONE ADVERBIAL. ATTRIBUTE is a modifier attached to a noun phrase, either in front of it (\"fully formed\" inside \"fully formed designs\") or behind it (\"signed yesterday\" in \"The documents signed yesterday\"); never tag a noun phrase governed by a verb or preposition as ATTRIBUTE.\n\nPeer-component rule: within a single clause, identify the coequal grammatical components rather than labeling every verb-led span as PREDICATE. A PREDICATE must not absorb a separable OBJECT, PREDICATIVE, COMPLEMENT, or ADVERBIAL; emit each such span as its own component.\n\nSupplement rule: text after an em dash or colon is often an explanation, reformulation, or list, not a coordinate clause and not a conjunction. Keep the output flat and non-overlapping: use APPOSITIVE or INDEPENDENT_ELEMENT for an indivisible supplement, but when it contains separable predicate, object, or adverbial peers, emit those internal peers instead of an overlapping outer supplement. Do not label a whole noun phrase plus its relative clause as ATTRIBUTIVE_CLAUSE: in 'the ones that matter', 'the ones' is the noun phrase and only 'that matter' is ATTRIBUTIVE_CLAUSE.\n\nCompound-sentence rule: when two or more clauses that could each stand alone as a sentence are joined by a coordinating conjunction (for, and, nor, but, or, yet, so) or a semicolon, analyse the inside of every clause as peer components and tag only the coordinating conjunction as its own CONJUNCTION component (in a comma-plus-conjunction pair, tag only the conjunction itself). Never emit COORDINATE_CLAUSE.\n\nComplex-sentence rule: tag a subordinate clause as one whole component with one of the five clause roles (SUBJECT_CLAUSE, OBJECT_CLAUSE, PREDICATIVE_CLAUSE, ATTRIBUTIVE_CLAUSE, ADVERBIAL_CLAUSE) and never split its internal structure. The component runs from the introducing word through that clause's own subject, predicate, object, and adverbials, so never stop a clause component at its introducing word and never emit the clause's own predicate, object, or adverbial as a peer of the main clause: in \"Apple tests Siri feature that handles multiple commands at once\", \"that handles multiple commands at once\" is ONE ATTRIBUTIVE_CLAUSE — \"that\" on its own is wrong, and so is \"that handles\" followed by a separate OBJECT. A clause whose introducing word is omitted is still one whole component: in \"That means developers now play a frontline role\", \"developers now play a frontline role\" is ONE OBJECT_CLAUSE.\n\nSimple-sentence rule: analyse a sentence with a single subject-predicate structure as peer components.\n\nGive every component a concise, non-empty Chinese translation that renders everything the component covers rather than only its head word: \"incorporate artificial intelligence functionality\" is \"整合人工智能功能\", not \"整合\", and \"of applications\" is \"应用程序的\", not \"的\".\n\nKeep every sentenceId and every supplied Token unchanged. Return JSON only, with no Markdown or explanatory prose.\n\nOutput exactly one JSON object of this shape, not a top-level array:\n{\"sentences\": [{\"sentenceId\": string, \"components\": [{\"startToken\": number, \"endToken\": number, \"role\": string, \"translation\": string}]}]}\nA component must never contain only punctuation Tokens; attach punctuation to an adjacent component or leave it uncovered.\nOutput minified JSON on a single line: no newlines, no indentation, no spaces after ':' or ','. Do not wrap it in a Markdown code fence.\n\nNumbered sentence requests:\n\n[{\"sentenceId\":\"ho-complement-3\",\"text\":\"Retries keep connections healthy.\",\"tokens\":[{\"id\":0,\"text\":\"Retries\"},{\"id\":1,\"text\":\"keep\"},{\"id\":2,\"text\":\"connections\"},{\"id\":3,\"text\":\"healthy\"},{\"id\":4,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"ho-complement-4\",\"text\":\"They named the channel stable.\",\"tokens\":[{\"id\":0,\"text\":\"They\"},{\"id\":1,\"text\":\"named\"},{\"id\":2,\"text\":\"the\"},{\"id\":3,\"text\":\"channel\"},{\"id\":4,\"text\":\"stable\"},{\"id\":5,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"ho-preposition-1\",\"text\":\"A bridge between the runtimes failed.\",\"tokens\":[{\"id\":0,\"text\":\"A\"},{\"id\":1,\"text\":\"bridge\"},{\"id\":2,\"text\":\"between\"},{\"id\":3,\"text\":\"the\"},{\"id\":4,\"text\":\"runtimes\"},{\"id\":5,\"text\":\"failed\"},{\"id\":6,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"ho-preposition-2\",\"text\":\"No amount of retries helped.\",\"tokens\":[{\"id\":0,\"text\":\"No\"},{\"id\":1,\"text\":\"amount\"},{\"id\":2,\"text\":\"of\"},{\"id\":3,\"text\":\"retries\"},{\"id\":4,\"text\":\"helped\"},{\"id\":5,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"ho-preposition-3\",\"text\":\"The worker ran within strict limits.\",\"tokens\":[{\"id\":0,\"text\":\"The\"},{\"id\":1,\"text\":\"worker\"},{\"id\":2,\"text\":\"ran\"},{\"id\":3,\"text\":\"within\"},{\"id\":4,\"text\":\"strict\"},{\"id\":5,\"text\":\"limits\"},{\"id\":6,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"ho-preposition-4\",\"text\":\"The request from the editor arrived.\",\"tokens\":[{\"id\":0,\"text\":\"The\"},{\"id\":1,\"text\":\"request\"},{\"id\":2,\"text\":\"from\"},{\"id\":3,\"text\":\"the\"},{\"id\":4,\"text\":\"editor\"},{\"id\":5,\"text\":\"arrived\"},{\"id\":6,\"text\":\".\",\"punctuation\":true}]}]"
           }
         ],
         "raw": {
@@ -5351,25 +5356,25 @@
                   "startToken": 0,
                   "endToken": 0,
                   "role": "SUBJECT",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 1,
                   "endToken": 1,
                   "role": "PREDICATE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 2,
                   "endToken": 2,
                   "role": "OBJECT",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 3,
                   "endToken": 3,
                   "role": "COMPLEMENT",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 }
               ]
             },
@@ -5380,25 +5385,25 @@
                   "startToken": 0,
                   "endToken": 0,
                   "role": "SUBJECT",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 1,
                   "endToken": 1,
                   "role": "PREDICATE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 2,
                   "endToken": 3,
                   "role": "OBJECT",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 4,
                   "endToken": 4,
                   "role": "COMPLEMENT",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 }
               ]
             },
@@ -5409,19 +5414,19 @@
                   "startToken": 0,
                   "endToken": 1,
                   "role": "SUBJECT",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 2,
                   "endToken": 4,
                   "role": "ATTRIBUTE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 5,
                   "endToken": 5,
                   "role": "PREDICATE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 }
               ]
             },
@@ -5432,19 +5437,19 @@
                   "startToken": 0,
                   "endToken": 1,
                   "role": "SUBJECT",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 2,
                   "endToken": 3,
                   "role": "ATTRIBUTE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 4,
                   "endToken": 4,
                   "role": "PREDICATE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 }
               ]
             },
@@ -5455,19 +5460,19 @@
                   "startToken": 0,
                   "endToken": 1,
                   "role": "SUBJECT",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 2,
                   "endToken": 2,
                   "role": "PREDICATE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 3,
                   "endToken": 5,
                   "role": "ADVERBIAL",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 }
               ]
             },
@@ -5478,19 +5483,19 @@
                   "startToken": 0,
                   "endToken": 1,
                   "role": "SUBJECT",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 2,
                   "endToken": 4,
                   "role": "ATTRIBUTE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 5,
                   "endToken": 5,
                   "role": "PREDICATE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 }
               ]
             }
@@ -5666,7 +5671,7 @@
         "messages": [
           {
             "role": "user",
-            "content": "Analyze the supplied sentences and return the schema.\nCore analysis serialized subset:\n[\"ho-coordination-1\",\"ho-coordination-2\",\"ho-coordination-3\",\"ho-coordination-4\"]\n\nOriginal sentence IDs and Tokens:\n\n[{\"sentenceId\":\"ho-coordination-1\",\"text\":\"Workers fetch, validate, and cache responses.\",\"tokens\":[{\"id\":0,\"text\":\"Workers\"},{\"id\":1,\"text\":\"fetch\"},{\"id\":2,\"text\":\",\",\"punctuation\":true},{\"id\":3,\"text\":\"validate\"},{\"id\":4,\"text\":\",\",\"punctuation\":true},{\"id\":5,\"text\":\"and\"},{\"id\":6,\"text\":\"cache\"},{\"id\":7,\"text\":\"responses\"},{\"id\":8,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"ho-coordination-2\",\"text\":\"The client retried, but the server refused.\",\"tokens\":[{\"id\":0,\"text\":\"The\"},{\"id\":1,\"text\":\"client\"},{\"id\":2,\"text\":\"retried\"},{\"id\":3,\"text\":\",\",\"punctuation\":true},{\"id\":4,\"text\":\"but\"},{\"id\":5,\"text\":\"the\"},{\"id\":6,\"text\":\"server\"},{\"id\":7,\"text\":\"refused\"},{\"id\":8,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"ho-coordination-3\",\"text\":\"Choose JSON or return plain text.\",\"tokens\":[{\"id\":0,\"text\":\"Choose\"},{\"id\":1,\"text\":\"JSON\"},{\"id\":2,\"text\":\"or\"},{\"id\":3,\"text\":\"return\"},{\"id\":4,\"text\":\"plain\"},{\"id\":5,\"text\":\"text\"},{\"id\":6,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"ho-coordination-4\",\"text\":\"The result is safe and deterministic.\",\"tokens\":[{\"id\":0,\"text\":\"The\"},{\"id\":1,\"text\":\"result\"},{\"id\":2,\"text\":\"is\"},{\"id\":3,\"text\":\"safe\"},{\"id\":4,\"text\":\"and\"},{\"id\":5,\"text\":\"deterministic\"},{\"id\":6,\"text\":\".\",\"punctuation\":true}]}]"
+            "content": "Analyze the numbered English sentences below into core grammatical components.\n\nThe role field is a closed 17-role enum: SUBJECT, PREDICATE, OBJECT, PREDICATIVE, ATTRIBUTE, ADVERBIAL, COMPLEMENT, APPOSITIVE, FRAGMENT_HEAD, SUBJECT_CLAUSE, OBJECT_CLAUSE, PREDICATIVE_CLAUSE, ATTRIBUTIVE_CLAUSE, ADVERBIAL_CLAUSE, INDEPENDENT_ELEMENT, COORDINATE_CLAUSE, CONJUNCTION.\n\nEvery component uses a closed Token interval [startToken, endToken]; both endpoints are inclusive Token IDs from the supplied sentence.\n\nEach supplied Token is {\"id\",\"text\"}; a Token is punctuation only when it carries \"punctuation\": true.\n\nCoverage rule: every non-punctuation Token must be covered exactly once. Components must be ordered, non-overlapping, and may include punctuation but may not contain punctuation only.\n\nCompleteness-first rule: before assigning clause roles, decide whether the input forms a clause. An input with an explicit finite predicate, or an imperative with an omitted subject, is a clause and uses the existing clause-level roles. A heading, list item, noun phrase, adjective phrase, or non-finite verb phrase that does not form a clause must contain exactly one FRAGMENT_HEAD; never invent SUBJECT, PREDICATE, OBJECT, PREDICATIVE, or ADVERBIAL merely to force a fragment into a clause pattern. Keep ordinary determiners and tightly bound single-word premodifiers with the FRAGMENT_HEAD, and emit separable postmodifying prepositional, participial, or infinitive phrases as ATTRIBUTE. \"Portable API support across AI providers for Chat, text-to-image, and Embedding models\" is FRAGMENT_HEAD \"Portable API support\" plus ATTRIBUTE \"across AI providers\" plus ATTRIBUTE \"for Chat, text-to-image, and Embedding models\". An imperative is a clause, not a fragment: \"Install the CLI\" is PREDICATE \"Install\" plus OBJECT \"the CLI\".\n\nClause-structure-first rule: decide the clause layout before anything else. A sentence is compound only when two or more clauses each carry their own subject and are joined by a coordinating conjunction (for, and, nor, but, or, yet, so) or a semicolon; analyse every compound clause as peer components (subject, predicate, object, adverbial, …), and tag only a coordinating conjunction as its own CONJUNCTION component. Never emit COORDINATE_CLAUSE. A comma, a colon, or a dash on its own never makes a sentence compound, and neither does a series of imperatives nor one subject shared by several verbs: analyse every one of those as peer components of a single clause. Tag a coordinating conjunction as CONJUNCTION only when it joins whole clauses or whole verb phrases; one inside a coordinated noun, adjective, or adverb phrase stays part of that single component (\"calmly and confidently\" is ONE ADVERBIAL). A clause introduced by a subordinating conjunction (because, although, if, when, while, since, until, as, …) must use one of the five subordinate clause roles, stay whole, and leave the main clause analysed as peer components.\n\nPredicate-scope rule: inside a single clause a PREDICATE covers only the verb group — auxiliaries (can, could, may, might, must, shall, should, will, would, be, am, is, are, was, were, have, has, had, do, does, did) plus the main verb, including any adverbs between them and any bare-infinitive chain (\"Help turn\" is one PREDICATE, \"let go\" is one PREDICATE, \"must close\" is one PREDICATE). Passive, perfect, and progressive forms keep be/have inside the verb group (\"was rebuilt\", \"have been told\", \"is deflating\" are each one PREDICATE), but a linking verb takes only the verb itself and whatever completes it becomes its own PREDICATIVE (\"Be clear\" is PREDICATE \"Be\" plus PREDICATIVE \"clear\"; \"are widely beneficial\" is PREDICATE \"are\" plus PREDICATIVE \"widely beneficial\"). Two PREDICATE components must never be adjacent: side-by-side verbs belong to a single PREDICATE.\n\nPrepositional-phrase rule: a preposition and everything it governs form exactly one component (ADVERBIAL or ATTRIBUTE), including a coordinated object — \"into fully formed designs and specs\" is ONE ADVERBIAL, not a preposition plus separate noun phrases. Never emit a preposition as its own component and never let a component end on a preposition. Pick between the two roles by what the phrase modifies: a prepositional phrase that directly follows the noun phrase it modifies is ATTRIBUTE, so \"the development\" plus \"of applications\" is OBJECT plus ATTRIBUTE and \"Four\" plus \"of the biggest US technology companies\" is SUBJECT plus ATTRIBUTE — never ADVERBIAL; a phrase that modifies the verb or the whole clause is ADVERBIAL. Quantity and part expressions follow the same split, with no exception for \"a lot of\", \"some of\", or \"no amount of\". Do not split a prepositional phrase that already sits inside another one: \"without looking at any of the code\" stays ONE ADVERBIAL. ATTRIBUTE is a modifier attached to a noun phrase, either in front of it (\"fully formed\" inside \"fully formed designs\") or behind it (\"signed yesterday\" in \"The documents signed yesterday\"); never tag a noun phrase governed by a verb or preposition as ATTRIBUTE.\n\nPeer-component rule: within a single clause, identify the coequal grammatical components rather than labeling every verb-led span as PREDICATE. A PREDICATE must not absorb a separable OBJECT, PREDICATIVE, COMPLEMENT, or ADVERBIAL; emit each such span as its own component.\n\nSupplement rule: text after an em dash or colon is often an explanation, reformulation, or list, not a coordinate clause and not a conjunction. Keep the output flat and non-overlapping: use APPOSITIVE or INDEPENDENT_ELEMENT for an indivisible supplement, but when it contains separable predicate, object, or adverbial peers, emit those internal peers instead of an overlapping outer supplement. Do not label a whole noun phrase plus its relative clause as ATTRIBUTIVE_CLAUSE: in 'the ones that matter', 'the ones' is the noun phrase and only 'that matter' is ATTRIBUTIVE_CLAUSE.\n\nCompound-sentence rule: when two or more clauses that could each stand alone as a sentence are joined by a coordinating conjunction (for, and, nor, but, or, yet, so) or a semicolon, analyse the inside of every clause as peer components and tag only the coordinating conjunction as its own CONJUNCTION component (in a comma-plus-conjunction pair, tag only the conjunction itself). Never emit COORDINATE_CLAUSE.\n\nComplex-sentence rule: tag a subordinate clause as one whole component with one of the five clause roles (SUBJECT_CLAUSE, OBJECT_CLAUSE, PREDICATIVE_CLAUSE, ATTRIBUTIVE_CLAUSE, ADVERBIAL_CLAUSE) and never split its internal structure. The component runs from the introducing word through that clause's own subject, predicate, object, and adverbials, so never stop a clause component at its introducing word and never emit the clause's own predicate, object, or adverbial as a peer of the main clause: in \"Apple tests Siri feature that handles multiple commands at once\", \"that handles multiple commands at once\" is ONE ATTRIBUTIVE_CLAUSE — \"that\" on its own is wrong, and so is \"that handles\" followed by a separate OBJECT. A clause whose introducing word is omitted is still one whole component: in \"That means developers now play a frontline role\", \"developers now play a frontline role\" is ONE OBJECT_CLAUSE.\n\nSimple-sentence rule: analyse a sentence with a single subject-predicate structure as peer components.\n\nGive every component a concise, non-empty Chinese translation that renders everything the component covers rather than only its head word: \"incorporate artificial intelligence functionality\" is \"整合人工智能功能\", not \"整合\", and \"of applications\" is \"应用程序的\", not \"的\".\n\nKeep every sentenceId and every supplied Token unchanged. Return JSON only, with no Markdown or explanatory prose.\n\nOutput exactly one JSON object of this shape, not a top-level array:\n{\"sentences\": [{\"sentenceId\": string, \"components\": [{\"startToken\": number, \"endToken\": number, \"role\": string, \"translation\": string}]}]}\nA component must never contain only punctuation Tokens; attach punctuation to an adjacent component or leave it uncovered.\nOutput minified JSON on a single line: no newlines, no indentation, no spaces after ':' or ','. Do not wrap it in a Markdown code fence.\n\nNumbered sentence requests:\n\n[{\"sentenceId\":\"ho-coordination-1\",\"text\":\"Workers fetch, validate, and cache responses.\",\"tokens\":[{\"id\":0,\"text\":\"Workers\"},{\"id\":1,\"text\":\"fetch\"},{\"id\":2,\"text\":\",\",\"punctuation\":true},{\"id\":3,\"text\":\"validate\"},{\"id\":4,\"text\":\",\",\"punctuation\":true},{\"id\":5,\"text\":\"and\"},{\"id\":6,\"text\":\"cache\"},{\"id\":7,\"text\":\"responses\"},{\"id\":8,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"ho-coordination-2\",\"text\":\"The client retried, but the server refused.\",\"tokens\":[{\"id\":0,\"text\":\"The\"},{\"id\":1,\"text\":\"client\"},{\"id\":2,\"text\":\"retried\"},{\"id\":3,\"text\":\",\",\"punctuation\":true},{\"id\":4,\"text\":\"but\"},{\"id\":5,\"text\":\"the\"},{\"id\":6,\"text\":\"server\"},{\"id\":7,\"text\":\"refused\"},{\"id\":8,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"ho-coordination-3\",\"text\":\"Choose JSON or return plain text.\",\"tokens\":[{\"id\":0,\"text\":\"Choose\"},{\"id\":1,\"text\":\"JSON\"},{\"id\":2,\"text\":\"or\"},{\"id\":3,\"text\":\"return\"},{\"id\":4,\"text\":\"plain\"},{\"id\":5,\"text\":\"text\"},{\"id\":6,\"text\":\".\",\"punctuation\":true}]},{\"sentenceId\":\"ho-coordination-4\",\"text\":\"The result is safe and deterministic.\",\"tokens\":[{\"id\":0,\"text\":\"The\"},{\"id\":1,\"text\":\"result\"},{\"id\":2,\"text\":\"is\"},{\"id\":3,\"text\":\"safe\"},{\"id\":4,\"text\":\"and\"},{\"id\":5,\"text\":\"deterministic\"},{\"id\":6,\"text\":\".\",\"punctuation\":true}]}]"
           }
         ],
         "raw": {
@@ -5678,37 +5683,37 @@
                   "startToken": 0,
                   "endToken": 0,
                   "role": "SUBJECT",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 1,
                   "endToken": 1,
                   "role": "PREDICATE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 3,
                   "endToken": 3,
                   "role": "PREDICATE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 5,
                   "endToken": 5,
                   "role": "CONJUNCTION",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 6,
                   "endToken": 6,
                   "role": "PREDICATE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 7,
                   "endToken": 7,
                   "role": "OBJECT",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 }
               ]
             },
@@ -5719,31 +5724,31 @@
                   "startToken": 0,
                   "endToken": 1,
                   "role": "SUBJECT",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 2,
                   "endToken": 2,
                   "role": "PREDICATE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 4,
                   "endToken": 4,
                   "role": "CONJUNCTION",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 5,
                   "endToken": 6,
                   "role": "SUBJECT",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 7,
                   "endToken": 7,
                   "role": "PREDICATE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 }
               ]
             },
@@ -5754,31 +5759,31 @@
                   "startToken": 0,
                   "endToken": 0,
                   "role": "PREDICATE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 1,
                   "endToken": 1,
                   "role": "OBJECT",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 2,
                   "endToken": 2,
                   "role": "CONJUNCTION",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 3,
                   "endToken": 3,
                   "role": "PREDICATE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 4,
                   "endToken": 5,
                   "role": "OBJECT",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 }
               ]
             },
@@ -5789,31 +5794,31 @@
                   "startToken": 0,
                   "endToken": 1,
                   "role": "SUBJECT",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 2,
                   "endToken": 2,
                   "role": "PREDICATE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 3,
                   "endToken": 3,
                   "role": "PREDICATIVE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 4,
                   "endToken": 4,
                   "role": "CONJUNCTION",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 },
                 {
                   "startToken": 5,
                   "endToken": 5,
                   "role": "PREDICATIVE",
-                  "translation": "synthetic"
+                  "translation": "合成译文"
                 }
               ]
             }
@@ -5972,37 +5977,89 @@
   "report": {
     "denominator": 40,
     "firstPass": {
-      "sentences": [40, 0, 0],
-      "exactSentence": [36, 0.9],
-      "spanExact": [127, 127, 135, 1, 0.9407407407407408, 0.9694656488549619],
-      "labeledSpan": [127, 127, 135, 1, 0.9407407407407408, 0.9694656488549619],
-      "roleAccuracyOnExactSpans": [127, 127, 1]
+      "sentences": [
+        40,
+        0,
+        0
+      ],
+      "exactSentence": [
+        36,
+        0.9
+      ],
+      "spanExact": [
+        127,
+        127,
+        135,
+        1,
+        0.9407407407407408,
+        0.9694656488549619
+      ],
+      "labeledSpan": [
+        127,
+        127,
+        135,
+        1,
+        0.9407407407407408,
+        0.9694656488549619
+      ],
+      "roleAccuracyOnExactSpans": [
+        127,
+        127,
+        1
+      ]
     },
     "final": {
-      "sentences": [40, 1, 0],
-      "exactSentence": [38, 0.95],
+      "sentences": [
+        40,
+        1,
+        0
+      ],
+      "exactSentence": [
+        38,
+        0.95
+      ],
       "spanExact": [
-        132, 133, 135, 0.9924812030075187, 0.9777777777777777,
+        132,
+        133,
+        135,
+        0.9924812030075187,
+        0.9777777777777777,
         0.9850746268656717
       ],
       "labeledSpan": [
-        132, 133, 135, 0.9924812030075187, 0.9777777777777777,
+        132,
+        133,
+        135,
+        0.9924812030075187,
+        0.9777777777777777,
         0.9850746268656717
       ],
-      "roleAccuracyOnExactSpans": [132, 132, 1]
+      "roleAccuracyOnExactSpans": [
+        132,
+        132,
+        1
+      ]
     },
     "transitions": {
       "repairedToCorrect": {
         "count": 3,
-        "sentenceIds": ["rr-fragment-2", "rr-clause-1", "rr-clause-2"]
+        "sentenceIds": [
+          "rr-fragment-2",
+          "rr-clause-1",
+          "rr-clause-2"
+        ]
       },
       "correctToWrongOrFailure": {
         "count": 1,
-        "sentenceIds": ["rr-fragment-3"]
+        "sentenceIds": [
+          "rr-fragment-3"
+        ]
       },
       "finalFailures": {
         "count": 1,
-        "sentenceIds": ["rr-fragment-4"]
+        "sentenceIds": [
+          "rr-fragment-4"
+        ]
       }
     },
     "correctFirstPassRejection": {
@@ -6011,43 +6068,97 @@
       "rate": 0.027777777777777776,
       "displayRate": "2.78%",
       "grammarSentenceIds": [],
-      "nonGrammarSentenceIds": ["rr-fragment-3"]
+      "nonGrammarSentenceIds": [
+        "rr-fragment-3"
+      ]
     },
     "bySplit": {
       "rule-regression": {
         "denominator": 20,
         "firstPass": {
-          "sentences": [20, 0, 0],
-          "exactSentence": [16, 0.8],
-          "spanExact": [58, 58, 66, 1, 0.8787878787878788, 0.9354838709677419],
-          "labeledSpan": [
-            58, 58, 66, 1, 0.8787878787878788, 0.9354838709677419
+          "sentences": [
+            20,
+            0,
+            0
           ],
-          "roleAccuracyOnExactSpans": [58, 58, 1]
+          "exactSentence": [
+            16,
+            0.8
+          ],
+          "spanExact": [
+            58,
+            58,
+            66,
+            1,
+            0.8787878787878788,
+            0.9354838709677419
+          ],
+          "labeledSpan": [
+            58,
+            58,
+            66,
+            1,
+            0.8787878787878788,
+            0.9354838709677419
+          ],
+          "roleAccuracyOnExactSpans": [
+            58,
+            58,
+            1
+          ]
         },
         "final": {
-          "sentences": [20, 1, 0],
-          "exactSentence": [18, 0.9],
+          "sentences": [
+            20,
+            1,
+            0
+          ],
+          "exactSentence": [
+            18,
+            0.9
+          ],
           "spanExact": [
-            63, 64, 66, 0.984375, 0.9545454545454546, 0.9692307692307692
+            63,
+            64,
+            66,
+            0.984375,
+            0.9545454545454546,
+            0.9692307692307692
           ],
           "labeledSpan": [
-            63, 64, 66, 0.984375, 0.9545454545454546, 0.9692307692307692
+            63,
+            64,
+            66,
+            0.984375,
+            0.9545454545454546,
+            0.9692307692307692
           ],
-          "roleAccuracyOnExactSpans": [63, 63, 1]
+          "roleAccuracyOnExactSpans": [
+            63,
+            63,
+            1
+          ]
         },
         "transitions": {
           "repairedToCorrect": {
             "count": 3,
-            "sentenceIds": ["rr-fragment-2", "rr-clause-1", "rr-clause-2"]
+            "sentenceIds": [
+              "rr-fragment-2",
+              "rr-clause-1",
+              "rr-clause-2"
+            ]
           },
           "correctToWrongOrFailure": {
             "count": 1,
-            "sentenceIds": ["rr-fragment-3"]
+            "sentenceIds": [
+              "rr-fragment-3"
+            ]
           },
           "finalFailures": {
             "count": 1,
-            "sentenceIds": ["rr-fragment-4"]
+            "sentenceIds": [
+              "rr-fragment-4"
+            ]
           }
         },
         "correctFirstPassRejection": {
@@ -6056,24 +6167,76 @@
           "rate": 0.0625,
           "displayRate": "6.25%",
           "grammarSentenceIds": [],
-          "nonGrammarSentenceIds": ["rr-fragment-3"]
+          "nonGrammarSentenceIds": [
+            "rr-fragment-3"
+          ]
         }
       },
       "independent-holdout": {
         "denominator": 20,
         "firstPass": {
-          "sentences": [20, 0, 0],
-          "exactSentence": [20, 1],
-          "spanExact": [69, 69, 69, 1, 1, 1],
-          "labeledSpan": [69, 69, 69, 1, 1, 1],
-          "roleAccuracyOnExactSpans": [69, 69, 1]
+          "sentences": [
+            20,
+            0,
+            0
+          ],
+          "exactSentence": [
+            20,
+            1
+          ],
+          "spanExact": [
+            69,
+            69,
+            69,
+            1,
+            1,
+            1
+          ],
+          "labeledSpan": [
+            69,
+            69,
+            69,
+            1,
+            1,
+            1
+          ],
+          "roleAccuracyOnExactSpans": [
+            69,
+            69,
+            1
+          ]
         },
         "final": {
-          "sentences": [20, 0, 0],
-          "exactSentence": [20, 1],
-          "spanExact": [69, 69, 69, 1, 1, 1],
-          "labeledSpan": [69, 69, 69, 1, 1, 1],
-          "roleAccuracyOnExactSpans": [69, 69, 1]
+          "sentences": [
+            20,
+            0,
+            0
+          ],
+          "exactSentence": [
+            20,
+            1
+          ],
+          "spanExact": [
+            69,
+            69,
+            69,
+            1,
+            1,
+            1
+          ],
+          "labeledSpan": [
+            69,
+            69,
+            69,
+            1,
+            1,
+            1
+          ],
+          "roleAccuracyOnExactSpans": [
+            69,
+            69,
+            1
+          ]
         },
         "transitions": {
           "repairedToCorrect": {
@@ -6103,33 +6266,87 @@
       "fragment": {
         "denominator": 8,
         "firstPass": {
-          "sentences": [8, 0, 0],
-          "exactSentence": [6, 0.75],
-          "spanExact": [10, 10, 12, 1, 0.8333333333333334, 0.9090909090909091],
-          "labeledSpan": [
-            10, 10, 12, 1, 0.8333333333333334, 0.9090909090909091
+          "sentences": [
+            8,
+            0,
+            0
           ],
-          "roleAccuracyOnExactSpans": [10, 10, 1]
+          "exactSentence": [
+            6,
+            0.75
+          ],
+          "spanExact": [
+            10,
+            10,
+            12,
+            1,
+            0.8333333333333334,
+            0.9090909090909091
+          ],
+          "labeledSpan": [
+            10,
+            10,
+            12,
+            1,
+            0.8333333333333334,
+            0.9090909090909091
+          ],
+          "roleAccuracyOnExactSpans": [
+            10,
+            10,
+            1
+          ]
         },
         "final": {
-          "sentences": [8, 1, 0],
-          "exactSentence": [6, 0.75],
-          "spanExact": [9, 10, 12, 0.9, 0.75, 0.8181818181818182],
-          "labeledSpan": [9, 10, 12, 0.9, 0.75, 0.8181818181818182],
-          "roleAccuracyOnExactSpans": [9, 9, 1]
+          "sentences": [
+            8,
+            1,
+            0
+          ],
+          "exactSentence": [
+            6,
+            0.75
+          ],
+          "spanExact": [
+            9,
+            10,
+            12,
+            0.9,
+            0.75,
+            0.8181818181818182
+          ],
+          "labeledSpan": [
+            9,
+            10,
+            12,
+            0.9,
+            0.75,
+            0.8181818181818182
+          ],
+          "roleAccuracyOnExactSpans": [
+            9,
+            9,
+            1
+          ]
         },
         "transitions": {
           "repairedToCorrect": {
             "count": 1,
-            "sentenceIds": ["rr-fragment-2"]
+            "sentenceIds": [
+              "rr-fragment-2"
+            ]
           },
           "correctToWrongOrFailure": {
             "count": 1,
-            "sentenceIds": ["rr-fragment-3"]
+            "sentenceIds": [
+              "rr-fragment-3"
+            ]
           },
           "finalFailures": {
             "count": 1,
-            "sentenceIds": ["rr-fragment-4"]
+            "sentenceIds": [
+              "rr-fragment-4"
+            ]
           }
         },
         "correctFirstPassRejection": {
@@ -6138,31 +6355,84 @@
           "rate": 0.16666666666666666,
           "displayRate": "16.67%",
           "grammarSentenceIds": [],
-          "nonGrammarSentenceIds": ["rr-fragment-3"]
+          "nonGrammarSentenceIds": [
+            "rr-fragment-3"
+          ]
         }
       },
       "clause": {
         "denominator": 8,
         "firstPass": {
-          "sentences": [8, 0, 0],
-          "exactSentence": [6, 0.75],
-          "spanExact": [20, 20, 26, 1, 0.7692307692307693, 0.8695652173913044],
-          "labeledSpan": [
-            20, 20, 26, 1, 0.7692307692307693, 0.8695652173913044
+          "sentences": [
+            8,
+            0,
+            0
           ],
-          "roleAccuracyOnExactSpans": [20, 20, 1]
+          "exactSentence": [
+            6,
+            0.75
+          ],
+          "spanExact": [
+            20,
+            20,
+            26,
+            1,
+            0.7692307692307693,
+            0.8695652173913044
+          ],
+          "labeledSpan": [
+            20,
+            20,
+            26,
+            1,
+            0.7692307692307693,
+            0.8695652173913044
+          ],
+          "roleAccuracyOnExactSpans": [
+            20,
+            20,
+            1
+          ]
         },
         "final": {
-          "sentences": [8, 0, 0],
-          "exactSentence": [8, 1],
-          "spanExact": [26, 26, 26, 1, 1, 1],
-          "labeledSpan": [26, 26, 26, 1, 1, 1],
-          "roleAccuracyOnExactSpans": [26, 26, 1]
+          "sentences": [
+            8,
+            0,
+            0
+          ],
+          "exactSentence": [
+            8,
+            1
+          ],
+          "spanExact": [
+            26,
+            26,
+            26,
+            1,
+            1,
+            1
+          ],
+          "labeledSpan": [
+            26,
+            26,
+            26,
+            1,
+            1,
+            1
+          ],
+          "roleAccuracyOnExactSpans": [
+            26,
+            26,
+            1
+          ]
         },
         "transitions": {
           "repairedToCorrect": {
             "count": 2,
-            "sentenceIds": ["rr-clause-1", "rr-clause-2"]
+            "sentenceIds": [
+              "rr-clause-1",
+              "rr-clause-2"
+            ]
           },
           "correctToWrongOrFailure": {
             "count": 0,
@@ -6185,18 +6455,68 @@
       "object-complement": {
         "denominator": 8,
         "firstPass": {
-          "sentences": [8, 0, 0],
-          "exactSentence": [8, 1],
-          "spanExact": [32, 32, 32, 1, 1, 1],
-          "labeledSpan": [32, 32, 32, 1, 1, 1],
-          "roleAccuracyOnExactSpans": [32, 32, 1]
+          "sentences": [
+            8,
+            0,
+            0
+          ],
+          "exactSentence": [
+            8,
+            1
+          ],
+          "spanExact": [
+            32,
+            32,
+            32,
+            1,
+            1,
+            1
+          ],
+          "labeledSpan": [
+            32,
+            32,
+            32,
+            1,
+            1,
+            1
+          ],
+          "roleAccuracyOnExactSpans": [
+            32,
+            32,
+            1
+          ]
         },
         "final": {
-          "sentences": [8, 0, 0],
-          "exactSentence": [8, 1],
-          "spanExact": [32, 32, 32, 1, 1, 1],
-          "labeledSpan": [32, 32, 32, 1, 1, 1],
-          "roleAccuracyOnExactSpans": [32, 32, 1]
+          "sentences": [
+            8,
+            0,
+            0
+          ],
+          "exactSentence": [
+            8,
+            1
+          ],
+          "spanExact": [
+            32,
+            32,
+            32,
+            1,
+            1,
+            1
+          ],
+          "labeledSpan": [
+            32,
+            32,
+            32,
+            1,
+            1,
+            1
+          ],
+          "roleAccuracyOnExactSpans": [
+            32,
+            32,
+            1
+          ]
         },
         "transitions": {
           "repairedToCorrect": {
@@ -6224,18 +6544,68 @@
       "prepositional-attachment": {
         "denominator": 8,
         "firstPass": {
-          "sentences": [8, 0, 0],
-          "exactSentence": [8, 1],
-          "spanExact": [23, 23, 23, 1, 1, 1],
-          "labeledSpan": [23, 23, 23, 1, 1, 1],
-          "roleAccuracyOnExactSpans": [23, 23, 1]
+          "sentences": [
+            8,
+            0,
+            0
+          ],
+          "exactSentence": [
+            8,
+            1
+          ],
+          "spanExact": [
+            23,
+            23,
+            23,
+            1,
+            1,
+            1
+          ],
+          "labeledSpan": [
+            23,
+            23,
+            23,
+            1,
+            1,
+            1
+          ],
+          "roleAccuracyOnExactSpans": [
+            23,
+            23,
+            1
+          ]
         },
         "final": {
-          "sentences": [8, 0, 0],
-          "exactSentence": [8, 1],
-          "spanExact": [23, 23, 23, 1, 1, 1],
-          "labeledSpan": [23, 23, 23, 1, 1, 1],
-          "roleAccuracyOnExactSpans": [23, 23, 1]
+          "sentences": [
+            8,
+            0,
+            0
+          ],
+          "exactSentence": [
+            8,
+            1
+          ],
+          "spanExact": [
+            23,
+            23,
+            23,
+            1,
+            1,
+            1
+          ],
+          "labeledSpan": [
+            23,
+            23,
+            23,
+            1,
+            1,
+            1
+          ],
+          "roleAccuracyOnExactSpans": [
+            23,
+            23,
+            1
+          ]
         },
         "transitions": {
           "repairedToCorrect": {
@@ -6263,18 +6633,68 @@
       "coordination": {
         "denominator": 8,
         "firstPass": {
-          "sentences": [8, 0, 0],
-          "exactSentence": [8, 1],
-          "spanExact": [42, 42, 42, 1, 1, 1],
-          "labeledSpan": [42, 42, 42, 1, 1, 1],
-          "roleAccuracyOnExactSpans": [42, 42, 1]
+          "sentences": [
+            8,
+            0,
+            0
+          ],
+          "exactSentence": [
+            8,
+            1
+          ],
+          "spanExact": [
+            42,
+            42,
+            42,
+            1,
+            1,
+            1
+          ],
+          "labeledSpan": [
+            42,
+            42,
+            42,
+            1,
+            1,
+            1
+          ],
+          "roleAccuracyOnExactSpans": [
+            42,
+            42,
+            1
+          ]
         },
         "final": {
-          "sentences": [8, 0, 0],
-          "exactSentence": [8, 1],
-          "spanExact": [42, 42, 42, 1, 1, 1],
-          "labeledSpan": [42, 42, 42, 1, 1, 1],
-          "roleAccuracyOnExactSpans": [42, 42, 1]
+          "sentences": [
+            8,
+            0,
+            0
+          ],
+          "exactSentence": [
+            8,
+            1
+          ],
+          "spanExact": [
+            42,
+            42,
+            42,
+            1,
+            1,
+            1
+          ],
+          "labeledSpan": [
+            42,
+            42,
+            42,
+            1,
+            1,
+            1
+          ],
+          "roleAccuracyOnExactSpans": [
+            42,
+            42,
+            1
+          ]
         },
         "transitions": {
           "repairedToCorrect": {

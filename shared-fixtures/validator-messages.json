@@ -17,7 +17,8 @@
     "must contain a non-punctuation component",
     "COORDINATE_CLAUSE is deprecated",
     "a non-clausal fragment must contain at most one FRAGMENT_HEAD",
-    "FRAGMENT_HEAD marks a non-clausal fragment"
+    "FRAGMENT_HEAD marks a non-clausal fragment",
+    "translation must include a meaningful Chinese gloss"
   ],
   "cases": [
     {
@@ -659,6 +660,33 @@
         {
           "path": "sentences[0].components",
           "message": "FRAGMENT_HEAD marks a non-clausal fragment and must not be mixed with clause-level SUBJECT, PREDICATE, OBJECT, PREDICATIVE, COMPLEMENT, or clause roles"
+        }
+      ]
+    },
+    {
+      "id": "echo-translation-plus-grammar",
+      "sentence": { "id": "echo-translation-plus-grammar", "text": "Help turn ideas." },
+      "raw": {
+        "sentences": [
+          {
+            "sentenceId": "echo-translation-plus-grammar",
+            "components": [
+              { "startToken": 0, "endToken": 0, "role": "PREDICATE", "translation": "Help" },
+              { "startToken": 1, "endToken": 1, "role": "PREDICATE", "translation": "转化" },
+              { "startToken": 2, "endToken": 3, "role": "OBJECT", "translation": "想法" }
+            ]
+          }
+        ]
+      },
+      "accepted": false,
+      "expected": [
+        {
+          "path": "sentences[0].components[0].translation",
+          "message": "translation must include a meaningful Chinese gloss for the complete covered English span instead of echoing or only copying it"
+        },
+        {
+          "path": "sentences[0].components[1]",
+          "message": "adjacent PREDICATE components must be merged into one PREDICATE covering the whole verb group"
         }
       ]
     }

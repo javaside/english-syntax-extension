@@ -21,6 +21,23 @@ const grammarRoles: ReadonlySet<string> = new Set(Object.values(GrammarRole));
 const UNSAFE_TEXT = /<script|<iframe|javascript:|\0/i;
 
 /**
+ * 译文质量硬门:每个最终 component 的 translation 必须至少含一个 Unicode Han 字符,
+ * 并且不能在 NFKC + 大小写折叠 + Unicode 空白折叠后仍等于它覆盖的英文 span。
+ * 这条是非语法错误:component 照样解析、structureTrusted 不受影响、grammar errors
+ * 同轮继续;错误文案原样进修复 prompt。与 Kotlin 端逐字一致。
+ */
+const HAN_PATTERN = /\p{Script=Han}/u;
+const TRANSLATION_QUALITY_MESSAGE =
+  "translation must include a meaningful Chinese gloss for the complete covered English span instead of echoing or only copying it";
+/** 与 segmenter 相同的显式 Unicode 空白类,避免 TS `\s` 与 JVM `\s` 语义分叉。 */
+const TRANSLATION_QUALITY_WHITESPACE =
+  "\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff";
+const TRANSLATION_QUALITY_WHITESPACE_FOLD = new RegExp(
+  `[${TRANSLATION_QUALITY_WHITESPACE}]+`,
+  "gu",
+);
+
+/**
  * 提示词里能本地判定的粒度规则,在这里变成硬校验。
  *
  * 只写在 prompt 里的约束等于没有约束:模型违反了没人拦,坏划分照样写进缓存并长期
@@ -571,6 +588,34 @@ function componentEnglishLength(tokens: readonly Token[], range: TokenRange): nu
     .reduce((length, token) => length + token.leadingWhitespace.length + token.text.length, 0);
 }
 
+/** 从 Token 区间用 leadingWhitespace + text 重建英文 span,供译文回显比对。 */
+function rebuildEnglishSpan(tokens: readonly Token[], range: TokenRange): string {
+  return tokens
+    .filter((token) => token.id >= range.startToken && token.id <= range.endToken)
+    .map((token) => token.leadingWhitespace + token.text)
+    .join("");
+}
+
+function normalizeTranslationQuality(value: string): string {
+  return value
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(TRANSLATION_QUALITY_WHITESPACE_FOLD, " ")
+    .trim();
+}
+
+function isMeaningfulChineseGloss(
+  translation: string,
+  tokens: readonly Token[],
+  range: TokenRange,
+): boolean {
+  const span = rebuildEnglishSpan(tokens, range);
+  return (
+    HAN_PATTERN.test(translation) &&
+    normalizeTranslationQuality(translation) !== normalizeTranslationQuality(span)
+  );
+}
+
 function parseCoreComponent(
   value: unknown,
   tokens: readonly Token[],
@@ -601,6 +646,9 @@ function parseCoreComponent(
     translation.length > Math.max(500, componentEnglishLength(tokens, range) * 8)
   ) {
     addError(errors, `${path}.translation`, "is too long");
+  } else if (range !== undefined && !isMeaningfulChineseGloss(translation, tokens, range)) {
+    // 译文质量硬门:无 Han 或与英文 span 等值(回显)都只报这一条,不阻断语法诊断。
+    addError(errors, `${path}.translation`, TRANSLATION_QUALITY_MESSAGE);
   }
 
   if (

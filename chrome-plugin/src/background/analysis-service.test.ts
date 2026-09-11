@@ -1531,3 +1531,78 @@ describe("本地修掉纯标点成分，省掉一次修复往返", () => {
     expect(adapter.completeJson).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("英文回显译文被拒并走修复", () => {
+  function rawEchoCore(sentence: SentenceInput) {
+    return {
+      sentenceId: sentence.sentenceId,
+      components: [
+        { startToken: 0, endToken: 0, role: "SUBJECT", translation: "Learners" },
+        { startToken: 1, endToken: 2, role: "PREDICATE", translation: "read." },
+      ],
+    };
+  }
+
+  it("首轮回显触发修复，修复 prompt 带精确错误，只缓存修好的中文", async () => {
+    const { adapter, cache, service } = harness([
+      { sentences: [rawEchoCore(sentenceOne)] },
+      { sentences: [rawCore(sentenceOne)] },
+    ]);
+
+    const outcome = await service.analyzeCore(coreInput(), new AbortController().signal);
+
+    expect(outcome).toMatchObject({ result: [coreAnalysis(sentenceOne)], failures: [] });
+    expect(adapter.completeJson).toHaveBeenCalledTimes(2);
+    const repairWork = adapter.completeJson.mock.calls[1] as [
+      ModelProfile,
+      AnalysisModelWork["messages"],
+    ];
+    expect(repairWork[1][0]!.content).toContain(
+      "translation must include a meaningful Chinese gloss for the complete covered English span instead of echoing or only copying it",
+    );
+    expect(cache.core.size).toBe(1);
+    const cached = cache.core.get(cache.core.keys().next().value!);
+    expect(cached).toEqual(coreAnalysis(sentenceOne));
+  });
+
+  it("当前 key 下的回显缓存视为 miss 并重新请求", async () => {
+    const { adapter, cache, service } = harness([
+      { sentences: [rawCore(sentenceOne)] },
+      { sentences: [rawCore(sentenceOne)] },
+    ]);
+    await service.analyzeCore(coreInput(), new AbortController().signal);
+    const key = cache.core.keys().next().value;
+    if (key === undefined) throw new Error("expected a core cache entry");
+    cache.core.set(key, {
+      schemaVersion: CORE_SCHEMA_VERSION,
+      sentenceId: sentenceOne.sentenceId,
+      components: [
+        { startToken: 0, endToken: 0, role: GrammarRole.SUBJECT, translation: "Learners" },
+        { startToken: 1, endToken: 2, role: GrammarRole.PREDICATE, translation: "read." },
+      ],
+      modelProfileId: "stale-profile",
+    });
+    adapter.completeJson.mockClear();
+
+    const outcome = await service.analyzeCore(coreInput(), new AbortController().signal);
+
+    expect(outcome.cacheHit).toBe(false);
+    expect(outcome.result).toEqual([coreAnalysis(sentenceOne)]);
+    expect(adapter.completeJson).toHaveBeenCalledTimes(1);
+    expect(cache.core.size).toBe(1);
+  });
+
+  it("两轮回显修复后仍失败且不缓存，不加第三轮", async () => {
+    const echo = { sentences: [rawEchoCore(sentenceOne)] };
+    const { adapter, cache, service } = harness([echo, echo, echo]);
+
+    const outcome = await service.analyzeCore(coreInput(), new AbortController().signal);
+
+    expect(outcome.result).toEqual([]);
+    expect(outcome.failures).toHaveLength(1);
+    expect(outcome.failures[0]!.sentenceId).toBe(sentenceOne.sentenceId);
+    expect(outcome.failures[0]!.error).toMatchObject({ code: "INVALID_MODEL_OUTPUT" });
+    expect(adapter.completeJson).toHaveBeenCalledTimes(3);
+    expect(cache.core.size).toBe(0);
+  });
+});

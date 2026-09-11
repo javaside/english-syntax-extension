@@ -3,10 +3,15 @@ package dev.codetui.englishsyntax.language
 import dev.codetui.englishsyntax.domain.GrammarRole
 import dev.codetui.englishsyntax.domain.SentenceInput
 import dev.codetui.englishsyntax.domain.TokenRange
+import dev.codetui.englishsyntax.contract.FixtureLoader
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -177,7 +182,7 @@ class AnalysisValidatorTest {
     val request = sentence("Claude uses tools throughout.")
     val raw = core(
       """
-      {"startToken":0,"endToken":0,"role":"SUBJECT","translation":"Claude"},
+      {"startToken":0,"endToken":0,"role":"SUBJECT","translation":"Claude 助手"},
       {"startToken":1,"endToken":1,"role":"PREDICATE","translation":"使用"},
       {"startToken":2,"endToken":2,"role":"OBJECT","translation":"工具"},
       {"startToken":3,"endToken":4,"role":"ADVERBIAL","translation":"全程"}
@@ -928,4 +933,47 @@ class AnalysisValidatorTest {
     assertEquals(5, clauseOnlyConjunctions.size)
     assertEquals(15, subjectClauseIntroducers.size)
   }
+
+  @Test
+  fun `Han script regex matches Chinese and rejects ascii`() {
+    assertTrue(hanPattern.containsMatchIn("汉"))
+    assertTrue(hanPattern.containsMatchIn("JSON 数据格式"))
+    assertTrue(hanPattern.containsMatchIn("哈勃常数 H0"))
+    assertFalse(hanPattern.containsMatchIn("JSON"))
+    assertFalse(hanPattern.containsMatchIn("Spring AI"))
+    assertFalse(hanPattern.containsMatchIn("H0"))
+  }
+
+  @Test
+  fun `shared translation quality fixture replays with exact ordered errors`() {
+    val fixture = Json.parseToJsonElement(FixtureLoader.text("translation-quality.json")).jsonObject
+    val cases = fixture.getValue("cases").jsonArray
+    val ids = cases.map { it.jsonObject.getValue("id").jsonPrimitive.content }
+
+    assertEquals(1, fixture.getValue("schemaVersion").jsonPrimitive.content.toInt())
+    assertTrue(cases.isNotEmpty())
+    assertEquals(ids.size, ids.toSet().size)
+
+    cases.forEach { element ->
+      val testCase = element.jsonObject
+      val sentenceJson = testCase.getValue("sentence").jsonObject
+      val text = sentenceJson.getValue("text").jsonPrimitive.content
+      val sentence = SentenceInput(
+        sentenceId = sentenceJson.getValue("id").jsonPrimitive.content,
+        text = text,
+        tokens = tokenize(text),
+      )
+      val accepted = testCase.getValue("accepted").jsonPrimitive.content.toBooleanStrict()
+      val result = validateCoreBatch(testCase.getValue("raw"), listOf(sentence), "translation-quality-fixture")
+      assertEquals(accepted, result.ok, "fixture case ${testCase.id()} acceptance")
+      assertEquals(expectedErrors(testCase), result.errors.map { it.path to it.message }, "fixture case ${testCase.id()}")
+    }
+  }
+
+  private fun expectedErrors(testCase: JsonObject) = testCase.getValue("expected").jsonArray.map { element ->
+    val expected = element.jsonObject
+    expected.getValue("path").jsonPrimitive.content to expected.getValue("message").jsonPrimitive.content
+  }
+
+  private fun JsonObject.id() = getValue("id").jsonPrimitive.content
 }

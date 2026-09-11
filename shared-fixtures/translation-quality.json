@@ -1,0 +1,275 @@
+{
+  "schemaVersion": 1,
+  "cases": [
+    {
+      "id": "echo-exact",
+      "sentence": { "id": "echo-exact", "text": "The service works well." },
+      "raw": {
+        "sentences": [
+          {
+            "sentenceId": "echo-exact",
+            "components": [
+              { "startToken": 0, "endToken": 1, "role": "SUBJECT", "translation": "The service" },
+              { "startToken": 2, "endToken": 2, "role": "PREDICATE", "translation": "工作" },
+              { "startToken": 3, "endToken": 3, "role": "ADVERBIAL", "translation": "良好" }
+            ]
+          }
+        ]
+      },
+      "accepted": false,
+      "expected": [
+        {
+          "path": "sentences[0].components[0].translation",
+          "message": "translation must include a meaningful Chinese gloss for the complete covered English span instead of echoing or only copying it"
+        }
+      ]
+    },
+    {
+      "id": "echo-case-whitespace",
+      "sentence": { "id": "echo-case-whitespace", "text": "The service works well." },
+      "raw": {
+        "sentences": [
+          {
+            "sentenceId": "echo-case-whitespace",
+            "components": [
+              { "startToken": 0, "endToken": 1, "role": "SUBJECT", "translation": "  THE   service " },
+              { "startToken": 2, "endToken": 2, "role": "PREDICATE", "translation": "工作" },
+              { "startToken": 3, "endToken": 3, "role": "ADVERBIAL", "translation": "良好" }
+            ]
+          }
+        ]
+      },
+      "accepted": false,
+      "expected": [
+        {
+          "path": "sentences[0].components[0].translation",
+          "message": "translation must include a meaningful Chinese gloss for the complete covered English span instead of echoing or only copying it"
+        }
+      ]
+    },
+    {
+      "id": "echo-fullwidth",
+      "sentence": { "id": "echo-fullwidth", "text": "JSON" },
+      "raw": {
+        "sentences": [
+          {
+            "sentenceId": "echo-fullwidth",
+            "components": [
+              { "startToken": 0, "endToken": 0, "role": "FRAGMENT_HEAD", "translation": "ＪＳＯＮ" }
+            ]
+          }
+        ]
+      },
+      "accepted": false,
+      "expected": [
+        {
+          "path": "sentences[0].components[0].translation",
+          "message": "translation must include a meaningful Chinese gloss for the complete covered English span instead of echoing or only copying it"
+        }
+      ]
+    },
+    {
+      "id": "no-han-non-echo",
+      "sentence": { "id": "no-han-non-echo", "text": "The service works well." },
+      "raw": {
+        "sentences": [
+          {
+            "sentenceId": "no-han-non-echo",
+            "components": [
+              { "startToken": 0, "endToken": 1, "role": "SUBJECT", "translation": "the system" },
+              { "startToken": 2, "endToken": 2, "role": "PREDICATE", "translation": "工作" },
+              { "startToken": 3, "endToken": 3, "role": "ADVERBIAL", "translation": "良好" }
+            ]
+          }
+        ]
+      },
+      "accepted": false,
+      "expected": [
+        {
+          "path": "sentences[0].components[0].translation",
+          "message": "translation must include a meaningful Chinese gloss for the complete covered English span instead of echoing or only copying it"
+        }
+      ]
+    },
+    {
+      "id": "proper-json",
+      "sentence": { "id": "proper-json", "text": "JSON" },
+      "raw": {
+        "sentences": [
+          {
+            "sentenceId": "proper-json",
+            "components": [
+              { "startToken": 0, "endToken": 0, "role": "FRAGMENT_HEAD", "translation": "JSON" }
+            ]
+          }
+        ]
+      },
+      "accepted": false,
+      "expected": [
+        {
+          "path": "sentences[0].components[0].translation",
+          "message": "translation must include a meaningful Chinese gloss for the complete covered English span instead of echoing or only copying it"
+        }
+      ]
+    },
+    {
+      "id": "proper-spring-ai",
+      "sentence": { "id": "proper-spring-ai", "text": "Spring AI" },
+      "raw": {
+        "sentences": [
+          {
+            "sentenceId": "proper-spring-ai",
+            "components": [
+              { "startToken": 0, "endToken": 1, "role": "FRAGMENT_HEAD", "translation": "Spring AI" }
+            ]
+          }
+        ]
+      },
+      "accepted": false,
+      "expected": [
+        {
+          "path": "sentences[0].components[0].translation",
+          "message": "translation must include a meaningful Chinese gloss for the complete covered English span instead of echoing or only copying it"
+        }
+      ]
+    },
+    {
+      "id": "proper-gwtc",
+      "sentence": { "id": "proper-gwtc", "text": "GWTC-5.0" },
+      "raw": {
+        "sentences": [
+          {
+            "sentenceId": "proper-gwtc",
+            "components": [
+              { "startToken": 0, "endToken": 2, "role": "FRAGMENT_HEAD", "translation": "GWTC-5.0" }
+            ]
+          }
+        ]
+      },
+      "accepted": false,
+      "expected": [
+        {
+          "path": "sentences[0].components[0].translation",
+          "message": "translation must include a meaningful Chinese gloss for the complete covered English span instead of echoing or only copying it"
+        }
+      ]
+    },
+    {
+      "id": "proper-h0",
+      "sentence": { "id": "proper-h0", "text": "H0" },
+      "raw": {
+        "sentences": [
+          {
+            "sentenceId": "proper-h0",
+            "components": [
+              { "startToken": 0, "endToken": 0, "role": "FRAGMENT_HEAD", "translation": "H0" }
+            ]
+          }
+        ]
+      },
+      "accepted": false,
+      "expected": [
+        {
+          "path": "sentences[0].components[0].translation",
+          "message": "translation must include a meaningful Chinese gloss for the complete covered English span instead of echoing or only copying it"
+        }
+      ]
+    },
+    {
+      "id": "accept-json",
+      "sentence": { "id": "accept-json", "text": "JSON" },
+      "raw": {
+        "sentences": [
+          {
+            "sentenceId": "accept-json",
+            "components": [
+              { "startToken": 0, "endToken": 0, "role": "FRAGMENT_HEAD", "translation": "JSON 数据格式" }
+            ]
+          }
+        ]
+      },
+      "accepted": true,
+      "expected": []
+    },
+    {
+      "id": "accept-spring-ai",
+      "sentence": { "id": "accept-spring-ai", "text": "Spring AI" },
+      "raw": {
+        "sentences": [
+          {
+            "sentenceId": "accept-spring-ai",
+            "components": [
+              { "startToken": 0, "endToken": 1, "role": "FRAGMENT_HEAD", "translation": "Spring AI 框架" }
+            ]
+          }
+        ]
+      },
+      "accepted": true,
+      "expected": []
+    },
+    {
+      "id": "accept-gwtc",
+      "sentence": { "id": "accept-gwtc", "text": "GWTC-5.0" },
+      "raw": {
+        "sentences": [
+          {
+            "sentenceId": "accept-gwtc",
+            "components": [
+              {
+                "startToken": 0,
+                "endToken": 2,
+                "role": "FRAGMENT_HEAD",
+                "translation": "GWTC-5.0 引力波事件目录"
+              }
+            ]
+          }
+        ]
+      },
+      "accepted": true,
+      "expected": []
+    },
+    {
+      "id": "accept-h0",
+      "sentence": { "id": "accept-h0", "text": "H0" },
+      "raw": {
+        "sentences": [
+          {
+            "sentenceId": "accept-h0",
+            "components": [
+              { "startToken": 0, "endToken": 0, "role": "FRAGMENT_HEAD", "translation": "哈勃常数 H0" }
+            ]
+          }
+        ]
+      },
+      "accepted": true,
+      "expected": []
+    },
+    {
+      "id": "echo-plus-grammar",
+      "sentence": { "id": "echo-plus-grammar", "text": "Help turn ideas." },
+      "raw": {
+        "sentences": [
+          {
+            "sentenceId": "echo-plus-grammar",
+            "components": [
+              { "startToken": 0, "endToken": 0, "role": "PREDICATE", "translation": "Help" },
+              { "startToken": 1, "endToken": 1, "role": "PREDICATE", "translation": "转化" },
+              { "startToken": 2, "endToken": 3, "role": "OBJECT", "translation": "想法" }
+            ]
+          }
+        ]
+      },
+      "accepted": false,
+      "expected": [
+        {
+          "path": "sentences[0].components[0].translation",
+          "message": "translation must include a meaningful Chinese gloss for the complete covered English span instead of echoing or only copying it"
+        },
+        {
+          "path": "sentences[0].components[1]",
+          "message": "adjacent PREDICATE components must be merged into one PREDICATE covering the whole verb group"
+        }
+      ]
+    }
+  ]
+}

@@ -481,4 +481,100 @@ class AnalysisServiceTest {
     assertEquals(0, server.requests.size)
     assertEquals(outcome.result.structures, second.result.structures)
   }
+
+  /** 与 Chrome 端 analysis-service.test.ts「英文回显译文被拒并走修复」逐条同构。 */
+  @Test
+  fun `echo translation triggers repair whose prompt carries the exact error and caches only the fixed chinese`() = runBlocking {
+    val sentence = sentence("s1", "Learners read.")
+    // 首轮：两个成分都原样回显英文 span（无 Han）。
+    val echo = """{"sentences":[{"sentenceId":"s1","components":[""" +
+      """{"startToken":0,"endToken":0,"role":"SUBJECT","translation":"Learners"},""" +
+      """{"startToken":1,"endToken":2,"role":"PREDICATE","translation":"read."}]}]}"""
+    val repaired = """{"sentences":[{"sentenceId":"s1","components":[""" +
+      """{"startToken":0,"endToken":0,"role":"SUBJECT","translation":"学习者"},""" +
+      """{"startToken":1,"endToken":2,"role":"PREDICATE","translation":"阅读"}]}]}"""
+    server.enqueueJson(echo)
+    server.enqueueJson(repaired)
+
+    val outcome = service.analyzeCore(profile(), "doc-1", listOf(sentence))
+
+    assertEquals(0, outcome.failures.size)
+    assertEquals(1, outcome.result.size)
+    assertEquals(listOf("学习者", "阅读"), outcome.result[0].components.map { it.translation })
+    assertEquals(2, server.requests.size)
+    val repairPrompt = server.requests[1].body.getValue("messages").jsonArray
+      .first().jsonObject.getValue("content").jsonPrimitive.content
+    assertTrue(
+      "translation must include a meaningful Chinese gloss for the complete covered English span instead of echoing or only copying it" in repairPrompt,
+    )
+    // 只缓存修好的中文版本：缓存条目数 = 成功句数 = 1，且重新读取不触发请求。
+    server.clearRequests()
+    val second = service.analyzeCore(profile(), "doc-1", listOf(sentence))
+    assertTrue(second.cacheHit)
+    assertEquals(0, server.requests.size)
+    assertEquals(listOf("学习者", "阅读"), second.result[0].components.map { it.translation })
+  }
+
+  @Test
+  fun `echo translation under the current cache key is treated as a miss and re-requested`() = runBlocking {
+    val sentence = sentence("s1", "Learners read.")
+    val chinese = """{"sentences":[{"sentenceId":"s1","components":[""" +
+      """{"startToken":0,"endToken":0,"role":"SUBJECT","translation":"学习者"},""" +
+      """{"startToken":1,"endToken":2,"role":"PREDICATE","translation":"阅读"}]}]}"""
+    server.enqueueJson(chinese)
+    service.analyzeCore(profile(), "doc-1", listOf(sentence))
+    server.clearRequests()
+
+    // 把当前 key 下的缓存值改写为英文回显形状（旧版本写入的合法形状）。
+    val key = dev.codetui.englishsyntax.cache.createCoreCacheKey(
+      dev.codetui.englishsyntax.cache.CoreCacheKeyInput(
+        sentence.text,
+        dev.codetui.englishsyntax.domain.ContractVersions.CORE_SCHEMA,
+        dev.codetui.englishsyntax.domain.ContractVersions.CORE_PROMPT,
+      ),
+    )
+    cache.putCore(
+      key,
+      "stale-profile",
+      json.parseToJsonElement(
+        """{"schemaVersion":${dev.codetui.englishsyntax.domain.ContractVersions.CORE_SCHEMA},"sentenceId":"s1","components":[""" +
+          """{"startToken":0,"endToken":0,"role":"SUBJECT","translation":"Learners"},""" +
+          """{"startToken":1,"endToken":2,"role":"PREDICATE","translation":"read."}],"modelProfileId":"stale-profile"}""",
+      ) as JsonObject,
+    )
+    server.enqueueJson(chinese)
+
+    val outcome = service.analyzeCore(profile(), "doc-1", listOf(sentence))
+
+    assertTrue(!outcome.cacheHit)
+    assertEquals(1, server.requests.size)
+    assertEquals(listOf("学习者", "阅读"), outcome.result[0].components.map { it.translation })
+    // 回显旧值没有留下第二条缓存；当前 key 指向重取后的中文结果。
+    server.clearRequests()
+    val second = service.analyzeCore(profile(), "doc-1", listOf(sentence))
+    assertTrue(second.cacheHit)
+    assertEquals(0, server.requests.size)
+    assertEquals(listOf("学习者", "阅读"), second.result[0].components.map { it.translation })
+  }
+
+  @Test
+  fun `echo translation surviving two repairs fails without a third round or caching`() = runBlocking {
+    val sentence = sentence("s1", "Learners read.")
+    val echo = """{"sentences":[{"sentenceId":"s1","components":[""" +
+      """{"startToken":0,"endToken":0,"role":"SUBJECT","translation":"Learners"},""" +
+      """{"startToken":1,"endToken":2,"role":"PREDICATE","translation":"read."}]}]}"""
+    server.enqueueJson(echo)
+    server.enqueueJson(echo)
+    server.enqueueJson(echo)
+
+    val outcome = service.analyzeCore(profile(), "doc-1", listOf(sentence))
+
+    assertEquals(0, outcome.result.size)
+    assertEquals(1, outcome.failures.size)
+    assertEquals("s1", outcome.failures[0].sentenceId)
+    assertEquals(dev.codetui.englishsyntax.domain.ErrorCode.INVALID_MODEL_OUTPUT, outcome.failures[0].error.code)
+    // 首轮 + 至多两轮修复，绝无第三轮；失败结果不写缓存（缓存条目数为 0）。
+    assertEquals(3, server.requests.size)
+    assertEquals(0, cache.stats().entries)
+  }
 }

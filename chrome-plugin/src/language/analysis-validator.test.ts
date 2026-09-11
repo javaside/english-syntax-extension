@@ -418,7 +418,7 @@ describe("core analysis grammar constraints", () => {
       "throughout as ADVERBIAL",
       "Claude uses tools throughout.",
       [
-        { startToken: 0, endToken: 0, role: "SUBJECT", translation: "Claude" },
+        { startToken: 0, endToken: 0, role: "SUBJECT", translation: "Claude 助手" },
         { startToken: 1, endToken: 1, role: "PREDICATE", translation: "使用" },
         { startToken: 2, endToken: 2, role: "OBJECT", translation: "工具" },
         { startToken: 3, endToken: 4, role: "ADVERBIAL", translation: "全程" },
@@ -1179,6 +1179,51 @@ describe("core analysis grammar constraints", () => {
       { startToken: 4, endToken: 6, role: "ATTRIBUTIVE_CLAUSE", translation: "昨天打电话来的" },
       { startToken: 7, endToken: 10, role: "ADVERBIAL", translation: "在公园里" },
     ]);
+  });
+});
+
+describe("shared translation quality fixture", () => {
+  const fixture = JSON.parse(
+    readFileSync(
+      new URL("../../../shared-fixtures/translation-quality.json", import.meta.url),
+      "utf8",
+    ),
+  ) as {
+    schemaVersion: number;
+    cases: Array<{
+      id: string;
+      sentence: { id: string; text: string };
+      raw: unknown;
+      accepted: boolean;
+      expected: Array<{ path: string; message: string }>;
+    }>;
+  };
+
+  it("has an unambiguous versioned schema", () => {
+    expect(fixture.schemaVersion).toBe(1);
+    expect(fixture.cases.length).toBeGreaterThan(0);
+    expect(new Set(fixture.cases.map(({ id }) => id)).size).toBe(fixture.cases.length);
+    expect(
+      fixture.cases.every(
+        ({ accepted, expected }) =>
+          typeof accepted === "boolean" && (accepted ? expected.length === 0 : expected.length > 0),
+      ),
+    ).toBe(true);
+  });
+
+  it.each(fixture.cases)("matches the complete ordered errors for $id", (testCase) => {
+    const sentence: SentenceInput = {
+      sentenceId: testCase.sentence.id,
+      text: testCase.sentence.text,
+      tokens: tokenize(testCase.sentence.text),
+    };
+    const result = validateCoreBatch(testCase.raw, [sentence], "translation-quality-fixture");
+    expect(result.ok, `fixture case ${testCase.id} acceptance`).toBe(testCase.accepted);
+    if (result.ok) {
+      expect(testCase.expected).toEqual([]);
+    } else {
+      expect(result.errors).toEqual(testCase.expected);
+    }
   });
 });
 

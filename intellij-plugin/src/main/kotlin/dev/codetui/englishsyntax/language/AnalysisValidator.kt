@@ -14,8 +14,26 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
+import java.text.Normalizer
 
 private val unsafeText = Regex("<script|<iframe|javascript:|\\u0000", RegexOption.IGNORE_CASE)
+
+/**
+ * 译文质量硬门:每个最终 component 的 translation 必须至少含一个 Unicode Han 字符,
+ * 并且不能在 NFKC + 大小写折叠 + Unicode 空白折叠后仍等于它覆盖的英文 span。
+ * 这条是非语法错误:component 照样解析、structureTrusted 不受影响、grammar errors
+ * 同轮继续;错误文案原样进修复 prompt。与 Chrome 端逐字一致。
+ *
+ * `\p{IsHan}` 是 JVM 的 Script=Han 二元属性,与 `\p{script=Han}` 及 TS 的
+ * `\p{Script=Han}` 等价(JDK 21 实测;由 AnalysisValidatorTest 钉住)。
+ */
+internal val hanPattern = Regex("\\p{IsHan}")
+internal const val TRANSLATION_QUALITY_MESSAGE =
+  "translation must include a meaningful Chinese gloss for the complete covered English span instead of echoing or only copying it"
+/** 与 Segmenter 相同的显式 Unicode 空白类,避免 JVM `\s` 与 TS `\s` 语义分叉。 */
+private val translationQualityWhitespaceClass =
+  "\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff"
+private val translationQualityWhitespaceFold = Regex("[$translationQualityWhitespaceClass]+")
 
 private val coreEnvelopeKeys = setOf("sentences")
 private val coreSentenceKeys = setOf("sentenceId", "components")
@@ -74,6 +92,19 @@ private fun parseRange(value: JsonObject, path: String, errors: MutableList<Vali
 private fun tokenLength(tokens: List<Token>, range: TokenRange): Int = tokens
   .filter { it.id in range.startToken..range.endToken }
   .sumOf { it.leadingWhitespace.length + it.text.length }
+
+/** 从 Token 区间用 leadingWhitespace + text 重建英文 span,供译文回显比对。 */
+private fun rebuildEnglishSpan(tokens: List<Token>, range: TokenRange): String =
+  tokens.filter { it.id in range.startToken..range.endToken }.joinToString("") { it.leadingWhitespace + it.text }
+
+private fun normalizeTranslationQuality(value: String): String =
+  Normalizer.normalize(value, Normalizer.Form.NFKC).lowercase().replace(translationQualityWhitespaceFold, " ").trim()
+
+private fun isMeaningfulChineseGloss(translation: String, tokens: List<Token>, range: TokenRange): Boolean {
+  val span = rebuildEnglishSpan(tokens, range)
+  return hanPattern.containsMatchIn(translation) &&
+    normalizeTranslationQuality(translation) != normalizeTranslationQuality(span)
+}
 
 /**
  * 提示词里能本地判定的粒度规则，在这里变成硬校验。与 Chrome 端
@@ -432,6 +463,9 @@ private fun parseCoreComponent(
     errors += error("$path.translation", "must not be empty")
   } else if (range != null && translation.length > maxOf(500, tokenLength(tokens, range) * 8)) {
     errors += error("$path.translation", "is too long")
+  } else if (range != null && !isMeaningfulChineseGloss(translation, tokens, range)) {
+    // 译文质量硬门:无 Han 或与英文 span 等值(回显)都只报这一条,不阻断语法诊断。
+    errors += error("$path.translation", TRANSLATION_QUALITY_MESSAGE)
   }
   val role = roleText?.let { runCatching { GrammarRole.valueOf(it) }.getOrNull() }
   return if (range == null || role == null || translation == null || translation.trim().isEmpty()) null
