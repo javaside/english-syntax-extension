@@ -242,15 +242,30 @@ const CLAUSE_ROLES: ReadonlySet<GrammarRole> = new Set([
   GrammarRole.ATTRIBUTIVE_CLAUSE,
   GrammarRole.ADVERBIAL_CLAUSE,
 ]);
-const FRAGMENT_CLAUSE_ROLES: ReadonlySet<GrammarRole> = new Set([
+/**
+ * `FRAGMENT_HEAD` 存在时仍被禁止的分句级角色。fragment-relative 放行只移出
+ * `ATTRIBUTIVE_CLAUSE` 一项:名词片段后跟一个完整定语从句是真实文本里高频的结构
+ * (`An API that returns JSON responses`),其余分句级角色与片段主体同现依旧等于
+ * 给不成句的输入虚构主谓宾。刻意用显式集合而不是 `...CLAUSE_ROLES` 展开——
+ * 从句五类里哪一类被放行必须在这一处一眼可见,后续再放行/收回也只改这里。
+ */
+const FRAGMENT_FORBIDDEN_ROLES: ReadonlySet<GrammarRole> = new Set([
   GrammarRole.SUBJECT,
   GrammarRole.PREDICATE,
   GrammarRole.OBJECT,
   GrammarRole.PREDICATIVE,
   GrammarRole.COMPLEMENT,
-  ...CLAUSE_ROLES,
+  GrammarRole.SUBJECT_CLAUSE,
+  GrammarRole.OBJECT_CLAUSE,
+  GrammarRole.PREDICATIVE_CLAUSE,
+  GrammarRole.ADVERBIAL_CLAUSE,
   GrammarRole.COORDINATE_CLAUSE,
 ]);
+const FRAGMENT_MIXED_ROLE_MESSAGE =
+  "FRAGMENT_HEAD marks a non-clausal fragment and must not be mixed with clause-level " +
+  "SUBJECT, PREDICATE, OBJECT, PREDICATIVE, COMPLEMENT, SUBJECT_CLAUSE, OBJECT_CLAUSE, " +
+  "PREDICATIVE_CLAUSE, ADVERBIAL_CLAUSE, or the deprecated COORDINATE_CLAUSE; a whole " +
+  "ATTRIBUTIVE_CLAUSE is the only clause role allowed beside a FRAGMENT_HEAD";
 
 /**
  * 一个从句至少要有引导词 + 谓语,或主语 + 谓语,所以实词数 1 一定不是从句。
@@ -533,13 +548,9 @@ function collectGrammarErrors(
   }
   if (
     fragmentHeads.length > 0 &&
-    components.some((component) => FRAGMENT_CLAUSE_ROLES.has(component.role))
+    components.some((component) => FRAGMENT_FORBIDDEN_ROLES.has(component.role))
   ) {
-    addError(
-      errors,
-      `${path}.components`,
-      "FRAGMENT_HEAD marks a non-clausal fragment and must not be mixed with clause-level SUBJECT, PREDICATE, OBJECT, PREDICATIVE, COMPLEMENT, or clause roles",
-    );
+    addError(errors, `${path}.components`, FRAGMENT_MIXED_ROLE_MESSAGE);
   }
 }
 

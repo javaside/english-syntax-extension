@@ -659,7 +659,7 @@
       "expected": [
         {
           "path": "sentences[0].components",
-          "message": "FRAGMENT_HEAD marks a non-clausal fragment and must not be mixed with clause-level SUBJECT, PREDICATE, OBJECT, PREDICATIVE, COMPLEMENT, or clause roles"
+          "message": "FRAGMENT_HEAD marks a non-clausal fragment and must not be mixed with clause-level SUBJECT, PREDICATE, OBJECT, PREDICATIVE, COMPLEMENT, SUBJECT_CLAUSE, OBJECT_CLAUSE, PREDICATIVE_CLAUSE, ADVERBIAL_CLAUSE, or the deprecated COORDINATE_CLAUSE; a whole ATTRIBUTIVE_CLAUSE is the only clause role allowed beside a FRAGMENT_HEAD"
         }
       ]
     },
@@ -687,6 +687,50 @@
         {
           "path": "sentences[0].components[1]",
           "message": "adjacent PREDICATE components must be merged into one PREDICATE covering the whole verb group"
+        }
+      ]
+    },
+    {
+      "id": "fragment-relative-accepted",
+      "sentence": { "id": "fragment-relative-accepted", "text": "An API that returns JSON responses." },
+      "raw": {
+        "sentences": [
+          {
+            "sentenceId": "fragment-relative-accepted",
+            "components": [
+              { "startToken": 0, "endToken": 1, "role": "FRAGMENT_HEAD", "translation": "一个 API" },
+              { "startToken": 2, "endToken": 5, "role": "ATTRIBUTIVE_CLAUSE", "translation": "返回 JSON 响应的" }
+            ]
+          }
+        ]
+      },
+      "accepted": true,
+      "expected": []
+    },
+    {
+      "id": "fragment-truncated-attributive",
+      "sentence": { "id": "fragment-truncated-attributive", "text": "An API that returns JSON responses." },
+      "raw": {
+        "sentences": [
+          {
+            "sentenceId": "fragment-truncated-attributive",
+            "components": [
+              { "startToken": 0, "endToken": 1, "role": "FRAGMENT_HEAD", "translation": "一个 API" },
+              { "startToken": 2, "endToken": 2, "role": "ATTRIBUTIVE_CLAUSE", "translation": "引导词" },
+              { "startToken": 3, "endToken": 5, "role": "PREDICATE", "translation": "返回 JSON 响应" }
+            ]
+          }
+        ]
+      },
+      "accepted": false,
+      "expected": [
+        {
+          "path": "sentences[0].components[1]",
+          "message": "a clause component must cover a whole clause: extend it through the clause's own subject, predicate, and any objects or adverbials instead of a single word"
+        },
+        {
+          "path": "sentences[0].components",
+          "message": "FRAGMENT_HEAD marks a non-clausal fragment and must not be mixed with clause-level SUBJECT, PREDICATE, OBJECT, PREDICATIVE, COMPLEMENT, SUBJECT_CLAUSE, OBJECT_CLAUSE, PREDICATIVE_CLAUSE, ADVERBIAL_CLAUSE, or the deprecated COORDINATE_CLAUSE; a whole ATTRIBUTIVE_CLAUSE is the only clause role allowed beside a FRAGMENT_HEAD"
         }
       ]
     }

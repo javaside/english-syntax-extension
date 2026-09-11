@@ -158,7 +158,7 @@
 
 ### I-11.2 非分句片段不得被强套进分句角色
 
-**规则** 技术文档里大量输入根本不成句(标题、列表项、名词/形容词/非限定动词短语)。completeness-first:有成句结构(显式限定谓语,或省略主语的祈使句)才用既有分句角色;不成句的输入**恰有一个** `FRAGMENT_HEAD`,可分离的后置介词/分词/不定式短语标 `ATTRIBUTE`,**绝不虚构 `SUBJECT` / `PREDICATE` / `OBJECT` 等分句角色**去拼一个主谓宾。三处必须说同一件事:提示词 `COMPLETENESS_FIRST_RULE`(内嵌正例 `Portable API support across AI providers…` 与祈使反例 `Install the CLI` = `PREDICATE("Install")` + `OBJECT("the CLI")`)、黄金集 `conventions` 与 `fragment-*` 标注、双端 validator 的两条硬门(至多一个 `FRAGMENT_HEAD`;存在时不得混任何分句级角色)加上整句单成分门对该角色的唯一豁免。`CORE_PROMPT_VERSION` 11 落地,core 缓存整体作废;`FRAGMENT_HEAD` 的 `translation` 与其它成分一样只译自身覆盖的局部短语,没有句级 translation。validator **刻意不用词表判「缺限定谓语」**——词形兼类(祈使句、动名词短语)会大面积误拒,「模型该用而没用 `FRAGMENT_HEAD`」由提示词、黄金集与真模型评测约束。
+**规则** 技术文档里大量输入根本不成句(标题、列表项、名词/形容词/非限定动词短语)。completeness-first:有成句结构(显式限定谓语,或省略主语的祈使句)才用既有分句角色;不成句的输入**恰有一个** `FRAGMENT_HEAD`,可分离的后置介词/分词/不定式短语标 `ATTRIBUTE`,**绝不虚构 `SUBJECT` / `PREDICATE` / `OBJECT` 等分句角色**去拼一个主谓宾。三处必须说同一件事:提示词 `COMPLETENESS_FIRST_RULE`(内嵌正例 `Portable API support across AI providers…` 与祈使反例 `Install the CLI` = `PREDICATE("Install")` + `OBJECT("the CLI")`)、黄金集 `conventions` 与 `fragment-*` 标注、双端 validator 的两条硬门(至多一个 `FRAGMENT_HEAD`;存在时不得混 `FRAGMENT_FORBIDDEN_ROLES` 显式列举的分句级角色——唯一例外是完整 `ATTRIBUTIVE_CLAUSE` 可以紧跟片段主体,fragment-relative 放行只移出这一类,其余从句门照旧)加上整句单成分门对该角色的唯一豁免。`CORE_PROMPT_VERSION` 11 落地,core 缓存整体作废;`FRAGMENT_HEAD` 的 `translation` 与其它成分一样只译自身覆盖的局部短语,没有句级 translation。validator **刻意不用词表判「缺限定谓语」**——词形兼类(祈使句、动名词短语)会大面积误拒,「模型该用而没用 `FRAGMENT_HEAD`」由提示词、黄金集与真模型评测约束。
 
 **为什么** 文档页里片段输入与成句输入同样高频;把 `Portable API support…` 强拆成主谓宾会得到完全虚构的语法讲解,而单靠「缺主语不判」的既有硬门一个都拦不住——这正是「一个 role 的判定标准只能有一处定义」在成句判定上的延伸。祈使句反例同样关键:祈使句没有主语但有限定谓语,是分句不是片段。
 

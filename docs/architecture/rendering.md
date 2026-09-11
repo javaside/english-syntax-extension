@@ -173,7 +173,7 @@ content script 跑在隔离世界,`window.customElements` 是 `null`。所以 `S
 | **成分首 token 去前导空格** | 否则下划线会伸进成分之间的间隙,模糊边界                                                                                                                                                          |
 | **未覆盖的标点**            | 挂到**前一个成分的英文行**里(没有前置成分时挂句容器),不单独成卡                                                                                                                                  |
 | **句首独立标点**            | `align-self: end` 沉到行底,不参与三行基线组                                                                                                                                                      |
-| **片段主体**                | `FRAGMENT_HEAD`(标签「片段主体」)与其它结构角色一样走三行卡片:专属色浅色主题 `#0284c7`、IDEA 深色主题提亮 `#38bdf8`,IntelliJ 侧 `roles.ts` 的色板/标签与 Chrome 端逐值同源(`roles.test.ts` 钉住) |
+| **片段主体**                | `FRAGMENT_HEAD`(标签「片段主体」)与其它结构角色一样走三行卡片:专属色浅色主题 `#0284c7`、IDEA 深色主题提亮 `#38bdf8`,IntelliJ 侧 `roles.ts` 的色板/标签与 Chrome 端逐值同源(`roles.test.ts` 钉住)。fragment-relative 放行后,`FRAGMENT_HEAD + ATTRIBUTIVE_CLAUSE` 的两成分片段句同样按各自角色正常渲染,渲染层对该组合没有任何特殊分支 |
 | **并列分句编号**            | 有 ≥2 个 `COORDINATE_CLAUSE` 时,可见标签加圈码 ①②,`aria-label` 用普通数字(屏幕阅读器念得准);`COORDINATE_CLAUSE` 输出已被提示词与 validator 双侧废弃,这条编号路径实际不会再触发                   |
 | **宽译文**                  | 超过 16 个字符的译文加 `.translation-wide`(`inline-size:0; min-inline-size:max(100%,16em)`),铺满卡宽而不是以 16em 窄列折行。Chrome 在内涵尺寸阶段解析不了含百分比的 `max()`,只能按长度分流       |
 | **回显译文**                | 小参数本地模型偶尔把英文原文回填进 `translation`;`isEchoTranslation()` 判等即视为无译文,退回两行                                                                                                 |

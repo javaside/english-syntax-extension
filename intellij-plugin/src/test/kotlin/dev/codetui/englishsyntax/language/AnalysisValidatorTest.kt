@@ -278,7 +278,6 @@ class AnalysisValidatorTest {
       "SUBJECT_CLAUSE",
       "OBJECT_CLAUSE",
       "PREDICATIVE_CLAUSE",
-      "ATTRIBUTIVE_CLAUSE",
       "ADVERBIAL_CLAUSE",
       "COORDINATE_CLAUSE",
     )
@@ -291,9 +290,39 @@ class AnalysisValidatorTest {
         """.trimIndent(),
         "sentences[0].components",
         "FRAGMENT_HEAD marks a non-clausal fragment and must not be mixed with clause-level " +
-          "SUBJECT, PREDICATE, OBJECT, PREDICATIVE, COMPLEMENT, or clause roles",
+          "SUBJECT, PREDICATE, OBJECT, PREDICATIVE, COMPLEMENT, SUBJECT_CLAUSE, OBJECT_CLAUSE, " +
+          "PREDICATIVE_CLAUSE, ADVERBIAL_CLAUSE, or the deprecated COORDINATE_CLAUSE; a whole " +
+          "ATTRIBUTIVE_CLAUSE is the only clause role allowed beside a FRAGMENT_HEAD",
       )
     }
+  }
+
+  @Test
+  fun `accepts a fragment head followed by a whole attributive clause`() {
+    // fragment-relative:不成句的名词片段后跟一个完整定语从句,从句整块覆盖。
+    assertAccepted(
+      "An API that returns JSON responses.",
+      """
+      {"startToken":0,"endToken":1,"role":"FRAGMENT_HEAD","translation":"一个 API"},
+      {"startToken":2,"endToken":5,"role":"ATTRIBUTIVE_CLAUSE","translation":"返回 JSON 响应的"}
+      """.trimIndent(),
+    )
+  }
+
+  @Test
+  fun `keeps rejecting a fragment head followed by a truncated attributive clause`() {
+    // 放行只针对「完整从句」:只标引导词依旧被从句最小长度门拦住。
+    assertGrammarError(
+      "An API that returns JSON responses.",
+      """
+      {"startToken":0,"endToken":1,"role":"FRAGMENT_HEAD","translation":"一个 API"},
+      {"startToken":2,"endToken":2,"role":"ATTRIBUTIVE_CLAUSE","translation":"引导词"},
+      {"startToken":3,"endToken":5,"role":"PREDICATE","translation":"返回 JSON 响应"}
+      """.trimIndent(),
+      "sentences[0].components[1]",
+      "a clause component must cover a whole clause: extend it through the clause's own subject, " +
+        "predicate, and any objects or adverbials instead of a single word",
+    )
   }
 
   @Test

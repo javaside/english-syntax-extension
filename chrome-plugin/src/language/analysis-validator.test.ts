@@ -464,7 +464,9 @@ describe("core analysis grammar constraints", () => {
     "a non-clausal fragment must contain at most one FRAGMENT_HEAD";
   const MIXED_FRAGMENT_ROLE_MESSAGE =
     "FRAGMENT_HEAD marks a non-clausal fragment and must not be mixed with clause-level " +
-    "SUBJECT, PREDICATE, OBJECT, PREDICATIVE, COMPLEMENT, or clause roles";
+    "SUBJECT, PREDICATE, OBJECT, PREDICATIVE, COMPLEMENT, SUBJECT_CLAUSE, OBJECT_CLAUSE, " +
+    "PREDICATIVE_CLAUSE, ADVERBIAL_CLAUSE, or the deprecated COORDINATE_CLAUSE; a whole " +
+    "ATTRIBUTIVE_CLAUSE is the only clause role allowed beside a FRAGMENT_HEAD";
 
   it("accepts a non-clausal fragment with one FRAGMENT_HEAD and modifiers", () => {
     const sentence = sentenceOf(
@@ -544,10 +546,9 @@ describe("core analysis grammar constraints", () => {
     "SUBJECT_CLAUSE",
     "OBJECT_CLAUSE",
     "PREDICATIVE_CLAUSE",
-    "ATTRIBUTIVE_CLAUSE",
     "ADVERBIAL_CLAUSE",
     "COORDINATE_CLAUSE",
-  ])("rejects FRAGMENT_HEAD mixed with %s", (forbiddenRole) => {
+  ])(`rejects FRAGMENT_HEAD mixed with %s`, (forbiddenRole) => {
     const sentence = sentenceOf("Portable support works well.");
 
     expect(
@@ -558,6 +559,52 @@ describe("core analysis grammar constraints", () => {
     ).toContainEqual({
       path: "sentences[0].components",
       message: MIXED_FRAGMENT_ROLE_MESSAGE,
+    });
+  });
+
+  it("accepts a fragment head followed by a whole attributive clause", () => {
+    // fragment-relative:不成句的名词片段后跟一个完整定语从句——从句从引导词一直
+    // 覆盖到它自己的宾语,不得为了「片段不能混从句」把它拆进主句层。
+    const sentence = sentenceOf("An API that returns JSON responses.");
+
+    expect(
+      validateCoreBatch(
+        {
+          sentences: [
+            {
+              sentenceId: sentence.sentenceId,
+              components: [
+                { startToken: 0, endToken: 1, role: "FRAGMENT_HEAD", translation: "一个 API" },
+                {
+                  startToken: 2,
+                  endToken: 5,
+                  role: "ATTRIBUTIVE_CLAUSE",
+                  translation: "返回 JSON 响应的",
+                },
+              ],
+            },
+          ],
+        },
+        [sentence],
+        "profile-1",
+      ).ok,
+    ).toBe(true);
+  });
+
+  it("keeps rejecting a fragment head followed by a truncated attributive clause", () => {
+    // 放行只针对「完整从句」:只标引导词依旧被从句最小长度门拦住,从句内部成分
+    // 平铺出去依旧被 follower 门拦住——十五条硬门的其余部分不因这条放行而松动。
+    const sentence = sentenceOf("An API that returns JSON responses.");
+
+    expect(
+      grammarErrors(sentence, [
+        { startToken: 0, endToken: 1, role: "FRAGMENT_HEAD", translation: "一个 API" },
+        { startToken: 2, endToken: 2, role: "ATTRIBUTIVE_CLAUSE", translation: "引导词" },
+        { startToken: 3, endToken: 5, role: "PREDICATE", translation: "返回 JSON 响应" },
+      ]),
+    ).toContainEqual({
+      path: "sentences[0].components[1]",
+      message: CLAUSE_INTRODUCER_ONLY_MESSAGE,
     });
   });
 

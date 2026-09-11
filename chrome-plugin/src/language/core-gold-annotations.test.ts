@@ -92,6 +92,127 @@ describe("core gold annotations", () => {
     expect(imperative?.components.map(({ role }) => role)).not.toContain(GrammarRole.FRAGMENT_HEAD);
   });
 
+  // fragment-relative 放行与页面语料新句型的钉死口径。每条都按 ID 精确断言 token
+  // span/role:全量 replay 只证明「validator 合法」,这里的精确表才证明「标注没漂移」。
+  it.each([
+    [
+      "fragment-relative-api",
+      [
+        { startToken: 0, endToken: 1, role: GrammarRole.FRAGMENT_HEAD },
+        { startToken: 2, endToken: 5, role: GrammarRole.ATTRIBUTIVE_CLAUSE },
+      ],
+    ],
+    [
+      "full-relative-counterexample",
+      [
+        { startToken: 0, endToken: 1, role: GrammarRole.SUBJECT },
+        { startToken: 2, endToken: 4, role: GrammarRole.ATTRIBUTIVE_CLAUSE },
+        { startToken: 5, endToken: 5, role: GrammarRole.PREDICATE },
+        { startToken: 6, endToken: 7, role: GrammarRole.OBJECT },
+      ],
+    ],
+    [
+      "arxiv-dark-siren-title",
+      [
+        { startToken: 0, endToken: 2, role: GrammarRole.FRAGMENT_HEAD },
+        { startToken: 3, endToken: 6, role: GrammarRole.ATTRIBUTE },
+        { startToken: 8, endToken: 11, role: GrammarRole.APPOSITIVE },
+        { startToken: 12, endToken: 15, role: GrammarRole.ATTRIBUTE },
+      ],
+    ],
+    [
+      "colon-complete-clause-counterexample",
+      [
+        { startToken: 0, endToken: 1, role: GrammarRole.SUBJECT },
+        { startToken: 2, endToken: 2, role: GrammarRole.PREDICATE },
+        { startToken: 3, endToken: 3, role: GrammarRole.PREDICATIVE },
+        { startToken: 5, endToken: 7, role: GrammarRole.SUBJECT },
+        { startToken: 8, endToken: 8, role: GrammarRole.PREDICATE },
+        { startToken: 9, endToken: 9, role: GrammarRole.OBJECT },
+      ],
+    ],
+    [
+      "page-finite-when-clause",
+      [
+        { startToken: 0, endToken: 4, role: GrammarRole.SUBJECT },
+        { startToken: 5, endToken: 5, role: GrammarRole.PREDICATE },
+        { startToken: 6, endToken: 23, role: GrammarRole.ADVERBIAL_CLAUSE },
+      ],
+    ],
+    [
+      "page-nonfinite-when-phrase",
+      [
+        { startToken: 0, endToken: 6, role: GrammarRole.SUBJECT },
+        { startToken: 7, endToken: 8, role: GrammarRole.PREDICATE },
+        { startToken: 9, endToken: 20, role: GrammarRole.ADVERBIAL },
+      ],
+    ],
+    [
+      "page-vp-coordination",
+      [
+        { startToken: 0, endToken: 0, role: GrammarRole.SUBJECT },
+        { startToken: 1, endToken: 1, role: GrammarRole.PREDICATE },
+        { startToken: 2, endToken: 3, role: GrammarRole.OBJECT },
+        { startToken: 4, endToken: 7, role: GrammarRole.ATTRIBUTE },
+        { startToken: 8, endToken: 8, role: GrammarRole.CONJUNCTION },
+        { startToken: 9, endToken: 9, role: GrammarRole.PREDICATE },
+        { startToken: 10, endToken: 13, role: GrammarRole.OBJECT },
+      ],
+    ],
+    [
+      "page-object-control",
+      [
+        { startToken: 0, endToken: 1, role: GrammarRole.SUBJECT },
+        { startToken: 2, endToken: 2, role: GrammarRole.PREDICATE },
+        { startToken: 3, endToken: 3, role: GrammarRole.OBJECT },
+        { startToken: 4, endToken: 8, role: GrammarRole.COMPLEMENT },
+        { startToken: 9, endToken: 9, role: GrammarRole.ADVERBIAL },
+        { startToken: 10, endToken: 17, role: GrammarRole.ADVERBIAL },
+      ],
+    ],
+    [
+      "page-zero-relative",
+      [
+        { startToken: 0, endToken: 1, role: GrammarRole.SUBJECT },
+        { startToken: 2, endToken: 2, role: GrammarRole.PREDICATE },
+        { startToken: 3, endToken: 4, role: GrammarRole.OBJECT },
+        { startToken: 6, endToken: 7, role: GrammarRole.SUBJECT },
+        { startToken: 8, endToken: 9, role: GrammarRole.PREDICATE },
+        { startToken: 10, endToken: 11, role: GrammarRole.COMPLEMENT },
+        { startToken: 12, endToken: 12, role: GrammarRole.OBJECT },
+        { startToken: 13, endToken: 16, role: GrammarRole.ATTRIBUTE },
+        { startToken: 18, endToken: 18, role: GrammarRole.CONJUNCTION },
+        { startToken: 19, endToken: 20, role: GrammarRole.SUBJECT },
+        { startToken: 21, endToken: 21, role: GrammarRole.PREDICATE },
+        { startToken: 22, endToken: 22, role: GrammarRole.OBJECT },
+        { startToken: 23, endToken: 27, role: GrammarRole.ADVERBIAL },
+        { startToken: 28, endToken: 39, role: GrammarRole.ATTRIBUTIVE_CLAUSE },
+      ],
+    ],
+    [
+      "improved-001",
+      [
+        { startToken: 0, endToken: 1, role: GrammarRole.SUBJECT },
+        { startToken: 2, endToken: 4, role: GrammarRole.ATTRIBUTIVE_CLAUSE },
+        { startToken: 5, endToken: 6, role: GrammarRole.PREDICATE },
+      ],
+    ],
+  ] as const)("keeps the reviewed page-coverage contract for %s", (id, components) => {
+    expect(
+      fixture.sentences
+        .find((sentence) => sentence.id === id)
+        ?.components.map(({ startToken, endToken, role }) => ({ startToken, endToken, role })),
+    ).toEqual(components);
+  });
+
+  it("keeps the fixed arXiv title colon uncovered and its four segments separate", () => {
+    const title = fixture.sentences.find(({ id }) => id === "arxiv-dark-siren-title");
+    expect(title?.components).toHaveLength(4);
+    expect(
+      title?.components.every(({ startToken, endToken }) => startToken !== 7 && endToken !== 7),
+    ).toBe(true);
+  });
+
   it("uses component token IDs from the production tokenizer", () => {
     for (const sentence of fixture.sentences) {
       const tokens = tokenize(sentence.text);

@@ -13,7 +13,8 @@
     "作为独立成分的名词短语后面紧跟的介词短语一律单独标 ATTRIBUTE，没有量词或部分结构的例外（`Four` + `of the biggest US technology companies`、`a lot` + `of context`、`No amount` + `of firewalls or patches`）。但介词短语或从句内部的介词短语不再拆，`without looking at any of the code` 保持一个 ADVERBIAL。",
     "非限定动词短语（动名词、不定式、分词）与它管辖的宾语同属一个成分（`avoiding blind adoption`、`building a software application`、`performing near the frontier of what AI can do`），不拆成两个同级宾语，也不让介词悬在成分末尾。",
     "含 `It's` 这类「主语 + 系动词」缩写的句子不纳入：分词刻意不拆缩写，整个 `It's` 是一个 Token，主语与系动词无法分到两个成分里。`isn't` / `aren't` 这类「系动词 + 否定」是一个词，不受影响。",
-    "不成句的标题、列表项、名词短语、形容词短语或非限定动词短语恰好一个 FRAGMENT_HEAD；不得虚构 SUBJECT / PREDICATE / OBJECT 强套句型。单一 FRAGMENT_HEAD 可以合法覆盖没有可分离同层修饰语的多词片段。祈使句仍是完整分句，必须以 PREDICATE 起始并按需标出 OBJECT。`Building production-ready AI applications at scale.` 按名词性活动采用扁平核心：活动整体为 FRAGMENT_HEAD，修饰该活动的 `at scale` 为 ATTRIBUTE。"
+    "不成句的标题、列表项、名词短语、形容词短语或非限定动词短语恰好一个 FRAGMENT_HEAD；不得虚构 SUBJECT / PREDICATE / OBJECT 强套句型。唯一例外：完整定语从句（ATTRIBUTIVE_CLAUSE，从引导词或零关系词位置起、一直覆盖到从句自己的宾语与状语）可以紧跟在 FRAGMENT_HEAD 之后，如 `An API` + `that returns JSON responses`；其余分句级角色与其余四类从句仍不得与 FRAGMENT_HEAD 混用。单一 FRAGMENT_HEAD 可以合法覆盖没有可分离同层修饰语的多词片段。祈使句仍是完整分句，必须以 PREDICATE 起始并按需标出 OBJECT。`Building production-ready AI applications at scale.` 按名词性活动采用扁平核心：活动整体为 FRAGMENT_HEAD，修饰该活动的 `at scale` 为 ATTRIBUTE。",
+    "名词中心词后的零关系词完整从句一律整块标 ATTRIBUTIVE_CLAUSE，不并入它修饰的名词短语：`The way we build software` = SUBJECT(`The way`) + ATTRIBUTIVE_CLAUSE(`we build software`)，与显式引导词从句（`that she recommended`）同一口径；但缩减定语（过去分词/介词短语，无主谓结构，如 `documents signed yesterday`、`time spent performing the invocation`）仍是 ATTRIBUTE——有没有自己的主语和限定谓语是两者的分界。冒号或破折号后若为完整独立分句（自带主语与限定谓语），按其内部同层角色展开，不标 APPOSITIVE；只有不可拆的说明性补语才用 APPOSITIVE / INDEPENDENT_ELEMENT。"
   ],
   "sentences": [
     {
@@ -2229,9 +2230,15 @@
       "components": [
         {
           "startToken": 0,
-          "endToken": 4,
+          "endToken": 1,
           "role": "SUBJECT",
-          "translation": "我们构建软件的方式"
+          "translation": "那种方式"
+        },
+        {
+          "startToken": 2,
+          "endToken": 4,
+          "role": "ATTRIBUTIVE_CLAUSE",
+          "translation": "我们构建软件的"
         },
         {
           "startToken": 5,
@@ -2528,6 +2535,354 @@
           "endToken": 2,
           "role": "OBJECT",
           "translation": "该命令行工具"
+        }
+      ]
+    },
+    {
+      "id": "fragment-relative-api",
+      "text": "An API that returns JSON responses.",
+      "components": [
+        {
+          "startToken": 0,
+          "endToken": 1,
+          "role": "FRAGMENT_HEAD",
+          "translation": "一个 API"
+        },
+        {
+          "startToken": 2,
+          "endToken": 5,
+          "role": "ATTRIBUTIVE_CLAUSE",
+          "translation": "返回 JSON 响应的"
+        }
+      ]
+    },
+    {
+      "id": "full-relative-counterexample",
+      "text": "The tool that we built passes every test.",
+      "components": [
+        {
+          "startToken": 0,
+          "endToken": 1,
+          "role": "SUBJECT",
+          "translation": "那个工具"
+        },
+        {
+          "startToken": 2,
+          "endToken": 4,
+          "role": "ATTRIBUTIVE_CLAUSE",
+          "translation": "我们构建的"
+        },
+        {
+          "startToken": 5,
+          "endToken": 5,
+          "role": "PREDICATE",
+          "translation": "通过"
+        },
+        {
+          "startToken": 6,
+          "endToken": 7,
+          "role": "OBJECT",
+          "translation": "每项测试"
+        }
+      ]
+    },
+    {
+      "id": "arxiv-dark-siren-title",
+      "text": "Expanding the scope of dark siren cosmology: Inferring the population properties of gravitational wave-hosting galaxies",
+      "components": [
+        {
+          "startToken": 0,
+          "endToken": 2,
+          "role": "FRAGMENT_HEAD",
+          "translation": "拓展研究范围"
+        },
+        {
+          "startToken": 3,
+          "endToken": 6,
+          "role": "ATTRIBUTE",
+          "translation": "暗标准汽笛宇宙学的"
+        },
+        {
+          "startToken": 8,
+          "endToken": 11,
+          "role": "APPOSITIVE",
+          "translation": "推断种群属性"
+        },
+        {
+          "startToken": 12,
+          "endToken": 15,
+          "role": "ATTRIBUTE",
+          "translation": "引力波宿主星系的"
+        }
+      ]
+    },
+    {
+      "id": "colon-complete-clause-counterexample",
+      "text": "The result is clear: the sampled prior reduces uncertainty.",
+      "components": [
+        {
+          "startToken": 0,
+          "endToken": 1,
+          "role": "SUBJECT",
+          "translation": "结果"
+        },
+        {
+          "startToken": 2,
+          "endToken": 2,
+          "role": "PREDICATE",
+          "translation": "是"
+        },
+        {
+          "startToken": 3,
+          "endToken": 3,
+          "role": "PREDICATIVE",
+          "translation": "清晰的"
+        },
+        {
+          "startToken": 5,
+          "endToken": 7,
+          "role": "SUBJECT",
+          "translation": "采样先验"
+        },
+        {
+          "startToken": 8,
+          "endToken": 8,
+          "role": "PREDICATE",
+          "translation": "降低"
+        },
+        {
+          "startToken": 9,
+          "endToken": 9,
+          "role": "OBJECT",
+          "translation": "不确定性"
+        }
+      ]
+    },
+    {
+      "id": "page-finite-when-clause",
+      "text": "The actual AI model invocation occurs when methods such as content(), chatResponse(), and responseEntity() are called.",
+      "components": [
+        {
+          "startToken": 0,
+          "endToken": 4,
+          "role": "SUBJECT",
+          "translation": "实际的 AI 模型调用"
+        },
+        {
+          "startToken": 5,
+          "endToken": 5,
+          "role": "PREDICATE",
+          "translation": "发生"
+        },
+        {
+          "startToken": 6,
+          "endToken": 23,
+          "role": "ADVERBIAL_CLAUSE",
+          "translation": "当诸如 content()、chatResponse() 与 responseEntity() 的方法被调用时"
+        }
+      ]
+    },
+    {
+      "id": "page-nonfinite-when-phrase",
+      "text": "The spring.ai.tool observations are recorded when performing tool calling in the context of a chat model interaction.",
+      "components": [
+        {
+          "startToken": 0,
+          "endToken": 6,
+          "role": "SUBJECT",
+          "translation": "spring.ai.tool 观测数据"
+        },
+        {
+          "startToken": 7,
+          "endToken": 8,
+          "role": "PREDICATE",
+          "translation": "被记录"
+        },
+        {
+          "startToken": 9,
+          "endToken": 20,
+          "role": "ADVERBIAL",
+          "translation": "在聊天模型交互的上下文中执行工具调用时"
+        }
+      ]
+    },
+    {
+      "id": "page-vp-coordination",
+      "text": "They measure the time spent performing the invocation and propagate the related tracing information.",
+      "components": [
+        {
+          "startToken": 0,
+          "endToken": 0,
+          "role": "SUBJECT",
+          "translation": "它们"
+        },
+        {
+          "startToken": 1,
+          "endToken": 1,
+          "role": "PREDICATE",
+          "translation": "测量"
+        },
+        {
+          "startToken": 2,
+          "endToken": 3,
+          "role": "OBJECT",
+          "translation": "所花费的时间"
+        },
+        {
+          "startToken": 4,
+          "endToken": 7,
+          "role": "ATTRIBUTE",
+          "translation": "执行调用时耗用的"
+        },
+        {
+          "startToken": 8,
+          "endToken": 8,
+          "role": "CONJUNCTION",
+          "translation": "并且"
+        },
+        {
+          "startToken": 9,
+          "endToken": 9,
+          "role": "PREDICATE",
+          "translation": "传播"
+        },
+        {
+          "startToken": 10,
+          "endToken": 13,
+          "role": "OBJECT",
+          "translation": "相关的追踪信息"
+        }
+      ]
+    },
+    {
+      "id": "page-object-control",
+      "text": "This configuration allows Maven to access Spring snapshot repositories directly while still using your mirror for other dependencies.",
+      "components": [
+        {
+          "startToken": 0,
+          "endToken": 1,
+          "role": "SUBJECT",
+          "translation": "此配置"
+        },
+        {
+          "startToken": 2,
+          "endToken": 2,
+          "role": "PREDICATE",
+          "translation": "允许"
+        },
+        {
+          "startToken": 3,
+          "endToken": 3,
+          "role": "OBJECT",
+          "translation": "Maven"
+        },
+        {
+          "startToken": 4,
+          "endToken": 8,
+          "role": "COMPLEMENT",
+          "translation": "直接访问 Spring 快照仓库"
+        },
+        {
+          "startToken": 9,
+          "endToken": 9,
+          "role": "ADVERBIAL",
+          "translation": "直接地"
+        },
+        {
+          "startToken": 10,
+          "endToken": 17,
+          "role": "ADVERBIAL",
+          "translation": "同时仍将你的镜像用于其他依赖"
+        }
+      ]
+    },
+    {
+      "id": "page-zero-relative",
+      "text": "Structured output bridges that gap: the model is steered to produce text conforming to a schema, and the application parses it back into a typed object the rest of the codebase can treat like any other domain type.",
+      "components": [
+        {
+          "startToken": 0,
+          "endToken": 1,
+          "role": "SUBJECT",
+          "translation": "结构化输出"
+        },
+        {
+          "startToken": 2,
+          "endToken": 2,
+          "role": "PREDICATE",
+          "translation": "弥合"
+        },
+        {
+          "startToken": 3,
+          "endToken": 4,
+          "role": "OBJECT",
+          "translation": "那一差距"
+        },
+        {
+          "startToken": 6,
+          "endToken": 7,
+          "role": "SUBJECT",
+          "translation": "模型"
+        },
+        {
+          "startToken": 8,
+          "endToken": 9,
+          "role": "PREDICATE",
+          "translation": "被引导"
+        },
+        {
+          "startToken": 10,
+          "endToken": 11,
+          "role": "COMPLEMENT",
+          "translation": "去生成"
+        },
+        {
+          "startToken": 12,
+          "endToken": 12,
+          "role": "OBJECT",
+          "translation": "文本"
+        },
+        {
+          "startToken": 13,
+          "endToken": 16,
+          "role": "ATTRIBUTE",
+          "translation": "符合模式的"
+        },
+        {
+          "startToken": 18,
+          "endToken": 18,
+          "role": "CONJUNCTION",
+          "translation": "并且"
+        },
+        {
+          "startToken": 19,
+          "endToken": 20,
+          "role": "SUBJECT",
+          "translation": "应用程序"
+        },
+        {
+          "startToken": 21,
+          "endToken": 21,
+          "role": "PREDICATE",
+          "translation": "解析"
+        },
+        {
+          "startToken": 22,
+          "endToken": 22,
+          "role": "OBJECT",
+          "translation": "它"
+        },
+        {
+          "startToken": 23,
+          "endToken": 27,
+          "role": "ADVERBIAL",
+          "translation": "回到一个类型化对象中"
+        },
+        {
+          "startToken": 28,
+          "endToken": 39,
+          "role": "ATTRIBUTIVE_CLAUSE",
+          "translation": "代码库其余部分可以像任何其他领域类型一样对待的"
         }
       ]
     }
