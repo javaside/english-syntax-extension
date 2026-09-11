@@ -1,0 +1,258 @@
+{
+  "sourceUrl": "https://arxiv.org/html/2609.04991v1",
+  "capturedAt": "2026-09-08",
+  "units": [
+    {
+      "id": "arxiv-site-header",
+      "kind": "loose-block",
+      "text": "arXiv paper tools",
+      "automatic": false,
+      "reason": "outside-principal-content"
+    },
+    {
+      "id": "arxiv-paper-title",
+      "kind": "heading",
+      "text": "Expanding the scope of dark siren cosmology: Inferring the population properties of gravitational wave-hosting galaxies",
+      "automatic": true,
+      "reason": null
+    },
+    {
+      "id": "arxiv-authors",
+      "kind": "loose-block",
+      "text": "Alice Researcher, Bob Scientist, and the Cosmology Collaboration",
+      "automatic": false,
+      "reason": "reference-metadata"
+    },
+    {
+      "id": "arxiv-author-email",
+      "kind": "loose-block",
+      "text": "author@example.org",
+      "automatic": false,
+      "reason": "reference-metadata"
+    },
+    {
+      "id": "arxiv-abstract-heading",
+      "kind": "heading",
+      "text": "Abstract",
+      "automatic": true,
+      "reason": null
+    },
+    {
+      "id": "arxiv-abstract-text",
+      "kind": "paragraph",
+      "text": "Dark sirens provide a way to measure cosmic expansion without an electromagnetic counterpart.",
+      "automatic": true,
+      "reason": null
+    },
+    {
+      "id": "arxiv-method-heading",
+      "kind": "heading",
+      "text": "Method",
+      "automatic": true,
+      "reason": null
+    },
+    {
+      "id": "arxiv-method-list",
+      "kind": "loose-block",
+      "text": "Combine galaxy catalogues with gravitational-wave observations.",
+      "automatic": false,
+      "reason": "covered-by-child"
+    },
+    {
+      "id": "arxiv-method-list-item",
+      "kind": "list-item",
+      "text": "Combine galaxy catalogues with gravitational-wave observations.",
+      "automatic": true,
+      "reason": null
+    },
+    {
+      "id": "arxiv-inline-math",
+      "kind": "paragraph",
+      "text": "With a clear path forward, the goal of reaching a 2% measurement of H0 by the mid-2030s is tantalisingly close.",
+      "automatic": true,
+      "reason": null
+    },
+    {
+      "id": "arxiv-inline-math-node",
+      "kind": "loose-block",
+      "text": "H0",
+      "automatic": false,
+      "reason": "covered-by-child"
+    },
+    {
+      "id": "arxiv-math-annotation",
+      "kind": "loose-block",
+      "text": "H_0",
+      "automatic": false,
+      "reason": "math-auxiliary"
+    },
+    {
+      "id": "arxiv-assistive-math",
+      "kind": "loose-block",
+      "text": "H0",
+      "automatic": false,
+      "reason": "math-auxiliary"
+    },
+    {
+      "id": "arxiv-display-equation",
+      "kind": "loose-block",
+      "text": "p(H0 | d) proportional to p(d | H0) p(H0)",
+      "automatic": false,
+      "reason": "display-math"
+    },
+    {
+      "id": "arxiv-definition-table",
+      "kind": "loose-block",
+      "text": "A list of parameters appearing in the dark siren methodology and their definitions Parameter Definition Galaxy population model p(z | Lambda)",
+      "automatic": false,
+      "reason": "covered-by-child"
+    },
+    {
+      "id": "arxiv-table-caption",
+      "kind": "table-caption",
+      "text": "A list of parameters appearing in the dark siren methodology and their definitions",
+      "automatic": true,
+      "reason": null
+    },
+    {
+      "id": "arxiv-table-header",
+      "kind": "table-header",
+      "text": "Parameter",
+      "automatic": true,
+      "reason": null
+    },
+    {
+      "id": "arxiv-table-header-definition",
+      "kind": "table-header",
+      "text": "Definition",
+      "automatic": true,
+      "reason": null
+    },
+    {
+      "id": "arxiv-natural-cell",
+      "kind": "table-cell",
+      "text": "Galaxy population model",
+      "automatic": true,
+      "reason": null
+    },
+    {
+      "id": "arxiv-formula-cell",
+      "kind": "table-cell",
+      "text": "p(z | Lambda)",
+      "automatic": false,
+      "reason": "display-math"
+    },
+    {
+      "id": "arxiv-figure",
+      "kind": "loose-block",
+      "text": "Comparison of six nside 64 GOOD pixels generated using the gridded LOS prior method and the sampled LOS prior method.",
+      "automatic": false,
+      "reason": "covered-by-child"
+    },
+    {
+      "id": "arxiv-figure-caption",
+      "kind": "figure-caption",
+      "text": "Comparison of six nside 64 GOOD pixels generated using the gridded LOS prior method and the sampled LOS prior method.",
+      "automatic": false,
+      "reason": "covered-by-child"
+    },
+    {
+      "id": "arxiv-figure-caption-text",
+      "kind": "paragraph",
+      "text": "Comparison of six nside 64 GOOD pixels generated using the gridded LOS prior method and the sampled LOS prior method.",
+      "automatic": true,
+      "reason": null
+    },
+    {
+      "id": "arxiv-footnote-heading",
+      "kind": "heading",
+      "text": "Footnote",
+      "automatic": true,
+      "reason": null
+    },
+    {
+      "id": "arxiv-footnote",
+      "kind": "footnote",
+      "text": "The catalogue selection is described in Appendix A.",
+      "automatic": true,
+      "reason": null
+    },
+    {
+      "id": "arxiv-reference-heading",
+      "kind": "heading",
+      "text": "References",
+      "automatic": true,
+      "reason": null
+    },
+    {
+      "id": "arxiv-structured-reference",
+      "kind": "loose-block",
+      "text": "A. Author, B. Author, C. Author, and D. Author A practical framework for dark siren cosmology 2026",
+      "automatic": false,
+      "reason": "covered-by-child"
+    },
+    {
+      "id": "arxiv-reference-authors",
+      "kind": "loose-block",
+      "text": "A. Author, B. Author, C. Author, and D. Author",
+      "automatic": false,
+      "reason": "reference-metadata"
+    },
+    {
+      "id": "arxiv-reference-title",
+      "kind": "reference-title",
+      "text": "A practical framework for dark siren cosmology",
+      "automatic": true,
+      "reason": null
+    },
+    {
+      "id": "arxiv-reference-year",
+      "kind": "loose-block",
+      "text": "2026",
+      "automatic": false,
+      "reason": "reference-metadata"
+    },
+    {
+      "id": "arxiv-unstructured-reference",
+      "kind": "loose-block",
+      "text": "Many Authors. Journal metadata, volume 42, pages 1–20, 2025.",
+      "automatic": false,
+      "reason": "unsupported-reference-layout"
+    },
+    {
+      "id": "arxiv-conversion-placeholder",
+      "kind": "paragraph",
+      "text": "\\Acp",
+      "automatic": false,
+      "reason": "conversion-placeholder"
+    },
+    {
+      "id": "arxiv-partial-parent",
+      "kind": "loose-block",
+      "text": "Direct parent prose that cannot be replaced safely. A safe nested paragraph remains independently readable.",
+      "automatic": false,
+      "reason": "unsafe-partial-replacement"
+    },
+    {
+      "id": "arxiv-partial-child",
+      "kind": "paragraph",
+      "text": "A safe nested paragraph remains independently readable.",
+      "automatic": true,
+      "reason": null
+    },
+    {
+      "id": "arxiv-interactive",
+      "kind": "loose-block",
+      "text": "Download source",
+      "automatic": false,
+      "reason": "unsafe-interactive"
+    },
+    {
+      "id": "arxiv-hidden",
+      "kind": "paragraph",
+      "text": "Hidden author affiliation.",
+      "automatic": false,
+      "reason": "hidden"
+    }
+  ]
+}

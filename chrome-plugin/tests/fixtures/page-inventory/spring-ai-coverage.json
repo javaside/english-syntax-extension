@@ -1,0 +1,174 @@
+{
+  "sourceUrl": "https://docs.spring.io/spring-ai/reference/index.html",
+  "capturedAt": "2026-09-08",
+  "units": [
+    {
+      "id": "spring-site-nav",
+      "kind": "loose-block",
+      "text": "Reference navigation",
+      "automatic": false,
+      "reason": "outside-principal-content"
+    },
+    {
+      "id": "spring-page-title",
+      "kind": "heading",
+      "text": "Spring AI",
+      "automatic": true,
+      "reason": null
+    },
+    {
+      "id": "spring-feature-lead",
+      "kind": "paragraph",
+      "text": "Spring AI provides the following features:",
+      "automatic": true,
+      "reason": null
+    },
+    {
+      "id": "spring-feature-list",
+      "kind": "loose-block",
+      "text": "Portable API support across AI providers for Chat, text-to-image, and Embedding models. Vector Store API with a portable SQL-like metadata filter API. Tool Calling supports flexible workflows. Client-side tool execution. Server-side tools that the model can invoke safely.",
+      "automatic": false,
+      "reason": "covered-by-child"
+    },
+    {
+      "id": "spring-portable-api",
+      "kind": "list-item",
+      "text": "Portable API support across AI providers for Chat, text-to-image, and Embedding models.",
+      "automatic": true,
+      "reason": null
+    },
+    {
+      "id": "spring-vector-store",
+      "kind": "list-item",
+      "text": "Vector Store API with a portable SQL-like metadata filter API.",
+      "automatic": true,
+      "reason": null
+    },
+    {
+      "id": "spring-tool-calling",
+      "kind": "list-item",
+      "text": "Tool Calling supports flexible workflows. Client-side tool execution. Server-side tools that the model can invoke safely.",
+      "automatic": false,
+      "reason": "unsafe-partial-replacement"
+    },
+    {
+      "id": "spring-tool-sublist",
+      "kind": "loose-block",
+      "text": "Client-side tool execution. Server-side tools that the model can invoke safely.",
+      "automatic": false,
+      "reason": "covered-by-child"
+    },
+    {
+      "id": "spring-tool-client",
+      "kind": "list-item",
+      "text": "Client-side tool execution.",
+      "automatic": true,
+      "reason": null
+    },
+    {
+      "id": "spring-tool-server",
+      "kind": "list-item",
+      "text": "Server-side tools that the model can invoke safely.",
+      "automatic": true,
+      "reason": null
+    },
+    {
+      "id": "spring-sidebar",
+      "kind": "loose-block",
+      "text": "Related documentation",
+      "automatic": false,
+      "reason": "excluded-region"
+    },
+    {
+      "id": "spring-callout",
+      "kind": "callout",
+      "text": "The Spring AI project provides abstractions that simplify AI application development.",
+      "automatic": true,
+      "reason": null
+    },
+    {
+      "id": "spring-definitions",
+      "kind": "loose-block",
+      "text": "Chat Model A model that processes conversational prompts.",
+      "automatic": false,
+      "reason": "covered-by-child"
+    },
+    {
+      "id": "spring-term",
+      "kind": "definition-term",
+      "text": "Chat Model",
+      "automatic": true,
+      "reason": null
+    },
+    {
+      "id": "spring-definition",
+      "kind": "definition-body",
+      "text": "A model that processes conversational prompts.",
+      "automatic": true,
+      "reason": null
+    },
+    {
+      "id": "spring-table",
+      "kind": "loose-block",
+      "text": "Supported model capabilities Capability ✓ Portable chat completion API 仅供测试",
+      "automatic": false,
+      "reason": "covered-by-child"
+    },
+    {
+      "id": "spring-table-caption",
+      "kind": "table-caption",
+      "text": "Supported model capabilities",
+      "automatic": true,
+      "reason": null
+    },
+    {
+      "id": "spring-table-header",
+      "kind": "table-header",
+      "text": "Capability",
+      "automatic": true,
+      "reason": null
+    },
+    {
+      "id": "spring-table-symbol",
+      "kind": "table-header",
+      "text": "✓",
+      "automatic": false,
+      "reason": "no-readable-words"
+    },
+    {
+      "id": "spring-table-cell",
+      "kind": "table-cell",
+      "text": "Portable chat completion API",
+      "automatic": true,
+      "reason": null
+    },
+    {
+      "id": "spring-table-non-english",
+      "kind": "table-cell",
+      "text": "仅供测试",
+      "automatic": false,
+      "reason": "non-english"
+    },
+    {
+      "id": "spring-interactive",
+      "kind": "loose-block",
+      "text": "Try Spring AI",
+      "automatic": false,
+      "reason": "unsafe-interactive"
+    },
+    {
+      "id": "spring-hidden",
+      "kind": "paragraph",
+      "text": "Hidden migration instructions.",
+      "automatic": false,
+      "reason": "hidden"
+    },
+    {
+      "id": "spring-short-loose",
+      "kind": "loose-block",
+      "text": "API",
+      "automatic": false,
+      "reason": "loose-block-too-short"
+    }
+  ]
+}
