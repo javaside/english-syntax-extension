@@ -25,7 +25,10 @@ private val unsafeText = Regex("<script|<iframe|javascript:|\\u0000", RegexOptio
  * 同轮继续;错误文案原样进修复 prompt。与 Chrome 端逐字一致。
  *
  * `\p{IsHan}` 是 JVM 的 Script=Han 二元属性,与 `\p{script=Han}` 及 TS 的
- * `\p{Script=Han}` 等价(JDK 21 实测;由 AnalysisValidatorTest 钉住)。
+ * `\p{Script=Han}` 等价;15 个跨脚本/跨区块边界 case 存于
+ * `shared-fixtures/translation-quality.json` 的 `hanScriptBoundary` 组
+ * (含 astral 平面的 U+2F800 `丽`,代理对),由 AnalysisValidatorTest 与
+ * Chrome 端 analysis-validator.test.ts 双端 replay。
  */
 internal val hanPattern = Regex("\\p{IsHan}")
 internal const val TRANSLATION_QUALITY_MESSAGE =

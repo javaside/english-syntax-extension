@@ -25,8 +25,11 @@ const UNSAFE_TEXT = /<script|<iframe|javascript:|\0/i;
  * 并且不能在 NFKC + 大小写折叠 + Unicode 空白折叠后仍等于它覆盖的英文 span。
  * 这条是非语法错误:component 照样解析、structureTrusted 不受影响、grammar errors
  * 同轮继续;错误文案原样进修复 prompt。与 Kotlin 端逐字一致。
+ *
+ * 模式本身导出仅供测试消费 `shared-fixtures/translation-quality.json` 的
+ * `hanScriptBoundary` 组;语义等价于 Kotlin 端的 `\p{IsHan}`。
  */
-const HAN_PATTERN = /\p{Script=Han}/u;
+export const HAN_PATTERN = /\p{Script=Han}/u;
 const TRANSLATION_QUALITY_MESSAGE =
   "translation must include a meaningful Chinese gloss for the complete covered English span instead of echoing or only copying it";
 /** 与 segmenter 相同的显式 Unicode 空白类,避免 TS `\s` 与 JVM `\s` 语义分叉。 */

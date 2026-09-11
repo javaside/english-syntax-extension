@@ -1,5 +1,22 @@
 {
   "schemaVersion": 1,
+  "hanScriptBoundary": [
+    { "id": "cjk-unified", "text": "汉", "containsHan": true },
+    { "id": "cjk-unified-word", "text": "中文", "containsHan": true },
+    { "id": "han-plus-ascii-proper-noun", "text": "ＪＳＯＮ 数据", "containsHan": true },
+    { "id": "proper-noun-plus-han-type", "text": "JSON 数据格式", "containsHan": true },
+    { "id": "han-plus-ascii-symbols", "text": "哈勃常数 H0", "containsHan": true },
+    { "id": "extension-a", "text": "㐀", "containsHan": true },
+    { "id": "cjk-compatibility-ideograph", "text": "丽", "containsHan": true },
+    { "id": "cjk-radical-as-ideographic-zero", "text": "〇", "containsHan": true },
+    { "id": "hiragana-katakana", "text": "かなカナ", "containsHan": false },
+    { "id": "hangul", "text": "한국어", "containsHan": false },
+    { "id": "cjk-punctuation", "text": "。！", "containsHan": false },
+    { "id": "latin-1-accented", "text": "é", "containsHan": false },
+    { "id": "ascii-letters", "text": "JSON", "containsHan": false },
+    { "id": "ascii-words", "text": "Spring AI", "containsHan": false },
+    { "id": "ascii-alphanumeric", "text": "H0", "containsHan": false }
+  ],
   "cases": [
     {
       "id": "echo-exact",

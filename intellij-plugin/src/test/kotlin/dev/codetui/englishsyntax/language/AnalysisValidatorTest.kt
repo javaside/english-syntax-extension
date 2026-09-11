@@ -934,14 +934,30 @@ class AnalysisValidatorTest {
     assertEquals(15, subjectClauseIntroducers.size)
   }
 
+  /**
+   * Han 脚本边界与 Chrome 端共享 `shared-fixtures/translation-quality.json` 的
+   * `hanScriptBoundary` 组(15 case):假名/谚文/CJK 标点/纯 ASCII false,
+   * 扩展 A 区(㐀)/CJK 兼容区(丽 = U+2F800,代理对)/〇 true。有人把 `\p{IsHan}` 简化成
+   * `[\u4e00-\u9fff]` 时,三个跨区块 true case 在双端同时变红——不再依赖单端口头验证。
+   */
   @Test
-  fun `Han script regex matches Chinese and rejects ascii`() {
-    assertTrue(hanPattern.containsMatchIn("汉"))
-    assertTrue(hanPattern.containsMatchIn("JSON 数据格式"))
-    assertTrue(hanPattern.containsMatchIn("哈勃常数 H0"))
-    assertFalse(hanPattern.containsMatchIn("JSON"))
-    assertFalse(hanPattern.containsMatchIn("Spring AI"))
-    assertFalse(hanPattern.containsMatchIn("H0"))
+  fun `Han script regex boundaries replay the shared fixture`() {
+    val fixture = Json.parseToJsonElement(FixtureLoader.text("translation-quality.json")).jsonObject
+    val boundaries = fixture.getValue("hanScriptBoundary").jsonArray
+
+    assertEquals(15, boundaries.size)
+    val ids = boundaries.map { it.jsonObject.getValue("id").jsonPrimitive.content }
+    assertEquals(ids.size, ids.toSet().size)
+    assertTrue(boundaries.any { it.jsonObject.getValue("containsHan").jsonPrimitive.content.toBooleanStrict() })
+    assertTrue(boundaries.any { !it.jsonObject.getValue("containsHan").jsonPrimitive.content.toBooleanStrict() })
+
+    boundaries.forEach { element ->
+      val boundary = element.jsonObject
+      val id = boundary.getValue("id").jsonPrimitive.content
+      val text = boundary.getValue("text").jsonPrimitive.content
+      val expected = boundary.getValue("containsHan").jsonPrimitive.content.toBooleanStrict()
+      assertEquals(expected, hanPattern.containsMatchIn(text), "Han boundary case $id ($text)")
+    }
   }
 
   @Test

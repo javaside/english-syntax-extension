@@ -8,6 +8,7 @@ import type { CoreAnalysis, TokenRange } from "../shared/grammar";
 import { MAX_SENTENCES_PER_REQUEST } from "../shared/protocol";
 import type { SentenceInput } from "../shared/protocol";
 import { ModelRequestError } from "./openai-compatible-adapter";
+import { buildCorePrompt } from "./prompts";
 import type { ModelProfile } from "./config-repository";
 import {
   CachedAnalysisService,
@@ -669,6 +670,43 @@ describe("shared core evaluation trace replay", () => {
     expect(trace.repairs[1]!.subsetSentenceIds).toContain(narrowB);
     expect(trace.repairs[1]!.subsetSentenceIds).not.toContain(narrowA);
     expect(trace.final.failureSentenceIds).toEqual([failedId]);
+  });
+
+  // Task 8 重算 trace 译文占位时,traces[1..6] 的首轮 prompt 顺带从陈旧旧模板
+  // 迁到了当前生产模板。这条用例遍历全部 trace 的 firstPass messages,用生产
+  // buildCorePrompt + tokenizer snapshot 重建并逐字比对——任何一轨再陈旧都会红,
+  // 杜绝「只有 trace0 被回放、其余轨道的 prompt 悄悄过期」。
+  it("rebuilds every trace's first-pass prompt from the current production template", () => {
+    const fixture = JSON.parse(
+      readFileSync(
+        new URL("../../../shared-fixtures/core-evaluation-traces.json", import.meta.url),
+        "utf8",
+      ),
+    ) as {
+      tokenizerSnapshot: {
+        sentences: Array<{
+          id: string;
+          text: string;
+          tokens: Array<{ id: number; start: number; end: number }>;
+        }>;
+      };
+      traces: Array<{
+        inputSentenceIds: string[];
+        firstPass: { messages: AnalysisModelWork["messages"] };
+      }>;
+    };
+    expect(fixture.traces.length).toBeGreaterThan(1);
+    const byId = new Map(fixture.tokenizerSnapshot.sentences.map((item) => [item.id, item]));
+    for (const trace of fixture.traces) {
+      const sentences = trace.inputSentenceIds.map((sentenceId) => {
+        const item = byId.get(sentenceId)!;
+        return { sentenceId, text: item.text, tokens: tokenize(item.text) };
+      });
+      const expected = trace.firstPass.messages;
+      expect(expected).toHaveLength(1);
+      expect(expected[0]!.role).toBe("user");
+      expect(expected[0]!.content).toBe(buildCorePrompt(sentences));
+    }
   });
 });
 

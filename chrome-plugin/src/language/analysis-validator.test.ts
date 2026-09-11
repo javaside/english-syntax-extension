@@ -5,7 +5,7 @@ import { GrammarRole } from "../shared/grammar";
 import { CORE_SCHEMA_VERSION } from "../shared/versions";
 import type { TokenRange } from "../shared/grammar";
 import type { SentenceInput } from "../shared/protocol";
-import { validateCoreBatch, validateDetail } from "./analysis-validator";
+import { validateCoreBatch, validateDetail, HAN_PATTERN } from "./analysis-validator";
 import { tokenize } from "./segmenter";
 
 const request: SentenceInput = {
@@ -1190,6 +1190,7 @@ describe("shared translation quality fixture", () => {
     ),
   ) as {
     schemaVersion: number;
+    hanScriptBoundary: Array<{ id: string; text: string; containsHan: boolean }>;
     cases: Array<{
       id: string;
       sentence: { id: string; text: string };
@@ -1209,6 +1210,23 @@ describe("shared translation quality fixture", () => {
           typeof accepted === "boolean" && (accepted ? expected.length === 0 : expected.length > 0),
       ),
     ).toBe(true);
+  });
+
+  // 与 Kotlin 端 `\p{IsHan}` 共享同一组 15 边界 case:假名/谚文/CJK 标点 false,
+  // 扩展 A 区(㐀)/CJK 兼容区(丽, U+2F800, 代理对)/〇 true。有人把 Script=Han 简化成
+  // [\u4e00-\u9fff] 时,这三个 true case 在双端同时变红。
+  it.each(fixture.hanScriptBoundary)(
+    "Han script boundary $id matches the shared fixture",
+    (boundary) => {
+      expect(HAN_PATTERN.test(boundary.text)).toBe(boundary.containsHan);
+    },
+  );
+
+  it("pins the Han boundary group size so silent truncation fails", () => {
+    expect(fixture.hanScriptBoundary).toHaveLength(15);
+    expect(new Set(fixture.hanScriptBoundary.map(({ id }) => id)).size).toBe(15);
+    expect(fixture.hanScriptBoundary.some(({ containsHan }) => containsHan)).toBe(true);
+    expect(fixture.hanScriptBoundary.some(({ containsHan }) => !containsHan)).toBe(true);
   });
 
   it.each(fixture.cases)("matches the complete ordered errors for $id", (testCase) => {
