@@ -129,11 +129,13 @@ function semanticFixture(): HTMLElement {
     <dl>
       <dt id="term">Chat Model</dt>
       <dd id="definition">A model that processes conversational prompts.</dd>
+      <dt id="cn-term">参数</dt>
     </dl>
     <table>
       <caption id="caption">Supported model capabilities</caption>
       <thead>
         <tr><th id="header">Capability</th></tr>
+        <tr><th id="cn-header">仅供测试</th><th id="en-header">API</th></tr>
       </thead>
       <tbody>
         <tr>
@@ -173,6 +175,15 @@ describe("scanMarkdownBlocks semantic document blocks", () => {
 
   it("collects short headings, definition terms and bodies, captions, and table headers", () => {
     expect(ids()).toEqual(expect.arrayContaining(["short-h3", "term", "definition", "caption", "header"]));
+  });
+
+  it("short semantic tags skip only the length gate, not the english ratio", () => {
+    const found = ids();
+    // 短语义英文（th "API"，3 字符 <20）被收录：门只豁免长度，不豁免英文占比。
+    expect(found).toContain("en-header");
+    // 短语义中文（dt "参数" / th "仅供测试"）仍被英文占比拦下，不会被收录。
+    expect(found).not.toContain("cn-term");
+    expect(found).not.toContain("cn-header");
   });
 
   it("collects natural-language table cells and inner paragraphs, skipping formula/symbol/chinese cells", () => {

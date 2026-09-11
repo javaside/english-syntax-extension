@@ -2632,6 +2632,8 @@ describe("SessionController 真实 fixture 页面集成", () => {
       );
 
       expect([...requested].sort()).toEqual([...sentences].sort());
+      // 多重集相等只保证「句集一致」，这条钉住「每句恰好一次」：不允许同一句被重复下发。
+      expect(new Set(requested).size).toBe(requested.length);
       expect(subject.controller.status.failed).toBe(0);
       expect(subject.controller.status.skipped).toBe(0);
     });
