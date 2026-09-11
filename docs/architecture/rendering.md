@@ -2,11 +2,13 @@
 
 content script 世界里发生的一切:怎么认出段落、怎么切句、什么时候发请求、卡片长什么样、怎么可逆地换回去。涉及文件都在 `chrome-plugin/src/content/` 与 `chrome-plugin/src/language/`(文件名不再逐个带前缀)。
 
-## 1. 认段落(`document-scanner.ts`)
+## 1. 认段落(`page-inventory.ts` + `document-scanner.ts`)
 
 **两条路径,取舍刻意不同。** 把自动扫描的克制套到显式手势上,是本仓库出过的真实回归。
 
-### `scanDocument(root)` —— 自动扫描
+自动扫描现在是**页面语义清单的投影**:`page-inventory.ts` 先枚举页面里每个安全、可读、有语义的英文单元并给每个单元一个明确结局(自动分析,或带稳定排除原因——14 种 reason 供测试与 acceptance 审计,不进 SW/JCEF 协议),`document-scanner.ts` 的 `scanDocument()` 只取 `automatic === true` 的那部分。文本提取由 `readable-dom-text.ts` 统一负责:普通可见文本按 DOM 顺序、`<math>` 只取一个稳定表示(`alttext` 优先,否则剔除辅助子树后的可见 MathML 文本)、annotation 与 assistive fallback 不与可见公式重复、Unicode 空白折叠;不解析 TeX、不翻译公式、不按 URL 分支。
+
+### `scanDocument(root)` —— 自动扫描 = inventory 投影
 
 ```
 selectPrincipalRoot(root)                  先选出"正文容器"
@@ -16,30 +18,46 @@ selectPrincipalRoot(root)                  先选出"正文容器"
   └─ fallbackRoot():  没有语义根时,给每个祖先累加后代块的分数,取最高
        │
        ▼
-blockCandidates(principalRoot)             在容器内收候选块
-  ├─ strict: h1-h6, p, li, blockquote
-  └─ loose:  div/section/dd/td/figcaption/span/article/main 中
-             「渲染为块」且「无块级子元素」且「未被 strict 块包含」的叶子
+enumerateUnitElements(root)                枚举语义单元
+  ├─ 语义标签: h1-h6, p, li, blockquote, dt, dd, caption, th, td, figcaption
+  ├─ 语义类:   .ltx_bib_title(文献题名)、callout/note/warning/abstract、
+  │            参考文献元数据(.ltx_bib_authors/.ltx_bib_year/.ltx_authors/邮箱)
+  ├─ loose 叶子: div/section/span 中「渲染为块」「无块级子元素」「未被语义块包含」
+  └─ data-audit-id 锚点(仅 fixture 诊断分母;生产页面不凭空多导航噪声)
        │
        ▼
-每个候选过 candidateText(element, automatic = true)
+每个单元判「自动资格」(分类型门槛,不再是统一 20 字符)
+  ├─ 科学语义排除前置: \Acp 转换占位符 / MathML 辅助与 assistive /
+  │    文献元数据 / 独立公式(math[display=block]/.ltx_equation/公式单元格)/
+  │    无题名边界的整条文献 —— 文本再"英文"也不进模型
   ├─ isSafeElement:  是块候选 / 不在排除区 / 不含危险后代 / 布局可见
+  ├─ 必须落在 principal root 内(导航/页脚由此挡住)
   ├─ 英文占优:  英文单词占全部字母词 ≥ 60%
-  └─ 长度 ≥ 20 字符
+  └─ 长度 ≥ 20 字符 —— 仅对 loose div/section/span 与非语义类保留;
+     标题/dt/th/caption 只要有可读英文实词;p/li/dd/td/figcaption/callout/
+     .ltx_bib_title 靠语义标签 + principal root + 英文占比把关
+       │
+       ▼
+父子去重(自动资格阶段):文本有可分析语义子单元的父不当自动单元
+  —— li>p / blockquote>p / td>p / figcaption>p / 嵌套 li 只进子;
+     table/tr/thead/tbody/figure 永不整体成块
 ```
 
-- **排除区** `EXCLUSION_SELECTOR`:`nav, aside, footer, form, pre, code, script, style, noscript, template, svg, canvas, iframe, [contenteditable], [hidden], [aria-hidden=true]`。
+排除单元的 14 种 reason:`outside-principal-content`、`excluded-region`、`unsafe-interactive`、`hidden`、`non-english`、`no-readable-words`、`loose-block-too-short`、`display-math`、`math-auxiliary`、`conversion-placeholder`、`reference-metadata`、`unsupported-reference-layout`、`covered-by-child`、`unsafe-partial-replacement`。**covered-by-child 的方向是"父被子吸收"**:内联单元(如 `<math>`)躺在自动分析的段落里 → 记在子节点上;父容器文本完全由子单元组成 → 记在父容器上。父带不可安全分离的直接文本 → `unsafe-partial-replacement`(整体替换会把这段文本连坐,优先显式路径)。契约由 `tests/fixtures/page-inventory/*.json` 全等钉住。
+
+- **排除区** `EXCLUDED_REGION_SELECTOR`:`nav, aside, footer, header, form, pre, code, script, style, noscript, template, svg, canvas, iframe`(显式含 header:arXiv 站点工具条)。隐藏判据 `[hidden], [aria-hidden=true], [contenteditable]` 另列。
 - **危险后代** `UNSAFE_DESCENDANT_SELECTOR`:`button, input, textarea, select, video, audio, canvas, iframe, [contenteditable]`。**图片不在此列**——替换只是把原节点 `display:none`,退出时原样恢复,段落里夹插图不妨碍可逆性;而按钮 / 输入控件会连交互状态一起被藏掉。
 - **为什么要收 loose 叶子**:只按标签名找会漏掉整类站点。Mintlify 一类文档站(含 Claude Code 自己的文档)整篇正文都是 `<span data-as="p">` 靠 CSS 渲染成块——真实页面实测覆盖率仅 10%。躲开边栏靠的是排除区与正文容器限制,不是标签名。
 
 ### `nearestSafeBlock(target)` —— 显式手势(选中 / 悬停 / 右键)
 
-从光标处的元素往上逐级找第一个安全块。**不套用自动扫描的两条取舍**:
+从光标处的元素往上逐级找第一个安全块(判据在 `page-inventory.ts` 的 `explicitCandidateText`)。**不套用自动扫描的取舍**:
 
 | 取舍                         | 自动扫描 | 显式手势 | 为什么                                                                                                        |
 | ---------------------------- | -------- | -------- | ------------------------------------------------------------------------------------------------------------- |
 | 必须落在得分最高的正文容器内 | ✅       | ❌       | 多 `<article>` 页面、SPA 换内容后缓存失效都会误伤,表现为"鼠标明明停在段落上,快捷键却报『未找到可解析的段落』" |
-| 最短 20 字符                 | ✅       | ❌       | 用户指哪解析哪,歧义已由鼠标消解                                                                               |
+| 最短 20 字符(loose)         | ✅       | ❌       | 用户指哪解析哪,歧义已由鼠标消解                                                                               |
+| 英文占比 ≥ 60%               | ✅       | ❌       | 同上;统计门槛不应否决用户指明的目标                                                                            |
 | 按渲染盒子认块               | ✅       | ✅       | `isRenderedBlock()` 看 computed display,`LOOSE_BLOCK_SELECTOR` 只作兜底                                       |
 | 只认叶子块                   | ✅       | ✅       | 否则往上找会撞到包着整篇正文的外层容器                                                                        |
 

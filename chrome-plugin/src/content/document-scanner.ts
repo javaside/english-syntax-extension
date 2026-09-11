@@ -1,125 +1,13 @@
+import { explicitCandidateText, inventoryReadableUnits } from "./page-inventory";
+
 export interface CandidateBlock {
   id: string;
   element: Element;
   text: string;
 }
 
-/**
- * 自动扫描只认语义段落标签,免得把边栏、面包屑、按钮标签当正文。
- * 显式手势(选中/悬停/右键)额外接受这些「松散块」——现代站点大量用 div /
- * section 排版正文,只认 <p> 会让用户指着段落却被告知找不到段落。
- */
-const BLOCK_SELECTOR = "h1,h2,h3,h4,h5,h6,p,li,blockquote";
-const LOOSE_BLOCK_SELECTOR = "div,section,dd,td,figcaption";
-/** 自动扫描允许当段落的松散载体。刻意不含 a/button/label 等交互或导航语义。 */
-const LOOSE_CANDIDATE_SELECTOR = "div,section,dd,td,figcaption,span,article,main";
-const SEMANTIC_ROOT_SELECTOR = "article,main,[role='main']";
-const EXCLUSION_SELECTOR =
-  "nav,aside,footer,form,pre,code,script,style,noscript,template,svg,canvas,iframe," +
-  "[contenteditable],[hidden],[aria-hidden='true']";
-// 图片不在此列:卡片替换只是把原节点 display:none,退出时原样恢复,所以段落里
-// 夹一张插图并不妨碍可逆渲染,而按钮/输入控件会连同交互状态一起被藏掉。
-const UNSAFE_DESCENDANT_SELECTOR =
-  "button,input,textarea,select,video,audio,canvas,iframe,[contenteditable]";
-const MINIMUM_AUTO_TEXT_LENGTH = 20;
-
 const blockIds = new WeakMap<Element, string>();
 let nextBlockId = 1;
-
-/**
- * 自动扫描的候选枚举。只按标签名找会漏掉整类站点:Mintlify(含 Claude Code 文档)
- * 的正文是 <span data-as="p"> 靠 CSS 渲染成块,真实页面实测覆盖率仅 10%。所以除
- * 语义标签外,再收「渲染为块且不含块级子元素」的叶子——躲开边栏靠的是
- * EXCLUSION_SELECTOR 与正文容器限制,不是标签名。
- */
-function blockCandidates(root: ParentNode): Element[] {
-  const strict = queryElements(root, BLOCK_SELECTOR);
-  const seen = new Set(strict);
-  const loose = queryElements(root, "*").filter(
-    (element) =>
-      !seen.has(element) &&
-      element.matches(LOOSE_CANDIDATE_SELECTOR) &&
-      isRenderedBlock(element) &&
-      !hasBlockChild(element) &&
-      // 已被语义块覆盖的不再单收:同一段文本收两遍会解析两次、渲染两次。
-      !strict.some((block) => block !== element && block.contains(element)),
-  );
-  return [...strict, ...loose];
-}
-
-function queryElements(root: ParentNode, selector: string): Element[] {
-  const matches = Array.from(root.querySelectorAll(selector));
-  if (root instanceof Element && root.matches(selector)) matches.unshift(root);
-  return matches;
-}
-
-function normalizedText(element: Element): string {
-  const walker = element.ownerDocument.createTreeWalker(element, NodeFilter.SHOW_TEXT);
-  let text = "";
-  for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
-    const parent = node.parentElement;
-    if (parent !== null && isLayoutVisible(parent)) text += node.textContent ?? "";
-  }
-  return text.replace(/\s+/gu, " ").trim();
-}
-
-function isLayoutVisible(element: Element): boolean {
-  for (let current: Element | null = element; current !== null; current = current.parentElement) {
-    if (current.matches("[hidden],[aria-hidden='true']")) return false;
-    const style = getComputedStyle(current);
-    if (
-      style.display === "none" ||
-      style.visibility === "hidden" ||
-      style.visibility === "collapse"
-    ) {
-      return false;
-    }
-  }
-  return true;
-}
-
-function isEnglishDominant(text: string): boolean {
-  const letterWords = text.match(/\p{L}+(?:['’-]\p{L}+)*/gu) ?? [];
-  const englishWordCount = letterWords.filter((word) =>
-    /^[A-Za-z]+(?:['’-][A-Za-z]+)*$/u.test(word),
-  ).length;
-  return englishWordCount / Math.max(1, letterWords.length) >= 0.6;
-}
-
-/**
- * 标签名不足以判断「是不是一段」:Mintlify 一类文档站(含 Claude Code 文档)整篇
- * 正文都是 <span data-as="p">,靠 CSS 渲染成块。所以按渲染盒子判定,标签名只作兜底
- * (happy-dom 等环境下内联元素的 computed display 是空串而非 "inline")。
- */
-const INLINE_DISPLAY = /^(?:|inline|inline-\w+|contents|none)$/u;
-
-function isRenderedBlock(element: Element): boolean {
-  return (
-    element.matches(LOOSE_BLOCK_SELECTOR) || !INLINE_DISPLAY.test(getComputedStyle(element).display)
-  );
-}
-
-function hasBlockChild(element: Element): boolean {
-  return Array.from(element.children).some(
-    (child) => isRenderedBlock(child) && (child.textContent ?? "").trim().length > 0,
-  );
-}
-
-function isBlockCandidate(element: Element, loose: boolean): boolean {
-  if (element.matches(BLOCK_SELECTOR)) return true;
-  if (!loose || !isRenderedBlock(element)) return false;
-  // 松散块只认叶子块,否则从光标往上找会撞到包着整篇正文的外层容器。
-  return !hasBlockChild(element);
-}
-
-function isSafeElement(element: Element, loose: boolean): boolean {
-  return (
-    isBlockCandidate(element, loose) &&
-    element.closest(EXCLUSION_SELECTOR) === null &&
-    element.querySelector(UNSAFE_DESCENDANT_SELECTOR) === null &&
-    isLayoutVisible(element)
-  );
-}
 
 function getBlockId(element: Element): string {
   const existing = blockIds.get(element);
@@ -129,125 +17,25 @@ function getBlockId(element: Element): string {
   return id;
 }
 
-function candidateText(element: Element, automatic: boolean): string | null {
-  // 松散块判定与 automatic 的其余约束(最短长度、正文容器)解耦:两条路径都按
-  // 渲染盒子认块,自动扫描的克制体现在长度下限与容器限制上。
-  if (!isSafeElement(element, true)) return null;
-  const text = normalizedText(element);
-  if (
-    text.length === 0 ||
-    !isEnglishDominant(text) ||
-    (automatic && text.length < MINIMUM_AUTO_TEXT_LENGTH)
-  ) {
-    return null;
-  }
-  return text;
-}
-
-function createCandidate(element: Element, automatic: boolean): CandidateBlock | null {
-  const text = candidateText(element, automatic);
-  if (text === null) return null;
-  return { id: getBlockId(element), element, text };
-}
-
-interface ScoredBlock {
-  element: Element;
-  text: string;
-}
-
-function eligibleBlocks(root: ParentNode): ScoredBlock[] {
-  return blockCandidates(root).flatMap((element) => {
-    const text = candidateText(element, true);
-    return text === null ? [] : [{ element, text }];
-  });
-}
-
-function linkedTextLength(element: Element): number {
-  return Array.from(element.querySelectorAll("a")).reduce(
-    (total, link) => total + normalizedText(link).length,
-    0,
-  );
-}
-
-function contentScore(blocks: readonly ScoredBlock[]): number {
-  return blocks.reduce(
-    (score, block) => score + block.text.length - 2 * linkedTextLength(block.element),
-    0,
-  );
-}
-
-function semanticRoot(root: ParentNode): Element | null {
-  const ranked = queryElements(root, SEMANTIC_ROOT_SELECTOR).flatMap((element, order) => {
-    if (element.closest(EXCLUSION_SELECTOR) !== null || !isLayoutVisible(element)) return [];
-    const blocks = eligibleBlocks(element);
-    if (blocks.length === 0) return [];
-    return [
-      {
-        element,
-        score: contentScore(blocks),
-        scopeSize: element.querySelectorAll("*").length,
-        order,
-      },
-    ];
-  });
-  ranked.sort(
-    (left, right) =>
-      right.score - left.score || left.scopeSize - right.scopeSize || left.order - right.order,
-  );
-  return ranked[0]?.element ?? null;
-}
-
-function fallbackRoot(root: ParentNode): Element | null {
-  const safeBlocks = eligibleBlocks(root);
-  const scores = new Map<Element, { textLength: number; linkedTextLength: number }>();
-
-  for (const block of safeBlocks) {
-    const length = block.text.length;
-    const linkedLength = linkedTextLength(block.element);
-    for (
-      let ancestor = block.element.parentElement;
-      ancestor !== null;
-      ancestor = ancestor.parentElement
-    ) {
-      if (!root.contains(ancestor) && ancestor !== root) break;
-      if (ancestor.closest(EXCLUSION_SELECTOR) !== null || !isLayoutVisible(ancestor)) continue;
-      const score = scores.get(ancestor) ?? { textLength: 0, linkedTextLength: 0 };
-      score.textLength += length;
-      score.linkedTextLength += linkedLength;
-      scores.set(ancestor, score);
-      if (ancestor === root) break;
-    }
-  }
-
-  let best: Element | null = null;
-  let bestScore = Number.NEGATIVE_INFINITY;
-  for (const [element, { textLength, linkedTextLength }] of scores) {
-    const score = textLength * (1 - (2 * linkedTextLength) / Math.max(1, textLength));
-    if (score > bestScore) {
-      best = element;
-      bestScore = score;
-    }
-  }
-  return best;
-}
-
-function selectPrincipalRoot(root: ParentNode): Element | null {
-  return semanticRoot(root) ?? fallbackRoot(root);
-}
-
+/**
+ * 自动扫描 = 页面语义清单(`page-inventory.ts`)的 automatic 投影。
+ *
+ * 候选发现、分类型门槛(标题/`dt`/`th`/`caption` 有英文实词即可;`p/li/dd/td/
+ * figcaption` 不吃统一 20 字符门;松散 `div/section/span` 保留门)、principal root、
+ * 最小安全语义单元去重(`li>p`、`td>p`、`figcaption>p` 只进一个;`table/tr/figure`
+ * 永不整体)都由 inventory 统一定义,这里只做投影——两条路径永远不会口径分叉。
+ */
 export function scanDocument(root: ParentNode): CandidateBlock[] {
-  const principalRoot = selectPrincipalRoot(root);
-  if (principalRoot === null) return [];
-  return blockCandidates(principalRoot).flatMap((element) => {
-    const candidate = createCandidate(element, true);
-    return candidate === null ? [] : [candidate];
-  });
+  return inventoryReadableUnits(root)
+    .filter(({ automatic }) => automatic)
+    .map(({ element, text }) => ({ id: getBlockId(element), element, text }));
 }
 
 /**
  * 只服务用户显式手势(选中文本 / 快捷键悬停 / 右键此区域),所以不套用自动扫描
- * 那两道取舍:不要求落在得分最高的正文容器里(多 article 页面、SPA 换页后缓存
- * 失效都会误伤),也不设最短长度。指哪解析哪,歧义已由用户的鼠标消解。
+ * 那几道取舍:不要求落在得分最高的正文容器里(多 article 页面、SPA 换页后缓存失效
+ * 都会误伤),不设最短长度,也不看英文比例门。指哪解析哪,歧义已由用户的鼠标消解;
+ * 但密码框、代码、编辑区、隐藏内容和危险交互容器仍然拒绝。
  */
 export function nearestSafeBlock(target: EventTarget | null): CandidateBlock | null {
   const start =
@@ -261,8 +49,8 @@ export function nearestSafeBlock(target: EventTarget | null): CandidateBlock | n
   }
 
   for (let current: Element | null = start; current !== null; current = current.parentElement) {
-    const candidate = createCandidate(current, false);
-    if (candidate !== null) return candidate;
+    const text = explicitCandidateText(current);
+    if (text !== null) return { id: getBlockId(current), element: current, text };
   }
   return null;
 }

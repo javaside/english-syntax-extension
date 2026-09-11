@@ -24,8 +24,11 @@ describe("scanDocument", () => {
     const blocks = scanDocument(document);
 
     // 段内插图不影响可逆渲染(原节点只是被 display:none 藏起来),所以 #with-image
-    // 是正文候选;#with-button 带交互控件,仍然排除。
+    // 是正文候选;#with-button 带交互控件,仍然排除。分类型门槛下正文标题
+    // (Brief heading)有英文实词即可进入;incidental article 里没有可分析正文,
+    // 其 Brief promotion 不在 principal root 内,不收。
     expect(blocks.map(({ element }) => element.id || element.tagName)).toEqual([
+      "H1",
       "intro",
       "linked",
       "quote",
@@ -33,7 +36,9 @@ describe("scanDocument", () => {
       "with-image",
     ]);
     expect(
-      blocks.every(({ element }) => /^(?:H[1-6]|P|LI|BLOCKQUOTE)$/u.test(element.tagName)),
+      blocks.every(({ element }) =>
+        /^(?:H[1-6]|P|LI|BLOCKQUOTE|DT|DD|CAPTION|TH|TD|FIGCAPTION)$/u.test(element.tagName),
+      ),
     ).toBe(true);
     expect(blocks.map(({ text }) => text)).toContain(
       "This English paragraph contains a helpful reference link for readers.",
@@ -43,7 +48,6 @@ describe("scanDocument", () => {
   it("chooses the only semantic root containing valid safe English candidates", () => {
     document.body.innerHTML = `
       <article>
-        <h2>Short note</h2>
         <form><p>This otherwise eligible English text is unsafe form content.</p></form>
         <p>This paragraph includes an unsafe <button>interactive control</button>.</p>
       </article>
@@ -81,13 +85,15 @@ describe("scanDocument", () => {
         <p id="fallback-two">The following paragraph develops the argument for careful English readers.</p>
       </section>`;
 
+    // 链接农场里的整句链接仍是安全英文句,会被收进;但正文容器的选择由去链接化
+    // 的文本密度决定——#story 的 p 胜出,导航农场不是 principal root。
     expect(scanDocument(document).map(({ element }) => element.id)).toEqual([
       "fallback-one",
       "fallback-two",
     ]);
   });
 
-  it("requires twenty visible characters and English-dominant letter words in automatic mode", () => {
+  it("gates by English dominance and keeps the twenty-character floor for loose blocks only", () => {
     document.body.innerHTML = `<main>
       <h2 id="short">Brief heading</h2>
       <p id="mixed">这是 一个 中文 句子 avec quelques mots English</p>
@@ -96,7 +102,14 @@ describe("scanDocument", () => {
       <p id="english">English readers can reliably recognize this sufficiently long sentence.</p>
     </main>`;
 
-    expect(scanDocument(document).map(({ element }) => element.id)).toEqual(["english"]);
+    // 分类型门槛:标题只要可读英文实词(Brief heading 不再被 20 字符门挡住);
+    // 英文占比门与隐藏文本裁剪对全部类型仍然生效。#hidden-tail 裁掉隐藏 span 后
+    // 剩「Brief text」——它是 <p>,分类型规则下不再吃统一 20 字符门,故一并收入。
+    expect(scanDocument(document).map(({ element }) => element.id)).toEqual([
+      "short",
+      "hidden-tail",
+      "english",
+    ]);
   });
 
   it("assigns stable WeakMap IDs without changing page attributes", () => {
