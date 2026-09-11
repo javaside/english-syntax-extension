@@ -34,8 +34,8 @@ export function scanDocument(root: ParentNode): CandidateBlock[] {
 /**
  * 只服务用户显式手势(选中文本 / 快捷键悬停 / 右键此区域),所以不套用自动扫描
  * 那几道取舍:不要求落在得分最高的正文容器里(多 article 页面、SPA 换页后缓存失效
- * 都会误伤),不设最短长度,也不看英文比例门。指哪解析哪,歧义已由用户的鼠标消解;
- * 但密码框、代码、编辑区、隐藏内容和危险交互容器仍然拒绝。
+ * 都会误伤),也不设最短长度。指哪解析哪,歧义已由用户的鼠标消解;英文占比仍适用
+ * (非英文内容照旧拒绝),密码框、代码、编辑区、隐藏内容和危险交互容器也仍然拒绝。
  */
 export function nearestSafeBlock(target: EventTarget | null): CandidateBlock | null {
   const start =

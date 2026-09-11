@@ -18,15 +18,16 @@ describe("scanDocument", () => {
     document.body.innerHTML = "";
   });
 
-  it("skips an incidental article without eligible content before the real main", () => {
+  it("excludes an incidental article's heading that falls outside the principal content", () => {
     document.body.innerHTML = fixture("article");
 
     const blocks = scanDocument(document);
 
     // 段内插图不影响可逆渲染(原节点只是被 display:none 藏起来),所以 #with-image
-    // 是正文候选;#with-button 带交互控件,仍然排除。分类型门槛下正文标题
-    // (Brief heading)有英文实词即可进入;incidental article 里没有可分析正文,
-    // 其 Brief promotion 不在 principal root 内,不收。
+    // 是正文候选;#with-button 带交互控件,仍然排除。分类型门槛下标题只要可读英文
+    // 实词即可——incidental article 的 Brief promotion 本身是合格 heading,但它
+    // 不在 principal root 内(outside-principal-content),故仍不收;正文里的
+    // Brief heading 照常进入。
     expect(blocks.map(({ element }) => element.id || element.tagName)).toEqual([
       "H1",
       "intro",

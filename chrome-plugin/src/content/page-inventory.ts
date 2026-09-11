@@ -376,6 +376,8 @@ function classifyExclusion(
   // ② 父容器文本完全由子单元组成,记在父容器上。「完全由子组成」= 父的直接文本
   //    (含内联公式)为空或纯空白——`figcaption > p` 唯一进 p,`li` 带自己的
   //    直接文字则记 unsafe-partial-replacement,由显式路径兜底。
+  //    方向①里 reason 记在「被父吸收的子」侧,命名沿用冻结的 covered-by-child
+  //    (即使此处语义读作「子被父覆盖」)——fixture 全等契约按此方向钉住,不要改。
   const automaticAncestor = ancestorInSet(element, automaticUnits);
   if (automaticAncestor !== null) return "covered-by-child";
   const analyzableChildren = analyzableDescendants(element);
