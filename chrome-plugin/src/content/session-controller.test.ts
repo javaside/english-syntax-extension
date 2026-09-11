@@ -1,5 +1,8 @@
 // @vitest-environment happy-dom
 
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { Window } from "happy-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GrammarRole } from "../shared/grammar";
 import { CORE_SCHEMA_VERSION } from "../shared/versions";
@@ -12,8 +15,10 @@ import type {
   SessionStatus,
 } from "../shared/protocol";
 import { isSessionComplete } from "../shared/protocol";
+import { segmentBlock } from "../language/segmenter";
 import type { CandidateBlock } from "./document-scanner";
 import { scanDocument } from "./document-scanner";
+import { inventoryReadableUnits } from "./page-inventory";
 import type {
   ControllerBlock,
   ControllerMarker,
@@ -2526,5 +2531,165 @@ describe("段落解析中标记", () => {
     await vi.waitFor(() => expect(reconnect).toHaveBeenCalledTimes(4));
 
     expect(subject.markers[0]?.marked).toBeNull();
+  });
+});
+
+describe("SessionController 真实 fixture 页面集成", () => {
+  beforeEach(() => {
+    document.body.replaceChildren();
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  const fixtureNames = ["spring-ai-coverage", "arxiv-paper-coverage"] as const;
+
+  const fixturePath = (name: string) =>
+    resolve(import.meta.dirname, `../../tests/fixtures/pages/${name}.html`);
+
+  function loadPage(name: string): Document {
+    const window = new Window();
+    window.document.write(readFileSync(fixturePath(name), "utf8"));
+    return window.document as unknown as Document;
+  }
+
+  interface FixtureHarness {
+    controller: SessionController;
+    transport: FakeTransport;
+    viewport: FakeViewport;
+    page: Document;
+    replacements: FakeReplacement[];
+  }
+
+  function fixtureHarness(name: string): FixtureHarness {
+    const page = loadPage(name);
+    const transport = new FakeTransport();
+    const replacements: FakeReplacement[] = [];
+    let viewport!: FakeViewport;
+    const controller = new SessionController({
+      tabId: 9,
+      document: page,
+      transport,
+      scan: scanDocument,
+      createSentenceId: ({ blockId, order }) => Promise.resolve(`${blockId}-sentence-${order + 1}`),
+      viewportFactory: (callback) => (viewport = new FakeViewport(callback)),
+      learningBlockFactory: () => new FakeLearningBlock(),
+      replacementFactory: () => {
+        const replacement = new FakeReplacement();
+        replacements.push(replacement);
+        return replacement;
+      },
+      markerFactory: () => new FakeMarker(),
+      now: () => 0,
+      batchWindowMs: 5,
+    });
+    return { controller, transport, viewport, page, replacements };
+  }
+
+  const automaticUnits = (page: Document) =>
+    inventoryReadableUnits(page)
+      .filter(({ automatic }) => automatic)
+      .map(({ element, text }) => ({ element, text }));
+
+  const expectedSentences = (units: ReadonlyArray<{ text: string }>) =>
+    units.flatMap(({ text }) => segmentBlock(text).map(({ text: sentence }) => sentence));
+
+  type AnalyzeCoreRequest = Extract<RequestMessage, { type: "ANALYZE_CORE" }>;
+
+  function analyzeCoreRequests(transport: FakeTransport): AnalyzeCoreRequest[] {
+    return transport.sent.filter(
+      (message): message is AnalyzeCoreRequest => message.type === "ANALYZE_CORE",
+    );
+  }
+
+  describe.each(fixtureNames)("%s", (name) => {
+    it("start() 后视口登记与自动清单一一对应，discovered 等于句数总和且无重复", async () => {
+      const subject = fixtureHarness(name);
+      await subject.controller.start();
+
+      const expected = automaticUnits(subject.page);
+      expect(subject.viewport.observed.map(({ element, text }) => ({ element, text }))).toEqual(
+        expected,
+      );
+      expect(new Set(subject.viewport.observed.map(({ element }) => element)).size).toBe(
+        subject.viewport.observed.length,
+      );
+      expect(subject.controller.status.discovered).toBe(expectedSentences(expected).length);
+    });
+
+    it("逐块 emit 后 ANALYZE_CORE 句子集合全等且每句恰好一次，全部 ready", async () => {
+      const subject = fixtureHarness(name);
+      await subject.controller.start();
+
+      const sentences = expectedSentences(automaticUnits(subject.page));
+      for (let i = 0; i < subject.viewport.observed.length; i += 1) subject.viewport.emit(i);
+
+      await vi.waitFor(() => expect(subject.controller.status.ready).toBe(sentences.length), {
+        timeout: 5_000,
+      });
+
+      const requested = analyzeCoreRequests(subject.transport).flatMap((message) =>
+        message.sentences.map(({ text }) => text),
+      );
+
+      expect([...requested].sort()).toEqual([...sentences].sort());
+      expect(subject.controller.status.failed).toBe(0);
+      expect(subject.controller.status.skipped).toBe(0);
+    });
+
+    it("stop() 后全部 replacement restore、视口断开、transport 取消", async () => {
+      const subject = fixtureHarness(name);
+      await subject.controller.start();
+      const sentences = expectedSentences(automaticUnits(subject.page));
+      for (let i = 0; i < subject.viewport.observed.length; i += 1) subject.viewport.emit(i);
+      await vi.waitFor(() => expect(subject.controller.status.ready).toBe(sentences.length), {
+        timeout: 5_000,
+      });
+
+      subject.controller.stop();
+
+      expect(subject.replacements.every((replacement) => replacement.restores >= 1)).toBe(true);
+      expect(subject.viewport.disconnected).toBe(true);
+      expect(subject.transport.cancelled).toEqual([subject.controller.documentId]);
+    });
+  });
+
+  it("figcaption 内 p 文本变动后重扫只登记内层 p，父级不重复", async () => {
+    const subject = fixtureHarness("arxiv-paper-coverage");
+    await subject.controller.start();
+    const initialReplacements = subject.replacements.length;
+    const initialObserved = subject.viewport.observed.length;
+
+    const inner = subject.page.querySelector('[data-audit-id="arxiv-figure-caption-text"]')!;
+    const figcaption = inner.parentElement!;
+    inner.firstChild!.textContent =
+      "Updated figure caption with enough English words to remain independently readable.";
+
+    await vi.waitFor(() => expect(subject.replacements.length).toBe(initialReplacements + 1), {
+      timeout: 2_000,
+    });
+
+    const newlyObserved = subject.viewport.observed.slice(initialObserved);
+    expect(newlyObserved.map(({ element }) => element)).toEqual([inner]);
+    expect(newlyObserved.map(({ element }) => element)).not.toContain(figcaption);
+  });
+
+  it("td 内插入 p 后重扫只注册 p，td 不再出现", async () => {
+    const subject = fixtureHarness("arxiv-paper-coverage");
+    await subject.controller.start();
+    const initialReplacements = subject.replacements.length;
+    const initialObserved = subject.viewport.observed.length;
+
+    const td = subject.page.querySelector('[data-audit-id="arxiv-natural-cell"]')!;
+    const p = subject.page.createElement("p");
+    p.textContent = "A natural language sentence about galaxy populations.";
+    td.append(p);
+
+    await vi.waitFor(() => expect(subject.replacements.length).toBe(initialReplacements + 1), {
+      timeout: 2_000,
+    });
+
+    const newlyObserved = subject.viewport.observed.slice(initialObserved);
+    expect(newlyObserved.map(({ element }) => element)).toEqual([p]);
+    expect(newlyObserved.map(({ element }) => element)).not.toContain(td);
   });
 });

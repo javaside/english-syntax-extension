@@ -68,17 +68,17 @@ describe("scanMarkdownBlocks", () => {
     );
   });
 
-  it("skips code, tables, math, mermaid, footnotes, and interactive controls", () => {
+  it("skips code, math, mermaid, and interactive controls", () => {
     const container = fixture();
     const ids = scanMarkdownBlocks(container).map((block) => block.element.id);
 
     expect(ids).not.toContain("code");
-    expect(ids).not.toContain("cell");
     expect(ids).not.toContain("math");
     expect(ids).not.toContain("mermaid");
-    expect(ids).not.toContain("footnote");
     expect(ids).not.toContain("button");
     expect(ids).not.toContain("card");
+    // 表格的语义子单元（自然语言 td）现在是候选；表格/脚注容器本身仍是结构壳。
+    expect(ids).toContain("cell");
   });
 
   it("skips short blocks and blocks below the english ratio", () => {
@@ -118,6 +118,85 @@ describe("scanMarkdownBlocks", () => {
       expect(block.blockId).toMatch(/^english-syntax-block-\d+$/);
       expect(block.element.getAttribute("data-english-syntax-block")).toBe(block.blockId);
     }
+  });
+});
+
+/** 语义文档块 fixture：标题/定义列表/表格/图注/脚注，及其代码/数学/公式/非英文反例。 */
+function semanticFixture(): HTMLElement {
+  const container = document.createElement("div");
+  container.innerHTML = `
+    <h3 id="short-h3">Overview</h3>
+    <dl>
+      <dt id="term">Chat Model</dt>
+      <dd id="definition">A model that processes conversational prompts.</dd>
+    </dl>
+    <table>
+      <caption id="caption">Supported model capabilities</caption>
+      <thead>
+        <tr><th id="header">Capability</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td id="natural-cell">Portable chat completion API</td>
+          <td class="math" id="formula-cell">p(z | Lambda)</td>
+          <td id="symbol-cell">λ = 3.2 ± 0.4</td>
+          <td id="chinese-cell">仅供测试</td>
+          <td id="cell-with-p"><p id="inner-p">A natural language sentence inside a table cell.</p></td>
+        </tr>
+      </tbody>
+    </table>
+    <figure>
+      <img alt="diagram" />
+      <figcaption id="figure-caption">A figure caption with enough English words.</figcaption>
+    </figure>
+    <figure>
+      <figcaption><p id="figure-caption-p">A caption paragraph inside a figure caption wrapper.</p></figcaption>
+    </figure>
+    <div class="footnotes"><p id="footnote-p">Some footnote text that is english and long enough here.</p></div>
+    <pre><code id="code">const answer = theService.validates(everyResponse);</code></pre>
+    <div class="math" id="math">E equals m times c squared with extra words.</div>
+    <div class="mermaid" id="mermaid">graph TD; A --> B with english words too.</div>
+    <button id="button">A button with plenty of english text inside it.</button>
+    <div data-english-syntax-card="true" id="card">Previously rendered card content here.</div>
+  `;
+  document.body.append(container);
+  return container;
+}
+
+describe("scanMarkdownBlocks semantic document blocks", () => {
+  beforeEach(() => {
+    document.body.replaceChildren();
+  });
+
+  const ids = (): string[] =>
+    scanMarkdownBlocks(semanticFixture()).map((block) => block.element.id);
+
+  it("collects short headings, definition terms and bodies, captions, and table headers", () => {
+    expect(ids()).toEqual(expect.arrayContaining(["short-h3", "term", "definition", "caption", "header"]));
+  });
+
+  it("collects natural-language table cells and inner paragraphs, skipping formula/symbol/chinese cells", () => {
+    const found = ids();
+    expect(found).toContain("natural-cell");
+    expect(found).toContain("inner-p");
+    // td>p 只进叶子 p，td 容器不再单独成块。
+    expect(found).not.toContain("cell-with-p");
+    expect(found).not.toContain("formula-cell");
+    expect(found).not.toContain("symbol-cell");
+    expect(found).not.toContain("chinese-cell");
+  });
+
+  it("collects figure captions, inner caption paragraphs, and footnote paragraphs", () => {
+    expect(ids()).toEqual(expect.arrayContaining(["figure-caption", "figure-caption-p", "footnote-p"]));
+  });
+
+  it("still skips code, math, mermaid, interactive controls, and cards", () => {
+    const found = ids();
+    expect(found).not.toContain("code");
+    expect(found).not.toContain("math");
+    expect(found).not.toContain("mermaid");
+    expect(found).not.toContain("button");
+    expect(found).not.toContain("card");
   });
 });
 

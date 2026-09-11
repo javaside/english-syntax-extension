@@ -194,12 +194,38 @@
 		"H6",
 		"P",
 		"LI",
-		"BLOCKQUOTE"
+		"BLOCKQUOTE",
+		"DT",
+		"DD",
+		"CAPTION",
+		"TH",
+		"TD",
+		"FIGCAPTION"
 	]);
+	/**
+	* 自动扫描的排除区：语义文档块（table/.footnotes/[role='doc-endnotes']）不再整体排除，
+	* 改由标签、叶子块与父子去重决定；代码/数学/图表/交互控件/我方卡片仍排除。
+	*/
+	const AUTO_EXCLUDED_SELECTOR = "pre,code,.math,.katex,.mermaid,button,input,textarea,select,iframe,[contenteditable],[data-english-syntax-card]";
+	/**
+	* 显式手势（快捷键悬停解析）保持旧口径：表格与脚注仍拒绝（现有 cell→null 语义不变）。
+	*/
 	const EXCLUDED_SELECTOR = "pre,code,table,.math,.katex,.mermaid,.footnotes,[role='doc-endnotes'],button,input,textarea,select,iframe,[contenteditable],[data-english-syntax-card]";
 	const BLOCK_ID_ATTRIBUTE = "data-english-syntax-block";
 	const MIN_TEXT_LENGTH = 20;
 	const ENGLISH_RATIO = .6;
+	/** 短语义标签：标题/定义项/表格标题/表头有英文实词即可，不吃 20 字符门（英文占比仍要求）。 */
+	const SHORT_SEMANTIC_TAGS = /* @__PURE__ */ new Set([
+		"H1",
+		"H2",
+		"H3",
+		"H4",
+		"H5",
+		"H6",
+		"DT",
+		"CAPTION",
+		"TH"
+	]);
 	const BLOCK_SELECTOR_PREFIX = "english-syntax-block-";
 	let nextBlockId = 0;
 	let registeredElements = /* @__PURE__ */ new WeakSet();
@@ -272,6 +298,10 @@
 	function isExcluded(element) {
 		return element.closest(EXCLUDED_SELECTOR) !== null;
 	}
+	/** 自动扫描专用排除：表格/脚注不再整体排除，其余与显式路径一致。 */
+	function isAutoExcluded(element) {
+		return element.closest(AUTO_EXCLUDED_SELECTOR) !== null;
+	}
 	function isHyphenatedCustomElement(element) {
 		return element.localName.includes("-");
 	}
@@ -289,14 +319,14 @@
 	}
 	/** 收集一个候选的安全叶子块；blockquote 递归取其内部叶子。 */
 	function collectCandidates(element, into) {
-		if (isExcluded(element)) return;
+		if (isAutoExcluded(element)) return;
 		if (element.tagName === "BLOCKQUOTE") {
 			for (const child of element.querySelectorAll("p,li")) collectCandidates(child, into);
 			return;
 		}
 		if (!isLeafBlock(element)) return;
 		const text = (element.textContent ?? "").trim();
-		if (text.length < MIN_TEXT_LENGTH) return;
+		if (!SHORT_SEMANTIC_TAGS.has(element.tagName) && text.length < MIN_TEXT_LENGTH) return;
 		if (englishRatio(text) < ENGLISH_RATIO) return;
 		into.push(element);
 	}

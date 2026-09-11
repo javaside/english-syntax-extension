@@ -2,9 +2,11 @@
  * Markdown 预览 DOM 扫描与可见性观察。
  *
  * 与 Chrome 端 document-scanner 的取舍不同：预览 DOM 是 Markdown 渲染产物，
- * 候选为 h1-h6/p/li/blockquote（blockquote 只取安全叶子），以及 Markdown 原文中的
- * 连字符自定义标签（如 HARD-GATE）；排除区覆盖代码/表格/数学/图表/脚注/交互控件。
- * 英文占比 >= 60%、最短 20 字符。
+ * 候选为 h1-h6/p/li/blockquote/dt/dd/caption/th/td/figcaption（blockquote 只取安全
+ * 叶子），以及 Markdown 原文中的连字符自定义标签（如 HARD-GATE）。自动扫描的排除区
+ * 覆盖代码/数学/图表/交互控件，但不再整体排除表格与脚注——它们的语义子单元（caption/
+ * th/td/figcaption/p）纳入候选。英文占比 >= 60%；短语义标签（h1-h6/dt/caption/th）
+ * 有英文实词即可，其余标签维持最短 20 字符。
  */
 
 export interface PreviewBlock {
@@ -23,7 +25,23 @@ const STANDARD_CANDIDATE_TAGS = new Set([
   "P",
   "LI",
   "BLOCKQUOTE",
+  "DT",
+  "DD",
+  "CAPTION",
+  "TH",
+  "TD",
+  "FIGCAPTION",
 ]);
+/**
+ * 自动扫描的排除区：语义文档块（table/.footnotes/[role='doc-endnotes']）不再整体排除，
+ * 改由标签、叶子块与父子去重决定；代码/数学/图表/交互控件/我方卡片仍排除。
+ */
+const AUTO_EXCLUDED_SELECTOR =
+  "pre,code,.math,.katex,.mermaid," +
+  "button,input,textarea,select,iframe,[contenteditable],[data-english-syntax-card]";
+/**
+ * 显式手势（快捷键悬停解析）保持旧口径：表格与脚注仍拒绝（现有 cell→null 语义不变）。
+ */
 const EXCLUDED_SELECTOR =
   "pre,code,table,.math,.katex,.mermaid,.footnotes,[role='doc-endnotes']," +
   "button,input,textarea,select,iframe,[contenteditable],[data-english-syntax-card]";
@@ -35,6 +53,8 @@ export const HIDDEN_ATTRIBUTE = "data-english-syntax-hidden";
 const BLOCK_ID_ATTRIBUTE = "data-english-syntax-block";
 const MIN_TEXT_LENGTH = 20;
 const ENGLISH_RATIO = 0.6;
+/** 短语义标签：标题/定义项/表格标题/表头有英文实词即可，不吃 20 字符门（英文占比仍要求）。 */
+const SHORT_SEMANTIC_TAGS = new Set(["H1", "H2", "H3", "H4", "H5", "H6", "DT", "CAPTION", "TH"]);
 const BLOCK_SELECTOR_PREFIX = "english-syntax-block-";
 
 let nextBlockId = 0;
@@ -121,6 +141,11 @@ function isExcluded(element: Element): boolean {
   return element.closest(EXCLUDED_SELECTOR) !== null;
 }
 
+/** 自动扫描专用排除：表格/脚注不再整体排除，其余与显式路径一致。 */
+function isAutoExcluded(element: Element): boolean {
+  return element.closest(AUTO_EXCLUDED_SELECTOR) !== null;
+}
+
 function isHyphenatedCustomElement(element: Element): boolean {
   return element.localName.includes("-");
 }
@@ -144,7 +169,7 @@ function englishRatio(text: string): number {
 
 /** 收集一个候选的安全叶子块；blockquote 递归取其内部叶子。 */
 function collectCandidates(element: HTMLElement, into: HTMLElement[]): void {
-  if (isExcluded(element)) return;
+  if (isAutoExcluded(element)) return;
   if (element.tagName === "BLOCKQUOTE") {
     for (const child of element.querySelectorAll<HTMLElement>("p,li")) {
       collectCandidates(child, into);
@@ -153,7 +178,8 @@ function collectCandidates(element: HTMLElement, into: HTMLElement[]): void {
   }
   if (!isLeafBlock(element)) return;
   const text = (element.textContent ?? "").trim();
-  if (text.length < MIN_TEXT_LENGTH) return;
+  // 短语义标签（h1-h6/dt/caption/th）只有英文实词即可；其余候选维持 20 字符门。
+  if (!SHORT_SEMANTIC_TAGS.has(element.tagName) && text.length < MIN_TEXT_LENGTH) return;
   if (englishRatio(text) < ENGLISH_RATIO) return;
   into.push(element);
 }

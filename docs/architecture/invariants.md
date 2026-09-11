@@ -452,7 +452,7 @@
 
 ### IntelliJ 自动扫描必须保留连字符自定义标签的正文
 
-**规则**:`scanMarkdownBlocks` 除标准 Markdown 块 `h1-h6/p/li/blockquote` 外，还必须把标签名含连字符的自定义元素作为候选；它们仍统一经过排除区、叶子块、最短长度与英文占比校验，不能放宽成扫描任意容器。
+**规则**:`scanMarkdownBlocks` 除标准 Markdown 块 `h1-h6/p/li/blockquote/dt/dd/caption/th/td/figcaption` 外，还必须把标签名含连字符的自定义元素作为候选；所有候选仍经过自动排除区、叶子块与英文占比校验，短语义标签(h1-h6/dt/caption/th)有英文实词即可、其余候选维持最短 20 字符——不能放宽成扫描任意容器。
 
 **为什么**:Markdown 中的 `<HARD-GATE>`、`<EXTREMELY-IMPORTANT>` 等原始 HTML 会被官方预览保留为自定义 DOM 元素，内部直接文本不会自动生成 `<p>`。只查询标准块标签会在进入 Kotlin 分句和模型请求前整段漏掉。
 
