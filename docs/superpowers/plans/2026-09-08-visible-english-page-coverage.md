@@ -21,7 +21,7 @@
 - translation 质量错误是非结构错误，与 grammar errors 同轮返回，不阻断 grammar；repair 仍至多两轮。
 - `FRAGMENT_HEAD + ATTRIBUTIVE_CLAUSE` 合法；fragment 与普通分句级角色、其余四类从句和 `COORDINATE_CLAUSE` 仍互斥；硬门仍是十五条。
 - inventory 排除项仅供测试/验收，不进入 SW/JCEF 协议；不扩 `SessionStatus`。
-- 显式手势不套 principal root、自动长度和英文比例门，安全排除不变。
+- 显式手势不套 principal root 与自动最短长度门，英文占比与安全排除不变。
 - 科学 DOM 只为 inline math 选择一个稳定表示；不解析 TeX、不翻译公式、不按 URL 分支。
 - 自动单元必须有可整体隐藏并恢复的 HTMLElement；不引入 Range 替换器。
 - prompt 句子走 `serializeSentences` / `serializeSentence`，其余 JSON 走 `serialize`；假服务器首行和 focus 标签保持兼容。
