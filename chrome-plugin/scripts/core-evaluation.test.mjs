@@ -1467,6 +1467,154 @@ describe("scoreCorePredictions", () => {
     expect(report.roleAccuracyOnExactSpans).toEqual({ correct: 0, matched: 0, accuracy: 0 });
   });
 
+  it("normalizes trailing terminal punctuation on predicted spans instead of punishing it", () => {
+    const tokens = [
+      { id: 0, start: 0, end: 4, punctuation: false },
+      { id: 1, start: 5, end: 13, punctuation: false },
+      { id: 2, start: 13, end: 14, punctuation: true },
+    ];
+    const gold = [{ sentenceId: "trail", tokens, components: [component(0, 1, "PREDICATE")] }];
+    const predicted = [{ sentenceId: "trail", tokens, components: [component(0, 2, "PREDICATE")] }];
+
+    const report = scoreCorePredictions(gold, predicted);
+
+    expect(report.exactSentence).toEqual({ count: 1, rate: 1 });
+    expect(report.spanExact).toMatchObject({ truePositive: 1, predicted: 1, gold: 1, f1: 1 });
+    expect(report.labeledSpan).toMatchObject({ truePositive: 1, predicted: 1, gold: 1, f1: 1 });
+    expect(report.roleAccuracyOnExactSpans).toEqual({ correct: 1, matched: 1, accuracy: 1 });
+    expect(report.details[0]).toMatchObject({ exact: true, missing: [], extra: [] });
+  });
+
+  it("trims trailing punctuation-only tokens after a semantic tail in character coordinates", () => {
+    const text = "Stop the run.";
+    const tokens = [
+      { id: 0, start: 0, end: 4, punctuation: false },
+      { id: 1, start: 5, end: 12, punctuation: false },
+      { id: 2, start: 12, end: 13, punctuation: true },
+    ];
+    const gold = [
+      {
+        sentenceId: "char-trim",
+        text,
+        tokens,
+        components: [{ startChar: 0, endChar: 12, role: "OBJECT" }],
+      },
+    ];
+    // 真实 artifact 评分路径给预测附上 tokenizer 快照的 tokens(artifactScoringInput),
+    // 这里按同一数据形态构造:预测自带 tokens,但 span 直接用字符坐标且吞掉句尾句号。
+    const predicted = [
+      {
+        sentenceId: "char-trim",
+        text,
+        tokens,
+        components: [{ startChar: 0, endChar: 13, role: "OBJECT" }],
+      },
+    ];
+
+    const report = scoreCorePredictions(gold, predicted, { coordinateSystem: "characters" });
+
+    expect(report.exactSentence).toEqual({ count: 1, rate: 1 });
+    expect(report.spanExact).toMatchObject({ truePositive: 1, predicted: 1, gold: 1, f1: 1 });
+  });
+
+  it("symmetrically drops punctuation-only predicted components", () => {
+    const tokens = [
+      { id: 0, start: 0, end: 4, punctuation: false },
+      { id: 1, start: 5, end: 13, punctuation: false },
+      { id: 2, start: 13, end: 15, punctuation: true },
+      { id: 3, start: 15, end: 16, punctuation: true },
+    ];
+    const gold = [{ sentenceId: "punct-only", tokens, components: [component(0, 1, "SUBJECT")] }];
+    // 纯标点成分(句尾两个标点 token)与生产 validator 的 semanticComponents 过滤对称:
+    // 整条丢弃,不计入 predicted 分母,不让凭空虚构的 PUNCTUATION 角色污染记账。
+    const predicted = [
+      {
+        sentenceId: "punct-only",
+        tokens,
+        components: [component(0, 1, "SUBJECT"), component(2, 3, "PUNCTUATION")],
+      },
+    ];
+
+    const report = scoreCorePredictions(gold, predicted);
+
+    expect(report.spanExact).toMatchObject({ truePositive: 1, predicted: 1, gold: 1, f1: 1 });
+    expect(report.labeledSpan).toMatchObject({ truePositive: 1, predicted: 1, gold: 1, f1: 1 });
+    expect(report.exactSentence).toEqual({ count: 1, rate: 1 });
+  });
+
+  it("does not punish predictions for keeping punctuation that the gold exception covers", () => {
+    // fragment-portable-api 例外形态:gold ATTRIBUTE 刻意覆盖句尾终止标点(全黄金集唯一
+    // 人工核过的例外)。gold 不参与归一化——预测含标点与 gold 相等时仍 exact,预测裁掉
+    // 标点时保持 span 命中但 exact 不放行,归一化不反向惩罚 gold 例外。
+    const tokens = [
+      { id: 0, start: 0, end: 20, punctuation: false },
+      { id: 1, start: 21, end: 40, punctuation: false },
+      { id: 2, start: 40, end: 41, punctuation: true },
+    ];
+    const withPunctuation = [
+      { sentenceId: "fragment-portable-api", tokens, components: [component(0, 2, "ATTRIBUTE")] },
+    ];
+    const withoutPunctuation = [
+      { sentenceId: "fragment-portable-api", tokens, components: [component(0, 1, "ATTRIBUTE")] },
+    ];
+
+    const covered = scoreCorePredictions(withPunctuation, cloneJson(withPunctuation));
+    expect(covered.exactSentence).toEqual({ count: 1, rate: 1 });
+    expect(covered.spanExact).toMatchObject({ truePositive: 1, predicted: 1, gold: 1, f1: 1 });
+
+    const report = scoreCorePredictions(withPunctuation, withoutPunctuation);
+
+    // gold 例外句不裁剪,预测又不覆盖那个句号——span 键 0:2 vs 0:1 确实不同,必须记为
+    // missing+extra 而不是强行 TP;归一化的义务只是「不惩罚多覆盖标点的预测」,不是
+    // 把 gold 例外改写成「标点不覆盖」。
+    expect(report.exactSentence).toEqual({ count: 0, rate: 0 });
+    expect(report.spanExact).toMatchObject({ truePositive: 0, predicted: 1, gold: 1 });
+    expect(report.details[0].missing).toEqual([component(0, 2, "ATTRIBUTE")]);
+    expect(report.details[0].extra).toEqual([component(0, 1, "ATTRIBUTE")]);
+  });
+
+  it("keeps a non-trailing punctuation token inside the trimmed span and only drops a whole component when nothing semantic remains", () => {
+    const text = "A, b.";
+    const tokens = [
+      { id: 0, start: 0, end: 1, punctuation: false },
+      { id: 1, start: 1, end: 2, punctuation: true },
+      { id: 2, start: 3, end: 4, punctuation: false },
+      { id: 3, start: 4, end: 5, punctuation: true },
+    ];
+    const midPunctuation = [
+      {
+        sentenceId: "mid-punct",
+        text,
+        tokens,
+        components: [{ startToken: 0, endToken: 2, role: "FRAGMENT_HEAD" }],
+      },
+    ];
+    const midPredicted = [
+      {
+        sentenceId: "mid-punct",
+        text,
+        tokens,
+        components: [{ startToken: 0, endToken: 3, role: "FRAGMENT_HEAD" }],
+      },
+    ];
+    const midReport = scoreCorePredictions(midPunctuation, midPredicted);
+    expect(midReport.exactSentence).toEqual({ count: 1, rate: 1 });
+
+    const onlyPunctuation = [
+      {
+        sentenceId: "mid-punct",
+        text,
+        tokens,
+        components: [{ startToken: 1, endToken: 1, role: "CONJUNCTION" }],
+      },
+    ];
+    const onlyReport = scoreCorePredictions(midPunctuation, onlyPunctuation);
+    expect(onlyReport.exactSentence).toEqual({ count: 0, rate: 0 });
+    expect(onlyReport.spanExact.predicted).toBe(0);
+    expect(onlyReport.spanExact.gold).toBe(1);
+    expect(onlyReport.details[0].exact).toBe(false);
+  });
+
   it("compares etc. spans across tokenizer versions that assign different token IDs", () => {
     const text = "Use counters, timers, etc. in practice.";
     const gold = [

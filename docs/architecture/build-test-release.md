@@ -87,6 +87,8 @@ harness 提供三个口子:`seedProfiles()`(直接写 `chrome.storage.local`)、
 
 准确性修改必须以这套指标比较 baseline/candidate，不能只凭某一句手测。跨 tokenizer 的可比评分先用每次运行保存的 token→原文字符映射，把 Token span 归一成字符半开区间；Token ID 不同但字符边界与 role 相同仍视为相等。失败句始终留在冻结全集分母中。
 
+**预测尾标点归一化（评分口径，与生产 validator 语义一致）**：`scoreCorePredictions` 在评分前对**预测**成分做两步归一化，口径与 `validateCoreBatch` 内的 `semanticComponents` 过滤完全一致——①成分覆盖的 token 从 startToken 到 endToken **全部为纯标点**时整条丢弃（生产同样不允许凭空给逗号/句号标 PUNCTUATION 一类角色）；②否则把「句尾纯标点尾巴上的 token」从成分尾部裁掉，`endToken`（及 `endChar`，若有）同步改写到新尾 token。理由：标点 token 本就允许不覆盖，模型把句尾终止标点并进最后一个成分只是覆盖记账差，不是语义差，不归一化会让按新 prompt 措辞（"may include punctuation"）行事的模型被 exact 与 span 记账双重惩罚。**gold 不做裁剪**——黄金集总体约定标点不覆盖，唯一人工核过的例外（`fragment-portable-api` 的 `ATTRIBUTE` 止于句号）必须保持可区分；且「与 gold 完全相等（含该例外尾标点）」的预测保留原样、仍判 exact，归一化不反向惩罚 gold 例外。裁剪只发生在评分路径；artifact 校验、哈希与 trace 结构都不经此函数（内嵌 `report` 因评分口径变化需同步重算）。
+
 ### 首轮评分与生产链路验收边界
 
 准确性验收分两轨，不能混成一个分数：

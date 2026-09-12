@@ -821,6 +821,66 @@ function characterComponent(component, tokenIndex, sentenceId, sentenceText) {
   return { ...component, startChar: start.start, endChar: end.end };
 }
 
+/**
+ * 评分口径与生产 validator 的 `semanticComponents` 过滤完全一致:covered token 从
+ * startToken 到 endChar 全部为纯标点 => 成分整条丢弃;否则把「句尾纯标点尾巴上的
+ * token」从成分尾部裁掉(gold 按标点不覆盖钉 span,模型把句尾终止标点并进最后成分只是
+ * 覆盖记账差,不是语义差)。裁剪只对「区间与 token 对齐」的成分生效;裁掉尾部 token 时
+ * 同步把 endChar(若有)改写到新尾 token 的句内终点,保持 boundaryKey 的字符口径。
+ * gold 不裁剪——黄金集总体约定标点不覆盖,唯一人工核过的例外(fragment-portable-api
+ * 的 ATTRIBUTE 止于句号)必须保持可区分,归一化只做单向豁免、不反向惩罚 gold 例外。
+ * 裁剪只发生在 scoreCorePredictions 的评分路径;artifact 校验/哈希/trace 结构不经此函数。
+ */
+function trimTrailingPunctuationTokens(components, sentenceTokens) {
+  const trimmed = [];
+  let changed = false;
+  for (const component of components) {
+    const hasTokenSpan =
+      Number.isInteger(component.startToken) && Number.isInteger(component.endToken);
+    const hasCharSpan =
+      Number.isInteger(component.startChar) && Number.isInteger(component.endChar);
+    const covered = hasTokenSpan
+      ? sentenceTokens.filter(
+          (token) => token.id >= component.startToken && token.id <= component.endToken,
+        )
+      : hasCharSpan && sentenceTokens.every((token) => Number.isInteger(token.start))
+        ? sentenceTokens.filter(
+            (token) => token.start >= component.startChar && token.end <= component.endChar,
+          )
+        : [];
+    const aligned = hasTokenSpan
+      ? covered.length > 0 &&
+        covered[0].id === component.startToken &&
+        covered.at(-1).id === component.endToken
+      : hasCharSpan &&
+        covered.length > 0 &&
+        covered[0].start === component.startChar &&
+        covered.at(-1).end === component.endChar;
+    if (!aligned) {
+      trimmed.push(component);
+      changed = true;
+      continue;
+    }
+    if (covered.every((token) => token.punctuation)) {
+      changed = true;
+      continue;
+    }
+    let last = covered.length - 1;
+    while (last >= 0 && covered[last].punctuation === true) last -= 1;
+    if (last === covered.length - 1) {
+      trimmed.push(component);
+      continue;
+    }
+    changed = true;
+    const tail = covered[last];
+    const trimmedComponent = { ...component, endToken: tail.id };
+    if (Number.isInteger(component.endChar)) trimmedComponent.endChar = tail.end;
+    else delete trimmedComponent.endChar;
+    trimmed.push(trimmedComponent);
+  }
+  return changed ? trimmed : components;
+}
+
 function normalizedCoordinates(sentences, coordinateSystem) {
   if (coordinateSystem !== "characters") return sentences ?? [];
   return (sentences ?? []).map((sentence) => {
@@ -938,8 +998,30 @@ function indexSentences(sentences) {
 export function scoreCorePredictions(goldSentences, predictedSentences, options = {}) {
   const gold = normalizedCoordinates(goldSentences, options.coordinateSystem);
   const predicted = normalizedCoordinates(predictedSentences, options.coordinateSystem);
+  // 归一化只作用于预测侧:gold 不动(标点总体不覆盖是黄金集约定,fragment-portable-api
+  // 的尾句号例外必须保持可区分),纯标点成分与生产 validator 的 semanticComponents 对称丢弃。
+  // 归一化只作用于预测侧(gold 不动),但「与 gold 完全相等(含 gold 例外的尾标点)」的
+  // 预测不裁剪:归一化只能让「预测比 gold 多覆盖标点」的记账差消失,不能反过来制造新差异、
+  // 把等值预测挤掉 exact。判定按句做:预测成分键序与对应 gold 完全相等(数量与键+role
+  // 一致)时保留原句;否则裁剪。
+  const goldComponentsById = indexSentences(gold).indexed;
+  const normalizedPredicted = predicted.map((sentence) => {
+    const components = sentence.components ?? [];
+    const trimmed = trimTrailingPunctuationTokens(components, sentence.tokens ?? []);
+    if (trimmed === components) return sentence;
+    const goldComponents = goldComponentsById.get(normalizedSentenceId(sentence))?.components ?? [];
+    const equalsGold =
+      components.length === goldComponents.length &&
+      components.every(
+        (component, index) =>
+          boundaryKey(component) === boundaryKey(goldComponents[index]) &&
+          component.role === goldComponents[index]?.role,
+      );
+    return equalsGold ? sentence : { ...sentence, components: trimmed };
+  });
+
   const goldIndex = indexSentences(gold).indexed;
-  const predictionIndex = indexSentences(predicted);
+  const predictionIndex = indexSentences(normalizedPredicted);
   const details = [];
   let exactCount = 0;
   let spanMatches = 0;
