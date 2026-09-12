@@ -43,6 +43,18 @@ IntelliJ 的 JCEF 真机执行提交的 `intellij-plugin/src/main/resources/web/
 
 E2E 配置:`fullyParallel: false`、`workers: 1`(共享持久化 profile 的权限与存储状态)、单例 30s / 断言 10s 超时、CI 上重试 1 次。**不碰外网**——只有本地假模型与固定页服务器。
 
+### 页面级覆盖 E2E(`chrome-plugin/tests/e2e/page-coverage.spec.ts`)
+
+`extension.spec`/`layout.spec` 之外的第二条整页链路:两份 coverage fixture(`arxiv-paper-coverage.html` / `spring-ai-coverage.html` + 冻结 inventory `tests/fixtures/page-inventory/*.json`)钉住「页面语义合同」——inventory 里每个单元都有明确结局(automatic 或带 reason 的排除),automatic 单元经生产 `segmentBlock` 得出期望句集合:
+
+1. 逐 automatic DOM id `scrollIntoView`(原生 API;`scrollIntoViewIfNeeded` 会被 `display:none` 的已替换原文卡住空转)让每块真实走视口发现;
+2. `expect.poll` 同时盯假服务器请求多重集与 `GET_SESSION_STATUS`(探针,不用墙钟),定格后断言 `discovered/ready === expected`、`failed/skipped/queued/inFlight === 0`;
+3. 请求集合多重集全等且唯一,每条请求 ≤ `MAX_SENTENCES_PER_REQUEST`,kind 只允许 `core`/`core-repair`;
+4. 每块恰好一张卡(嵌套 `li>p`/`td>p`/`figcaption>p` 只进子),每张卡至少一条含 `\p{Script=Han}` 的译文(出现非 Han 译文 = 走了 `isEchoTranslation` 兜底,页面语义覆盖即破);
+5. 逐请求断言 prompt/句文本不含 display equation、TeX annotation、作者邮箱、`\Acp` 占位符、无题名 reference、隐藏段落、导航与交互控件(按内容而非 reason 枚举,贴近「内容不泄入模型」义务本身);
+6. STOP 无损还原(标题/表格/图注/链接 `outerHTML` 逐字节还原)+ 换 tab 换 documentId 重开缓存零请求;
+7. 另有一例三轮非法脚本钉「失败可见、不写缓存、重新解析强制重发」。
+
 ### E2E harness(`chrome-plugin/tests/e2e/fixtures.ts`)
 
 worker 级 fixture 做一次构建,然后:
@@ -86,6 +98,8 @@ harness 提供三个口子:`seedProfiles()`(直接写 `chrome.storage.local`)、
 - 每句的 missing span、extra span、role error，以及缺句/多句/重复句状态。
 
 准确性修改必须以这套指标比较 baseline/candidate，不能只凭某一句手测。跨 tokenizer 的可比评分先用每次运行保存的 token→原文字符映射，把 Token span 归一成字符半开区间；Token ID 不同但字符边界与 role 相同仍视为相等。失败句始终留在冻结全集分母中。
+
+**为什么必须归一化(踩过的坑)**:v12/v13 prompt 的标点措辞逐字相同(`"Punctuation tokens at the end of a component may be included…"` 自 v12 起未动),但 v13 的其余教学变化让模型开始把句尾终止标点并进最后一个成分——旧口径下 9 句「差 1 字符」的 lost-exact 把 3 句真实语义退化淹没,首轮评测因此先误判「大跌」、更正时又把因果写成「v13 新许可」。归一化后 core40 exact mean 从 0.675 修正回 0.84167、visible 从 0.43333 修正回 0.46667,真退化(`ho-clause-1/2` 系表合并、`spring-vp-coordination` OBJECT 吞 ATTRIBUTE、`arxiv-figure-caption` 双重合并)与教学空隙(`nonfinite-when-phrase`)才浮出来,记为 v14 回归靶。归一化只对称移除记账差,真实合并不受豁免;页面 corpus(20 句)与 40 句 corpus 的总分不可直接比较。
 
 **预测尾标点归一化（评分口径，与生产 validator 语义一致）**：`scoreCorePredictions` 在评分前对**预测**成分做两步归一化，口径与 `validateCoreBatch` 内的 `semanticComponents` 过滤完全一致——①成分覆盖的 token 从 startToken 到 endToken **全部为纯标点**时整条丢弃（生产同样不允许凭空给逗号/句号标 PUNCTUATION 一类角色）；②否则把「句尾纯标点尾巴上的 token」从成分尾部裁掉，`endToken`（及 `endChar`，若有）同步改写到新尾 token。理由：标点 token 本就允许不覆盖，模型把句尾终止标点并进最后一个成分只是覆盖记账差，不是语义差，不归一化会让按新 prompt 措辞（"may include punctuation"）行事的模型被 exact 与 span 记账双重惩罚。**gold 不做裁剪**——黄金集总体约定标点不覆盖，唯一人工核过的例外（`fragment-portable-api` 的 `ATTRIBUTE` 止于句号）必须保持可区分；且「与 gold 完全相等（含该例外尾标点）」的预测保留原样、仍判 exact，归一化不反向惩罚 gold 例外。裁剪只发生在评分路径；artifact 校验、哈希与 trace 结构都不经此函数（内嵌 `report` 因评分口径变化需同步重算）。
 
@@ -190,7 +204,7 @@ tag `v*` 触发,`permissions: contents: write`:
 ## IntelliJ 插件的构建、测试与发布
 
 - **门禁**:仓库根 `./gradlew :intellij-plugin:test :intellij-plugin:buildPlugin :intellij-plugin:verifyPluginProjectConfiguration`;桥协议的 TS 侧测试在 `intellij-plugin/` 里跑(`npm run test:idea-web`,即该子目录的 `vitest run src/main/resources/web`,有自己的 package.json / vitest.config.ts,不再挂在 Chrome 侧的 npm 工程下)。一键全量走仓库根 `npm run test:all`(= chrome-plugin 的 `npm test` + intellij-plugin 的 `test:idea-web` + `./gradlew intellijCheck`,见根 `package.json`)。
-- **测试分层**:Kotlin 单测(JUnit5)覆盖模型/调度/缓存/会话;集成测试(`integration/`)用 FakeOpenAiServer + 真实 AnalysisService 走全链路,断言用探针(请求计数、发送记录)不用墙钟;core repair 用例必须覆盖第二轮只带剩余失败句以及两轮后终止。`SecretIsolationTest` 钉密钥隔离;`PageMessageWiringTest` 钉 JS→Kotlin 消息接线(Panel 桥接入口 → 会话)。跨端契约由仓库根 `shared-fixtures/` 双端消费(chrome-plugin 里 `npm run test:contracts`)，`contracts.json` 钉版本常量，`core-prompt-parity.json` 钉两端 core 主 prompt 正文字节一致；repair-only 文案另由双端 `PromptsTest` 钉住。
+- **测试分层**:Kotlin 单测(JUnit5)覆盖模型/调度/缓存/会话;集成测试(`integration/`)用 FakeOpenAiServer + 真实 AnalysisService 走全链路,断言用探针(请求计数、发送记录)不用墙钟;core repair 用例必须覆盖第二轮只带剩余失败句以及两轮后终止。`SecretIsolationTest` 钉密钥隔离;`PageMessageWiringTest` 钉 JS→Kotlin 消息接线(Panel 桥接入口 → 会话)。跨端契约由仓库根 `shared-fixtures/` 双端消费(chrome-plugin 里 `npm run test:contracts`)，`contracts.json` 钉版本常量，`core-prompt-parity.json` 钉两端 core 主 prompt 正文字节一致；repair-only 文案另由双端 `PromptsTest` 钉住。**Gradle 配置缓存会把 `:intellij-plugin:test` 标 UP-TO-DATE 而无视 `shared-fixtures/` 的变更**——动过 fixture 时用 `./gradlew :intellij-plugin:test --rerun-tasks`,否则双端一致是假绿。
 - **假模型服务器**:Kotlin 侧复用 `testsupport/FakeOpenAiServer`(本地 HTTP,FIFO 响应队列);并发分块用例的响应内容做成"任意配对都合法",不依赖 HTTP 到达顺序。验证两轮 repair 终止时 FIFO 也必须排满首轮和两轮 repair 三份非法响应。
 - **CI**:三个 job——chrome(chrome-plugin 全部前端门禁)、intellij(JDK21 + Gradle 缓存 + 插件 zip 产物,web 测试也在这个 job 里)、contracts(契约向量)。不上传 PasswordSafe/沙箱目录。
 - **发版**:与 Chrome 扩展**同版本、同一个 Release**。`intellij-plugin/build.gradle.kts` 的 `version` 由 `chrome-plugin/scripts/release.mjs` 一并改写(发版提交里落成正式版本号并一直留在那儿,不回退成 SNAPSHOT;下次发版再被改成新版本号),`buildPlugin` 产出 `intellij-plugin-<version>.zip`(约 17 MB,含 sqlite-jdbc 多平台原生库),由 release CI 附进同一个 draft;`plugin.xml` 不写 `<version>`,由 gradle 注入。Plugin Verifier 对 IC 2025.1+ 校验。JCEF 不可用的运行时里「开始句法学习」Action 不可用并提示切换 JetBrains Runtime。

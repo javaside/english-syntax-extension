@@ -2,6 +2,32 @@
 
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## Unreleased — 页面级英文句法覆盖
+
+这一版把「翻得好」的目标升级为「**看得见的英文页面都被覆盖**」:文档标题、章节标题、列表项、定义项、表格题名/表头/自然语言单元格、图注、脚注、callout 与参考文献题名等短语义单元进入页面语义清单并按分类型门槛自动分析;科学文档(MathML/公式/占位符)有专门的文本归一化;双端新增译文质量硬门,拒绝「英文原样回显当译文」。
+
+**升级后请重新加载扩展并刷新页面；IDEA 插件需要安装新版 zip。** `CORE_PROMPT_VERSION` 升为 `13`、`DETAIL_PROMPT_VERSION` 升为 `7`（`CORE_SCHEMA_VERSION` 保持 `3`，结果 JSON 形状未变），**已有 core 与 detail 缓存按版本键整体作废、全量重取——这是预期行为**，升级后首次解析会重新请求全部句子。
+
+### 新增
+
+- **页面语义清单（`page-inventory.ts`）**：自动扫描改为「语义单元枚举 → 分类型门槛 → principal root → 父子去重」的清单投影，枚举标题/正文/列表/定义/表格/图注/脚注/callout/文献题名/松散块，并给每个单元一个明确结局——自动分析，或 14 种稳定排除原因之一（`outside-principal-content` / `excluded-region` / `unsafe-interactive` / `hidden` / `non-english` / `no-readable-words` / `loose-block-too-short` / `display-math` / `math-auxiliary` / `conversion-placeholder` / `reference-metadata` / `unsupported-reference-layout` / `covered-by-child` / `unsafe-partial-replacement`）。排除不再静默消失。**统一 20 字符门取消**：标题/dt/th/caption 有可读英文实词即可，p/li/dd/td/figcaption/callout 靠语义标签 + principal root + 英文占比把关，仅 loose div/section/span 保留 20 字符。
+- **科学 DOM 文本归一化（`readable-dom-text.ts`）**：`<math>` 只取一个稳定表示（`alttext` 优先）、annotation 与 assistive fallback 不重复、Unicode 空白折叠；展示公式、`\Acp` 转换占位符、作者邮箱与无题名文献不再进入模型。
+- **译文质量硬门（双端逐字一致）**：最终成分的 `translation` 必须至少含一个 Unicode Han 字符，且不得在 NFKC + 大小写/空白折叠后等于英文原文 span——回显与只有大小写/空白差异的回显都拒绝，进现有至多两轮修复配额，最终失败不写缓存；旧缓存里的回显值在读取时按 miss 重取。专名不是省略中文的理由：`JSON 数据格式`、`Spring AI 框架`、`GWTC-5.0 引力波事件目录`、`哈勃常数 H0` 这类「保留英文 + 补中文类型」合法，纯 `JSON` / `Spring AI` 回显拒绝。共享边界 case 由 `shared-fixtures/translation-quality.json` 双端 replay（15 个 `hanScriptBoundary` case 钉住 TS `\p{Script=Han}` 与 JVM `\p{IsHan}` 的跨区块等价）。
+- **页面级覆盖 E2E（`tests/e2e/page-coverage.spec.ts`）**：Spring AI 与 arXiv 两份 coverage fixture（HTML + 冻结 inventory）经生产 segmenter 得期望句集合，钉住「扫描发现 → 逐块滚动解析 → 请求集合全等且唯一 → 每卡译文含 Han → STOP 无损还原 → 重开缓存零请求」全链路；另有一例三轮非法脚本钉住失败可见、不写缓存与重新解析强制重发。
+
+### 修复
+
+- **双端扫描覆盖短语义文档块**：Chrome 的语义标签免 20 字符门（loose 块保留）；IntelliJ Markdown 预览纳入 `dt/dd/caption/th/td/figcaption`、`.footnotes` 内段落与 `<HARD-GATE>` 一类连字符自定义元素，短语义标签有英文实词即可，表格与脚注不再整体排除（改由语义子单元 + 父子去重决定）。显式手势照旧不套自动扫描的取舍（无长度/正文容器门，英文占比仍适用）。
+- **片段允许内嵌完整定语从句（fragment-relative 放行）**：`An API` + `that returns JSON responses` 这类「片段主体 + 完整定语从句」合法，`FRAGMENT_FORBIDDEN_ROLES` 只移出 `ATTRIBUTIVE_CLAUSE` 一类，其余从句门（最小长度、follower 门、尾介词豁免、主语从句首词闭集）照旧约束放行的从句。
+- **页面句型提示词重写（`CORE_PROMPT_VERSION` 13）**：删除与黄金集 conventions 重复的旧条目，页面语料新句型（arXiv 冒号长标题四段口径、VP/NP 并列、finite/non-finite when、allow/force/let 宾语控制、零关系词定语从句、非限定补足成分整体 `COMPLEMENT`、PP 依附四类映射）按「正例 + 最接近反例」对偶教学；detail/sentence-details 修复轮补输出模板与完整中文角色词表（`DETAIL_PROMPT_VERSION` 7）。单句规则段预算实测 8207 → 10903 字符（+33%，预算测试钉住 ≤1.35×）。
+- **评分器预测尾标点归一化**：评分前对预测成分做「纯标点成分丢弃 + 句尾终止标点尾巴裁剪」（与生产 validator `semanticComponents` 同口径；gold 不动，`fragment-portable-api` 尾标点例外保持可区分）。归一化把三次配对评测的记账差对称移除：core40 整句 exact mean 0.84167（35/33/33 of 40）、页面目标 corpus 0.46667（10/9/9 of 20）、finalFailures 3 → 0、correctToWrongOrFailure 两套口径均为 0、role accuracy 不降；仍非 exact 的合并才是真退化（系表合并、OBJECT 吞分词后置 ATTRIBUTE、图注双重合并），连同 `nonfinite-when-phrase` 教学空隙记为 v14 回归靶。
+
+### 测试
+
+- Chrome 43 个测试文件 / 1164 个单测与 37 个 Playwright E2E（新增页面级覆盖 3 例）全部通过；lint 保持唯一既有基线错误。
+- IntelliJ Web 测试、Kotlin 测试、插件构建与项目配置校验通过；动过 `shared-fixtures/` 时 Gradle 测试需 `--rerun-tasks`（配置缓存会把 fixture 变更标成 UP-TO-DATE）。
+- 两套 corpus（固定 40 句 + 页面目标 20 句）各完成三次 `pipeline` 配对评测，`--compare-manifest` 机器校验 corpus 与全部运行配置一致；`shared-fixtures/visible-page-core-evaluation-corpus.json` 冻结页面目标语料（浮动 Spring 来源带内嵌 `sourceEvidence`）。
+
 ## 1.3.3 — 2026-09-02
 
 这一版修复成分划分里三类会直接显示给用户的错误：定语从句只标引导词、名词后的介词短语误标状语、系表结构两种口径混用。三类都**完全通过**此前的全部本地校验，不进修复轮就写进缓存长期显示。

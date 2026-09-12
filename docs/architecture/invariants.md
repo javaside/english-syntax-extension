@@ -286,7 +286,7 @@
 
 ### I-21 显式手势不套用自动扫描的取舍
 
-**规则** `scanDocument` 要在整页里躲开边栏与样板文字,所以只在得分最高的正文容器内收块、并要求 20 字符起;`nearestSafeBlock` 只服务用户指到的那一处,**两条都不适用**。
+**规则** `scanDocument` 是页面语义清单(`page-inventory`)的 automatic 投影:先在得分最高的正文容器内枚举语义单元,再按**分类型门槛**判自动资格——统一 20 字符门已取消,仅 loose div/section/span 与非语义类保留最短 20 字符,标题/dt/th/caption 只要有可读英文实词,其余语义标签靠 principal root + 英文占比把关;`nearestSafeBlock` 只服务用户指到的那一处,**不走正文容器/最短长度这些统计门**(英文占比仍适用)。
 
 **症状** 套用后表现为"鼠标明明停在段落上,快捷键却报『未找到可解析的段落』"——多 `<article>` 页面、SPA 换内容后缓存失效、短段落全中招。
 
@@ -589,3 +589,23 @@
 **症状**:一段翻译完成后原文与卡片同时显示;紧接着再按快捷键就复现「一直显示在翻译状态」。
 
 **守护测试**:`render.test.ts`(`the injected stylesheet really hides the replaced original, not just marks it`——happy-dom 不加载注入的样式表,只能按文本钉住规则)。
+
+### 评测 artifact 的派生元数据要确定性重算,不能混进 provider 输出
+
+**规则**:`validatorErrors`、`report`、`hashes.messages`/`hashes.prompt` 这类**派生元数据**与 provider `raw` 是两类东西。生产行为变更(validator/prompt 改动)后,已保存 baseline 的派生层要么按生产代码确定性重算、要么显式登记 partition drift——**绝不能用旧 validator 的判定冒充新行为下的产物,也不能为了对齐而重跑或改写 provider raw**。
+
+**为什么** Task 4 曾在 runner 里让普通轮绕过 production 校验、用自己算的 `validatorErrors` 冒充生产诊断(修复:首轮一律走 committed `productionValidationErrorsFor`,Task 5 又曾把 first-pass 模式接错作用域拿到 `ReferenceError`,随后统一成共享生产诊断 helper);Task 9/10 的 validator/prompt 变更让六份旧 baseline 的「最后拒绝集合」与冻结 partition 不一致,靠 Task 4 ruling 的「只重算派生元数据、provider raw 一字不动」化解。反过来,**Gradle 配置缓存会把 `:intellij-plugin:test` 标成 UP-TO-DATE 而无视 `shared-fixtures/` 的变更**——fixture 相关任务必须 `--rerun-tasks`,否则你验证的是上一次的 fixture。
+
+**症状** ① runner 首轮出现 `ReferenceError: validationErrorsFor is not defined`,或失败句被标成 `.invalid` 假失败;② 旧 baseline 复评时拒绝文案仍是已删除的旧措辞,`--compare-manifest` strict 门变红;③ 改了 `shared-fixtures/` 后 Gradle 全绿,单测却仍消费旧 fixture——Kotlin 侧的「双端一致」是假绿。
+
+**守护测试** `scripts/core-evaluation-runner.test.mjs`(first-pass 与评分 API 强制 production 校验上下文)、`scripts/core-evaluation.test.mjs`;baseline 重算后逐份 `--validate-artifact` strict 复核 + provider raw 摘要逐字节比对。
+
+### 真页面评分以修正口径为准,记账差不算语义退化
+
+**规则**:三次配对评测的上线判断用**预测尾标点归一化**后的数字(纯标点成分丢弃 + 句尾终止标点尾巴裁剪,与生产 validator `semanticComponents` 同口径;gold 不动,`fragment-portable-api` 尾标点例外保持可区分)。归一化把 core40 exact mean 从 0.675 修正回 0.84167(35/33/33 of 40)、visible 从 0.43333 修正回 0.46667(10/9/9 of 20)、final failures 3 → 0、c2wf 0——修正后仍非 exact 的合并才是真退化,记为 v14 回归靶:`ho-clause-1/2` 系表合并成单个 `PREDICATE`、`spring-vp-coordination` OBJECT 吞分词后置 ATTRIBUTE、`arxiv-figure-caption` FRAGMENT_HEAD+ATTRIBUTE 双重合并、`nonfinite-when-phrase` 教学空隙。
+
+**为什么** gold 总体约定标点不覆盖,而 prompt 明文允许成分含标点;模型把句尾 `.` 并进最后成分只是覆盖记账差,不归一化会被 exact 与 span 记账双重惩罚,把「模型行为变化」误报成「语义回归」(Task 11 曾据旧口径误判 candidate 大跌,又在更正后把因果写反——标点措辞自 v12 起逐字未变,变的是模型行为)。
+
+**症状** 修复前后的真实差异被 9 句「差 1 字符」的 lost-exact 淹没;或反过来,归一化被当成洗白——它只对称移除记账差,`ho-clause-1/2` 这类真实合并照旧非 exact。
+
+**守护测试** `scripts/core-evaluation.test.mjs` 的归一化双向用例(纯标点丢弃、尾标点裁剪、gold 例外保持 exact、等值预测不反向惩罚);`core-evaluation-traces.json` 与真实 artifact 的内嵌 `report` 均按归一化 scorer 重算。

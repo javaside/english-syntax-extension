@@ -30,7 +30,7 @@
 | 文件                           | 职责                                                                                                                                                                    |
 | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `service-worker.ts`            | 消息路由、来源与权限门、脱敏、`activeTabs` 持久化、端口管理、右键菜单 / 快捷键 / 图标点击的监听器注册、依赖装配                                                         |
-| `analysis-service.ts`          | **核心编排**:缓存查找 → 按端点分块 → 提示词 → 调度 → 校验 → core 至多两轮修复(每轮仅剩余失败句) → 写缓存。同时实现 `lookupCore` / `lookupDetail`(纯缓存)与 `analyzeSentenceDetails`(整句预载) |
+| `analysis-service.ts`          | **核心编排**:缓存查找 → 按端点分块 → 提示词 → 调度 → 校验 → core 至多两轮修复(每轮仅剩余失败句) → 写缓存。同时实现 `lookupCore` / `lookupDetail`(纯缓存)与 `analyzeSentenceDetails`(整句预载)。**译文质量门**(含 Han、拒回显)与 grammar 门同轮返回,进同一修复配额   |
 | `openai-compatible-adapter.ts` | HTTP 层:请求体构造、鉴权头、超时(流式为静默超时)、HTTP 错误映射、**三种能力降级**、流式读取                                                                             |
 | `request-scheduler.ts`         | 通用优先级调度器:5 档优先级、`concurrency` / `backgroundConcurrency`、同 key 去重、可重试错误的指数退避、按 `documentId` 批量取消                                       |
 | `analysis-cache.ts`            | IndexedDB(`english-syntax-learning-v1`,v2,三个 store:core/detail/correction)+ LRU 限额 + 导入导出;缓存键工厂 `createCoreCacheKey` / `createCorrectionCacheKey`          |
@@ -48,7 +48,7 @@
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `content-script.ts`        | 三件事:①`ContentScriptRouter` 路由 SW 下发的页面命令;②`ChromeRuntimeTransport` 传输层(sendMessage + 端口 + 重连);③`isRuntimeResponse()` **响应守卫**         |
 | `session-controller.ts`    | **最重的一个文件**:会话状态机、块与句的注册、相位流转、合批窗口、发请求与版本守卫、详解 / 纠正交互、MutationObserver、断线重连、状态上报                     |
-| `page-inventory.ts`        | **页面语义清单**:枚举安全可读的英文语义单元(标题/正文/列表/定义/表格/图注/脚注/文献题名),分类型门槛 + principal root + 父子去重,给每个单元「自动分析或稳定排除原因」的结局 |
+| `page-inventory.ts`        | **页面语义清单**:枚举安全可读的英文语义单元(标题/正文/列表/定义/表格/图注/脚注/文献题名),分类型门槛 + principal root + 父子去重,给每个单元「自动分析或稳定排除原因」的结局;`scanDocument` 只取其 `automatic` 投影。fixtures: `tests/fixtures/page-inventory/*.json` 全等钉住 |
 | `readable-dom-text.ts`     | 科学 DOM 文本归一化:普通文本按序、`<math>` 只取一个稳定表示(alttext 优先)、annotation/assistive 不重复、Unicode 空白折叠;不解析 TeX、不翻译公式            |
 | `document-scanner.ts`      | `scanDocument()` = `page-inventory` 的 **automatic 投影**;`nearestSafeBlock()` 走显式手势路径(不设长度/正文容器门槛,英文占比仍适用)。**两者的取舍刻意不同**                  |
 | `hover-target.ts`          | 「鼠标指着谁」:查 `:is(:hover)` 取链尾(裸 `:hover` 在 quirks 页面恒为空集),链空才用记着的最后指针位置 `elementFromPoint` 兜底。装载即挂,冷启动快捷键才有坐标 |
@@ -94,7 +94,7 @@
 | `cache/CacheKeys.kt`                                  | 跨端一致的缓存键(SHA-256,共享向量钉住)                                                                                                                                                                                           |
 | `cache/AnalysisCache.kt`                              | SQLite 缓存:跨 store LRU、单调时间戳、导入合并                                                                                                                                                                                   |
 | `cache/CacheTransfer.kt`                              | 与 Chrome 扩展互通的导出/导入(格式头/schema 校验)                                                                                                                                                                                |
-| `analysis/AnalysisService.kt`                         | 编排:查缓存→分块→调度→校验→core 至多两轮修复(每轮仅剩余失败句)→写缓存;AnalysisServicePort 供测试替换                                                                                                                                                        |
+| `analysis/AnalysisService.kt`                         | 编排:查缓存→分块→调度→校验→core 至多两轮修复(每轮仅剩余失败句)→写缓存;译文质量门(含 Han、拒回显)与 Chrome 端同款;AnalysisServicePort 供测试替换                                                                                                                                                        |
 | `bridge/BridgeProtocol.kt`                            | JCEF 桥协议:键白名单严格校验,apiKey/headers/baseUrl 一律拒绝                                                                                                                                                                     |
 | `bridge/HotkeyDescriptor.kt`                          | 兼底 keydown 的键位判据:IDEA keymap 的 KeyStroke → 浏览器 event.code + 四个修饰键;没有可下发的绑定(未绑定 / 只有两段式 chord / 非字母数字键)时返回 null,页面兼底监听整条关掉,不回退 Alt+T 幻影键位                               |
 | `markdown/EnglishSyntaxPreviewPanel.kt`               | 官方 MarkdownJCEFHtmlPanel 的能力层包装:复用官方 JCEF 预览(不注册自建 provider),注入 web 资源、previewId/generation、PREVIEW_RENDERED 换代、桥接入口、dispose 语义                                                               |
@@ -112,7 +112,7 @@
 | `PluginServices.kt`                                   | 生产装配:应用级服务注册(ModelClientService/AnalysisServiceService/PreviewSessionManagerService),把模型客户端、SQLite 缓存、调度器与会话管理器接进 IntelliJ 服务容器                                                              |
 | `resources/web/bridge.ts`                             | JS 侧桥协议镜像:hasOnlyKeys + generation 复检,旧代次丢弃                                                                                                                                                                         |
 | `resources/web/bootstrap-entry.ts`                    | JCEF 页面入口:接 bridge/preview/render 到 window 全局(`__englishSyntaxInitialize` 等),由 rolldown 打包成 bundle.js 注入                                                                                                          |
-| `resources/web/preview.ts`                            | 预览 DOM 扫描:候选/排除选择器、英文占比、可见性观察;另有显式手势的块定位 `nearestPreviewBlock` 与 `ensureBlockId`(与自动扫描共用 blockId 计数器,判据刻意更松)                                                                    |
+| `resources/web/preview.ts`                            | 预览 DOM 扫描:候选/排除选择器、英文占比、可见性观察;另有显式手势的块定位 `nearestPreviewBlock` 与 `ensureBlockId`(与自动扫描共用 blockId 计数器,判据刻意更松)。Markdown 语义块:`h1-h6/p/li/blockquote/dt/dd/caption/th/td/figcaption`、`.footnotes` 内 p 与连字符自定义元素,短语义标签有英文实词即可、其余候选最短 20 字符;表格与脚注不再整体排除,由语义子单元 + 父子去重决定                                                                   |
 | `resources/web/render.ts`                             | 句法卡片渲染:可逆替换、流式暂定卡、详解面板,XSS 安全 textContent;结构与视觉对齐 Chrome 端 learning-block.ts                                                                                                                      |
 | `resources/web/roles.ts`                              | 语法角色颜色与中文标签映射(与 Chrome 端 grammar.ts/ROLE_COLORS 逐值同源,两端视觉必须一致)                                                                                                                                        |
 | `package.json` / `vitest.config.ts` / `tsconfig.json` | 子工程 npm 工程:web TS 测试(`npm ci && npm test`)独立运行,不挂在 chrome-plugin 依赖下                                                                                                                                            |
@@ -124,13 +124,14 @@
 | `tests/e2e/fixtures.ts`                     | Playwright harness:构建扩展 → 复制一份 patch 掉 `host_permissions` → 起假模型服务器与固定页服务器 → 提供 `seedProfiles` / `tabIdFor` / `dispatchFromUi` |
 | `tests/e2e/extension.spec.ts`               | 主 E2E 套件(30 余例):从选项页配置到流式降级的全链路                                                                                                     |
 | `tests/e2e/layout.spec.ts`                  | 布局回归:短句共行、译文不撑卡、详解面板锚定与不挤邻句                                                                                                   |
-| `tests/e2e/page-coverage.spec.ts`           | 页面级覆盖 E2E:两份 coverage fixture(HTML + 冻结 inventory)经生产 segmenter 得期望句集合,走「扫描发现 → 逐块滚动解析 → 请求集合全等且唯一 → 每卡译文含 Han → STOP 无损还原 → 重开缓存零请求」全链路;另有一例三轮非法脚本(排满三份非法响应)钉住失败可见、不写缓存与重新解析强制重发 |
+| `tests/e2e/page-coverage.spec.ts`           | 页面级覆盖 E2E:两份 coverage fixture(HTML + 冻结 inventory,位于 `tests/fixtures/pages/` 与 `tests/fixtures/page-inventory/`)经生产 segmenter 得期望句集合,走「扫描发现 → 逐块滚动解析 → 请求集合全等且唯一 → 每卡译文含 Han → STOP 无损还原 → 重开缓存零请求」全链路;另有一例三轮非法脚本(排满三份非法响应)钉住失败可见、不写缓存与重新解析强制重发 |
 | `tests/e2e/screenshots.spec.ts`             | 商店截图生成(`STORE_SHOTS=1 npm run screenshots`)                                                                                                       |
 | `tests/support/fake-openai-server.ts`       | 假 OpenAI 端点:按 prompt 首行识别请求类型、自动编造合法应答、可脚本化注入错误 / 分片 / 非法输出,并记录每次请求                                          |
-| `tests/fixtures/pages/*.html`               | E2E 用的各类固定页面(普通文章、动态内容、并列句、错误对照、悬停、折行探针…)                                                                             |
+| `tests/fixtures/pages/*.html`               | E2E 用的各类固定页面(普通文章、动态内容、并列句、错误对照、悬停、折行探针…,含 `arxiv-paper-coverage.html` / `spring-ai-coverage.html` 两份页面覆盖 fixture)                                                             |
+| `tests/fixtures/page-inventory/*.json`      | 页面语义清单契约:上述两份 coverage 页面的冻结 inventory(每单元 `id/kind/text/automatic/reason`),单测全等断言,自动分析单元即 `scanDocument` 的期望分母                                   |
 | `tests/fixtures/teaching-sentences.json`    | 12 类 × 3 句英语教学语料                                                                                                                                |
 | `shared-fixtures/core-gold-annotations.json` | 核心句法黄金标注集：显式标注约定、句文本及基于生产 tokenizer 的期望 span/role，供 TS/Kotlin 双端生产 validator replay 与可重复准确性比较                                                     |
-| `scripts/core-evaluation.mjs`               | 纯评分器：整句 exact、span exact 与 labeled span 的 P/R/F1、exact span role accuracy，以及逐句 missing/extra/role 错误                                  |
+| `scripts/core-evaluation.mjs`               | 纯评分器：整句 exact、span exact 与 labeled span 的 P/R/F1、exact span role accuracy，以及逐句 missing/extra/role 错误；评分前对**预测**做尾标点归一化（纯标点成分丢弃 + 句尾终止标点尾巴裁剪，与生产 validator `semanticComponents` 同口径；gold 不动）                                  |
 | `scripts/core-evaluation-runner.mjs`        | 手动真模型 runner 的可测试公共件：base URL 规范化/安全校验、预测归一、provider 错误脱敏、两项能力降级请求                                               |
 | `scripts/release.mjs`                       | 一条命令走完发版:改版本 → 全套门禁 → 打包 → 提交 → 打 tag → 推送                                                                                        |
 | `scripts/release-notes.mjs`                 | 从 CHANGELOG 切出指定版本那一节 + 补安装说明,作为 Release 正文                                                                                          |

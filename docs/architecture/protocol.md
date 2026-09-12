@@ -2,6 +2,8 @@
 
 一切定义在 `chrome-plugin/src/shared/`。**这是唯一真相**——`background` 与 `content` 互不 import,只靠这里的类型对齐。
 
+> **页面级英文覆盖这条分支没有改任何协议**:16 条请求消息、8 条响应消息、端口推送、storage 键与 IntelliJ 桥消息全部原样——页面发现与排除全部发生在 content 侧的 `page-inventory`/`readable-dom-text` 内部,不新增 SW/JCEF 消息,也不把 DOM 元数据加进任何协议。变化只在 prompt/validator(`CORE_PROMPT_VERSION` 13、`DETAIL_PROMPT_VERSION` 7,`CORE_SCHEMA_VERSION` 3 未变)与缓存键(随提示词版本整体作废重取)。
+
 ## 1. 版本常量(`shared/versions.ts`)
 
 | 常量                    | 当前值 | 含义                                                         | 改动影响                                               |
@@ -180,7 +182,7 @@ DetailAnalysis  = { sentenceId, focus, structures[], grammarPoints[], explanatio
 2. 成分之间**有序、不重叠**;
 3. **每个非标点 token 恰好被覆盖一次**;标点可以不被覆盖,但不得被覆盖两次;
 4. 纯标点成分在双端 `validateCoreBatch` 解析角色前直接丢弃（标点允许不覆盖，省一整轮模型往返）；丢弃后若一个语义成分都不剩，则以 `must contain a non-punctuation component` 拒绝；过滤后再编号，保证双端错误 path 一致;
-5. `translation` 非空、无危险文本、长度不超过 `max(500, 英文长度 × 8)`。`translation` 是**该成分自身覆盖文本的局部中文释义**,不存在句级 translation 字段——片段句(`FRAGMENT_HEAD`)同样按成分逐个给局部译文,不新增整句翻译;
+5. `translation` 非空、无危险文本、长度不超过 `max(500, 英文长度 × 8)`。`translation` 是**该成分自身覆盖文本的局部中文释义**,不存在句级 translation 字段——片段句(`FRAGMENT_HEAD`)同样按成分逐个给局部译文,不新增整句翻译。最终 component 还有**译文质量门**(非语法字段校验,双端逐字一致):必须至少含一个 Unicode Han 字符,且不得在 NFKC + 大小写/空白折叠后等于按 `leadingWhitespace + text` 重建的英文 span;错误文案 `"translation must include a meaningful Chinese gloss for the complete covered English span instead of echoing or only copying it"` 与 grammar 错误同轮返回、不阻断 grammar 诊断;专名保留英文 + 补中文类型(`JSON 数据格式`、`Spring AI 框架`)合法,纯专名回显拒绝;detail 的 translation 不强制(渐进增强字段);缓存读取路径重跑本门,旧缓存里的回显值按 miss 处理;共享 case 见 `shared-fixtures/translation-quality.json`;
 6. 组件序列相邻且 Token 区间连续的两个 `PREDICATE` 必须合并；
 7. 成分去掉标点后恰好一个 lexical word、role 不是 `CONJUNCTION`，且该词命中**保守的高把握介词白名单**时，不得独立成分，必须并入其管辖短语；`after/before/down/off/over/since/until/throughout/around/inside/outside` 等常见副词、表语或连词兼类词不收；
 8. `COORDINATE_CLAUSE` **出现即非法(≥1 个)**——该角色已废弃，并列句一律按同层成分平铺、FANBOYS 单独标 `CONJUNCTION`（`CORE_PROMPT_VERSION` 8 起提示词同步禁用）；
