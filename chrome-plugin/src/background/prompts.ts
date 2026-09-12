@@ -71,88 +71,102 @@ const MINIFIED_OUTPUT =
   "Do not wrap it in a Markdown code fence.";
 
 /**
- * 成分粒度的四条边界,以及它们必须按这个顺序出现的原因。
- *
- * completeness-first 排在最前:先判输入是否构成分句(带定式谓语、或省略主语的
+ * completeness-first 排最前:先判输入是否构成分句(带定式谓语、或省略主语的
  * 祈使句,都算分句),再交给 clause-first 决定分句层级——不构成分句的片段标
- * FRAGMENT_HEAD,不为凑句型凭空造主谓宾。
+ * FRAGMENT_HEAD,不为凑句型凭空造主谓宾。版本 13 在这条里补了页面语料的两组
+ * 对照:片段内的限定/零关系词定语从句不再把输入变成完整句;标题式冒号长句按
+ * 四段口径拆,冒号后是完整分句时反而按同层角色展开。
  *
- * 缺了这四条,同一个模型(deepseek-v4-flash)对指令型文本会给出词级碎片:实测
- * "Help turn ideas into fully formed designs and specs through natural collaborative
- * dialogue." 被切成 8-9 个成分——Help / turn 两个 PREDICATE、介词 into 与其宾语
- * 拆开、拆出来的名词短语再误标 ATTRIBUTE;补上后稳定收敛到 4 个短语级成分。
- *
- * 判定顺序必须写死"先分句、再句内":只把分句规则与 peer 规则并列摆着,
- * 两条会互相打架,实测同一句在两次调用之间会在两种切法之间跳。所以 peer 规则
- * 也收窄成「在单个分句之内」——它原本要挡的"谓语吞掉宾语"照旧被挡住。
- *
- * **`CORE_PROMPT_VERSION` 8 彻底废弃了 `COORDINATE_CLAUSE` 输出。** 版本 7 虽然已经让
- * validator 拒绝这种整块分句，提示词里却还残留「每个并列分句输出一个
- * `COORDINATE_CLAUSE`」的旧指令，模型照做后必然进入修复轮。现在所有并列句都按
- * subject/predicate/object 等同层成分平铺，只把 FANBOYS 并列连词单独标为
- * `CONJUNCTION`；分号可以连接两个分句，但不需要为它生成成分。
- *
- * 当年加"祈使句串整体标 COORDINATE_CLAUSE"是为了挡碎片化(6 个动词逗号串成一句时
- * 实测给出 6 个 `PREDICATE` / 16 个成分)。那条豁免现在去掉了,因为碎片化改由硬门
- * 直接拦:相邻 `PREDICATE` 必须合并、谓语首词不得是限定词/主格代词、谓语内部不得
- * 含限定词、单成分不得包住整句。
+ * `CORE_PROMPT_VERSION` 8 起彻底废弃 `COORDINATE_CLAUSE` 输出:所有并列句都按
+ * subject/predicate/object 等同层成分平铺,只把 FANBOYS 并列连词单独标为
+ * `CONJUNCTION`。版本 13 把旧的 Compound-sentence / Simple-sentence 两条独立
+ * 规则并入这里的分句层级叙述,消除三处重复口径。
  */
 const COMPLETENESS_FIRST_RULE =
-  'Completeness-first rule: before assigning clause roles, decide whether the input forms a clause. An input with an explicit finite predicate, or an imperative with an omitted subject, is a clause and uses the existing clause-level roles. A heading, list item, noun phrase, adjective phrase, or non-finite verb phrase that does not form a clause must contain exactly one FRAGMENT_HEAD; never invent SUBJECT, PREDICATE, OBJECT, PREDICATIVE, or ADVERBIAL merely to force a fragment into a clause pattern. Keep ordinary determiners and tightly bound single-word premodifiers with the FRAGMENT_HEAD, and emit separable postmodifying prepositional, participial, or infinitive phrases as ATTRIBUTE. "Portable API support across AI providers for Chat, text-to-image, and Embedding models" is FRAGMENT_HEAD "Portable API support" plus ATTRIBUTE "across AI providers" plus ATTRIBUTE "for Chat, text-to-image, and Embedding models". An imperative is a clause, not a fragment: "Install the CLI" is PREDICATE "Install" plus OBJECT "the CLI".';
-
-const CLAUSE_FIRST_RULE =
-  "Clause-structure-first rule: decide the clause layout before anything else. " +
+  "Completeness-first rule: before assigning clause roles, decide whether the input forms a clause. " +
+  "An input with an explicit finite predicate of its own, or an imperative with an omitted subject, is a clause and uses the clause-level roles; " +
+  'a finite verb inside an embedded relative clause does not count — "The tool that we built passes every test" keeps PREDICATE "passes" at the top level instead of becoming a fragment. ' +
+  "A heading, list item, noun phrase, adjective phrase, or non-finite verb phrase that does not form a clause must contain exactly one FRAGMENT_HEAD; never invent SUBJECT, PREDICATE, OBJECT, PREDICATIVE, or ADVERBIAL merely to force a fragment into a clause pattern. " +
+  "A noun-phrase fragment may contain one embedded relative clause: " +
+  '"An API that returns JSON responses" is FRAGMENT_HEAD "An API" plus ATTRIBUTIVE_CLAUSE "that returns JSON responses", and the finite verb inside that embedded clause does not turn the whole input into a main clause. ' +
+  "Keep ordinary determiners and tightly bound single-word premodifiers with the FRAGMENT_HEAD, and emit separable postmodifying prepositional, participial, or infinitive phrases as ATTRIBUTE. " +
+  '"Portable API support across AI providers for Chat, text-to-image, and Embedding models" is FRAGMENT_HEAD "Portable API support" plus ATTRIBUTE "across AI providers" plus ATTRIBUTE "for Chat, text-to-image, and Embedding models". ' +
+  'An imperative is a clause, not a fragment: "Install the CLI" is PREDICATE "Install" plus OBJECT "the CLI". ' +
   "A sentence is compound only when two or more clauses each carry their own subject and are joined by a coordinating conjunction (for, and, nor, but, or, yet, so) or a semicolon; " +
-  "analyse every compound clause as peer components (subject, predicate, object, adverbial, …), and tag only a coordinating conjunction as its own CONJUNCTION component. Never emit COORDINATE_CLAUSE. " +
-  "A comma, a colon, or a dash on its own never makes a sentence compound, and neither does a series of imperatives nor one subject shared by several verbs: " +
-  "analyse every one of those as peer components of a single clause. " +
-  'Tag a coordinating conjunction as CONJUNCTION only when it joins whole clauses or whole verb phrases; one inside a coordinated noun, adjective, or adverb phrase stays part of that single component ("calmly and confidently" is ONE ADVERBIAL). ' +
-  "A clause introduced by a subordinating conjunction (because, although, if, when, while, since, until, as, …) must use one of the five subordinate clause roles, stay whole, and leave the main clause analysed as peer components.";
+  "analyse every compound clause as peer components and tag only the coordinating conjunction as its own CONJUNCTION component. Never emit COORDINATE_CLAUSE. " +
+  "A comma, colon, dash, series of imperatives, or one subject shared by several verbs never makes a sentence compound: analyse all of those as peer components of a single clause.";
 
 /**
- * `"is independently deployable" is one PREDICATE` 这个例子废弃了:它与
- * `PEER_COMPONENT_RULE`（PREDICATE 不得吸收可分离的 PREDICATIVE）直接打架，
- * 黄金集里 `are` + `the front door`、`seem` + `clear enough` 都是拆开的，
- * 只有自动生成的两句跟着这个例子合成了一个 PREDICATE。两种口径混用时同一句在
- * 两次调用之间会跳，所以这里把系表结构定死成「系动词单独、补足部分标 PREDICATIVE」。
+ * 版本 13 的标题冒号口径:arXiv 论文长标题「前半活动片段 + 冒号 + 后半再说明」
+ * 整块标成一个 FRAGMENT_HEAD 会超过 10 实词的片段上限,所以在冒号处拆成
+ * FRAGMENT_HEAD + ATTRIBUTE + APPOSITIVE + ATTRIBUTE,冒号本身保持未覆盖;
+ * 反例钉住「不是所有冒号后文本都是 APPOSITIVE」。
+ */
+const COLON_TITLE_RULE =
+  "Colon-title rule: an indivisible supplement after a dash or colon takes APPOSITIVE or INDEPENDENT_ELEMENT, " +
+  "but when the supplement contains separable predicate, object, or adverbial peers, emit those internal peers instead of an overlapping outer supplement. " +
+  "A long title whose part after the colon renames the part before it splits at the colon, and the colon stays uncovered: " +
+  'in "Expanding the scope of dark siren cosmology: Inferring the population properties of gravitational wave-hosting galaxies", "Inferring the population properties" is ONE APPOSITIVE between FRAGMENT_HEAD "Expanding the scope", ATTRIBUTE "of dark siren cosmology", and ATTRIBUTE "of gravitational wave-hosting galaxies". ' +
+  'Do not mechanically tag everything after a colon as APPOSITIVE: in "The result is clear: the sampled prior reduces uncertainty", "the sampled prior reduces uncertainty" is a full clause and is analysed as peer SUBJECT, PREDICATE, and OBJECT. ' +
+  "Do not label a whole noun phrase plus its relative clause as ATTRIBUTIVE_CLAUSE: in 'the ones that matter', only 'that matter' is ATTRIBUTIVE_CLAUSE.";
+
+const CLAUSE_FIRST_RULE =
+  "Clause-structure rule: decide the clause layout before anything else. " +
+  "A clause introduced by a subordinating conjunction (because, although, if, when, while, since, until, as, …) must use one of the five subordinate clause roles, stay whole, and leave the main clause analysed as peer components. " +
+  'A when/before/after/if clause with its own finite predicate is ONE ADVERBIAL_CLAUSE ("when methods are called"), but when/before/after followed by a non-finite verb phrase stays at phrase level as ONE ADVERBIAL ("when performing tool calling"). ' +
+  "Inside a full clause a non-finite phrase keeps its normal role (a gerund phrase as SUBJECT or OBJECT, a participial opener as ADVERBIAL); FRAGMENT_HEAD applies only when the whole input is not a clause.";
+
+/**
+ * 版本 13 把五类从句、零关系词从句、并列结构(VP vs NP)、宾语控制结构、
+ * 非限定补足成分合并进「成分粒度规则」一条:它们全是「从句/短语从父节点
+ * 截断后单列」的同一条粒度纪律的具体情形,分散在五条规则里只会互相重复。
+ */
+const COMPONENT_GRANULARITY_RULE =
+  "Component-granularity rule: tag every subordinate clause as ONE whole component running from its introducing word through that clause's own subject, predicate, object, and adverbials — " +
+  "never stop a clause component at its introducing word and never emit the clause's own predicate, object, or adverbial as a peer of the main clause. " +
+  'In "Apple tests Siri feature that handles multiple commands at once", "that handles multiple commands at once" is ONE ATTRIBUTIVE_CLAUSE — "that" on its own is wrong, and so is "that handles" followed by a separate OBJECT; ' +
+  'in "That means developers now play a frontline role", "developers now play a frontline role" is ONE OBJECT_CLAUSE. ' +
+  "A relative clause whose introducing word is omitted is still ONE ATTRIBUTIVE_CLAUSE cut from the noun phrase it modifies: " +
+  '"a typed object the rest of the codebase can treat" is OBJECT "a typed object" plus ATTRIBUTIVE_CLAUSE "the rest of the codebase can treat". ' +
+  'The five clause roles have one example each: PREDICATIVE_CLAUSE completes a linking verb ("The real problem is that the cache entry has expired"), SUBJECT_CLAUSE acts as the subject ("Whoever wins the race gets the final ticket"), and ADVERBIAL_CLAUSE modifies the main clause ("Because the road was flooded, the bus took a longer route"). ' +
+  'Coordinate verb phrases sharing one subject are peer PREDICATEs: in "They measure the time and propagate the results", "and" is its own CONJUNCTION joining two verb phrases that share one subject, while a conjunction inside a coordinated noun, adjective, or adverb phrase stays part of that single component — in "a Claude subscription or Anthropic Console account", "or" stays inside the single OBJECT ("calmly and confidently" is ONE ADVERBIAL). ' +
+  'With allow/force/let plus a noun phrase plus an infinitive, the verb is PREDICATE, the noun phrase is OBJECT, and the infinitive phrase is COMPLEMENT ("allows Maven to access repositories" is PREDICATE "allows" plus OBJECT "Maven" plus COMPLEMENT "to access repositories"); a bare-infinitive chain without its own object stays inside the PREDICATE ("Help turn" is one PREDICATE, "let go" is one PREDICATE). ' +
+  'A non-finite complement phrase keeps its own object inside one COMPLEMENT ("is steered to produce text" is PREDICATE "is steered" plus COMPLEMENT "to produce text"); an object complement after the object is a separate COMPLEMENT ("We consider the tool essential" is OBJECT "the tool" plus COMPLEMENT "essential"). ' +
+  'A comma-braced renaming noun phrase is ONE APPOSITIVE ("Claude Code, an AI coding assistant, helps"), and a sentence-initial comment adverb is ONE INDEPENDENT_ELEMENT ("Fortunately, the deployment finished").';
+
+/**
+ * `["is independently deployable"] is one PREDICATE` 之类的旧例子已废弃:
+ * 系表结构定死「系动词单独、补足部分标 PREDICATIVE」。版本 13 把
+ * been/being/having 补进助动词清单。
  */
 const PREDICATE_SCOPE_RULE =
-  "Predicate-scope rule: inside a single clause a PREDICATE covers only the verb group — auxiliaries (can, could, may, might, must, shall, should, will, would, be, am, is, are, was, were, have, has, had, do, does, did) plus the main verb, " +
-  'including any adverbs between them and any bare-infinitive chain ("Help turn" is one PREDICATE, "let go" is one PREDICATE, "must close" is one PREDICATE). ' +
+  "Predicate-scope rule: inside a single clause a PREDICATE covers only the verb group — auxiliaries (can, could, may, might, must, shall, should, will, would, be, am, is, are, was, were, been, being, having, have, has, had, do, does, did) plus the main verb, " +
+  "including any adverbs between them. " +
   'Passive, perfect, and progressive forms keep be/have inside the verb group ("was rebuilt", "have been told", "is deflating" are each one PREDICATE), ' +
   "but a linking verb takes only the verb itself and whatever completes it becomes its own PREDICATIVE " +
   '("Be clear" is PREDICATE "Be" plus PREDICATIVE "clear"; "are widely beneficial" is PREDICATE "are" plus PREDICATIVE "widely beneficial"). ' +
   "Two PREDICATE components must never be adjacent: side-by-side verbs belong to a single PREDICATE.";
 
 /**
- * 旧文案把 ATTRIBUTE 限死成「名词短语内部的修饰语」并只给了前置修饰的例子
- * （`"fully formed" inside "fully formed designs"`），后置的介词短语于是无处可归，
- * 模型一律退回 ADVERBIAL——`the development` + `of applications` 实测就被标成
- * 宾语 + 状语，而这正是技术文档里最高频的结构。黄金集 conventions 与手工标注
- * （`an open standard` + `for connecting AI tools…`）本来就是 ATTRIBUTE，
- * 提示词与黄金集不一致的那半边在这里补齐。
+ * PP 依附的现有角色映射(动词管辖→ADVERBIAL、名词后所选→ATTRIBUTE、
+ * 外层 PP 内部不再拆、pay attention to 特例)按 spec §4.3 写成一对对正例。
  */
 const PREPOSITIONAL_PHRASE_RULE =
   "Prepositional-phrase rule: a preposition and everything it governs form exactly one component (ADVERBIAL or ATTRIBUTE), " +
   'including a coordinated object — "into fully formed designs and specs" is ONE ADVERBIAL, not a preposition plus separate noun phrases. ' +
   "Never emit a preposition as its own component and never let a component end on a preposition. " +
-  "Pick between the two roles by what the phrase modifies: a prepositional phrase that directly follows the noun phrase it modifies is ATTRIBUTE, " +
-  'so "the development" plus "of applications" is OBJECT plus ATTRIBUTE and "Four" plus "of the biggest US technology companies" is SUBJECT plus ATTRIBUTE — never ADVERBIAL; ' +
-  "a phrase that modifies the verb or the whole clause is ADVERBIAL. " +
+  "Pick between the two roles by what the phrase attaches to: " +
+  'a prepositional phrase expressing where/when/how the action happens is ADVERBIAL ("works directly with git" is PREDICATE "works" plus ADVERBIAL "directly with git"); ' +
+  'a prepositional phrase selecting or describing the preceding noun is ATTRIBUTE ("an open standard for connecting AI tools" is PREDICATIVE "an open standard" plus ATTRIBUTE "for connecting AI tools", and "the development" plus "of applications" is OBJECT plus ATTRIBUTE). ' +
   'Quantity and part expressions follow the same split, with no exception for "a lot of", "some of", or "no amount of". ' +
   'Do not split a prepositional phrase that already sits inside another one: "without looking at any of the code" stays ONE ADVERBIAL. ' +
-  "ATTRIBUTE is a modifier attached to a noun phrase, either in front of it " +
-  '("fully formed" inside "fully formed designs") or behind it ("signed yesterday" in "The documents signed yesterday"); ' +
+  'Fixed verb-preposition frames keep the governed noun as OBJECT and the phrase as ATTRIBUTE: "pay attention to the details" is PREDICATE "pay" plus OBJECT "attention" plus ATTRIBUTE "to the details". ' +
+  'ATTRIBUTE is a modifier attached to a noun phrase, either in front of it ("fully formed" inside "fully formed designs") or behind it ("signed yesterday"); ' +
   "never tag a noun phrase governed by a verb or preposition as ATTRIBUTE.";
 
 const PEER_COMPONENT_RULE =
   "Peer-component rule: within a single clause, identify the coequal grammatical components rather than labeling every verb-led span as PREDICATE. " +
   "A PREDICATE must not absorb a separable OBJECT, PREDICATIVE, COMPLEMENT, or ADVERBIAL; emit each such span as its own component.";
-
-const SUPPLEMENT_RULE =
-  "Supplement rule: text after an em dash or colon is often an explanation, reformulation, or list, not a coordinate clause and not a conjunction. " +
-  "Keep the output flat and non-overlapping: use APPOSITIVE or INDEPENDENT_ELEMENT for an indivisible supplement, but when it contains separable predicate, object, or adverbial peers, emit those internal peers instead of an overlapping outer supplement. " +
-  "Do not label a whole noun phrase plus its relative clause as ATTRIBUTIVE_CLAUSE: in 'the ones that matter', 'the ones' is the noun phrase and only 'that matter' is ATTRIBUTIVE_CLAUSE.";
 
 export const CORE_OUTPUT_SHAPE = [
   "Output exactly one JSON object of this shape, not a top-level array:",
@@ -161,20 +175,27 @@ export const CORE_OUTPUT_SHAPE = [
   MINIFIED_OUTPUT,
 ].join("\n");
 
-const DETAIL_OUTPUT_SHAPE = [
+/**
+ * 中文角色术语词表:detail 与 detail 修复轮共用。低频角色(表语/同位语/补语/
+ * 独立成分/片段主体)必须出现,否则修复轮之后 role 词表缩水。
+ */
+const CHINESE_ROLE_GLOSSARY =
+  "Use concise Chinese grammatical terms for roles (主语/谓语/宾语/定语/状语/表语/补语/同位语/独立成分/片段主体/系动词/引导词/连词 etc.), never English enum values.";
+
+export const DETAIL_OUTPUT_SHAPE = [
   "Output exactly one JSON object of this shape:",
   '{"sentenceId": string, "focus": {"startToken": number, "endToken": number}, "structures": [{"startToken": number, "endToken": number, "role": string, "explanation": string, "translation": string}], "grammarPoints": [string], "explanation": string}',
-  "Echo the supplied sentenceId and focus unchanged. Write explanations, grammar points, and every structure's role field in Chinese. Use concise Chinese grammatical terms for roles (主语/谓语/宾语/定语/状语/系动词/引导词/连词 etc.), never English enum values.",
+  `Echo the supplied sentenceId and focus unchanged. Write explanations, grammar points, and every structure's role field in Chinese. ${CHINESE_ROLE_GLOSSARY}`,
   "The structures array must break down only the internal components of the focus range. Every structure must stay inside focus, be ordered by Token ID, and be disjoint from every other structure; never return a whole span and then repeat its nested words or phrases. When the focus contains multiple lexical Tokens, never return a single structure that covers the entire focus — split it into meaningful non-overlapping sub-components; an indivisible one-Token focus may return one structure (subject, predicate, object, clauses, etc.).",
   "Give every structure a concise Chinese translation of exactly its own English text in the translation field (a few words, like a gloss under the phrase); keep the longer analysis in explanation. The translation field must be written in Chinese characters (中文译文) — copying the English words unchanged is invalid.",
   MINIFIED_OUTPUT,
 ].join("\n");
 
-const SENTENCE_DETAILS_OUTPUT_SHAPE = [
+export const SENTENCE_DETAILS_OUTPUT_SHAPE = [
   "Output exactly one JSON object of this shape:",
   '{"details": [{"sentenceId": string, "focus": {"startToken": number, "endToken": number}, "structures": [{"startToken": number, "endToken": number, "role": string, "explanation": string, "translation": string}], "grammarPoints": [string], "explanation": string}]}',
   "Return exactly one details entry per requested focus range, echoing the supplied sentenceId and that focus unchanged.",
-  "Write explanations, grammar points, and every structure's role field in Chinese. Use concise Chinese grammatical terms for roles (主语/谓语/宾语/定语/状语/系动词/引导词/连词 etc.), never English enum values.",
+  `Write explanations, grammar points, and every structure's role field in Chinese. ${CHINESE_ROLE_GLOSSARY}`,
   "Each entry's structures array must break down only the internal components of its focus range. Every structure must stay inside that focus, be ordered by Token ID, and be disjoint from every other structure; never return a whole span and then repeat its nested words or phrases. When the focus contains multiple lexical Tokens, never return a single structure that covers the entire focus — split it into meaningful non-overlapping sub-components; an indivisible one-Token focus may return one structure (subject, predicate, object, clauses, etc.).",
   "Give every structure a concise Chinese translation of exactly its own English text in the translation field (a few words, like a gloss under the phrase); keep the longer analysis in explanation. The translation field must be written in Chinese characters (中文译文) — copying the English words unchanged is invalid.",
   MINIFIED_OUTPUT,
@@ -186,6 +207,10 @@ const GRAMMAR_ROLE_NAMES: readonly string[] = Object.values(GrammarRole);
  * core 与 repair 共用的全套分析规则。修复轮曾只带 peer + supplement 两条,把覆盖率、
  * 角色枚举、并列/复合/简单句和译文要求全丢了——一句一旦进修复轮,剩下的唯一语法
  * 指导就是"把成分拆开",只会越修越碎。两处必须共享同一个来源。
+ *
+ * 版本 13 重写:删除了与黄金集 conventions 冲突/重复的旧句(独立的
+ * Compound-sentence 与 Simple-sentence 条目并入 completeness-first 的分句层级
+ * 叙述),页面语料新增句型全部以「正例 + 最接近反例」的对偶形式给出。
  */
 const CORE_ANALYSIS_RULES: readonly string[] = [
   `The role field is a closed ${GRAMMAR_ROLE_NAMES.length}-role enum: ${GRAMMAR_ROLE_NAMES.join(", ")}.`,
@@ -193,19 +218,15 @@ const CORE_ANALYSIS_RULES: readonly string[] = [
   'Each supplied Token is {"id","text"}; a Token is punctuation only when it carries "punctuation": true.',
   "Coverage rule: every non-punctuation Token must be covered exactly once. Components must be ordered, non-overlapping, and may include punctuation but may not contain punctuation only.",
   COMPLETENESS_FIRST_RULE,
+  COLON_TITLE_RULE,
   CLAUSE_FIRST_RULE,
+  COMPONENT_GRANULARITY_RULE,
   PREDICATE_SCOPE_RULE,
   PREPOSITIONAL_PHRASE_RULE,
   PEER_COMPONENT_RULE,
-  SUPPLEMENT_RULE,
-  "Compound-sentence rule: when two or more clauses that could each stand alone as a sentence are joined by a coordinating conjunction (for, and, nor, but, or, yet, so) or a semicolon, analyse the inside of every clause as peer components and tag only the coordinating conjunction as its own CONJUNCTION component (in a comma-plus-conjunction pair, tag only the conjunction itself). Never emit COORDINATE_CLAUSE.",
-  "Complex-sentence rule: tag a subordinate clause as one whole component with one of the five clause roles (SUBJECT_CLAUSE, OBJECT_CLAUSE, PREDICATIVE_CLAUSE, ATTRIBUTIVE_CLAUSE, ADVERBIAL_CLAUSE) and never split its internal structure. " +
-    "The component runs from the introducing word through that clause's own subject, predicate, object, and adverbials, so never stop a clause component at its introducing word and never emit the clause's own predicate, object, or adverbial as a peer of the main clause: " +
-    'in "Apple tests Siri feature that handles multiple commands at once", "that handles multiple commands at once" is ONE ATTRIBUTIVE_CLAUSE — "that" on its own is wrong, and so is "that handles" followed by a separate OBJECT. ' +
-    'A clause whose introducing word is omitted is still one whole component: in "That means developers now play a frontline role", "developers now play a frontline role" is ONE OBJECT_CLAUSE.',
-  "Simple-sentence rule: analyse a sentence with a single subject-predicate structure as peer components.",
   "Give every component a concise, non-empty Chinese translation that renders everything the component covers rather than only its head word: " +
-    '"incorporate artificial intelligence functionality" is "整合人工智能功能", not "整合", and "of applications" is "应用程序的", not "的".',
+    '"incorporate artificial intelligence functionality" is "整合人工智能功能", not "整合", and "of applications" is "应用程序的", not "的". ' +
+    'Proper names keep their English form and add a short Chinese type: "Spring AI 框架", "JSON 数据格式", "哈勃常数 H0"; a translation that only copies or echoes the English span is invalid and will be rejected.',
 ];
 
 export function buildCorePrompt(sentences: readonly SentenceInput[]): string {

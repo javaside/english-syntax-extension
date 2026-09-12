@@ -19,6 +19,7 @@ import dev.codetui.englishsyntax.language.ValidationResult
 import dev.codetui.englishsyntax.language.validateCoreBatch
 import dev.codetui.englishsyntax.language.validateDetail
 import dev.codetui.englishsyntax.model.ChatMessage
+import dev.codetui.englishsyntax.model.DETAIL_OUTPUT_SHAPE
 import dev.codetui.englishsyntax.model.JsonSchemaSpec
 import dev.codetui.englishsyntax.model.OpenAiCompatibleClient
 import dev.codetui.englishsyntax.model.StreamedComponent
@@ -507,6 +508,9 @@ class AnalysisService(
   ): String = listOf(
     "Repair only the structure of the invalid detail-analysis JSON.",
     "Keep the sentence ID, Tokens, verified core analysis, and focus unchanged. Return JSON only.",
+    // DETAIL_PROMPT_VERSION 7：修复轮带上完整输出模板与中文角色词表——兼容模式下
+    // response_format 缺失，修复请求若不带 shape，模型只能盲猜信封。
+    DETAIL_OUTPUT_SHAPE,
     "Selected sentence:",
     serializeSentence(sentence),
     "Verified core result:",

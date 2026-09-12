@@ -260,7 +260,7 @@
 
 ### I-18.1 Tokenization 改动必须同时提升 core 与 detail 提示词版本
 
-**规则** 任何会改变 Token 数量或 ID 的分词改动，都必须同时提升 `CORE_PROMPT_VERSION` 与 `DETAIL_PROMPT_VERSION`；当前值分别为 `12` 与 `6`（版本 12/6 因 `etc.` 从两个 Token 合并为单个非标点 Token 而同步提升），而输出契约未变，`CORE_SCHEMA_VERSION` 保持 `3`。
+**规则** 任何会改变 Token 数量或 ID 的分词改动，都必须同时提升 `CORE_PROMPT_VERSION` 与 `DETAIL_PROMPT_VERSION`；当前值分别为 `13` 与 `7`（版本 13/7 面向页面级英文覆盖重写双端 prompt 并给 detail 修复轮补输出模板与完整中文角色词表；`CORE_PROMPT_VERSION` 13 起单句规则段预算由预算测试钉住 ≤ 版本 12 实测 8207 字符的 1.35 倍），而输出契约未变，`CORE_SCHEMA_VERSION` 保持 `3`。
 
 **为什么** core span 与 detail focus 都使用 Token ID。两条缓存键虽各自带提示词版本，但 Token 坐标是共同依赖；只升一条会让另一类旧缓存仍以过期坐标命中新文本。
 

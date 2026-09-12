@@ -8,10 +8,10 @@
 | ----------------------- | ------ | ------------------------------------------------------------ | ------------------------------------------------------ |
 | `MESSAGE_VERSION`       | `1`    | 消息信封版本;收发两侧都校验                                  | 改了会让旧页面上残留的 content script 与新 SW 互不认账 |
 | `CORE_SCHEMA_VERSION`   | `3`    | core / detail 结果的语义契约版本;**参与缓存键**              | 改了等于全量作废缓存;缓存导入也会因版本不符整体拒绝    |
-| `CORE_PROMPT_VERSION`   | `12`   | core 提示词/Token 坐标版本;**参与 core / correction 缓存键** | 改了作废全部 core 缓存                                 |
-| `DETAIL_PROMPT_VERSION` | `6`    | detail 提示词/focus Token 坐标版本;**参与 detail 缓存键**    | 改了作废全部详解缓存                                   |
+| `CORE_PROMPT_VERSION`   | `13`   | core 提示词/Token 坐标版本;**参与 core / correction 缓存键** | 改了作废全部 core 缓存                                 |
+| `DETAIL_PROMPT_VERSION` | `7`    | detail 提示词/focus Token 坐标版本;**参与 detail 缓存键**    | 改了作废全部详解缓存                                   |
 
-> 缓存键**刻意不含** profile / 模型维度——换模型不该让已有译文全部作废;但**含提示词版本**,因为同一句在不同规则下会被切成不同粒度的成分,旧结果继续复用只会让新旧质量混在一屏。版本 8 彻底删除了要求输出 `COORDINATE_CLAUSE` 的残留旧指令；版本 9 强化 repair prompt 的限定词切分与逐条自检，并配套 core 至多两轮修复；版本 10 补齐从句右边界、后置介词短语和系表结构口径，并要求译文覆盖整段成分；版本 11 在分句角色前先判输入是否成句，无谓语标题/名词短语等使用唯一 `FRAGMENT_HEAD`，祈使句仍按完整分句处理；当前 `CORE_PROMPT_VERSION = 12` 把 `etc.` 合并为单个非标点 Token，并按可收句缩写处理。Token 坐标改变，因此 `DETAIL_PROMPT_VERSION = 6` 同步提升；结果 JSON 形状未变，`CORE_SCHEMA_VERSION` 保持 `3`。
+> 缓存键**刻意不含** profile / 模型维度——换模型不该让已有译文全部作废;但**含提示词版本**,因为同一句在不同规则下会被切成不同粒度的成分,旧结果继续复用只会让新旧质量混在一屏。版本 8 彻底删除了要求输出 `COORDINATE_CLAUSE` 的残留旧指令；版本 9 强化 repair prompt 的限定词切分与逐条自检，并配套 core 至多两轮修复；版本 10 补齐从句右边界、后置介词短语和系表结构口径，并要求译文覆盖整段成分；版本 11 在分句角色前先判输入是否成句，无谓语标题/名词短语等使用唯一 `FRAGMENT_HEAD`，祈使句仍按完整分句处理；版本 12 把 `etc.` 合并为单个非标点 Token，并按可收句缩写处理；当前 `CORE_PROMPT_VERSION = 13` 面向页面级英文覆盖重写了双端规则（fragment 内嵌定语从句、arXiv 冒号长标题四段口径、VP/NP 并列对照、finite/non-finite when 对照、allow/force/let 宾语控制、零关系词定语从句、非限定补足成分整体 COMPLEMENT、PP 依附四类映射、中文释义与专名中文类型要求），并删除与黄金集 conventions 重复的旧条目。detail 修复轮同步补输出模板与完整中文角色词表，因此 `DETAIL_PROMPT_VERSION = 7` 同步提升；结果 JSON 形状未变，`CORE_SCHEMA_VERSION` 保持 `3`。
 
 ## 2. 请求消息 `RequestMessage`
 

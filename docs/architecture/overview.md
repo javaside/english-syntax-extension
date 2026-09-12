@@ -151,7 +151,7 @@ MV3 把扩展拆成互不共享内存的几个世界。**每个模块能做什�
 
 **预载路径**(选项页开启「预载成分详解」后):每句 core 就绪即 `DetailPrefetcher.enqueue()`,发 `PREFETCH_SENTENCE_DETAILS`——**一次整句请求覆盖该句所有缺失成分**,结果逐成分写进**与点击路径完全相同的缓存键**。于是后续点击零模型调用。
 
-> 缓存键 = 规范化句文本 + schema 版本 + 提示词版本(core 用 `CORE_PROMPT_VERSION`,详解用 `DETAIL_PROMPT_VERSION`)+ focus 区间,**与 profile / 模型无关**。改任一侧的键构造必须两侧同步,并用对方路径读回验证。
+> 缓存键 = 规范化句文本 + schema 版本 + 提示词版本(core 用 `CORE_PROMPT_VERSION`,详解用 `DETAIL_PROMPT_VERSION`)+ focus 区间,**与 profile / 模型无关**。改任一侧的键构造必须两侧同步,并用对方路径读回验证。当前契约为 core `13` / detail `7`(版本 13/7 面向页面级英文覆盖重写双端 prompt 并补 detail 修复轮输出模板,旧缓存按预期整体作废重取),版本四文件(`versions.ts` / `Domain.kt` / `contracts.json` / `core-prompt-parity.json`)必须一次同步。
 
 ## 6. 两个状态机
 

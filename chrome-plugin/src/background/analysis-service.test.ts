@@ -1118,6 +1118,74 @@ describe("service-built prompts reuse the compact sentence payload", () => {
     const messages = adapter.completeJson.mock.calls[1]![1] as AnalysisModelWork["messages"];
     expect(messages[0]!.content).not.toMatch(indented);
   });
+
+  // DETAIL_PROMPT_VERSION 7:修复轮不再只回传错误,还要带上输出模板与中文角色
+  // 词表,否则兼容模式下修复请求等于让模型盲猜 JSON 形状。两个修复 prompt
+  // (detail + sentence-details)都要带同一份模板。
+  it("carries the output shape and Chinese role glossary into the detail repair prompt", async () => {
+    const focus = { startToken: 1, endToken: 2 };
+    const invalid = { ...rawDetail(focus), explanation: "" };
+    const { adapter, service } = harness([invalid, rawDetail(focus)]);
+
+    await service.analyzeDetail(
+      {
+        profile,
+        documentId: "document-1",
+        sentence: sentenceOne,
+        core: coreAnalysis(sentenceOne),
+        focus,
+      },
+      new AbortController().signal,
+    );
+
+    const messages = adapter.completeJson.mock.calls[1]![1] as AnalysisModelWork["messages"];
+    const repair = messages[0]!.content;
+    // 输出 shape(与首轮 DETAIL_OUTPUT_SHAPE 同款 JSON 形状行)。
+    expect(repair).toContain(
+      '{"sentenceId": string, "focus": {"startToken": number, "endToken": number}, "structures"',
+    );
+    expect(repair).toContain("Output minified JSON on a single line");
+    // 中文角色词表:低频角色(表语/同位语/补语/独立成分/片段主体)必须出现在
+    // 修复轮词表里,否则修复后 role 词表缩水。
+    for (const term of [
+      "主语",
+      "谓语",
+      "宾语",
+      "定语",
+      "状语",
+      "表语",
+      "补语",
+      "同位语",
+      "独立成分",
+      "系动词",
+      "引导词",
+      "连词",
+      "片段主体",
+    ]) {
+      expect(repair, `detail repair 缺少角色词「${term}」`).toContain(term);
+    }
+  });
+
+  it("carries the output shape and Chinese role glossary into the sentence-details repair prompt", async () => {
+    const { adapter, service } = harness([{ details: [] }, { details: [] }]);
+
+    await service.analyzeSentenceDetails(
+      {
+        profile,
+        documentId: "document-1",
+        sentence: sentenceOne,
+        core: coreAnalysis(sentenceOne),
+      },
+      new AbortController().signal,
+    );
+
+    const messages = adapter.completeJson.mock.calls[1]![1] as AnalysisModelWork["messages"];
+    const repair = messages[0]!.content;
+    expect(repair).toContain('{"details": [{"sentenceId": string');
+    expect(repair).toContain("Output minified JSON on a single line");
+    expect(repair).toContain("片段主体");
+    expect(repair).toContain("独立成分");
+  });
 });
 
 describe("repair requests jump their own priority queue", () => {

@@ -27,7 +27,9 @@ import {
   buildRepairPrompt,
   buildSentenceDetailsPrompt,
   CORE_OUTPUT_SHAPE,
+  DETAIL_OUTPUT_SHAPE,
   PROMPT_FIRST_LINES,
+  SENTENCE_DETAILS_OUTPUT_SHAPE,
   serialize,
   serializeSentence,
 } from "./prompts";
@@ -539,6 +541,9 @@ function detailRepairPrompt(
   return [
     PROMPT_FIRST_LINES.detailRepair,
     "Keep the sentence ID, Tokens, verified core analysis, and focus unchanged. Return JSON only.",
+    // DETAIL_PROMPT_VERSION 7:修复轮带上完整输出模板与中文角色词表——兼容模式下
+    // response_format 缺失,修复请求若不带 shape,模型只能盲猜信封。
+    DETAIL_OUTPUT_SHAPE,
     `Sentence and Tokens:\n${serializeSentence(input.sentence)}`,
     `Verified core analysis:\n${serialize(input.core)}`,
     `Focus:\n${serialize(input.focus)}`,
@@ -556,6 +561,7 @@ function sentenceDetailsRepairPrompt(
   return [
     "Repair only the structure of the invalid sentence-details JSON so every requested focus has one valid entry.",
     "Keep the sentence ID, Tokens, verified core analysis, and focus ranges unchanged. Return JSON only.",
+    SENTENCE_DETAILS_OUTPUT_SHAPE,
     `Sentence and Tokens:\n${serializeSentence(input.sentence)}`,
     `Verified core analysis:\n${serialize(input.core)}`,
     `Validation errors:\n${serialize(errors)}`,

@@ -426,9 +426,10 @@ describe("syntax prompts", () => {
     // ellipsis a model could stretch to subordinators like "because".
     expect(prompt).toContain("(for, and, nor, but, or, yet, so)");
     expect(prompt).not.toContain("...");
-    expect(prompt).toContain("analyse the inside of every clause as peer components");
-    expect(prompt).toMatch(/subordinate clause.*one whole component/is);
-    expect(prompt).toContain("single subject-predicate structure as peer components");
+    // 版本 13 重写:并列句平铺口径并入 completeness-first 的分句层级叙述,
+    // 从句整块与同层粒度并成 Component-granularity rule。
+    expect(prompt).toContain("analyse every compound clause as peer components");
+    expect(prompt).toMatch(/subordinate clause as ONE whole component/is);
   });
 
   it("spells out the exact output envelope so schema-free models cannot guess", () => {

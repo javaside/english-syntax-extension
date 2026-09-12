@@ -82,7 +82,7 @@ class PromptsTest {
         assertTrue(index > previousIndex, part)
         previousIndex = index
       }
-      assertTrue(previousIndex < prompt.indexOf("Clause-structure-first rule:"))
+      assertTrue(previousIndex < prompt.indexOf("Clause-structure rule:"))
       assertTrue(prompt.contains("Give every component a concise, non-empty Chinese translation"))
       assertFalse(prompt.contains("sentence-level translation"))
       assertFalse(prompt.contains("""{"sentenceId": string, "translation": string"""))
@@ -99,7 +99,7 @@ class PromptsTest {
   fun `core prompt bounds granularity and decides clause layout first`() {
     val prompt = buildCorePrompt(listOf(sentence("Help turn ideas into fully formed designs and specs.")))
 
-    assertTrue(prompt.contains("Clause-structure-first rule:"))
+    assertTrue(prompt.contains("Clause-structure rule:"))
     assertTrue(prompt.contains("analyse every compound clause as peer components"))
     assertTrue(prompt.contains("Never emit COORDINATE_CLAUSE"))
     assertFalse(prompt.contains("emit exactly one COORDINATE_CLAUSE per clause"))
@@ -107,7 +107,7 @@ class PromptsTest {
     assertTrue(prompt.contains("Two PREDICATE components must never be adjacent"))
     assertTrue(prompt.contains("a preposition and everything it governs form exactly one component"))
     assertTrue(prompt.contains("never tag a noun phrase governed by a verb or preposition as ATTRIBUTE"))
-    assertTrue(prompt.indexOf("Clause-structure-first rule:") < prompt.indexOf("Peer-component rule:"))
+    assertTrue(prompt.indexOf("Clause-structure rule:") < prompt.indexOf("Peer-component rule:"))
     assertTrue(prompt.contains("Peer-component rule: within a single clause"))
   }
 
@@ -128,14 +128,12 @@ class PromptsTest {
     listOf(
       "The role field is a closed 17-role enum:",
       "Coverage rule:",
-      "Clause-structure-first rule:",
+      "Clause-structure rule:",
       "Predicate-scope rule:",
       "Prepositional-phrase rule:",
       "Peer-component rule:",
-      "Supplement rule:",
-      "Compound-sentence rule:",
-      "Complex-sentence rule:",
-      "Simple-sentence rule:",
+      "Colon-title rule:",
+      "Component-granularity rule:",
       "Give every component a concise, non-empty Chinese translation",
     ).forEach { rule ->
       assertTrue(core.contains(rule), rule)
@@ -209,5 +207,173 @@ class PromptsTest {
     assertTrue(prompt.contains("\"schemaVersion\":${dev.codetui.englishsyntax.domain.ContractVersions.CORE_SCHEMA}"))
     assertTrue(prompt.contains("\"role\":\"SUBJECT\""))
     assertTrue(prompt.contains("\"startToken\":0,\"endToken\":1"))
+  }
+
+  /**
+   * CORE_PROMPT_VERSION 13 的页面句型重写,与 TS `prompts.test.ts` 同一清单:
+   * 每条口径一条正例 + 一条最接近的反例,文案与 Chrome 端逐字一致,由
+   * core-prompt-parity.json 钉住全文,这里只逐条钉「新教学内容确实存在」。
+   */
+  @Test
+  fun `core prompt teaches the page-sentence patterns of version 13`() {
+    val prompt = buildCorePrompt(listOf(sentence("The service works.")))
+
+    // fragment-relative 定语从句 + 完整句反例
+    assertTrue(
+      prompt.contains(
+        "\"An API that returns JSON responses\" is FRAGMENT_HEAD \"An API\" plus ATTRIBUTIVE_CLAUSE \"that returns JSON responses\"",
+      ),
+    )
+    assertTrue(
+      prompt.contains(
+        "the finite verb inside that embedded clause does not turn the whole input into a main clause",
+      ),
+    )
+    assertTrue(
+      prompt.contains(
+        "\"The tool that we built passes every test\" keeps PREDICATE \"passes\" at the top level",
+      ),
+    )
+
+    // arXiv 长冒号标题四段口径 + 冒号后完整分句反例
+    assertTrue(
+      prompt.contains(
+        "in \"Expanding the scope of dark siren cosmology: Inferring the population properties of gravitational wave-hosting galaxies\", \"Inferring the population properties\" is ONE APPOSITIVE",
+      ),
+    )
+    assertTrue(prompt.contains("the colon stays uncovered"))
+    assertTrue(
+      prompt.contains(
+        "in \"The result is clear: the sampled prior reduces uncertainty\", \"the sampled prior reduces uncertainty\" is a full clause and is analysed as peer SUBJECT, PREDICATE, and OBJECT",
+      ),
+    )
+
+    // VP / NP coordination 对照
+    assertTrue(
+      prompt.contains(
+        "in \"They measure the time and propagate the results\", \"and\" is its own CONJUNCTION joining two verb phrases that share one subject",
+      ),
+    )
+    assertTrue(
+      prompt.contains(
+        "in \"a Claude subscription or Anthropic Console account\", \"or\" stays inside the single OBJECT",
+      ),
+    )
+
+    // finite / non-finite when 对照
+    assertTrue(
+      prompt.contains(
+        "A when/before/after/if clause with its own finite predicate is ONE ADVERBIAL_CLAUSE (\"when methods are called\")",
+      ),
+    )
+    assertTrue(
+      prompt.contains(
+        "when/before/after followed by a non-finite verb phrase stays at phrase level as ONE ADVERBIAL (\"when performing tool calling\")",
+      ),
+    )
+
+    // allow/force/let 宾语控制结构
+    assertTrue(
+      prompt.contains(
+        "With allow/force/let plus a noun phrase plus an infinitive, the verb is PREDICATE, the noun phrase is OBJECT, and the infinitive phrase is COMPLEMENT (\"allows Maven to access repositories\" is PREDICATE \"allows\" plus OBJECT \"Maven\" plus COMPLEMENT \"to access repositories\")",
+      ),
+    )
+    assertTrue(prompt.contains("\"let go\" is one PREDICATE"))
+
+    // 零关系词定语从句
+    assertTrue(
+      prompt.contains(
+        "A relative clause whose introducing word is omitted is still ONE ATTRIBUTIVE_CLAUSE cut from the noun phrase it modifies: \"a typed object the rest of the codebase can treat\" is OBJECT \"a typed object\" plus ATTRIBUTIVE_CLAUSE \"the rest of the codebase can treat\"",
+      ),
+    )
+
+    // 非限定补足成分(conventions 第 11 条)
+    assertTrue(
+      prompt.contains(
+        "A non-finite complement phrase keeps its own object inside one COMPLEMENT (\"is steered to produce text\" is PREDICATE \"is steered\" plus COMPLEMENT \"to produce text\")",
+      ),
+    )
+
+    // PP 依附四类
+    assertTrue(
+      prompt.contains(
+        "a prepositional phrase expressing where/when/how the action happens is ADVERBIAL (\"works directly with git\" is PREDICATE \"works\" plus ADVERBIAL \"directly with git\")",
+      ),
+    )
+    assertTrue(
+      prompt.contains(
+        "a prepositional phrase selecting or describing the preceding noun is ATTRIBUTE (\"an open standard for connecting AI tools\" is PREDICATIVE \"an open standard\" plus ATTRIBUTE \"for connecting AI tools\", and \"the development\" plus \"of applications\" is OBJECT plus ATTRIBUTE)",
+      ),
+    )
+    assertTrue(prompt.contains("\"without looking at any of the code\" stays ONE ADVERBIAL"))
+    assertTrue(
+      prompt.contains(
+        "\"pay attention to the details\" is PREDICATE \"pay\" plus OBJECT \"attention\" plus ATTRIBUTE \"to the details\"",
+      ),
+    )
+
+    // 译文质量:每成分中文释义、专名保留 + 中文类型、拒绝英文回显
+    assertTrue(prompt.contains("Spring AI 框架"))
+    assertTrue(prompt.contains("JSON 数据格式"))
+    assertTrue(prompt.contains("哈勃常数 H0"))
+    assertTrue(
+      prompt.contains(
+        "a translation that only copies or echoes the English span is invalid and will be rejected",
+      ),
+    )
+
+    // 低频角色一例
+    assertTrue(
+      prompt.contains(
+        "PREDICATIVE_CLAUSE completes a linking verb (\"The real problem is that the cache entry has expired\")",
+      ),
+    )
+    assertTrue(
+      prompt.contains(
+        "SUBJECT_CLAUSE acts as the subject (\"Whoever wins the race gets the final ticket\")",
+      ),
+    )
+    assertTrue(
+      prompt.contains(
+        "ADVERBIAL_CLAUSE modifies the main clause (\"Because the road was flooded, the bus took a longer route\")",
+      ),
+    )
+    assertTrue(
+      prompt.contains(
+        "\"We consider the tool essential\" is OBJECT \"the tool\" plus COMPLEMENT \"essential\"",
+      ),
+    )
+    assertTrue(
+      prompt.contains(
+        "A comma-braced renaming noun phrase is ONE APPOSITIVE (\"Claude Code, an AI coding assistant, helps\")",
+      ),
+    )
+    assertTrue(
+      prompt.contains(
+        "a sentence-initial comment adverb is ONE INDEPENDENT_ELEMENT (\"Fortunately, the deployment finished\")",
+      ),
+    )
+    assertTrue(prompt.contains("\"have been told\""))
+    assertTrue(Regex("being").containsMatchIn(prompt))
+    assertTrue(Regex("having").containsMatchIn(prompt))
+
+    // 重写去重:旧的两个独立条目并入 clause-first
+    assertFalse(prompt.contains("Compound-sentence rule:"))
+    assertFalse(prompt.contains("Simple-sentence rule:"))
+    assertTrue(prompt.contains("A sentence is compound only when"))
+  }
+
+  /**
+   * 重写后的规则段预算：spec §实施前置 5 要求增量有测量依据。旧版规则段(版本 12,
+   * 单句)实测 8207 字符；重写删除 SUPPLEMENT_RULE 与内联 Compound/Simple 重复条目,
+   * 同时为页面语料新增约 10 组「正例 + 反例」对照,净增 +33%(新实测 ≤ 旧值 × 1.35)。
+   */
+  @Test
+  fun `core prompt rule text stays within the measured budget envelope`() {
+    val prompt = buildCorePrompt(listOf(sentence("The service works.")))
+    val payloadStart = prompt.indexOf("Numbered sentence requests:")
+    val ruleTextLength = prompt.slice(0 until payloadStart).length
+
+    assertTrue(ruleTextLength <= 8207 * 1.35, "rule text grew beyond budget: $ruleTextLength")
   }
 }

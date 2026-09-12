@@ -515,6 +515,42 @@ class AnalysisServiceTest {
     assertEquals(listOf("学习者", "阅读"), second.result[0].components.map { it.translation })
   }
 
+  /** DETAIL_PROMPT_VERSION 7：详解修复轮必须带输出模板与完整中文角色词表（含低频角色）。 */
+  @Test
+  fun `detail repair prompt carries output shape and the full Chinese role glossary`() = runBlocking {
+    val sentence = sentence("s1", "The service works.")
+    val core = CoreAnalysis(
+      sentenceId = "s1",
+      components = listOf(CoreComponent(0, 1, GrammarRole.SUBJECT, "该服务")),
+      modelProfileId = "profile-1",
+    )
+    // 首轮 explanation 为空 → 校验失败进修复轮。
+    server.enqueueJson(
+      """{"sentenceId":"s1","focus":{"startToken":0,"endToken":1},"structures":[],"grammarPoints":[],"explanation":""}""",
+    )
+    server.enqueueJson(
+      """{"sentenceId":"s1","focus":{"startToken":0,"endToken":1},"structures":[{"startToken":0,"endToken":1,"role":"主语","explanation":"名词短语"}],"grammarPoints":[],"explanation":"主语解析"}""",
+    )
+
+    service.analyzeDetail(profile(), "doc-1", sentence, core, TokenRange(0, 1))
+
+    assertEquals(2, server.requests.size)
+    val repairPrompt = server.requests[1].body.getValue("messages").jsonArray
+      .first().jsonObject.getValue("content").jsonPrimitive.content
+    // 输出 shape(与首轮 DETAIL_OUTPUT_SHAPE 同款 JSON 形状行与紧凑指令)。
+    assertTrue(
+      """{"sentenceId": string, "focus": {"startToken": number, "endToken": number}, "structures""""
+        .replace("\\\"", "\"") in repairPrompt,
+    )
+    assertTrue("Output minified JSON on a single line" in repairPrompt)
+    // 中文角色词表:低频角色必须出现在修复轮。
+    for (term in listOf("主语", "谓语", "宾语", "定语", "状语", "表语", "补语", "同位语", "独立成分", "系动词", "引导词", "连词", "片段主体")) {
+      assertTrue(term in repairPrompt, "detail repair 缺少角色词「$term」")
+    }
+    // 假服务器红线:Focus: 标签原样保留。
+    assertTrue("Focus:" in repairPrompt)
+  }
+
   @Test
   fun `echo translation under the current cache key is treated as a miss and re-requested`() = runBlocking {
     val sentence = sentence("s1", "Learners read.")

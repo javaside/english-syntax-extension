@@ -95,7 +95,7 @@ describe("model-facing sentence payload", () => {
         expect(index, part).toBeGreaterThan(previousIndex);
         previousIndex = index;
       }
-      expect(previousIndex).toBeLessThan(prompt.indexOf("Clause-structure-first rule:"));
+      expect(previousIndex).toBeLessThan(prompt.indexOf("Clause-structure rule:"));
       expect(prompt).toContain("Give every component a concise, non-empty Chinese translation");
       expect(prompt).not.toContain("sentence-level translation");
       expect(prompt).not.toContain('{"sentenceId": string, "translation": string');
@@ -111,7 +111,7 @@ describe("model-facing sentence payload", () => {
   it("bounds component granularity and decides clause layout first", () => {
     const prompt = buildCorePrompt([sentence]);
 
-    expect(prompt).toContain("Clause-structure-first rule:");
+    expect(prompt).toContain("Clause-structure rule:");
     expect(prompt).toContain("analyse every compound clause as peer components");
     expect(prompt).toContain("Never emit COORDINATE_CLAUSE");
     expect(prompt).not.toContain("emit exactly one COORDINATE_CLAUSE per clause");
@@ -121,7 +121,7 @@ describe("model-facing sentence payload", () => {
     expect(prompt).toContain(
       "never tag a noun phrase governed by a verb or preposition as ATTRIBUTE",
     );
-    expect(prompt.indexOf("Clause-structure-first rule:")).toBeLessThan(
+    expect(prompt.indexOf("Clause-structure rule:")).toBeLessThan(
       prompt.indexOf("Peer-component rule:"),
     );
     // peer 规则收窄到分句内，才不会与分句规则打架。
@@ -141,8 +141,9 @@ describe("model-facing sentence payload", () => {
 
     // 后置定语归 ATTRIBUTE,不是 ADVERBIAL;旧文案把 ATTRIBUTE 限死在前置修饰上。
     expect(prompt).toContain(
-      "a prepositional phrase that directly follows the noun phrase it modifies is ATTRIBUTE",
+      "a prepositional phrase selecting or describing the preceding noun is ATTRIBUTE",
     );
+    expect(prompt).toContain('"the development" plus "of applications" is OBJECT plus ATTRIBUTE');
     expect(prompt).not.toContain("ATTRIBUTE is only a modifier sitting inside a noun phrase");
     expect(prompt).toContain("never let a component end on a preposition");
 
@@ -165,14 +166,12 @@ describe("model-facing sentence payload", () => {
     for (const rule of [
       "The role field is a closed 17-role enum:",
       "Coverage rule:",
-      "Clause-structure-first rule:",
+      "Clause-structure rule:",
       "Predicate-scope rule:",
       "Prepositional-phrase rule:",
       "Peer-component rule:",
-      "Supplement rule:",
-      "Compound-sentence rule:",
-      "Complex-sentence rule:",
-      "Simple-sentence rule:",
+      "Colon-title rule:",
+      "Component-granularity rule:",
       "Give every component a concise, non-empty Chinese translation",
     ]) {
       expect(core).toContain(rule);
@@ -299,5 +298,175 @@ describe("紧凑输出指令", () => {
     const prompt = buildCorePrompt([sentence]);
 
     expect(prompt.split("\n")[0]).not.toMatch(/minified/u);
+  });
+});
+
+/**
+ * CORE_PROMPT_VERSION 13 的页面句型重写。这一组测试钉住「页面级英文覆盖」所需的
+ * 最小对照教学:每个口径一条正例 + 一条最接近的反例,不再堆叠段落式规则——
+ * 旧规则文案里互相重复/冲突的句子已删,新增内容以对偶例句为主。
+ */
+describe("页面句型教学(版本 13 重写)", () => {
+  const rules = () => buildCorePrompt([sentence]);
+
+  it("teaches the fragment-relative attributive clause with its full-clause counterexample", () => {
+    const prompt = rules();
+
+    expect(prompt).toContain(
+      '"An API that returns JSON responses" is FRAGMENT_HEAD "An API" plus ATTRIBUTIVE_CLAUSE "that returns JSON responses"',
+    );
+    expect(prompt).toContain(
+      "the finite verb inside that embedded clause does not turn the whole input into a main clause",
+    );
+    // 完整句反例:内嵌定从不使输入成片段,主句照旧拆同层成分。
+    expect(prompt).toContain(
+      '"The tool that we built passes every test" keeps PREDICATE "passes" at the top level',
+    );
+  });
+
+  it("teaches the arXiv long-colon title four-segment analysis and its full-clause counterexample", () => {
+    const prompt = rules();
+
+    expect(prompt).toContain(
+      'in "Expanding the scope of dark siren cosmology: Inferring the population properties of gravitational wave-hosting galaxies", "Inferring the population properties" is ONE APPOSITIVE',
+    );
+    expect(prompt).toContain("the colon stays uncovered");
+    // 反例:冒号后是完整独立分句时按同层角色展开,不机械标 APPOSITIVE。
+    expect(prompt).toContain(
+      'in "The result is clear: the sampled prior reduces uncertainty", "the sampled prior reduces uncertainty" is a full clause and is analysed as peer SUBJECT, PREDICATE, and OBJECT',
+    );
+  });
+
+  it("contrasts VP coordination (FANBOYS as CONJUNCTION) with NP coordination (and stays inside)", () => {
+    const prompt = rules();
+
+    expect(prompt).toContain(
+      'in "They measure the time and propagate the results", "and" is its own CONJUNCTION joining two verb phrases that share one subject',
+    );
+    expect(prompt).toContain(
+      'in "a Claude subscription or Anthropic Console account", "or" stays inside the single OBJECT',
+    );
+  });
+
+  it("contrasts finite when-clauses with non-finite when-phrases", () => {
+    const prompt = rules();
+
+    expect(prompt).toContain(
+      'A when/before/after/if clause with its own finite predicate is ONE ADVERBIAL_CLAUSE ("when methods are called")',
+    );
+    expect(prompt).toContain(
+      'when/before/after followed by a non-finite verb phrase stays at phrase level as ONE ADVERBIAL ("when performing tool calling")',
+    );
+  });
+
+  it("teaches object-control allow/force/let plus NP plus infinitive and the bare-infinitive chain", () => {
+    const prompt = rules();
+
+    expect(prompt).toContain(
+      'With allow/force/let plus a noun phrase plus an infinitive, the verb is PREDICATE, the noun phrase is OBJECT, and the infinitive phrase is COMPLEMENT ("allows Maven to access repositories" is PREDICATE "allows" plus OBJECT "Maven" plus COMPLEMENT "to access repositories")',
+    );
+    // let go 类裸不定式链仍是一个 PREDICATE——反例口径留在 PREDICATE_SCOPE_RULE。
+    expect(prompt).toContain('"let go" is one PREDICATE');
+  });
+
+  it("teaches the zero-relative clause cut from its parent noun phrase", () => {
+    const prompt = rules();
+
+    expect(prompt).toContain(
+      'A relative clause whose introducing word is omitted is still ONE ATTRIBUTIVE_CLAUSE cut from the noun phrase it modifies: "a typed object the rest of the codebase can treat" is OBJECT "a typed object" plus ATTRIBUTIVE_CLAUSE "the rest of the codebase can treat"',
+    );
+  });
+
+  it("teaches the non-finite complement covering its own object", () => {
+    const prompt = rules();
+
+    expect(prompt).toContain(
+      'A non-finite complement phrase keeps its own object inside one COMPLEMENT ("is steered to produce text" is PREDICATE "is steered" plus COMPLEMENT "to produce text")',
+    );
+  });
+
+  it("teaches all four PP attachment mappings", () => {
+    const prompt = rules();
+
+    // 动词管辖 PP → ADVERBIAL
+    expect(prompt).toContain(
+      'a prepositional phrase expressing where/when/how the action happens is ADVERBIAL ("works directly with git" is PREDICATE "works" plus ADVERBIAL "directly with git")',
+    );
+    // 名词后所选 PP → ATTRIBUTE
+    expect(prompt).toContain(
+      'a prepositional phrase selecting or describing the preceding noun is ATTRIBUTE ("an open standard for connecting AI tools" is PREDICATIVE "an open standard" plus ATTRIBUTE "for connecting AI tools", and "the development" plus "of applications" is OBJECT plus ATTRIBUTE)',
+    );
+    // 外层 PP 内部不再顶层拆分
+    expect(prompt).toContain('"without looking at any of the code" stays ONE ADVERBIAL');
+    // pay attention to 保持 OBJECT + ATTRIBUTE
+    expect(prompt).toContain(
+      '"pay attention to the details" is PREDICATE "pay" plus OBJECT "attention" plus ATTRIBUTE "to the details"',
+    );
+  });
+
+  it("requires a Chinese gloss per component and Chinese-typed proper names, rejecting English echo", () => {
+    const prompt = rules();
+
+    expect(prompt).toContain("Spring AI 框架");
+    expect(prompt).toContain("JSON 数据格式");
+    expect(prompt).toContain("哈勃常数 H0");
+    expect(prompt).toContain(
+      "a translation that only copies or echoes the English span is invalid and will be rejected",
+    );
+  });
+
+  it("teaches the low-frequency roles with one example each", () => {
+    const prompt = rules();
+
+    // PREDICATIVE_CLAUSE
+    expect(prompt).toContain(
+      'PREDICATIVE_CLAUSE completes a linking verb ("The real problem is that the cache entry has expired")',
+    );
+    // SUBJECT_CLAUSE
+    expect(prompt).toContain(
+      'SUBJECT_CLAUSE acts as the subject ("Whoever wins the race gets the final ticket")',
+    );
+    // ADVERBIAL_CLAUSE
+    expect(prompt).toContain(
+      'ADVERBIAL_CLAUSE modifies the main clause ("Because the road was flooded, the bus took a longer route")',
+    );
+    // COMPLEMENT(宾补)
+    expect(prompt).toContain(
+      '"We consider the tool essential" is OBJECT "the tool" plus COMPLEMENT "essential"',
+    );
+    // APPOSITIVE / INDEPENDENT_ELEMENT
+    expect(prompt).toContain(
+      'A comma-braced renaming noun phrase is ONE APPOSITIVE ("Claude Code, an AI coding assistant, helps")',
+    );
+    expect(prompt).toContain(
+      'a sentence-initial comment adverb is ONE INDEPENDENT_ELEMENT ("Fortunately, the deployment finished")',
+    );
+    // 助动词 been/being/having 收进动词组
+    expect(prompt).toContain('"have been told"');
+    expect(prompt).toMatch(/being/u);
+    expect(prompt).toMatch(/having/u);
+  });
+
+  it("merges the duplicate compound/simple-sentence rules into the clause-first rule", () => {
+    const prompt = rules();
+
+    // 重写去重:旧的 Compound-sentence / Simple-sentence 独立条目不再单列,
+    // 其口径并入 CLAUSE_FIRST_RULE。
+    expect(prompt).not.toContain("Compound-sentence rule:");
+    expect(prompt).not.toContain("Simple-sentence rule:");
+    expect(prompt).toContain("A sentence is compound only when");
+  });
+
+  // spec §实施前置 5:重写后预算必须有测量依据。旧版规则段(版本 12,单句)实测
+  // 8207 字符;重写删掉 SUPPLEMENT_RULE 与内联 Compound/Simple 两条重复条目,
+  // 同时为页面语料新增约 10 组「正例 + 反例」教学对照,净增量 +33%(
+  // 新实测 10903 字符 ≤ 旧值 × 1.35)。若净增超过 1.35x,说明又在机械追加
+  // 而不是删重复后加最小对照。
+  it("keeps the rewritten rule text within the measured budget envelope", () => {
+    const prompt = buildCorePrompt([sentence]);
+    const payloadStart = prompt.indexOf("Numbered sentence requests:");
+    const ruleTextLength = prompt.slice(0, payloadStart).length;
+
+    expect(ruleTextLength).toBeLessThanOrEqual(Math.ceil(8207 * 1.35));
   });
 });
