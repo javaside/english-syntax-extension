@@ -287,8 +287,9 @@ function parseFocus(promptText: string): { startToken: number; endToken: number 
 }
 
 /** 修复轮是「按语法规则重拆」。首词为介词的句子把首个介词短语并回 ADVERBIAL——
- * 位置式 SUBJECT(介词) + OBJECT(其余) 会被本地 validator 的介词硬门连拒两轮,
- * 而真模型一轮就能修好;其余句子保持与首轮相同的位置式拆分。 */
+ * 若照搬首轮的位置式 SUBJECT(介词) + OBJECT(其余),同一个确定性拆分会被本地
+ * validator 的介词硬门连拒两轮直接判死;真模型按修复指令一轮就能修好。其余句子
+ * 保持与首轮相同的位置式拆分(首轮已合法,修复轮不会发生)。 */
 function repairComponents(sentence: PromptSentence, translationSuffix = ""): GeneratedComponent[] {
   const lexical = sentence.tokens.filter((token) => !token.punctuation);
   const first = lexical[0]!;
@@ -517,9 +518,10 @@ export class FakeOpenAiServer {
         );
         return;
       case "invalid-json":
-        // 流式下也必须经 streamContent:直接 response.end 会把 JSON 体发给
-        // 流式请求,客户端会误判「端点不支持流式」而回落重发,依赖请求计数的
-        // 用例随之错乱(仓库红线:任何模型内容都要经 writeContent 出去)。
+        // 红线说明(不是修复):自仓库拆分起,本分支就已经经 writeContent 出内容;
+        // 这条注释只是把红线钉在案发现场——任何「模型内容」都不许 response.end 直发,
+        // 否则流式请求拿到 JSON 体、误判端点不支持流式而回落重发,依赖请求计数的
+        // 用例随之错乱。
         await this.writeContent(response, "this is not json", streaming);
         return;
       case "coverage-gap":
@@ -600,8 +602,10 @@ export class FakeOpenAiServer {
         return;
       case "core-repair":
         // 修复轮是「按语法规则重拆」,不是位置式补洞:假服务器同样按语法感知的
-        // 拆分作答,否则带介词开头的句子会连续两轮被本地 validator 拒掉,
-        // 表现成假模型服务器特有的失败(真模型一轮就修好)。
+        // 拆分作答。若仍返回与首轮相同的位置式拆分,带介词开头的句子会被本地
+        // validator 的介词硬门连拒两轮直接判死(首轮与修复轮产出同一个确定性
+        // 拆分,拒绝是确定性的,与流式无关)——那是假模型服务器特有的失败,
+        // 真模型按修复指令一轮就能修好。
         await this.respondCore(
           response,
           sentences,

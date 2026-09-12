@@ -148,8 +148,9 @@ async function startCoverageSession(
   documentId: string,
 ): Promise<{ page: Page; tabId: number }> {
   const page = await harness.context.newPage();
-  await page.goto(`${harness.pagesOrigin}/${fixtureName}.html`);
-  const tabId = await harness.tabIdFor(`${harness.pagesOrigin}/${fixtureName}.html`);
+  const url = `${harness.pagesOrigin}/${fixtureName}.html`;
+  await page.goto(url);
+  const tabId = await harness.tabIdFor(url);
   const started = await harness.dispatchFromUi(uiMessage("START_SESSION", { tabId, documentId }));
   expect(started, JSON.stringify(started)).toMatchObject({ type: "SESSION_STATUS" });
   return { page, tabId };
@@ -331,21 +332,32 @@ for (const fixture of COVERAGE_FIXTURES) {
       ).toBe(original);
     }
 
-    // 换一个 documentId 重开:整页从缓存恢复,零模型请求,中文仍可见。
+    // 换 documentId 重开必须换 tab:SW 在 STOP_SESSION 时保留 activeTabs 条目,同 tab
+    // 的 START_SESSION 会沿用 previous.documentId,请求里的新 id 被静默丢弃——名义上的
+    // 「换键重开」并不成立。关掉原 tab(其记录随 tabs.onRemoved 清除)再开新 tab,
+    // START_SESSION 的 documentId 参数才真正生效;零请求 + 全 ready 恰好钉住
+    // 「缓存键不含 documentId」——新会话靠规范句文本 + 模式版本直接命中旧会话缓存。
+    // URL 加查询串让 tabIdFor 精确认到新 tab,与原 tab 关闭时序解耦。
     harness.fakeModel.clearRecorded();
     const reopenDocumentId = `${documentId}-reopen`;
+    await page.close();
+    const reopenedPage = await harness.context.newPage();
+    const reopenUrl = `${harness.pagesOrigin}/${fixture.name}.html?reopen=1`;
+    await reopenedPage.goto(reopenUrl);
+    const reopenedTabId = await harness.tabIdFor(reopenUrl);
+    expect(reopenedTabId, "重开腿必须拿到新 tab").not.toBe(tabId);
     const reopened = await harness.dispatchFromUi(
-      uiMessage("START_SESSION", { tabId, documentId: reopenDocumentId }),
+      uiMessage("START_SESSION", { tabId: reopenedTabId, documentId: reopenDocumentId }),
     );
     expect(reopened).toMatchObject({ type: "SESSION_STATUS" });
     await scrollThroughUnits(
-      page,
+      reopenedPage,
       units.map((unit) => unit.id),
     );
     await expect
       .poll(
         async () => {
-          const status = await sessionStatus(harness, tabId, reopenDocumentId);
+          const status = await sessionStatus(harness, reopenedTabId, reopenDocumentId);
           return {
             settled: status !== null && isSettled(status, expected.length),
             modelRequests: harness.fakeModel.recorded().length,
@@ -355,13 +367,14 @@ for (const fixture of COVERAGE_FIXTURES) {
         { timeout: 120_000 },
       )
       .toEqual({ settled: true, modelRequests: 0, ready: expected.length });
-    await expect(learningBlocks(page)).toHaveCount(units.length);
-    expectHanEverywhere(await translationAudit(page));
+    await expect(learningBlocks(reopenedPage)).toHaveCount(units.length);
+    expectHanEverywhere(await translationAudit(reopenedPage));
 
     await harness.dispatchFromUi(
-      uiMessage("STOP_SESSION", { tabId, documentId: reopenDocumentId }),
+      uiMessage("STOP_SESSION", { tabId: reopenedTabId, documentId: reopenDocumentId }),
     );
-    await expect(learningBlocks(page)).toHaveCount(0);
+    await expect(learningBlocks(reopenedPage)).toHaveCount(0);
+    await reopenedPage.close();
   });
 }
 
@@ -422,7 +435,9 @@ test("整页三轮非法脚本:失败可见、不写缓存,重新解析强制重
   // 失败不写缓存的正面证据:REANALYZE_VISIBLE 带 bypassCache 强制绕过缓存,
   // 所以这里必然出现「第二批」等量的模型请求——若失败曾被写成成功缓存,绕过
   // 与否无从区分;真正的判据是:此前的失败结果没有以任何形式短路这一轮请求。
-  // 队列仍是非法响应:第二批同样走到判死,请求数恰好翻倍(1+2)/批。
+  // 队列仍是非法响应:第二批同样走到判死,请求数再次至少增加一批(1+2)/批。
+  // 注意:本用例因此不钉「失败被写进缓存」这类回归——bypassCache 会把任何缓存
+  // 条目(无论对错)都绕开;「失败不可作为缓存命中」由换键重开零请求腿覆盖。
   const beforeReanalyze = harness.fakeModel.recordedOfKind("core").length;
   const reanalyzed = await harness.dispatchFromUi(
     uiMessage("REANALYZE_VISIBLE", { tabId, documentId }),
