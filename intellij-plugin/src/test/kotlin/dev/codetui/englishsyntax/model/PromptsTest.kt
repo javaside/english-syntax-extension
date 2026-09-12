@@ -297,7 +297,7 @@ class PromptsTest {
     // PP 依附四类
     assertTrue(
       prompt.contains(
-        "a prepositional phrase expressing where/when/how the action happens is ADVERBIAL (\"works directly with git\" is PREDICATE \"works\" plus ADVERBIAL \"directly with git\")",
+        "a prepositional phrase expressing where/when/how the action happens is ADVERBIAL, and a degree adverb in front of it stays its own ADVERBIAL component (\"Claude Code works directly with git.\" is SUBJECT \"Claude Code\", PREDICATE \"works\", ADVERBIAL \"directly\", and ADVERBIAL \"with git\")",
       ),
     )
     assertTrue(

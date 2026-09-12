@@ -388,9 +388,9 @@ describe("页面句型教学(版本 13 重写)", () => {
   it("teaches all four PP attachment mappings", () => {
     const prompt = rules();
 
-    // 动词管辖 PP → ADVERBIAL
+    // 动词管辖 PP → ADVERBIAL（前置程度副词独立成 ADVERBIAL，与黄金集 doc-adverbial-2 同构）
     expect(prompt).toContain(
-      'a prepositional phrase expressing where/when/how the action happens is ADVERBIAL ("works directly with git" is PREDICATE "works" plus ADVERBIAL "directly with git")',
+      'a prepositional phrase expressing where/when/how the action happens is ADVERBIAL, and a degree adverb in front of it stays its own ADVERBIAL component ("Claude Code works directly with git." is SUBJECT "Claude Code", PREDICATE "works", ADVERBIAL "directly", and ADVERBIAL "with git")',
     );
     // 名词后所选 PP → ATTRIBUTE
     expect(prompt).toContain(

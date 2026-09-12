@@ -148,7 +148,7 @@ private const val PREPOSITIONAL_PHRASE_RULE =
     "including a coordinated object — \"into fully formed designs and specs\" is ONE ADVERBIAL, not a preposition plus separate noun phrases. " +
     "Never emit a preposition as its own component and never let a component end on a preposition. " +
     "Pick between the two roles by what the phrase attaches to: " +
-    "a prepositional phrase expressing where/when/how the action happens is ADVERBIAL (\"works directly with git\" is PREDICATE \"works\" plus ADVERBIAL \"directly with git\"); " +
+    "a prepositional phrase expressing where/when/how the action happens is ADVERBIAL, and a degree adverb in front of it stays its own ADVERBIAL component (\"Claude Code works directly with git.\" is SUBJECT \"Claude Code\", PREDICATE \"works\", ADVERBIAL \"directly\", and ADVERBIAL \"with git\"); " +
     "a prepositional phrase selecting or describing the preceding noun is ATTRIBUTE (\"an open standard for connecting AI tools\" is PREDICATIVE \"an open standard\" plus ATTRIBUTE \"for connecting AI tools\", and \"the development\" plus \"of applications\" is OBJECT plus ATTRIBUTE). " +
     "Quantity and part expressions follow the same split, with no exception for \"a lot of\", \"some of\", or \"no amount of\". " +
     "Do not split a prepositional phrase that already sits inside another one: \"without looking at any of the code\" stays ONE ADVERBIAL. " +
