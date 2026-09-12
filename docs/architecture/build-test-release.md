@@ -169,6 +169,8 @@ npm run release -- 1.2.0 --dry-run
 
 它会校验:semver 递增(**新功能升 minor**)、工作树干净、CHANGELOG 有对应小节、商店文档版本一致。版本号同时写进 `chrome-plugin/manifest.json` / `chrome-plugin/package.json` / `chrome-plugin/package-lock.json` **与 `intellij-plugin/build.gradle.kts`**——双运行时同版本发布,IDEA 插件的产物名里就带版本号(`intellij-plugin-<version>.zip`),两端各自维护版本只会重演商店手册那个坑:tag 发出去了,附件却还是上一版。`build.gradle.kts` 因此也在 `RELEASE_FILES` 里(prettier 不认 `.kts`,发版脚本写完它不做格式化)。CHANGELOG 在仓库根,git 操作也从仓库根执行。
 
+发版检查清单补一条:**CHANGELOG「测试」小节里的单测/E2E 数量是写死的手工数字,发版前要用当次全门禁的实际输出更新**(分支期间测试会持续新增,Unreleased 条目写作时的计数到发版时通常已过期——本次 Unreleased 就经历了 1164 → 1169 的更正)。
+
 ### CI(`.github/workflows/release.yml`)
 
 tag `v*` 触发,`permissions: contents: write`:

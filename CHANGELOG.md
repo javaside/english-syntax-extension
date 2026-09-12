@@ -24,7 +24,7 @@
 
 ### 测试
 
-- Chrome 43 个测试文件 / 1164 个单测与 37 个 Playwright E2E（新增页面级覆盖 3 例）全部通过；lint 保持唯一既有基线错误。
+- Chrome 43 个测试文件 / 1169 个单测与 37 个 Playwright E2E（新增页面级覆盖 3 例）全部通过；lint 保持唯一既有基线错误。
 - IntelliJ Web 测试、Kotlin 测试、插件构建与项目配置校验通过；动过 `shared-fixtures/` 时 Gradle 测试需 `--rerun-tasks`（配置缓存会把 fixture 变更标成 UP-TO-DATE）。
 - 两套 corpus（固定 40 句 + 页面目标 20 句）各完成三次 `pipeline` 配对评测，`--compare-manifest` 机器校验 corpus 与全部运行配置一致；`shared-fixtures/visible-page-core-evaluation-corpus.json` 冻结页面目标语料（浮动 Spring 来源带内嵌 `sourceEvidence`）。
 

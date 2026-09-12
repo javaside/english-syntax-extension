@@ -286,7 +286,7 @@
 
 ### I-21 显式手势不套用自动扫描的取舍
 
-**规则** `scanDocument` 是页面语义清单(`page-inventory`)的 automatic 投影:先在得分最高的正文容器内枚举语义单元,再按**分类型门槛**判自动资格——统一 20 字符门已取消,仅 loose div/section/span 与非语义类保留最短 20 字符,标题/dt/th/caption 只要有可读英文实词,其余语义标签靠 principal root + 英文占比把关;`nearestSafeBlock` 只服务用户指到的那一处,**不走正文容器/最短长度这些统计门**(英文占比仍适用)。
+**规则** `scanDocument` 是页面语义清单(`page-inventory`)的 automatic 投影:先在得分最高的正文容器内枚举语义单元,再按**分类型门槛**判自动资格——统一 20 字符门已取消,仅 loose div/section/span 与非语义类保留最短 20 字符,标题/dt/th/caption 只要有可读英文实词,其余语义标签靠 principal root + 英文占比把关;`nearestSafeBlock` 只服务用户指到的那一处,**不走正文容器与最短长度这两道统计门**(英文占比仍适用,非英文内容照旧拒绝)。
 
 **症状** 套用后表现为"鼠标明明停在段落上,快捷键却报『未找到可解析的段落』"——多 `<article>` 页面、SPA 换内容后缓存失效、短段落全中招。
 

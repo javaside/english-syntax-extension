@@ -238,7 +238,7 @@ raw → validateCoreBatch（解析前预丢弃纯标点成分）
 页面级 prompt/validator 收口(`CORE_PROMPT_VERSION` 13 / `DETAIL_PROMPT_VERSION` 7,`CORE_SCHEMA_VERSION` 3 未变)以**两套 corpus、各三次 baseline/candidate 配对**验收,`--compare-manifest` 机器校验 corpus/sentenceOrder/endpoint/model/batch/temperature/reasoning/response-format/timeout 逐项一致:
 
 - **固定 40 句**:最终整句 exact mean 0.875 → **0.84167**(35/33/33 of 40),labeled span F1 0.92496,role accuracy 三对均 100%。
-- **页面目标 corpus(20 句,Spring AI + arXiv 句型)**:finalFailures **3 → 0**(旧稳定失败 `spring-fragment-relative`/`arxiv-dark-siren-title`/`spring-verb-nested-pp` 全部消灭),exact mean 0.46667(10/9/9 of 20),labeled span F1 0.74663,role accuracy ~98.5%。
+- **页面目标 corpus(20 句,Spring AI + arXiv 句型)**:finalFailures **3 → 0**(旧稳定失败 `spring-fragment-relative`/`arxiv-dark-siren-title`/`spring-verb-nested-pp` 全部消灭),exact mean 0.46667(10/9/9 of 20),labeled span F1 0.74663,role accuracy ~98.5%。口径注:baseline 按**冻结 partition** 记账(这是 baseline 不可变约定的直接后果),而这 3 个失败里有约 1.5–2 个(视 run,`spring-fragment-relative` 在 candidate 侧三份输出均结构合法、只差 span 粒度)在新 validator 的 fragment-relative 放行下**本来就不会发生**——「3 → 0」混合了 prompt 教学的真改善与 validator 放行的重算效应,不能全部归功于教学。
 - **两套口径下 `correctToWrongOrFailure` 均为 0**;visible 的 exact 缺口收敛为三句真退化 + `nonfinite-when-phrase` 教学空隙,记为 v14 回归靶:系表合并成单个 `PREDICATE`(`ho-clause-1/2`)、OBJECT 吞分词后置 ATTRIBUTE(`spring-vp-coordination`)、图注 FRAGMENT_HEAD+ATTRIBUTE 双重合并(`arxiv-figure-caption`)、非限定 when 短语的后置修饰归口无钉死正例。
 - 评测数字须按**评分器预测尾标点归一化**口径读取(见 [`build-test-release.md` §3](./build-test-release.md));页面 corpus 与 40 句 corpus 的总分**不可直接比较**——句型分布不同,页面 corpus 的 exact 显著更低是挑战集使然,不是回归。
 
