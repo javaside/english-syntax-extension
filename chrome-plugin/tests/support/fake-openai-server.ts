@@ -286,6 +286,53 @@ function parseFocus(promptText: string): { startToken: number; endToken: number 
     : { startToken: 0, endToken: 0 };
 }
 
+/** 修复轮是「按语法规则重拆」。首词为介词的句子把首个介词短语并回 ADVERBIAL——
+ * 位置式 SUBJECT(介词) + OBJECT(其余) 会被本地 validator 的介词硬门连拒两轮,
+ * 而真模型一轮就能修好;其余句子保持与首轮相同的位置式拆分。 */
+function repairComponents(sentence: PromptSentence, translationSuffix = ""): GeneratedComponent[] {
+  const lexical = sentence.tokens.filter((token) => !token.punctuation);
+  const first = lexical[0]!;
+  const PREPOSITION_HEADS = new Set([
+    "with",
+    "without",
+    "for",
+    "from",
+    "into",
+    "onto",
+    "upon",
+    "within",
+    "among",
+    "between",
+    "despite",
+    "during",
+    "toward",
+    "towards",
+    "at",
+    "of",
+  ]);
+  if (lexical.length > 1 && PREPOSITION_HEADS.has(first.text.toLowerCase())) {
+    // 首个介词短语:覆盖到逗号之前的实词(没有逗号则到第二个实词),后面整体为 OBJECT。
+    const commaToken = sentence.tokens.find((token) => token.text === ",");
+    let headEnd = lexical[1]!.id;
+    if (commaToken !== undefined && commaToken.id > first.id) headEnd = commaToken.id - 1;
+    return [
+      {
+        startToken: first.id,
+        endToken: headEnd,
+        role: "ADVERBIAL",
+        translation: `介词短语${translationSuffix}`,
+      },
+      {
+        startToken: headEnd + 1,
+        endToken: lexical.at(-1)!.id,
+        role: "OBJECT",
+        translation: `其余成分${translationSuffix}`,
+      },
+    ];
+  }
+  return autoComponents(sentence, translationSuffix);
+}
+
 /**
  * Recover the batched sentence-details targets from the prompt: the sentenceId
  * is the first "sentenceId" field and the focus array is the prompt's last
@@ -470,6 +517,9 @@ export class FakeOpenAiServer {
         );
         return;
       case "invalid-json":
+        // 流式下也必须经 streamContent:直接 response.end 会把 JSON 体发给
+        // 流式请求,客户端会误判「端点不支持流式」而回落重发,依赖请求计数的
+        // 用例随之错乱(仓库红线:任何模型内容都要经 writeContent 出去)。
         await this.writeContent(response, "this is not json", streaming);
         return;
       case "coverage-gap":
@@ -544,7 +594,18 @@ export class FakeOpenAiServer {
         await this.respondCore(
           response,
           sentences,
-          (sentence) => autoComponents(sentence, "（已纠正）"),
+          (sentence) => repairComponents(sentence, "（已纠正）"),
+          streaming,
+        );
+        return;
+      case "core-repair":
+        // 修复轮是「按语法规则重拆」,不是位置式补洞:假服务器同样按语法感知的
+        // 拆分作答,否则带介词开头的句子会连续两轮被本地 validator 拒掉,
+        // 表现成假模型服务器特有的失败(真模型一轮就修好)。
+        await this.respondCore(
+          response,
+          sentences,
+          (sentence) => repairComponents(sentence),
           streaming,
         );
         return;

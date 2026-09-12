@@ -124,6 +124,7 @@
 | `tests/e2e/fixtures.ts`                     | Playwright harness:构建扩展 → 复制一份 patch 掉 `host_permissions` → 起假模型服务器与固定页服务器 → 提供 `seedProfiles` / `tabIdFor` / `dispatchFromUi` |
 | `tests/e2e/extension.spec.ts`               | 主 E2E 套件(30 余例):从选项页配置到流式降级的全链路                                                                                                     |
 | `tests/e2e/layout.spec.ts`                  | 布局回归:短句共行、译文不撑卡、详解面板锚定与不挤邻句                                                                                                   |
+| `tests/e2e/page-coverage.spec.ts`           | 页面级覆盖 E2E:两份 coverage fixture(HTML + 冻结 inventory)经生产 segmenter 得期望句集合,走「扫描发现 → 逐块滚动解析 → 请求集合全等且唯一 → 每卡译文含 Han → STOP 无损还原 → 重开缓存零请求」全链路;另有一例三轮非法脚本(排满三份非法响应)钉住失败可见、不写缓存与重新解析强制重发 |
 | `tests/e2e/screenshots.spec.ts`             | 商店截图生成(`STORE_SHOTS=1 npm run screenshots`)                                                                                                       |
 | `tests/support/fake-openai-server.ts`       | 假 OpenAI 端点:按 prompt 首行识别请求类型、自动编造合法应答、可脚本化注入错误 / 分片 / 非法输出,并记录每次请求                                          |
 | `tests/fixtures/pages/*.html`               | E2E 用的各类固定页面(普通文章、动态内容、并列句、错误对照、悬停、折行探针…)                                                                             |
