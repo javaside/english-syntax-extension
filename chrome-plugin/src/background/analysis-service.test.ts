@@ -997,8 +997,87 @@ describe("analyzeSentenceDetails", () => {
   });
 });
 
-describe("service-built prompts reuse the compact sentence payload", () => {
-  const focus = { startToken: 1, endToken: 2 };
+describe("multi-sentence repair grouping and narrowing", () => {
+  /** 取出 repair prompt 里 `Validation errors:` 与 `Invalid JSON:` 之间的分组。 */
+  function errorGroupsOf(prompt: string) {
+    const start = prompt.indexOf("Validation errors:");
+    const end = prompt.indexOf("Invalid JSON:");
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    return JSON.parse(prompt.slice(start + "Validation errors:".length, end).trim());
+  }
+
+  /** 首部多一个纯标点成分(覆盖句号),其余一个成分回显英文。 */
+  function punctuationPlusEcho(sentence: SentenceInput) {
+    return [
+      {
+        startToken: sentence.tokens.at(-1)!.id,
+        endToken: sentence.tokens.at(-1)!.id,
+        role: "PUNCTUATION",
+        translation: "。",
+      },
+      { startToken: 0, endToken: 0, role: "SUBJECT", translation: "主语" },
+      { startToken: 1, endToken: 1, role: "PREDICATE", translation: sentence.text.split(" ")[1] },
+    ];
+  }
+
+  /** 不带纯标点成分,只有谓语回显。 */
+  function echoOnly(sentence: SentenceInput) {
+    return [
+      { startToken: 0, endToken: 0, role: "SUBJECT", translation: "主语" },
+      { startToken: 1, endToken: 1, role: "PREDICATE", translation: sentence.text.split(" ")[1] },
+    ];
+  }
+
+  it("多失败句 repair:errors 按句分组,已修好的兄弟句不回流", async () => {
+    // 第一轮:两句都非法(谓语回显),第一句还带一个纯标点成分。
+    const invalidBoth = {
+      sentences: [
+        { sentenceId: sentenceOne.sentenceId, components: punctuationPlusEcho(sentenceOne) },
+        { sentenceId: sentenceTwo.sentenceId, components: echoOnly(sentenceTwo) },
+      ],
+    };
+    // 第二轮:只修好第一句(第二句仍回显)。
+    const secondRound = { sentences: [rawCore(sentenceOne)] };
+    // 第三轮:两句都合法。
+    const thirdRound = { sentences: [rawCore(sentenceOne), rawCore(sentenceTwo)] };
+    const { adapter, service } = harness([invalidBoth, secondRound, thirdRound]);
+
+    const outcome = await service.analyzeCore(
+      coreInput([sentenceOne, sentenceTwo]),
+      new AbortController().signal,
+    );
+
+    // completeJson(profile, messages, schema, signal)——messages 是第 2 个参数。
+    const repairPrompts = adapter.completeJson.mock.calls
+      .map((call) => (call[1] as { content: string }[]).at(-1)!.content)
+      .filter((content) => content.includes("Repair only the structure"));
+    expect(repairPrompts).toHaveLength(2);
+
+    // 第一轮:两组各自的错误只含本句,路径不带 sentences[i] 前缀。
+    const firstGroups = errorGroupsOf(repairPrompts[0]!);
+    expect(firstGroups.map((group: { sentenceId: string }) => group.sentenceId)).toEqual([
+      sentenceOne.sentenceId,
+      sentenceTwo.sentenceId,
+    ]);
+    for (const group of firstGroups) {
+      expect(group.errors.length).toBeGreaterThan(0);
+      for (const error of group.errors) {
+        expect(error.path.startsWith("sentences[")).toBe(false);
+      }
+    }
+
+    // 第二轮:只带仍失败的第二句,已修好的第一句不得回流。
+    const secondGroups = errorGroupsOf(repairPrompts[1]!);
+    expect(secondGroups.map((group: { sentenceId: string }) => group.sentenceId)).toEqual([
+      sentenceTwo.sentenceId,
+    ]);
+
+    expect(outcome.result).toHaveLength(2);
+  });
+});
+
+describe("service-built prompts reuse the compact sentence payload", () => {  const focus = { startToken: 1, endToken: 2 };
 
   it("keeps token offsets out of the correction prompt", async () => {
     const { adapter, service } = harness([{ sentences: [rawCore(sentenceOne)] }]);
