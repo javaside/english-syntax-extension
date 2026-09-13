@@ -126,6 +126,85 @@ describe("core analysis validation", () => {
     expect(result).toEqual({ ok: true, value: [expectedAnalysis] });
   });
 
+  // 坐标系回归:错误路径必须是模型所见 JSON 的原始 components 下标。
+  // "The service works well." tokenize 后:0 The / 1 service / 2 works / 3 well / 4 .(p)
+  const rawIndexSentence: SentenceInput = {
+    sentenceId: "raw-index-1",
+    text: "The service works well.",
+    tokens: tokenize("The service works well."),
+  };
+
+  function rawIndexCore(components: unknown[]): unknown {
+    return { sentences: [{ sentenceId: rawIndexSentence.sentenceId, components }] };
+  }
+
+  it("错误路径索引是原始数组下标,不受纯标点成分影响", () => {
+    // 原始下标 0 是纯标点成分(被跳过);SUBJECT 合法(有中文),只有原始下标 2
+    // 的 PREDICATE 回显英文。旧实现报 components[1],新实现必须报 components[2]。
+    const result = validateCoreBatch(
+      rawIndexCore([
+        { startToken: 4, endToken: 4, role: "PUNCTUATION", translation: "。" },
+        { startToken: 0, endToken: 1, role: "SUBJECT", translation: "服务" },
+        { startToken: 2, endToken: 3, role: "PREDICATE", translation: "works well" },
+      ]),
+      [rawIndexSentence],
+      "profile-1",
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    const paths = result.errors.map((error) => error.path);
+    expect(paths).toContain("sentences[0].components[2].translation");
+    expect(paths).not.toContain("sentences[0].components[1].translation");
+    expect(paths).not.toContain("sentences[0].components[0].translation");
+  });
+
+  it("接受集合与成功成分不受坐标改动影响", () => {
+    const valid = validateCoreBatch(
+      rawIndexCore([
+        { startToken: 4, endToken: 4, role: "PUNCTUATION", translation: "。" },
+        { startToken: 0, endToken: 1, role: "SUBJECT", translation: "服务" },
+        { startToken: 2, endToken: 3, role: "PREDICATE", translation: "运转良好" },
+      ]),
+      [rawIndexSentence],
+      "profile-1",
+    );
+    expect(valid.ok).toBe(true);
+    if (!valid.ok) return;
+    // 返回的是纯 CoreComponent,不携带 rawIndex 等内部坐标。
+    expect(valid.value[0]!.components).toEqual([
+      { startToken: 0, endToken: 1, role: "SUBJECT", translation: "服务" },
+      { startToken: 2, endToken: 3, role: "PREDICATE", translation: "运转良好" },
+    ]);
+  });
+
+  it("非法元素(非对象)不被当作纯标点跳过,仍报 must be an object", () => {
+    const result = validateCoreBatch(
+      rawIndexCore(["not-an-object", { startToken: 0, endToken: 3, role: "SUBJECT", translation: "服务运转良好" }]),
+      [rawIndexSentence],
+      "profile-1",
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors).toContainEqual({
+      path: "sentences[0].components[0]",
+      message: "must be an object",
+    });
+  });
+
+  it("全纯标点成分仍被拒绝", () => {
+    const result = validateCoreBatch(
+      rawIndexCore([{ startToken: 4, endToken: 4, role: "PUNCTUATION", translation: "。" }]),
+      [rawIndexSentence],
+      "profile-1",
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors).toContainEqual({
+      path: "sentences[0].components",
+      message: "must contain a non-punctuation component",
+    });
+  });
+
   it("reports the exact path and message for an uncovered lexical token", () => {
     const raw = structuredClone(rawCore);
     raw.sentences[0]!.components.splice(2, 1);

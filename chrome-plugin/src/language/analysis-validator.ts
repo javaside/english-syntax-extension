@@ -9,6 +9,12 @@ import type {
 } from "../shared/grammar";
 import type { SentenceInput } from "../shared/protocol";
 import { CORE_SCHEMA_VERSION } from "../shared/versions";
+import {
+  rawComponentEntries,
+  toIndexed,
+  type IndexedCoreComponent,
+  type ParsedComponentEntry,
+} from "./indexed-components";
 
 export interface ValidationError {
   path: string;
@@ -319,18 +325,24 @@ function lexicalTexts(tokens: readonly Token[], range: TokenRange): string[] {
 /**
  * 逐条判定「本地能判的语法约束」。返回的 message 直接进修复 prompt。
  * 只在成分序列已通过结构校验(区间在句内、有序不重叠)之后调用。
+ *
+ * 入参是携带 rawIndex 的包装序列:邻接关系(前后成分)按**语义成分序列**取,
+ * 但错误路径用 rawIndex——它是模型所见 JSON 的原始 components 下标,两个
+ * 坐标系刻意分离(见 indexed-components.ts)。
  */
 function collectGrammarErrors(
-  components: readonly CoreComponent[],
+  components: readonly IndexedCoreComponent[],
   tokens: readonly Token[],
   path: string,
   errors: ValidationError[],
 ): void {
-  const hasConjunction = components.some((component) => component.role === GrammarRole.CONJUNCTION);
+  const roles = components.map(({ component }) => component);
+  const hasConjunction = roles.some((component) => component.role === GrammarRole.CONJUNCTION);
 
-  components.forEach((component, index) => {
-    const componentPath = `${path}.components[${index}]`;
-    const previous = components[index - 1];
+  components.forEach((entry, index) => {
+    const component = entry.component;
+    const componentPath = `${path}.components[${entry.rawIndex}]`;
+    const previous = components[index - 1]?.component;
     const words = lexicalTexts(tokens, component);
     const head = words[0];
 
@@ -460,10 +472,12 @@ function collectGrammarErrors(
     }
 
     // 定语从句后面紧跟宾语/表语/补语 = 从句自己的成分被切了出去。
+    // 后继按语义成分序列取(不是原数组邻接),被跳过的纯标点成分不算「紧跟」。
+    const next = components[index + 1]?.component;
     if (
       component.role === GrammarRole.ATTRIBUTIVE_CLAUSE &&
-      components[index + 1] !== undefined &&
-      CLAUSE_INTERNAL_FOLLOWERS.has(components[index + 1]!.role)
+      next !== undefined &&
+      CLAUSE_INTERNAL_FOLLOWERS.has(next.role)
     ) {
       addError(
         errors,
@@ -493,7 +507,7 @@ function collectGrammarErrors(
 
   // 单成分整句的豁免集是片段语义角色；10 是挑战集审阅后的启发式上限，不是语法定律。
   const lexicalTokenCount = tokens.filter((token) => !token.punctuation).length;
-  const only = components.length === 1 ? components[0] : undefined;
+  const only = roles.length === 1 ? roles[0] : undefined;
   const onlyLexicalCount = only === undefined ? 0 : lexicalTexts(tokens, only).length;
   const coversWholeSentence = onlyLexicalCount === lexicalTokenCount;
   if (
@@ -525,7 +539,7 @@ function collectGrammarErrors(
   // object 等作为句子的顶层成分），并列连词单独标 CONJUNCTION。这样卡片才能显示成分
   // 划分而不是几整块译文。旧的"包成两个 COORDINATE_CLAUSE"约定是「看着像翻译」的
   // 主要来源，在扩展到真实散文后实测退化严重。
-  const coordinateClauses = components.filter(
+  const coordinateClauses = roles.filter(
     (component) => component.role === GrammarRole.COORDINATE_CLAUSE,
   );
   if (coordinateClauses.length >= 1) {
@@ -536,7 +550,7 @@ function collectGrammarErrors(
     );
   }
 
-  const fragmentHeads = components.filter(
+  const fragmentHeads = roles.filter(
     (component) => component.role === GrammarRole.FRAGMENT_HEAD,
   );
   if (fragmentHeads.length > 1) {
@@ -548,7 +562,7 @@ function collectGrammarErrors(
   }
   if (
     fragmentHeads.length > 0 &&
-    components.some((component) => FRAGMENT_FORBIDDEN_ROLES.has(component.role))
+    roles.some((component) => FRAGMENT_FORBIDDEN_ROLES.has(component.role))
   ) {
     addError(errors, `${path}.components`, FRAGMENT_MIXED_ROLE_MESSAGE);
   }
@@ -701,38 +715,33 @@ function parseCoreSentence(
   }
 
   // 模型常给逗号/句号虚构 PUNCTUATION、CONJUNCTION 等角色。标点本来就允许不覆盖，
-  // 所以必须在角色枚举校验前丢掉纯标点区间；过滤后再编号，保证 TS/Kotlin error path 一致。
-  const semanticComponents = value.components.filter((component) => {
-    if (!isRecord(component)) return true;
-    const { startToken, endToken } = component;
-    if (!Number.isSafeInteger(startToken) || !Number.isSafeInteger(endToken)) return true;
-    const covered = request.tokens.filter(
-      (token) => token.id >= (startToken as number) && token.id <= (endToken as number),
-    );
-    return !(
-      covered.length > 0 &&
-      covered[0]!.id === startToken &&
-      covered.at(-1)!.id === endToken &&
-      covered.every((token) => token.punctuation)
-    );
-  });
-  if (semanticComponents.length === 0) {
+  // 所以必须在角色枚举校验前丢掉纯标点区间;rawIndex 先记录再过滤,保证 error path
+  // 与模型所见 JSON 的 components 下标一致(TS/Kotlin 双端一致)。
+  const entries = rawComponentEntries(value.components, request.tokens);
+  if (entries.length === 0) {
     addError(errors, `${path}.components`, "must contain a non-punctuation component");
     return undefined;
   }
-  const components = semanticComponents.map((component, componentIndex) =>
-    parseCoreComponent(component, request.tokens, `${path}.components[${componentIndex}]`, errors),
-  );
+  const parsed: ParsedComponentEntry[] = entries.map((entry) => ({
+    rawIndex: entry.rawIndex,
+    component: parseCoreComponent(
+      entry.value,
+      request.tokens,
+      `${path}.components[${entry.rawIndex}]`,
+      errors,
+    ),
+  }));
   // grammar 只依赖结构可信度，不能被 unknown field、过长译文或 sentenceId 等
   // 非结构错误短路；每个语义成分都成功解析、区间在句内且有序不重叠才可信。
-  let structureTrusted = components.every((component) => component !== undefined);
+  let structureTrusted = parsed.every((entry) => entry.component !== undefined);
   let previousEnd = -1;
-  for (const [index, component] of components.entries()) {
+  for (const entry of parsed) {
+    const component = entry.component;
     if (component === undefined) {
       structureTrusted = false;
       continue;
     }
-    const componentPath = `${path}.components[${index}]`;
+    const componentPath = `${path}.components[${entry.rawIndex}]`;
     const coveredTokens = request.tokens.filter(
       (token) => token.id >= component.startToken && token.id <= component.endToken,
     );
@@ -751,9 +760,7 @@ function parseCoreSentence(
     previousEnd = component.endToken;
   }
 
-  const validComponents = components.filter(
-    (component): component is CoreComponent => component !== undefined,
-  );
+  const validComponents = toIndexed(parsed);
 
   if (structureTrusted) {
     collectGrammarErrors(validComponents, request.tokens, path, errors);
@@ -761,7 +768,7 @@ function parseCoreSentence(
 
   for (const token of request.tokens) {
     const coverage = validComponents.filter(
-      (component) => token.id >= component.startToken && token.id <= component.endToken,
+      ({ component }) => token.id >= component.startToken && token.id <= component.endToken,
     ).length;
     if (!token.punctuation && coverage === 0) {
       addError(errors, `${path}.components`, `non-punctuation token ${token.id} is not covered`);
@@ -782,14 +789,15 @@ function parseCoreSentence(
 
   if (
     errors.some((error) => error.path === path || error.path.startsWith(`${path}.`)) ||
-    validComponents.length !== components.length
+    validComponents.length !== entries.length
   ) {
     return undefined;
   }
+  // 投影为纯 CoreComponent:rawIndex 只是诊断坐标,不得进缓存与渲染。
   return {
     schemaVersion: CORE_SCHEMA_VERSION,
     sentenceId: request.sentenceId,
-    components: validComponents,
+    components: validComponents.map(({ component }) => component),
     modelProfileId,
   };
 }
