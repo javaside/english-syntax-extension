@@ -364,6 +364,67 @@ describe("core analysis grammar constraints", () => {
     return { sentenceId: "grammar-1", text, tokens: tokenize(text) };
   }
 
+  // 文本 tokenize：0 The / 1 API / 2 that / 3 returns / 4 JSON / 5 responses /
+  // 6 ,(p) / 7 an / 8 object / 9 .(p)
+  const adjacency: SentenceInput = {
+    sentenceId: "adjacency-1",
+    text: "The API that returns JSON responses, an object.",
+    tokens: tokenize("The API that returns JSON responses, an object."),
+  };
+
+  it("保行为:定语从句后接宾语仍被拒(纯标点成分在中间不影响)", () => {
+    const result = validateCoreBatch(
+      {
+        sentences: [
+          {
+            sentenceId: adjacency.sentenceId,
+            components: [
+              { startToken: 0, endToken: 1, role: "SUBJECT", translation: "该 API" },
+              { startToken: 2, endToken: 5, role: "ATTRIBUTIVE_CLAUSE", translation: "返回 JSON 响应的" },
+              { startToken: 6, endToken: 6, role: "PUNCTUATION", translation: "，" },
+              { startToken: 7, endToken: 8, role: "OBJECT", translation: "一个对象" },
+            ],
+          },
+        ],
+      },
+      [adjacency],
+      "profile-1",
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    const grammar = result.errors.find((e) => e.message.includes("ATTRIBUTIVE_CLAUSE"));
+    expect(grammar).toBeDefined();
+    // 从句在原始下标 1（下标 0 是 SUBJECT）；标点成分在从句之后，不改变从句路径。
+    expect(grammar!.path).toBe("sentences[0].components[1]");
+  });
+
+  it("RED:从句之前插入纯标点成分后,grammar 错误路径随 rawIndex 平移", () => {
+    const result = validateCoreBatch(
+      {
+        sentences: [
+          {
+            sentenceId: adjacency.sentenceId,
+            // 原始下标 0 是纯标点成分(被跳过);从句现在位于原始下标 2。
+            components: [
+              { startToken: 9, endToken: 9, role: "PUNCTUATION", translation: "。" },
+              { startToken: 0, endToken: 1, role: "SUBJECT", translation: "该 API" },
+              { startToken: 2, endToken: 5, role: "ATTRIBUTIVE_CLAUSE", translation: "返回 JSON 响应的" },
+              { startToken: 7, endToken: 8, role: "OBJECT", translation: "一个对象" },
+            ],
+          },
+        ],
+      },
+      [adjacency],
+      "profile-1",
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    const grammar = result.errors.find((e) => e.message.includes("ATTRIBUTIVE_CLAUSE"));
+    expect(grammar).toBeDefined();
+    // 旧实现报 components[1]（过滤后下标），新实现必须报 components[2]。
+    expect(grammar!.path).toBe("sentences[0].components[2]");
+  });
+
   function grammarErrors(sentence: SentenceInput, components: readonly unknown[]) {
     const result = validateCoreBatch(
       { sentences: [{ sentenceId: sentence.sentenceId, components }] },
