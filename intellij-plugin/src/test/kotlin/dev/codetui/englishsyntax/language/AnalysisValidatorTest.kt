@@ -1,5 +1,6 @@
 package dev.codetui.englishsyntax.language
 
+import dev.codetui.englishsyntax.domain.CoreAnalysis
 import dev.codetui.englishsyntax.domain.GrammarRole
 import dev.codetui.englishsyntax.domain.SentenceInput
 import dev.codetui.englishsyntax.domain.TokenRange
@@ -15,6 +16,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -46,6 +48,46 @@ class AnalysisValidatorTest {
   ) = Json.parseToJsonElement(
     """{"sentenceId":"s1","focus":$focus,"structures":$structures,"grammarPoints":$grammarPoints,"explanation":"$explanation"$extra}""",
   )
+
+  @Test
+  fun `错误路径索引是原始数组下标不受纯标点成分影响`() {
+    // "The service works well.": 0 The / 1 service / 2 works / 3 well / 4 .(p)
+    val s = sentence("The service works well.", "raw-index-1")
+    val raw = core(
+      """
+      {"startToken":4,"endToken":4,"role":"PUNCTUATION","translation":"。"},
+      {"startToken":0,"endToken":1,"role":"SUBJECT","translation":"服务"},
+      {"startToken":2,"endToken":3,"role":"PREDICATE","translation":"works well"}
+      """.trimIndent(),
+      "raw-index-1",
+    )
+    val result = validateCoreBatch(raw, listOf(s), "p1")
+    assertIs<ValidationResult.Invalid>(result)
+    val paths = result.errors.map { it.path }
+    assertTrue("sentences[0].components[2].translation" in paths, "actual: $paths")
+    assertTrue("sentences[0].components[1].translation" !in paths)
+    assertTrue("sentences[0].components[0].translation" !in paths)
+  }
+
+  @Test
+  fun `从句之前插入纯标点成分后 grammar 错误路径随 rawIndex 平移`() {
+    // 0 The / 1 API / 2 that / 3 returns / 4 JSON / 5 responses / 6 ,(p) / 7 an / 8 object / 9 .(p)
+    val s = sentence("The API that returns JSON responses, an object.", "adjacency-1")
+    val raw = core(
+      """
+      {"startToken":9,"endToken":9,"role":"PUNCTUATION","translation":"。"},
+      {"startToken":0,"endToken":1,"role":"SUBJECT","translation":"该 API"},
+      {"startToken":2,"endToken":5,"role":"ATTRIBUTIVE_CLAUSE","translation":"返回 JSON 响应的"},
+      {"startToken":7,"endToken":8,"role":"OBJECT","translation":"一个对象"}
+      """.trimIndent(),
+      "adjacency-1",
+    )
+    val result = validateCoreBatch(raw, listOf(s), "p1")
+    assertIs<ValidationResult.Invalid>(result)
+    val grammar = result.errors.firstOrNull { it.message.contains("ATTRIBUTIVE_CLAUSE") }
+    assertNotNull(grammar) { "errors: ${result.errors}" }
+    assertEquals("sentences[0].components[2]", grammar!!.path)
+  }
 
   @Test
   fun `accepts complete non punctuation coverage and injects profile`() {

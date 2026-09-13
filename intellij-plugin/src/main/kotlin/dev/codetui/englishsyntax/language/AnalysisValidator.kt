@@ -268,16 +268,19 @@ private fun lexicalTexts(tokens: List<Token>, range: TokenRange): List<String> =
 
 /** 只在成分序列已通过结构校验（区间在句内、有序不重叠）之后调用。 */
 private fun collectGrammarErrors(
-  components: List<CoreComponent>,
+  components: List<IndexedCoreComponent>,
   tokens: List<Token>,
   path: String,
   errors: MutableList<ValidationError>,
 ) {
-  val hasConjunction = components.any { it.role == GrammarRole.CONJUNCTION }
+  val roles = components.map { it.component }
+  val hasConjunction = roles.any { it.role == GrammarRole.CONJUNCTION }
 
-  components.forEachIndexed { index, component ->
-    val componentPath = "$path.components[$index]"
-    val previous = components.getOrNull(index - 1)
+  components.forEachIndexed { index, entry ->
+    val component = entry.component
+    val componentPath = "$path.components[${entry.rawIndex}]"
+    val previous = components.getOrNull(index - 1)?.component
+    val next = components.getOrNull(index + 1)?.component
     val words = lexicalTexts(tokens, TokenRange(component.startToken, component.endToken))
     val head = words.firstOrNull()
 
@@ -372,9 +375,10 @@ private fun collectGrammarErrors(
     }
 
     // 定语从句后面紧跟宾语 / 表语 / 补语 = 从句自己的成分被切了出去。
+    // 后继按语义成分序列取(不是原数组邻接),被跳过的纯标点成分不算「紧跟」。
     if (
       component.role == GrammarRole.ATTRIBUTIVE_CLAUSE &&
-      components.getOrNull(index + 1)?.role in clauseInternalFollowers
+      next?.role in clauseInternalFollowers
     ) {
       errors += error(
         componentPath,
@@ -402,7 +406,7 @@ private fun collectGrammarErrors(
 
   // 单成分整句的豁免集是片段语义角色；10 是挑战集审阅后的启发式上限，不是语法定律。
   val lexicalTokenCount = tokens.count { !it.punctuation }
-  val only = components.singleOrNull()
+  val only = roles.singleOrNull()
   val onlyLexicalCount = only?.let {
     lexicalTexts(tokens, TokenRange(it.startToken, it.endToken)).size
   } ?: 0
@@ -435,7 +439,7 @@ private fun collectGrammarErrors(
   // object 等作为句子的顶层成分），并列连词单独标 CONJUNCTION。这样卡片才能显示成分
   // 划分而不是几整块译文。旧的"包成两个 COORDINATE_CLAUSE"约定是「看着像翻译」的
   // 主要来源，在扩展到真实散文后实测退化严重。
-  val coordinateClauses = components.count { it.role == GrammarRole.COORDINATE_CLAUSE }
+  val coordinateClauses = roles.count { it.role == GrammarRole.COORDINATE_CLAUSE }
   if (coordinateClauses >= 1) {
     errors += error(
       "$path.components",
@@ -444,14 +448,14 @@ private fun collectGrammarErrors(
     )
   }
 
-  val fragmentHeads = components.filter { it.role == GrammarRole.FRAGMENT_HEAD }
+  val fragmentHeads = roles.filter { it.role == GrammarRole.FRAGMENT_HEAD }
   if (fragmentHeads.size > 1) {
     errors += error(
       "$path.components",
       "a non-clausal fragment must contain at most one FRAGMENT_HEAD",
     )
   }
-  if (fragmentHeads.isNotEmpty() && components.any { it.role in fragmentForbiddenRoles }) {
+  if (fragmentHeads.isNotEmpty() && roles.any { it.role in fragmentForbiddenRoles }) {
     errors += error("$path.components", FRAGMENT_MIXED_ROLE_MESSAGE)
   }
 }
@@ -513,55 +517,58 @@ private fun parseCoreSentence(
   }
   // 模型常给逗号/句号虚构 PUNCTUATION、CONJUNCTION 等角色。标点本来就允许不覆盖，
   // 所以必须在角色枚举校验前丢掉纯标点区间；否则未知角色会让整句在 repair 后仍失败。
-  val semanticComponents = componentsValue.filterNot { component ->
-    val candidate = component.asObject() ?: return@filterNot false
-    val start = candidate["startToken"]?.safeInt() ?: return@filterNot false
-    val end = candidate["endToken"]?.safeInt() ?: return@filterNot false
-    val covered = request.tokens.filter { it.id in start..end }
-    covered.isNotEmpty() && covered.first().id == start && covered.last().id == end && covered.all { it.punctuation }
-  }
-  if (semanticComponents.isEmpty()) {
+  val entries = rawComponentEntries(componentsValue, request.tokens)
+  if (entries.isEmpty()) {
     errors += error("$path.components", "must contain a non-punctuation component")
     return null
   }
-  val parsed = semanticComponents.mapIndexed { componentIndex, component ->
-    parseCoreComponent(component, request.tokens, "$path.components[$componentIndex]", errors)
+  // 解析尝试保留 rawIndex;component 为 null 表示解析失败,不能用 filterNotNull
+  // 提前剔除——结构可信度需要它们参与判定。
+  val parsed: List<Pair<Int, CoreComponent?>> = entries.map { (rawIndex, value) ->
+    rawIndex to parseCoreComponent(value, request.tokens, "$path.components[$rawIndex]", errors)
   }
   // grammar 只依赖结构可信度，不能被 unknown field、过长译文或 sentenceId 等
   // 非结构错误短路；每个语义成分都成功解析、区间在句内且有序不重叠才可信。
-  var structureTrusted = parsed.all { it != null }
+  var structureTrusted = parsed.all { it.second != null }
   var previousEnd = -1
-  parsed.forEachIndexed { componentIndex, component ->
-    if (component == null) {
+  parsed.forEach { (rawIndex, component) ->
+    val safeComponent = component ?: run {
       structureTrusted = false
-      return@forEachIndexed
+      return@forEach
     }
-    val componentPath = "$path.components[$componentIndex]"
-    val covered = request.tokens.filter { it.id in component.startToken..component.endToken }
-    if (covered.isEmpty() || covered.first().id != component.startToken || covered.last().id != component.endToken) {
+    val componentPath = "$path.components[$rawIndex]"
+    val covered = request.tokens.filter { it.id in safeComponent.startToken..safeComponent.endToken }
+    if (covered.isEmpty() || covered.first().id != safeComponent.startToken || covered.last().id != safeComponent.endToken) {
       errors += error(componentPath, "token interval is outside the original sentence")
       structureTrusted = false
     }
-    if (component.startToken <= previousEnd) {
+    if (safeComponent.startToken <= previousEnd) {
       errors += error("$path.components", "components must be ordered and non-overlapping")
       structureTrusted = false
     }
-    previousEnd = component.endToken
+    previousEnd = safeComponent.endToken
   }
-  val valid = parsed.filterNotNull()
+  val valid: List<IndexedCoreComponent> = parsed.mapNotNull { (rawIndex, component) ->
+    component?.let { IndexedCoreComponent(rawIndex, it) }
+  }
   if (structureTrusted) {
     collectGrammarErrors(valid, request.tokens, path, errors)
   }
   request.tokens.forEach { token ->
-    val coverage = valid.count { token.id in it.startToken..it.endToken }
+    val coverage = valid.count { token.id in it.component.startToken..it.component.endToken }
     when {
       !token.punctuation && coverage == 0 -> errors += error("$path.components", "non-punctuation token ${token.id} is not covered")
       !token.punctuation && coverage > 1 -> errors += error("$path.components", "non-punctuation token ${token.id} is covered more than once")
       token.punctuation && coverage > 1 -> errors += error("$path.components", "punctuation token ${token.id} is covered more than once")
     }
   }
-  return if (errors.any { it.path == path || it.path.startsWith("$path.") } || valid.size != parsed.size) null
-  else CoreAnalysis(sentenceId = request.sentenceId, components = valid, modelProfileId = profileId)
+  return if (errors.any { it.path == path || it.path.startsWith("$path.") } || valid.size != entries.size) null
+  // 投影为纯 CoreComponent:rawIndex 只是诊断坐标,不得进缓存与渲染。
+  else CoreAnalysis(
+    sentenceId = request.sentenceId,
+    components = valid.map { it.component },
+    modelProfileId = profileId,
+  )
 }
 
 fun validateCoreBatch(raw: JsonElement, requests: List<SentenceInput>, profileId: String): ValidationResult<List<CoreAnalysis>> {

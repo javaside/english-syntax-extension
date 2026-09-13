@@ -400,7 +400,9 @@ class AnalysisService(
               "user",
               buildRepairPrompt(
                 invalid.map { it.first },
-                invalid.flatMap { it.second },
+                // 按 sentenceId 分组序列化:多句 repair 的错误各自可定位,
+                // 不再全部挤在 sentences[0] 下让模型猜是哪一句。
+                groupRepairErrors(invalid, invalidRawSubset(invalidRaw, invalid.map { it.first.sentenceId }.toSet())),
                 invalidRawSubset(invalidRaw, invalid.map { it.first.sentenceId }.toSet()),
               ),
             ),

@@ -6,6 +6,7 @@ import dev.codetui.englishsyntax.domain.CoreComponent
 import dev.codetui.englishsyntax.domain.GrammarRole
 import dev.codetui.englishsyntax.domain.SentenceInput
 import dev.codetui.englishsyntax.domain.TokenRange
+import dev.codetui.englishsyntax.analysis.RepairErrorGroup
 import dev.codetui.englishsyntax.domain.ValidationError
 import dev.codetui.englishsyntax.language.tokenize
 import kotlinx.serialization.json.Json
@@ -60,7 +61,7 @@ class PromptsTest {
       buildCorePrompt(listOf(input)),
       buildRepairPrompt(
         listOf(input),
-        listOf(ValidationError("sentences[0]", "bad")),
+        listOf(RepairErrorGroup("s1", 0, "invalid", listOf(ValidationError("components[0]", "bad")))),
         buildJsonObject { put("sentences", buildJsonArray { }) },
       ),
     )
@@ -121,7 +122,7 @@ class PromptsTest {
     val core = buildCorePrompt(listOf(input))
     val repair = buildRepairPrompt(
       listOf(input),
-      listOf(ValidationError("sentences[0]", "bad")),
+      listOf(RepairErrorGroup("s1", 0, "invalid", listOf(ValidationError("components[0]", "bad")))),
       buildJsonObject { put("sentences", buildJsonArray { }) },
     )
 
@@ -146,9 +147,16 @@ class PromptsTest {
     val prompt = buildRepairPrompt(
       listOf(sentence("Classify the request.")),
       listOf(
-        ValidationError(
-          "sentences[0].components[0]",
-          "a PREDICATE must cover only the verb group; emit the noun phrase that starts at the determiner as its own OBJECT, PREDICATIVE, or COMPLEMENT component",
+        RepairErrorGroup(
+          "s1",
+          0,
+          "invalid",
+          listOf(
+            ValidationError(
+              "components[0]",
+              "a PREDICATE must cover only the verb group; emit the noun phrase that starts at the determiner as its own OBJECT, PREDICATIVE, or COMPLEMENT component",
+            ),
+          ),
         ),
       ),
       buildJsonObject { put("sentences", buildJsonArray { }) },
@@ -165,7 +173,7 @@ class PromptsTest {
       buildCorePrompt(listOf(input)),
       buildRepairPrompt(
         listOf(input),
-        listOf(ValidationError("sentences[0]", "bad")),
+        listOf(RepairErrorGroup("s1", 0, "invalid", listOf(ValidationError("components[0]", "bad")))),
         buildJsonObject { put("sentences", buildJsonArray { }) },
       ),
     )
@@ -183,11 +191,15 @@ class PromptsTest {
     val invalid = buildJsonObject { put("sentences", buildJsonArray { }) }
     val prompt = buildRepairPrompt(
       listOf(sentence("The service works.")),
-      listOf(ValidationError("sentences[0]", "is missing")),
+      listOf(RepairErrorGroup("s1", null, "missing", listOf(ValidationError("", "no output for this sentenceId; emit it")))),
       invalid,
     )
     assertTrue(prompt.startsWith(firstLine("coreRepair")))
-    assertTrue(prompt.contains("""{"path":"sentences[0]","message":"is missing"}"""))
+    // 分组序列化:句身份 + 去前缀路径,不再出现裸 sentences[0]。
+    assertTrue(prompt.contains("\"sentenceId\":\"s1\""))
+    assertTrue(prompt.contains("\"kind\":\"missing\""))
+    assertTrue(prompt.contains("""{"path":"","message":"no output for this sentenceId; emit it"}"""))
+    assertFalse(prompt.contains("sentences[0]"))
     assertTrue(prompt.contains("PREDICATE must not absorb"))
     assertFalse(prompt.contains("\n  \"path\""))
   }

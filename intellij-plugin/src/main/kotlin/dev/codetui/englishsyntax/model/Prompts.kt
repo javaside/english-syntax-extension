@@ -6,6 +6,7 @@ import dev.codetui.englishsyntax.domain.SentenceInput
 import dev.codetui.englishsyntax.domain.TokenRange
 import dev.codetui.englishsyntax.domain.ValidationError
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonArray
@@ -235,12 +236,14 @@ fun buildCorePrompt(sentences: List<SentenceInput>): String =
 
 fun buildRepairPrompt(
   sentences: List<SentenceInput>,
-  errors: List<ValidationError>,
+  groups: List<dev.codetui.englishsyntax.analysis.RepairErrorGroup>,
   invalidJson: JsonElement,
 ): String = (
   listOf(
     "Repair only the structure of the invalid core-analysis JSON so it satisfies every validation error.",
     "Do not change sentence IDs or Tokens. Do not add sentences and do not reinterpret the source text.",
+    "Each error group below carries one sentenceId: apply its errors to that sentence only, never to another sentence in the same payload. A group's components[k] refers to entry k of that sentence's components array in the Invalid JSON below.",
+    "Ranges, roles and translations may be corrected, but sentence IDs and Tokens must not change.",
     "For each PREDICATE error caused by a determiner inside the component, split that component immediately before the determiner and emit the resulting noun phrase as its own OBJECT, PREDICATIVE, or COMPLEMENT component.",
     "Check the repaired JSON against every listed validation error before returning it; do not return until each listed error has been addressed.",
     "Return the repaired JSON only, without a Markdown fence or prose.",
@@ -251,11 +254,27 @@ fun buildRepairPrompt(
       "Original sentence IDs and Tokens:",
       serializeSentences(sentences),
       "Validation errors:",
-      serialize(promptJson.encodeToJsonElement(errors)),
+      serialize(groupsToJson(groups)),
       "Invalid JSON:",
       serialize(invalidJson),
     )
   ).joinToString("\n\n")
+
+/** 手构 JsonObject:与 TS serialize(groups) 逐字一致(missing 组省略 rawOccurrence)。 */
+private fun groupsToJson(groups: List<dev.codetui.englishsyntax.analysis.RepairErrorGroup>): JsonElement =
+  JsonArray(groups.map { group ->
+    buildJsonObject {
+      put("sentenceId", group.sentenceId)
+      if (group.rawOccurrence != null) put("rawOccurrence", group.rawOccurrence)
+      put("kind", group.kind)
+      put("errors", JsonArray(group.errors.map { error ->
+        buildJsonObject {
+          put("path", error.path)
+          put("message", error.message)
+        }
+      }))
+    }
+  })
 
 fun buildDetailPrompt(
   sentence: SentenceInput,
