@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { GrammarRole } from "../shared/grammar";
 import { rawComponentEntries, toIndexed } from "./indexed-components";
 import { tokenize } from "./segmenter";
 
@@ -9,9 +10,9 @@ describe("rawComponentEntries", () => {
   it("记录原始下标后再排除纯标点成分", () => {
     const entries = rawComponentEntries(
       [
-        { startToken: 0, endToken: 1, role: "SUBJECT", translation: "服务" },
+        { startToken: 0, endToken: 1, role: GrammarRole.SUBJECT, translation: "服务" },
         { startToken: 4, endToken: 4, role: "PUNCTUATION", translation: "。" }, // token 4 才是句号
-        { startToken: 2, endToken: 3, role: "PREDICATE", translation: "运转良好" },
+        { startToken: 2, endToken: 3, role: GrammarRole.PREDICATE, translation: "运转良好" },
       ],
       tokens,
     );
@@ -36,7 +37,7 @@ describe("rawComponentEntries", () => {
     const entries = rawComponentEntries(
       [
         { startToken: 99, endToken: 99, role: "PUNCTUATION", translation: "。" },
-        { startToken: "0", endToken: 1, role: "SUBJECT", translation: "服务" },
+        { startToken: "0", endToken: 1, role: GrammarRole.SUBJECT, translation: "服务" },
       ],
       tokens,
     );
@@ -44,7 +45,7 @@ describe("rawComponentEntries", () => {
   });
 
   it("全纯标点时结果为空(由调用方报 must contain a non-punctuation component)", () => {
-    const entries = rawComponentEntries([{ startToken: 4, endToken: 4, role: "X", translation: "" }], tokens);
+    const entries = rawComponentEntries([{ startToken: 4, endToken: 4, role: "X" as unknown as GrammarRole, translation: "" }], tokens);
     expect(entries).toEqual([]);
   });
 });
@@ -52,13 +53,13 @@ describe("rawComponentEntries", () => {
 describe("toIndexed", () => {
   it("只保留成功解析的成分并携带 rawIndex", () => {
     const indexed = toIndexed([
-      { rawIndex: 0, component: { startToken: 0, endToken: 1, role: "SUBJECT", translation: "服务" } },
+      { rawIndex: 0, component: { startToken: 0, endToken: 1, role: GrammarRole.SUBJECT, translation: "服务" } },
       { rawIndex: 1, component: undefined },
-      { rawIndex: 2, component: { startToken: 2, endToken: 3, role: "PREDICATE", translation: "运转良好" } },
+      { rawIndex: 2, component: { startToken: 2, endToken: 3, role: GrammarRole.PREDICATE, translation: "运转良好" } },
     ]);
     expect(indexed).toEqual([
-      { rawIndex: 0, component: { startToken: 0, endToken: 1, role: "SUBJECT", translation: "服务" } },
-      { rawIndex: 2, component: { startToken: 2, endToken: 3, role: "PREDICATE", translation: "运转良好" } },
+      { rawIndex: 0, component: { startToken: 0, endToken: 1, role: GrammarRole.SUBJECT, translation: "服务" } },
+      { rawIndex: 2, component: { startToken: 2, endToken: 3, role: GrammarRole.PREDICATE, translation: "运转良好" } },
     ]);
   });
 });
