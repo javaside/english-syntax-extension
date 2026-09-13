@@ -11,6 +11,14 @@ import {
   buildSentenceDetailsPrompt,
 } from "./prompts";
 
+/** 与生产 repair-errors.ts 同构的单组错误,供 repair prompt 测试使用。 */
+const repairGroup = {
+  sentenceId: "s1",
+  rawOccurrence: 0,
+  kind: "invalid",
+  errors: [{ path: "components[0]", message: "bad" }],
+} as const;
+
 const sentence: SentenceInput = {
   sentenceId: "sentence-1",
   text: "Learners read books daily.",
@@ -75,7 +83,7 @@ describe("model-facing sentence payload", () => {
   it("classifies complete clauses before fragments without adding sentence translations", () => {
     const prompts = [
       buildCorePrompt([sentence]),
-      buildRepairPrompt([sentence], [{ path: "sentences[0]", message: "bad" }], {}),
+      buildRepairPrompt([sentence], [repairGroup], {}),
     ];
     const completenessRuleParts = [
       "Completeness-first rule:",
@@ -161,7 +169,7 @@ describe("model-facing sentence payload", () => {
    */
   it("carries the full rule set into the repair prompt", () => {
     const core = buildCorePrompt([sentence]);
-    const repair = buildRepairPrompt([sentence], [{ path: "sentences[0]", message: "bad" }], {});
+    const repair = buildRepairPrompt([sentence], [repairGroup], {});
 
     for (const rule of [
       "The role field is a closed 17-role enum:",
@@ -184,9 +192,16 @@ describe("model-facing sentence payload", () => {
       [sentence],
       [
         {
-          path: "sentences[0].components[1]",
-          message:
-            "a PREDICATE must cover only the verb group; emit the noun phrase that starts at the determiner as its own OBJECT, PREDICATIVE, or COMPLEMENT component",
+          sentenceId: "sentence-1",
+          rawOccurrence: 0,
+          kind: "invalid",
+          errors: [
+            {
+              path: "components[1]",
+              message:
+                "a PREDICATE must cover only the verb group; emit the noun phrase that starts at the determiner as its own OBJECT, PREDICATIVE, or COMPLEMENT component",
+            },
+          ],
         },
       ],
       {},
@@ -204,7 +219,7 @@ describe("model-facing sentence payload", () => {
     };
     const prompts = [
       buildCorePrompt([dashSentence]),
-      buildRepairPrompt([dashSentence], [{ path: "sentences[0]", message: "bad" }], {}),
+      buildRepairPrompt([dashSentence], [repairGroup], {}),
     ];
 
     for (const prompt of prompts) {
@@ -229,7 +244,7 @@ describe("model-facing sentence payload", () => {
   it("reuses the same compact payload in every prompt that carries a sentence", () => {
     const focus = { startToken: 0, endToken: 1 };
     const prompts = [
-      buildRepairPrompt([sentence], [{ path: "sentences[0]", message: "bad" }], {}),
+      buildRepairPrompt([sentence], [repairGroup], {}),
       buildDetailPrompt(sentence, core, focus),
       buildSentenceDetailsPrompt(sentence, core, [focus]),
     ];
@@ -278,7 +293,7 @@ describe("prompt 内嵌的 JSON 同样紧凑", () => {
   });
 
   it("核心修复 prompt 的校验错误与待修复 JSON 不带缩进", () => {
-    const prompt = buildRepairPrompt([sentence], [{ path: "sentences[0]", message: "bad" }], {
+    const prompt = buildRepairPrompt([sentence], [repairGroup], {
       sentences: [{ sentenceId: sentence.sentenceId, components: [] }],
     });
 
