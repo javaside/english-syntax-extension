@@ -32,6 +32,7 @@
 | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `service-worker.ts`            | 消息路由、来源与权限门、脱敏、`activeTabs` 持久化、端口管理、右键菜单 / 快捷键 / 图标点击的监听器注册、依赖装配                                                         |
 | `analysis-service.ts`          | **核心编排**:缓存查找 → 按端点分块 → 提示词 → 调度 → 校验 → core 至多两轮修复(每轮仅剩余失败句) → 写缓存。同时实现 `lookupCore` / `lookupDetail`(纯缓存)与 `analyzeSentenceDetails`(整句预载)。**译文质量门**(含 Han、拒回显)与 grammar 门同轮返回,进同一修复配额   |
+| `repair-errors.ts`             | `groupRepairErrors()` 把逐句校验错误按 sentenceId 重新分组进 repair prompt(含 missing/duplicate 的四类路径与 rawOccurrence)——验证器按句单独调用,错误路径恒以 `sentences[0]` 起,不分组则多句 repair 的错误全部挤在第 0 句下,模型无从定位(真机 47/108 个 repair 如此) |
 | `openai-compatible-adapter.ts` | HTTP 层:请求体构造、鉴权头、超时(流式为静默超时)、HTTP 错误映射、**三种能力降级**、流式读取                                                                             |
 | `request-scheduler.ts`         | 通用优先级调度器:5 档优先级、`concurrency` / `backgroundConcurrency`、同 key 去重、可重试错误的指数退避、按 `documentId` 批量取消                                       |
 | `analysis-cache.ts`            | IndexedDB(`english-syntax-learning-v1`,v2,三个 store:core/detail/correction)+ LRU 限额 + 导入导出;缓存键工厂 `createCoreCacheKey` / `createCorrectionCacheKey`          |

@@ -18,6 +18,7 @@ import {
 import { validateCoreBatch, validateDetail } from "../language/analysis-validator";
 import type { ValidationError } from "../language/analysis-validator";
 import { createCoreCacheKey, createCorrectionCacheKey } from "./analysis-cache";
+import { groupRepairErrors } from "./repair-errors";
 import type { ModelProfile } from "./config-repository";
 import { ModelRequestError } from "./openai-compatible-adapter";
 import type { ChatMessage, JsonSchemaSpec } from "./openai-compatible-adapter";
@@ -705,7 +706,9 @@ export class CachedAnalysisService implements AnalysisService {
               role: "user",
               content: buildRepairPrompt(
                 remaining.map(({ sentence }) => sentence),
-                remaining.flatMap(({ errors }) => errors),
+                // 按 sentenceId 分组序列化:多句 repair 的错误各自可定位,
+                // 不再全部挤在 sentences[0] 下让模型猜是哪一句。
+                groupRepairErrors(remaining, invalidRaw),
                 invalidRawSubset(invalidRaw, failedIds),
               ),
             },

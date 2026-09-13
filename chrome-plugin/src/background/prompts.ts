@@ -1,6 +1,7 @@
 import { GrammarRole } from "../shared/grammar";
 import type { CoreAnalysis, TokenRange } from "../shared/grammar";
 import type { SentenceInput } from "../shared/protocol";
+import type { RepairErrorGroup } from "./repair-errors";
 
 export interface ValidationErrorDescription {
   path: string;
@@ -242,12 +243,14 @@ export function buildCorePrompt(sentences: readonly SentenceInput[]): string {
 
 export function buildRepairPrompt(
   sentences: readonly SentenceInput[],
-  errors: readonly ValidationErrorDescription[],
+  groups: readonly RepairErrorGroup[],
   invalidJson: unknown,
 ): string {
   return [
     PROMPT_FIRST_LINES.coreRepair,
     "Do not change sentence IDs or Tokens. Do not add sentences and do not reinterpret the source text.",
+    "Each error group below carries one sentenceId: apply its errors to that sentence only, never to another sentence in the same payload. A group's components[k] refers to entry k of that sentence's components array in the Invalid JSON below.",
+    "Ranges, roles and translations may be corrected, but sentence IDs and Tokens must not change.",
     "For each PREDICATE error caused by a determiner inside the component, split that component immediately before the determiner and emit the resulting noun phrase as its own OBJECT, PREDICATIVE, or COMPLEMENT component.",
     "Check the repaired JSON against every listed validation error before returning it; do not return until each listed error has been addressed.",
     "Return the repaired JSON only, without a Markdown fence or prose.",
@@ -256,7 +259,7 @@ export function buildRepairPrompt(
     "Original sentence IDs and Tokens:",
     serializeSentences(sentences),
     "Validation errors:",
-    serialize(errors),
+    serialize(groups),
     "Invalid JSON:",
     serialize(invalidJson),
   ].join("\n\n");
