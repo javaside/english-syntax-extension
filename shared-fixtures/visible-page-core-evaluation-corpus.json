@@ -1,7 +1,7 @@
 {
   "schemaVersion": "core-evaluation-corpus/v1",
   "id": "visible-english-pages-spring-ai-arxiv",
-  "version": 1,
+  "version": 2,
   "denominatorSentenceIds": [
     "spring-features-lead",
     "spring-portable-api-fragment",
@@ -38,9 +38,21 @@
       },
       "annotationRationale": "Complete SVO lead-in: the colon is punctuation outside the three clause-level components.",
       "boundaries": [
-        { "startChar": 0, "endChar": 9, "role": "SUBJECT" },
-        { "startChar": 10, "endChar": 18, "role": "PREDICATE" },
-        { "startChar": 19, "endChar": 41, "role": "OBJECT" }
+        {
+          "startChar": 0,
+          "endChar": 9,
+          "role": "SUBJECT"
+        },
+        {
+          "startChar": 10,
+          "endChar": 18,
+          "role": "PREDICATE"
+        },
+        {
+          "startChar": 19,
+          "endChar": 41,
+          "role": "OBJECT"
+        }
       ]
     },
     {
@@ -56,9 +68,21 @@
       },
       "annotationRationale": "Non-clausal noun feature: Portable API support is FRAGMENT_HEAD; the provider scope and the supported modality/model scope are separate postnominal ATTRIBUTE constituents.",
       "boundaries": [
-        { "startChar": 0, "endChar": 20, "role": "FRAGMENT_HEAD" },
-        { "startChar": 21, "endChar": 40, "role": "ATTRIBUTE" },
-        { "startChar": 41, "endChar": 87, "role": "ATTRIBUTE" }
+        {
+          "startChar": 0,
+          "endChar": 20,
+          "role": "FRAGMENT_HEAD"
+        },
+        {
+          "startChar": 21,
+          "endChar": 40,
+          "role": "ATTRIBUTE"
+        },
+        {
+          "startChar": 41,
+          "endChar": 87,
+          "role": "ATTRIBUTE"
+        }
       ]
     },
     {
@@ -74,9 +98,21 @@
       },
       "annotationRationale": "A non-clausal nominal head is followed first by its selected of-ATTRIBUTE and then by a complete finite relative clause; the relative clause includes its own predicate and complement.",
       "boundaries": [
-        { "startChar": 0, "endChar": 4, "role": "FRAGMENT_HEAD" },
-        { "startChar": 5, "endChar": 17, "role": "ATTRIBUTE" },
-        { "startChar": 18, "endChar": 75, "role": "ATTRIBUTIVE_CLAUSE" }
+        {
+          "startChar": 0,
+          "endChar": 4,
+          "role": "FRAGMENT_HEAD"
+        },
+        {
+          "startChar": 5,
+          "endChar": 17,
+          "role": "ATTRIBUTE"
+        },
+        {
+          "startChar": 18,
+          "endChar": 75,
+          "role": "ATTRIBUTIVE_CLAUSE"
+        }
       ]
     },
     {
@@ -87,10 +123,26 @@
       "source": "Controlled technical counterexample specified by the visible-page coverage design",
       "annotationRationale": "Unlike the fragment-relative target, this input has a finite main predicate and must remain SUBJECT plus ATTRIBUTIVE_CLAUSE plus copular PREDICATE/PREDICATIVE.",
       "boundaries": [
-        { "startChar": 0, "endChar": 7, "role": "SUBJECT" },
-        { "startChar": 8, "endChar": 35, "role": "ATTRIBUTIVE_CLAUSE" },
-        { "startChar": 36, "endChar": 43, "role": "PREDICATE" },
-        { "startChar": 44, "endChar": 50, "role": "PREDICATIVE" }
+        {
+          "startChar": 0,
+          "endChar": 7,
+          "role": "SUBJECT"
+        },
+        {
+          "startChar": 8,
+          "endChar": 35,
+          "role": "ATTRIBUTIVE_CLAUSE"
+        },
+        {
+          "startChar": 36,
+          "endChar": 43,
+          "role": "PREDICATE"
+        },
+        {
+          "startChar": 44,
+          "endChar": 50,
+          "role": "PREDICATIVE"
+        }
       ]
     },
     {
@@ -101,10 +153,26 @@
       "source": "arXiv 2609.04991v1 HTML title, https://arxiv.org/html/2609.04991v1 (verified 2026-09-08)",
       "annotationRationale": "The colon joins two non-finite title activities: one FRAGMENT_HEAD, its noun-selected ATTRIBUTE, an APPOSITIVE restatement, and that restatement's ATTRIBUTE; the colon remains uncovered.",
       "boundaries": [
-        { "startChar": 0, "endChar": 19, "role": "FRAGMENT_HEAD" },
-        { "startChar": 20, "endChar": 43, "role": "ATTRIBUTE" },
-        { "startChar": 45, "endChar": 80, "role": "APPOSITIVE" },
-        { "startChar": 81, "endChar": 119, "role": "ATTRIBUTE" }
+        {
+          "startChar": 0,
+          "endChar": 19,
+          "role": "FRAGMENT_HEAD"
+        },
+        {
+          "startChar": 20,
+          "endChar": 43,
+          "role": "ATTRIBUTE"
+        },
+        {
+          "startChar": 45,
+          "endChar": 80,
+          "role": "APPOSITIVE"
+        },
+        {
+          "startChar": 81,
+          "endChar": 119,
+          "role": "ATTRIBUTE"
+        }
       ]
     },
     {
@@ -115,12 +183,36 @@
       "source": "Controlled scientific counterexample specified by the visible-page coverage design",
       "annotationRationale": "The text after the colon is a complete independent clause and is therefore flattened into SUBJECT/PREDICATE/OBJECT rather than labeled APPOSITIVE.",
       "boundaries": [
-        { "startChar": 0, "endChar": 10, "role": "SUBJECT" },
-        { "startChar": 11, "endChar": 13, "role": "PREDICATE" },
-        { "startChar": 14, "endChar": 19, "role": "PREDICATIVE" },
-        { "startChar": 21, "endChar": 38, "role": "SUBJECT" },
-        { "startChar": 39, "endChar": 46, "role": "PREDICATE" },
-        { "startChar": 47, "endChar": 58, "role": "OBJECT" }
+        {
+          "startChar": 0,
+          "endChar": 10,
+          "role": "SUBJECT"
+        },
+        {
+          "startChar": 11,
+          "endChar": 13,
+          "role": "PREDICATE"
+        },
+        {
+          "startChar": 14,
+          "endChar": 19,
+          "role": "PREDICATIVE"
+        },
+        {
+          "startChar": 21,
+          "endChar": 38,
+          "role": "SUBJECT"
+        },
+        {
+          "startChar": 39,
+          "endChar": 46,
+          "role": "PREDICATE"
+        },
+        {
+          "startChar": 47,
+          "endChar": 58,
+          "role": "OBJECT"
+        }
       ]
     },
     {
@@ -136,9 +228,21 @@
       },
       "annotationRationale": "The when constituent has an explicit subject and finite passive predicate, so it is one complete ADVERBIAL_CLAUSE.",
       "boundaries": [
-        { "startChar": 0, "endChar": 30, "role": "SUBJECT" },
-        { "startChar": 31, "endChar": 37, "role": "PREDICATE" },
-        { "startChar": 38, "endChar": 117, "role": "ADVERBIAL_CLAUSE" }
+        {
+          "startChar": 0,
+          "endChar": 30,
+          "role": "SUBJECT"
+        },
+        {
+          "startChar": 31,
+          "endChar": 37,
+          "role": "PREDICATE"
+        },
+        {
+          "startChar": 38,
+          "endChar": 117,
+          "role": "ADVERBIAL_CLAUSE"
+        }
       ]
     },
     {
@@ -154,9 +258,21 @@
       },
       "annotationRationale": "When performing has no finite predicate; the entire temporal and contextual phrase is ADVERBIAL, including the nested in-PP.",
       "boundaries": [
-        { "startChar": 0, "endChar": 31, "role": "SUBJECT" },
-        { "startChar": 32, "endChar": 44, "role": "PREDICATE" },
-        { "startChar": 45, "endChar": 116, "role": "ADVERBIAL" }
+        {
+          "startChar": 0,
+          "endChar": 31,
+          "role": "SUBJECT"
+        },
+        {
+          "startChar": 32,
+          "endChar": 44,
+          "role": "PREDICATE"
+        },
+        {
+          "startChar": 45,
+          "endChar": 116,
+          "role": "ADVERBIAL"
+        }
       ]
     },
     {
@@ -167,10 +283,26 @@
       "source": "Controlled technical contrast from the Spring AI grammar review finite/non-finite ruling",
       "annotationRationale": "Before introduces a finite clause with its own subject, predicate, and object, all enclosed by ADVERBIAL_CLAUSE.",
       "boundaries": [
-        { "startChar": 0, "endChar": 10, "role": "SUBJECT" },
-        { "startChar": 11, "endChar": 20, "role": "PREDICATE" },
-        { "startChar": 21, "endChar": 32, "role": "OBJECT" },
-        { "startChar": 33, "endChar": 68, "role": "ADVERBIAL_CLAUSE" }
+        {
+          "startChar": 0,
+          "endChar": 10,
+          "role": "SUBJECT"
+        },
+        {
+          "startChar": 11,
+          "endChar": 20,
+          "role": "PREDICATE"
+        },
+        {
+          "startChar": 21,
+          "endChar": 32,
+          "role": "OBJECT"
+        },
+        {
+          "startChar": 33,
+          "endChar": 68,
+          "role": "ADVERBIAL_CLAUSE"
+        }
       ]
     },
     {
@@ -181,10 +313,26 @@
       "source": "Controlled technical contrast from the Spring AI grammar review finite/non-finite ruling",
       "annotationRationale": "Before sending is a non-finite VP, so the preposition and VP form ADVERBIAL rather than ADVERBIAL_CLAUSE.",
       "boundaries": [
-        { "startChar": 0, "endChar": 10, "role": "SUBJECT" },
-        { "startChar": 11, "endChar": 20, "role": "PREDICATE" },
-        { "startChar": 21, "endChar": 32, "role": "OBJECT" },
-        { "startChar": 33, "endChar": 50, "role": "ADVERBIAL" }
+        {
+          "startChar": 0,
+          "endChar": 10,
+          "role": "SUBJECT"
+        },
+        {
+          "startChar": 11,
+          "endChar": 20,
+          "role": "PREDICATE"
+        },
+        {
+          "startChar": 21,
+          "endChar": 32,
+          "role": "OBJECT"
+        },
+        {
+          "startChar": 33,
+          "endChar": 50,
+          "role": "ADVERBIAL"
+        }
       ]
     },
     {
@@ -200,13 +348,41 @@
       },
       "annotationRationale": "Two full VPs share They; and is a top-level CONJUNCTION, while spent performing the invocation modifies the object noun time.",
       "boundaries": [
-        { "startChar": 0, "endChar": 4, "role": "SUBJECT" },
-        { "startChar": 5, "endChar": 12, "role": "PREDICATE" },
-        { "startChar": 13, "endChar": 21, "role": "OBJECT" },
-        { "startChar": 22, "endChar": 53, "role": "ATTRIBUTE" },
-        { "startChar": 54, "endChar": 57, "role": "CONJUNCTION" },
-        { "startChar": 58, "endChar": 67, "role": "PREDICATE" },
-        { "startChar": 68, "endChar": 99, "role": "OBJECT" }
+        {
+          "startChar": 0,
+          "endChar": 4,
+          "role": "SUBJECT"
+        },
+        {
+          "startChar": 5,
+          "endChar": 12,
+          "role": "PREDICATE"
+        },
+        {
+          "startChar": 13,
+          "endChar": 21,
+          "role": "OBJECT"
+        },
+        {
+          "startChar": 22,
+          "endChar": 53,
+          "role": "ATTRIBUTE"
+        },
+        {
+          "startChar": 54,
+          "endChar": 57,
+          "role": "CONJUNCTION"
+        },
+        {
+          "startChar": 58,
+          "endChar": 67,
+          "role": "PREDICATE"
+        },
+        {
+          "startChar": 68,
+          "endChar": 99,
+          "role": "OBJECT"
+        }
       ]
     },
     {
@@ -220,13 +396,33 @@
         "exactExcerpt": "The input arguments and result from the tool call are not exported by default, as they can be potentially sensitive.",
         "contentHash": "867b406df65d3ab4909bf21f3ba94d767c691ae19ec42d1773d7971074e03dc9"
       },
-      "annotationRationale": "And remains inside the coordinated SUBJECT NP; from the tool call is its ATTRIBUTE, and the final finite as-clause after the source comma is ADVERBIAL_CLAUSE.",
+      "annotationRationale": "And remains inside the coordinated SUBJECT NP; from the tool call is its ATTRIBUTE, and the final finite as-clause after the source comma is ADVERBIAL_CLAUSE. v2: 末成分去掉句尾句号(79..116→79..115),与黄金集「标点总体不覆盖」约定一致(v1 冻结后复核发现,见 2026-09-12 spec D7)。",
       "boundaries": [
-        { "startChar": 0, "endChar": 30, "role": "SUBJECT" },
-        { "startChar": 31, "endChar": 49, "role": "ATTRIBUTE" },
-        { "startChar": 50, "endChar": 66, "role": "PREDICATE" },
-        { "startChar": 67, "endChar": 77, "role": "ADVERBIAL" },
-        { "startChar": 79, "endChar": 116, "role": "ADVERBIAL_CLAUSE" }
+        {
+          "startChar": 0,
+          "endChar": 30,
+          "role": "SUBJECT"
+        },
+        {
+          "startChar": 31,
+          "endChar": 49,
+          "role": "ATTRIBUTE"
+        },
+        {
+          "startChar": 50,
+          "endChar": 66,
+          "role": "PREDICATE"
+        },
+        {
+          "startChar": 67,
+          "endChar": 77,
+          "role": "ADVERBIAL"
+        },
+        {
+          "startChar": 79,
+          "endChar": 115,
+          "role": "ADVERBIAL_CLAUSE"
+        }
       ]
     },
     {
@@ -242,12 +438,36 @@
       },
       "annotationRationale": "Allows selects OBJECT Maven and infinitival COMPLEMENT to access; directly and the non-finite while phrase are ADVERBIAL constituents.",
       "boundaries": [
-        { "startChar": 0, "endChar": 18, "role": "SUBJECT" },
-        { "startChar": 19, "endChar": 25, "role": "PREDICATE" },
-        { "startChar": 26, "endChar": 31, "role": "OBJECT" },
-        { "startChar": 32, "endChar": 70, "role": "COMPLEMENT" },
-        { "startChar": 71, "endChar": 79, "role": "ADVERBIAL" },
-        { "startChar": 80, "endChar": 132, "role": "ADVERBIAL" }
+        {
+          "startChar": 0,
+          "endChar": 18,
+          "role": "SUBJECT"
+        },
+        {
+          "startChar": 19,
+          "endChar": 25,
+          "role": "PREDICATE"
+        },
+        {
+          "startChar": 26,
+          "endChar": 31,
+          "role": "OBJECT"
+        },
+        {
+          "startChar": 32,
+          "endChar": 70,
+          "role": "COMPLEMENT"
+        },
+        {
+          "startChar": 71,
+          "endChar": 79,
+          "role": "ADVERBIAL"
+        },
+        {
+          "startChar": 80,
+          "endChar": 132,
+          "role": "ADVERBIAL"
+        }
       ]
     },
     {
@@ -261,22 +481,78 @@
         "exactExcerpt": "Structured output bridges that gap: the model is steered to produce text conforming to a schema, and the application parses it back into a typed object the rest of the codebase can treat like any other domain type.",
         "contentHash": "75d19e45e4299d18bb6b5dd32b85d141137208e597fd010c0985415df6192122"
       },
-      "annotationRationale": "The colon introduces complete clause material; steered takes infinitival COMPLEMENT to produce, whose OBJECT text is modified by the participial ATTRIBUTE conforming to a schema; back into a typed object is one directional ADVERBIAL, and the zero-relative beginning the rest of the codebase is one full ATTRIBUTIVE_CLAUSE modifying object.",
+      "annotationRationale": "The colon introduces complete clause material; steered takes infinitival COMPLEMENT to produce, whose OBJECT text is modified by the participial ATTRIBUTE conforming to a schema; back into a typed object is one directional ADVERBIAL, and the zero-relative beginning the rest of the codebase is one full ATTRIBUTIVE_CLAUSE modifying object. v2: 末成分去掉句尾句号(152..214→152..213),理由同上。",
       "boundaries": [
-        { "startChar": 0, "endChar": 17, "role": "SUBJECT" },
-        { "startChar": 18, "endChar": 25, "role": "PREDICATE" },
-        { "startChar": 26, "endChar": 34, "role": "OBJECT" },
-        { "startChar": 36, "endChar": 45, "role": "SUBJECT" },
-        { "startChar": 46, "endChar": 56, "role": "PREDICATE" },
-        { "startChar": 57, "endChar": 67, "role": "COMPLEMENT" },
-        { "startChar": 68, "endChar": 72, "role": "OBJECT" },
-        { "startChar": 73, "endChar": 95, "role": "ATTRIBUTE" },
-        { "startChar": 97, "endChar": 100, "role": "CONJUNCTION" },
-        { "startChar": 101, "endChar": 116, "role": "SUBJECT" },
-        { "startChar": 117, "endChar": 123, "role": "PREDICATE" },
-        { "startChar": 124, "endChar": 126, "role": "OBJECT" },
-        { "startChar": 127, "endChar": 151, "role": "ADVERBIAL" },
-        { "startChar": 152, "endChar": 214, "role": "ATTRIBUTIVE_CLAUSE" }
+        {
+          "startChar": 0,
+          "endChar": 17,
+          "role": "SUBJECT"
+        },
+        {
+          "startChar": 18,
+          "endChar": 25,
+          "role": "PREDICATE"
+        },
+        {
+          "startChar": 26,
+          "endChar": 34,
+          "role": "OBJECT"
+        },
+        {
+          "startChar": 36,
+          "endChar": 45,
+          "role": "SUBJECT"
+        },
+        {
+          "startChar": 46,
+          "endChar": 56,
+          "role": "PREDICATE"
+        },
+        {
+          "startChar": 57,
+          "endChar": 67,
+          "role": "COMPLEMENT"
+        },
+        {
+          "startChar": 68,
+          "endChar": 72,
+          "role": "OBJECT"
+        },
+        {
+          "startChar": 73,
+          "endChar": 95,
+          "role": "ATTRIBUTE"
+        },
+        {
+          "startChar": 97,
+          "endChar": 100,
+          "role": "CONJUNCTION"
+        },
+        {
+          "startChar": 101,
+          "endChar": 116,
+          "role": "SUBJECT"
+        },
+        {
+          "startChar": 117,
+          "endChar": 123,
+          "role": "PREDICATE"
+        },
+        {
+          "startChar": 124,
+          "endChar": 126,
+          "role": "OBJECT"
+        },
+        {
+          "startChar": 127,
+          "endChar": 151,
+          "role": "ADVERBIAL"
+        },
+        {
+          "startChar": 152,
+          "endChar": 213,
+          "role": "ATTRIBUTIVE_CLAUSE"
+        }
       ]
     },
     {
@@ -287,10 +563,26 @@
       "source": "Controlled technical contrast from the Spring AI grammar review PP ruling",
       "annotationRationale": "The of-PP is selected by and modifies sequence, so it is ATTRIBUTE following the SUBJECT head.",
       "boundaries": [
-        { "startChar": 0, "endChar": 12, "role": "SUBJECT" },
-        { "startChar": 13, "endChar": 31, "role": "ATTRIBUTE" },
-        { "startChar": 32, "endChar": 42, "role": "PREDICATE" },
-        { "startChar": 43, "endChar": 53, "role": "OBJECT" }
+        {
+          "startChar": 0,
+          "endChar": 12,
+          "role": "SUBJECT"
+        },
+        {
+          "startChar": 13,
+          "endChar": 31,
+          "role": "ATTRIBUTE"
+        },
+        {
+          "startChar": 32,
+          "endChar": 42,
+          "role": "PREDICATE"
+        },
+        {
+          "startChar": 43,
+          "endChar": 53,
+          "role": "OBJECT"
+        }
       ]
     },
     {
@@ -306,10 +598,26 @@
       },
       "annotationRationale": "Upon expresses the verb's relation and contains the nested in-PP; the purpose infinitive contains its own into-PP, yielding two unsplit ADVERBIAL constituents.",
       "boundaries": [
-        { "startChar": 0, "endChar": 9, "role": "SUBJECT" },
-        { "startChar": 10, "endChar": 16, "role": "PREDICATE" },
-        { "startChar": 17, "endChar": 72, "role": "ADVERBIAL" },
-        { "startChar": 73, "endChar": 119, "role": "ADVERBIAL" }
+        {
+          "startChar": 0,
+          "endChar": 9,
+          "role": "SUBJECT"
+        },
+        {
+          "startChar": 10,
+          "endChar": 16,
+          "role": "PREDICATE"
+        },
+        {
+          "startChar": 17,
+          "endChar": 72,
+          "role": "ADVERBIAL"
+        },
+        {
+          "startChar": 73,
+          "endChar": 119,
+          "role": "ADVERBIAL"
+        }
       ]
     },
     {
@@ -320,9 +628,21 @@
       "source": "arXiv 2609.04991v1 Figure 2 caption, https://arxiv.org/html/2609.04991v1 (verified 2026-09-08; parenthetical plotting-style labels '(solid line)' and '(histogram)' omitted)",
       "annotationRationale": "A caption noun fragment has FRAGMENT_HEAD Comparison, an of-ATTRIBUTE, and a reduced-relative ATTRIBUTE modifying pixels; removing the plotting-style parentheticals isolates the natural-language syntax target without claiming a verbatim caption.",
       "boundaries": [
-        { "startChar": 0, "endChar": 10, "role": "FRAGMENT_HEAD" },
-        { "startChar": 11, "endChar": 38, "role": "ATTRIBUTE" },
-        { "startChar": 39, "endChar": 116, "role": "ATTRIBUTE" }
+        {
+          "startChar": 0,
+          "endChar": 10,
+          "role": "FRAGMENT_HEAD"
+        },
+        {
+          "startChar": 11,
+          "endChar": 38,
+          "role": "ATTRIBUTE"
+        },
+        {
+          "startChar": 39,
+          "endChar": 116,
+          "role": "ATTRIBUTE"
+        }
       ]
     },
     {
@@ -333,8 +653,16 @@
       "source": "arXiv 2609.04991v1 Table 1 caption, https://arxiv.org/html/2609.04991v1 (verified 2026-09-08)",
       "annotationRationale": "The table definition is a noun fragment: A list is FRAGMENT_HEAD and the entire selected of-phrase, including its reduced relative and coordination, is ATTRIBUTE.",
       "boundaries": [
-        { "startChar": 0, "endChar": 6, "role": "FRAGMENT_HEAD" },
-        { "startChar": 7, "endChar": 82, "role": "ATTRIBUTE" }
+        {
+          "startChar": 0,
+          "endChar": 6,
+          "role": "FRAGMENT_HEAD"
+        },
+        {
+          "startChar": 7,
+          "endChar": 82,
+          "role": "ATTRIBUTE"
+        }
       ]
     },
     {
@@ -345,11 +673,31 @@
       "source": "Controlled normalized scientific contrast based on the Hubble-constant measurement topic of arXiv 2609.04991v1; not asserted to be verbatim page HTML",
       "annotationRationale": "This controlled sentence tests an inline H0 atom without making an unverifiable claim about the saved page HTML. The initial with-PP is ADVERBIAL; goal is the SUBJECT head, its selected of-PP remains ATTRIBUTE, followed by copular PREDICATE/PREDICATIVE.",
       "boundaries": [
-        { "startChar": 0, "endChar": 25, "role": "ADVERBIAL" },
-        { "startChar": 27, "endChar": 35, "role": "SUBJECT" },
-        { "startChar": 36, "endChar": 87, "role": "ATTRIBUTE" },
-        { "startChar": 88, "endChar": 90, "role": "PREDICATE" },
-        { "startChar": 91, "endChar": 110, "role": "PREDICATIVE" }
+        {
+          "startChar": 0,
+          "endChar": 25,
+          "role": "ADVERBIAL"
+        },
+        {
+          "startChar": 27,
+          "endChar": 35,
+          "role": "SUBJECT"
+        },
+        {
+          "startChar": 36,
+          "endChar": 87,
+          "role": "ATTRIBUTE"
+        },
+        {
+          "startChar": 88,
+          "endChar": 90,
+          "role": "PREDICATE"
+        },
+        {
+          "startChar": 91,
+          "endChar": 110,
+          "role": "PREDICATIVE"
+        }
       ]
     },
     {
@@ -360,7 +708,11 @@
       "source": "arXiv 2609.04991v1 section heading, https://arxiv.org/html/2609.04991v1 (verified 2026-09-08)",
       "annotationRationale": "A short section heading is a one-word non-clausal FRAGMENT_HEAD.",
       "boundaries": [
-        { "startChar": 0, "endChar": 8, "role": "FRAGMENT_HEAD" }
+        {
+          "startChar": 0,
+          "endChar": 8,
+          "role": "FRAGMENT_HEAD"
+        }
       ]
     }
   ]

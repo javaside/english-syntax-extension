@@ -54,7 +54,7 @@ describe("visible page core evaluation corpus v1", () => {
     expect(corpus).toMatchObject({
       schemaVersion: "core-evaluation-corpus/v1",
       id: "visible-english-pages-spring-ai-arxiv",
-      version: 1,
+      version: 2, // v2:重钉 spring-np-coordination / spring-zero-relative 的句尾标点
     });
     expect(validateCoreEvaluationCorpusV1(corpus)).toBe(corpus);
     expect(corpus.denominatorSentenceIds).toEqual(corpus.sentences.map(({ id }) => id));
@@ -211,7 +211,7 @@ describe("visible page core evaluation corpus v1", () => {
           { startChar: 31, endChar: 49, role: "ATTRIBUTE" },
           { startChar: 50, endChar: 66, role: "PREDICATE" },
           { startChar: 67, endChar: 77, role: "ADVERBIAL" },
-          { startChar: 79, endChar: 116, role: "ADVERBIAL_CLAUSE" },
+          { startChar: 79, endChar: 115, role: "ADVERBIAL_CLAUSE" }, // v2:不含句号
         ],
       },
       "spring-object-control": {
@@ -245,7 +245,7 @@ describe("visible page core evaluation corpus v1", () => {
           { startChar: 117, endChar: 123, role: "PREDICATE" },
           { startChar: 124, endChar: 126, role: "OBJECT" },
           { startChar: 127, endChar: 151, role: "ADVERBIAL" },
-          { startChar: 152, endChar: 214, role: "ATTRIBUTIVE_CLAUSE" },
+          { startChar: 152, endChar: 213, role: "ATTRIBUTIVE_CLAUSE" }, // v2:不含句号
         ],
       },
       "spring-noun-pp": {
