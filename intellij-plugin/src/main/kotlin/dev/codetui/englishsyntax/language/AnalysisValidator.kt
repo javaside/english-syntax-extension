@@ -233,6 +233,13 @@ private const val FRAGMENT_MIXED_ROLE_MESSAGE =
  * `SUBJECT_CLAUSE`，从句剩下的部分平铺到主句层，页面上出现两个同级"谓语"，
  * 引导词底下还挂着整个从句的译文——旧硬门一条都拦不住。
  */
+/** 助动词/情态动词(与 TS AUXILIARY_MODALS 同集):单独成谓语时给出精确合并指令。 */
+private val auxiliaryModals = setOf(
+  "am", "are", "be", "been", "being", "can", "could", "did", "do", "does",
+  "had", "has", "have", "having", "is", "may", "might", "must", "shall", "should",
+  "was", "were", "will", "would",
+)
+
 private const val MIN_CLAUSE_LEXICAL_TOKENS = 2
 
 /**
@@ -310,10 +317,20 @@ private fun collectGrammarErrors(
       previous?.role == GrammarRole.PREDICATE &&
       previous.endToken + 1 == component.startToken
     ) {
-      errors += error(
-        componentPath,
-        "adjacent PREDICATE components must be merged into one PREDICATE covering the whole verb group",
-      )
+      val previousWords = lexicalTexts(tokens, TokenRange(previous.startToken, previous.endToken))
+      val prevHead = previousWords.lastOrNull()
+      // 前一个谓语只含助动词/情态动词时,给更精确的合并指令(与 TS 逐字一致)。
+      if (previousWords.size == 1 && prevHead != null && prevHead in auxiliaryModals) {
+        errors += error(
+          componentPath,
+          "auxiliary/modal verb \"$prevHead\" must be merged with the following main verb into one PREDICATE covering the complete verb group",
+        )
+      } else {
+        errors += error(
+          componentPath,
+          "adjacent PREDICATE components must be merged into one PREDICATE covering the whole verb group",
+        )
+      }
     }
 
     // 谓语必须以动词组开头。限定词与主格代词都不可能是动词，命中即说明主语被吞了进来。

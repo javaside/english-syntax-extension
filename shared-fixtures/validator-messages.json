@@ -18,12 +18,16 @@
     "COORDINATE_CLAUSE is deprecated",
     "a non-clausal fragment must contain at most one FRAGMENT_HEAD",
     "FRAGMENT_HEAD marks a non-clausal fragment",
-    "translation must include a meaningful Chinese gloss"
+    "translation must include a meaningful Chinese gloss",
+    "auxiliary/modal verb \"can\" must be merged"
   ],
   "cases": [
     {
       "id": "adjacent-predicates",
-      "sentence": { "id": "adjacent-predicates", "text": "Help turn ideas." },
+      "sentence": {
+        "id": "adjacent-predicates",
+        "text": "Help turn ideas."
+      },
       "raw": {
         "sentences": [
           {
@@ -264,7 +268,10 @@
     },
     {
       "id": "single-word-clause",
-      "sentence": { "id": "single-word-clause", "text": "Tools that work." },
+      "sentence": {
+        "id": "single-word-clause",
+        "text": "Tools that work."
+      },
       "raw": {
         "sentences": [
           {
@@ -665,15 +672,33 @@
     },
     {
       "id": "echo-translation-plus-grammar",
-      "sentence": { "id": "echo-translation-plus-grammar", "text": "Help turn ideas." },
+      "sentence": {
+        "id": "echo-translation-plus-grammar",
+        "text": "Help turn ideas."
+      },
       "raw": {
         "sentences": [
           {
             "sentenceId": "echo-translation-plus-grammar",
             "components": [
-              { "startToken": 0, "endToken": 0, "role": "PREDICATE", "translation": "Help" },
-              { "startToken": 1, "endToken": 1, "role": "PREDICATE", "translation": "转化" },
-              { "startToken": 2, "endToken": 3, "role": "OBJECT", "translation": "想法" }
+              {
+                "startToken": 0,
+                "endToken": 0,
+                "role": "PREDICATE",
+                "translation": "Help"
+              },
+              {
+                "startToken": 1,
+                "endToken": 1,
+                "role": "PREDICATE",
+                "translation": "转化"
+              },
+              {
+                "startToken": 2,
+                "endToken": 3,
+                "role": "OBJECT",
+                "translation": "想法"
+              }
             ]
           }
         ]
@@ -692,14 +717,27 @@
     },
     {
       "id": "fragment-relative-accepted",
-      "sentence": { "id": "fragment-relative-accepted", "text": "An API that returns JSON responses." },
+      "sentence": {
+        "id": "fragment-relative-accepted",
+        "text": "An API that returns JSON responses."
+      },
       "raw": {
         "sentences": [
           {
             "sentenceId": "fragment-relative-accepted",
             "components": [
-              { "startToken": 0, "endToken": 1, "role": "FRAGMENT_HEAD", "translation": "一个 API" },
-              { "startToken": 2, "endToken": 5, "role": "ATTRIBUTIVE_CLAUSE", "translation": "返回 JSON 响应的" }
+              {
+                "startToken": 0,
+                "endToken": 1,
+                "role": "FRAGMENT_HEAD",
+                "translation": "一个 API"
+              },
+              {
+                "startToken": 2,
+                "endToken": 5,
+                "role": "ATTRIBUTIVE_CLAUSE",
+                "translation": "返回 JSON 响应的"
+              }
             ]
           }
         ]
@@ -709,15 +747,33 @@
     },
     {
       "id": "fragment-truncated-attributive",
-      "sentence": { "id": "fragment-truncated-attributive", "text": "An API that returns JSON responses." },
+      "sentence": {
+        "id": "fragment-truncated-attributive",
+        "text": "An API that returns JSON responses."
+      },
       "raw": {
         "sentences": [
           {
             "sentenceId": "fragment-truncated-attributive",
             "components": [
-              { "startToken": 0, "endToken": 1, "role": "FRAGMENT_HEAD", "translation": "一个 API" },
-              { "startToken": 2, "endToken": 2, "role": "ATTRIBUTIVE_CLAUSE", "translation": "引导词" },
-              { "startToken": 3, "endToken": 5, "role": "PREDICATE", "translation": "返回 JSON 响应" }
+              {
+                "startToken": 0,
+                "endToken": 1,
+                "role": "FRAGMENT_HEAD",
+                "translation": "一个 API"
+              },
+              {
+                "startToken": 2,
+                "endToken": 2,
+                "role": "ATTRIBUTIVE_CLAUSE",
+                "translation": "引导词"
+              },
+              {
+                "startToken": 3,
+                "endToken": 5,
+                "role": "PREDICATE",
+                "translation": "返回 JSON 响应"
+              }
             ]
           }
         ]
@@ -733,6 +789,53 @@
           "message": "FRAGMENT_HEAD marks a non-clausal fragment and must not be mixed with clause-level SUBJECT, PREDICATE, OBJECT, PREDICATIVE, COMPLEMENT, SUBJECT_CLAUSE, OBJECT_CLAUSE, PREDICATIVE_CLAUSE, ADVERBIAL_CLAUSE, or the deprecated COORDINATE_CLAUSE; a whole ATTRIBUTIVE_CLAUSE is the only clause role allowed beside a FRAGMENT_HEAD"
         }
       ]
+    },
+    {
+      "id": "adjacent-auxiliary-modal",
+      "sentence": {
+        "id": "adjacent-auxiliary-modal",
+        "text": "Users can deploy services."
+      },
+      "raw": {
+        "sentences": [
+          {
+            "sentenceId": "adjacent-auxiliary-modal",
+            "components": [
+              {
+                "startToken": 0,
+                "endToken": 0,
+                "role": "SUBJECT",
+                "translation": "用户"
+              },
+              {
+                "startToken": 1,
+                "endToken": 1,
+                "role": "PREDICATE",
+                "translation": "能够"
+              },
+              {
+                "startToken": 2,
+                "endToken": 2,
+                "role": "PREDICATE",
+                "translation": "部署"
+              },
+              {
+                "startToken": 3,
+                "endToken": 4,
+                "role": "OBJECT",
+                "translation": "服务"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": [
+        {
+          "path": "sentences[0].components[2]",
+          "message": "auxiliary/modal verb \"can\" must be merged with the following main verb into one PREDICATE covering the complete verb group"
+        }
+      ],
+      "accepted": false
     }
   ]
 }
