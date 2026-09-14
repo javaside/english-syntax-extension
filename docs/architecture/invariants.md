@@ -632,9 +632,9 @@
 
 ### 「通过校验但标错」必须与失败分开度量
 
-**规则**:验收不得只看 failures——`II.2.2` 编号被切成独立 `FRAGMENT_HEAD`、标题词降级 `ATTRIBUTE` 这类**静默错标**通过全部校验、写进缓存、长期显示。固定审计集(`shared-fixtures/audit-silent-mislabel.json`)按 token 区间约束裁决,报告两轴(运行:未请求/失败/通过 × 裁决:待裁决/符合/违反)与两个比率(静默错标率、正确率下界);分母为 0 报 N/A 不是 0%。
+**规则**:验收不得只看 failures——`II.2.2` 编号被切成独立 `FRAGMENT_HEAD`、标题词降级 `ATTRIBUTE` 这类**静默错标**通过全部校验、写进缓存、长期显示。固定审计集(`shared-fixtures/audit-silent-mislabel.json`)按 token 区间约束裁决,报告两轴(运行:未运行/未终态/校验失败/通过 × 裁决:待裁决/满足局部约束/满足完整 gold/违反约束/违反 gold)与两个比率(静默错标率、正确率下界);分母为 0 报 N/A 不是 0%。局部约束通过不等于整句符合 gold(只有 `acceptedAnalyses` 逐组整体命中才算),待裁决项不算正确,没有逐句终态证据不得推定通过(流式分片先建 DOM 但仍 `requesting`)。
 
-**为什么** 只看失败率会把「模型从静默错变成全部失败」误读成退化,或反过来把静默错当成功;`silent-mislabel-audit` 对 2026-09-12 旧报告实测 2/3 违反(编号绑定 + 句末引用),新 prompt 后引用类已符合、编号类仍违反(教学回归靶,由审计集持续钉住)。
+**为什么** 只看失败率会把「模型从静默错变成全部失败」误读成退化,或反过来把静默错当成功。审计器第一版有三处会虚报正确:把局部约束通过命名成 `meets-gold`、把 `pending` 计进正确分子、CLI 把任何匹配到的 DOM sentence 硬编码为 `passedValidation: true`(流式临时卡片也会命中);三处都已由单测钉住。审计集本身也曾标错:`figure-label-noun-fragment` 的 `must-cover-together` 要求主体吞入后置 of 短语,会把符合口径的正确拆分判违反——oracle 错了比没有 oracle 更糟,所以 `validateAuditSetV1` 现在用生产 tokenizer 校验 tokenCount 与 span 边界。
 
 **症状** 「失败块比例下降」但页面上的错标没人看见;prompt 教学效果的验收退化为主观目测。
 

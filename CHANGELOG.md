@@ -18,7 +18,7 @@
 ### 新增
 
 - **句末引用附着与章节编号绑定口径**:prompt 新增 Trailing-citation(句末书目引用并入前一成分;括号列表值不算引用)与 Heading-number(编号不单独成片段主体)两条规则,黄金集新增两句真机样本。真机验证教学例句的引用已正确并入,全页独立引用成分 ~10→5;编号绑定 deepseek-flash 未学会,记为教学回归靶。
-- **静默错标审计器**:`scripts/silent-mislabel-audit.mjs` + 固定审计集,把「通过校验但标错」(旧报告实测 2/3 违反)变成与失败率分开的两轴报告;分母为 0 报 N/A。
+- **静默错标审计器**:`scripts/silent-mislabel-audit.mjs` + 固定审计集,把「通过校验但标错」变成与失败率分开的两轴报告。局部约束通过只报 `meets-constraints`,只有 `acceptedAnalyses` 逐组整体命中才报 `meets-gold`;`pending` 不计正确分子;预测必须带逐句终态证据,没有就报 `not-terminal`;oracle 用生产 tokenizer 校验坐标。
 - **评测 runner 补齐 `--corpus`**:文档描述的开关此前未实现(fixturePath 写死);另支持 `CORE_EVAL_ROOT` 在 worktree 上评测。
 - **页面语料 v2**:重钉 `spring-np-coordination` / `spring-zero-relative` 的句尾标点边界,消除约 2/20 的 exact 惩罚偏置;baseline 三份已冻结。
 
@@ -27,7 +27,7 @@
 - Chrome 45 个测试文件 / 1206 个单测全部通过;IntelliJ Kotlin 全绿。lint 保持唯一既有基线错误。
 - E2E 本次完整重跑：37 通过，2 个商店截图用例跳过。构建前置步骤保留子进程输出，失败时不再只显示笼统的 `Command failed`。
 - 验收尚未全部完成：P0 离线差分已按正确源码路径与生产 tokenizer 重跑并通过；小规模真实配对存在模型波动，不构成不劣性证明。页面 corpus candidate 只完成 run1，run2 首次因 provider raw 与 strict artifact subset 不符被拒，随后页面 run2/run3 与 core40 评测因 HTTP 402 `Insufficient Balance` 无法继续，停止付费请求。
-- 最新全页 DOM 观察：公式中的 TeX 命令形态为 0、未见邮箱解析卡片；含失败卡片为 37/182，未达到 ≤5% 效果目标。该观察不是已证明的整页覆盖率。
+- 最新全页 DOM 观察：公式中的 TeX 命令形态为 0、未见邮箱解析卡片；含失败卡片为 37/182，未达到 ≤5% 效果目标。该观察不是已证明的整页覆盖率。审计器对这份报告的三项里,Figure 2 判为校验失败,其余两项因该报告不含逐句终态证据而报 `not-terminal`——修正后的审计器不把 DOM 卡片当通过,因此本批次尚未产出可信的静默错标率。
 - 单个 artifact 的 `report.transitions.correctToWrongOrFailure` 描述首轮到修复终态的转移，不能当成 baseline/candidate 跨版本回归结论；完整配对验收仍待完成。
 
 ## Unreleased — 页面级英文句法覆盖

@@ -1000,6 +1000,8 @@ describe("analyzeSentenceDetails", () => {
 describe("multi-sentence repair grouping and narrowing", () => {
   interface RepairGroupFixture {
     sentenceId: string;
+    rawOccurrence?: number;
+    kind: string;
     errors: { path: string; message: string }[];
   }
 
@@ -1081,6 +1083,66 @@ describe("multi-sentence repair grouping and narrowing", () => {
     ]);
 
     expect(outcome.result).toHaveLength(2);
+  });
+
+  it("第二轮携带的是仍失败句的最新非法内容,而非上一轮的旧错误", async () => {
+    const invalidBoth = {
+      sentences: [
+        { sentenceId: sentenceOne.sentenceId, components: punctuationPlusEcho(sentenceOne) },
+        { sentenceId: sentenceTwo.sentenceId, components: echoOnly(sentenceTwo) },
+      ],
+    };
+    // 第二轮:第一句修好;第二句仍在输出里,但形状变了(改为首部多一个纯标点成分),
+    // 所以本轮错误内容与 rawIndex 都必须跟着变。
+    const secondRound = {
+      sentences: [
+        rawCore(sentenceOne),
+        { sentenceId: sentenceTwo.sentenceId, components: punctuationPlusEcho(sentenceTwo) },
+      ],
+    };
+    const thirdRound = { sentences: [rawCore(sentenceOne), rawCore(sentenceTwo)] };
+    const { adapter, service } = harness([invalidBoth, secondRound, thirdRound]);
+
+    await service.analyzeCore(coreInput([sentenceOne, sentenceTwo]), new AbortController().signal);
+
+    const repairPrompts = adapter.completeJson.mock.calls
+      .map((call) => (call[1] as { content: string }[]).at(-1)!.content)
+      .filter((content) => content.includes("Repair only the structure"));
+    expect(repairPrompts).toHaveLength(2);
+
+    // 第一轮:两句都是 invalid(不是 missing),第一句的错误指向原始下标 2 ——
+    // 它的 raw 数组首部有个纯标点成分,语义序列里的下标 1 不是诊断坐标。
+    const firstGroups = errorGroupsOf(repairPrompts[0]!);
+    expect(firstGroups.map(({ sentenceId, kind }) => [sentenceId, kind])).toEqual([
+      [sentenceOne.sentenceId, "invalid"],
+      [sentenceTwo.sentenceId, "invalid"],
+    ]);
+    const firstForOne = firstGroups.find(
+      ({ sentenceId }) => sentenceId === sentenceOne.sentenceId,
+    )!;
+    expect(firstForOne.errors.some(({ path }) => path === "components[2].translation")).toBe(true);
+
+    // 第二轮:只带仍失败的第二句;Invalid JSON 与 Tokens 段都不含已修好的第一句。
+    const secondGroups = errorGroupsOf(repairPrompts[1]!);
+    expect(secondGroups.map(({ sentenceId, kind }) => [sentenceId, kind])).toEqual([
+      [sentenceTwo.sentenceId, "invalid"],
+    ]);
+    const secondForTwo = secondGroups.find(
+      ({ sentenceId }) => sentenceId === sentenceTwo.sentenceId,
+    )!;
+    // 形状变了:错误指向新的原始下标 2,而不是上一轮的 components[1]。
+    expect(secondForTwo.errors.some(({ path }) => path === "components[2].translation")).toBe(true);
+    // 第二轮携带的是本轮 raw:第二句已改成首部带纯标点成分的形状,Invalid JSON
+    // 段里它必须含那个成分;上一轮的旧形状(无纯标点)不得再出现。
+    const secondInvalidJson = repairPrompts[1]!.slice(repairPrompts[1]!.indexOf("Invalid JSON:"));
+    expect(secondInvalidJson).toContain(sentenceTwo.sentenceId);
+    expect(secondInvalidJson).not.toContain(sentenceOne.sentenceId);
+    expect(secondInvalidJson).toContain('"PUNCTUATION"');
+    const secondTokens = repairPrompts[1]!.slice(
+      repairPrompts[1]!.indexOf("Original sentence IDs and Tokens:"),
+      repairPrompts[1]!.indexOf("Validation errors:"),
+    );
+    expect(secondTokens).not.toContain(sentenceOne.sentenceId);
   });
 });
 

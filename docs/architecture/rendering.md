@@ -293,4 +293,4 @@ Chrome 端在真实网页里替换 DOM;IntelliJ 端在 **IDEA 默认的官方 Ma
 
 ## 静默错标审计(2026-09-12 起)
 
-「通过校验但标错」(如章节编号独立成 `FRAGMENT_HEAD`、句末引用单独成成分)不报错、写缓存、长期显示,只看 failures 会把它算成成功。`chrome-plugin/scripts/silent-mislabel-audit.mjs` 消费固定审计集(`shared-fixtures/audit-silent-mislabel.json`,token 区间约束 oracle)与真机报告,输出两轴判定(运行:未请求/失败/通过 × 裁决:待裁决/符合/违反)与两个比率:静默错标率(分母 = 已通过且已裁决,分母 0 报 N/A)、正确率下界(分母 = 全部固定审计项)。新增审计类别时须人工裁决期望答案并升 `oracleVersion`。
+「通过校验但标错」(如章节编号独立成 `FRAGMENT_HEAD`、句末引用单独成成分)不报错、写缓存、长期显示,只看 failures 会把它算成成功。`chrome-plugin/scripts/silent-mislabel-audit.mjs` 消费固定审计集(`shared-fixtures/audit-silent-mislabel.json`)与真机报告,输出两轴判定(运行:未运行/未终态/校验失败/通过 × 裁决:待裁决/满足局部约束/满足完整 gold/违反约束/违反 gold)与两个比率:静默错标率(分母 = 已裁决且已通过,分母 0 报 N/A)、正确率下界(分子只计命中完整 `acceptedAnalyses` 的项,局部约束通过与待裁决都不计入)。三条硬约束:①局部 constraints 只能报告 `meets-constraints`,不得冒充整句 gold(spec D9);②完整答案必须逐组整体匹配,不能跨答案拼接;③预测必须带逐句终态证据(`sentenceTerminals` 的 `phase === "ready"`),没有证据一律 `not-terminal`——流式分片会先建 sentence DOM 但仍在 `requesting`,把它当通过会让审计分母被临时状态污染。oracle 自校验用生产 tokenizer 重算 tokenCount,并拒绝越界 span;新增审计类别时须人工裁决期望答案并升 `oracleVersion`。

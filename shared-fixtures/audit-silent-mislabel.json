@@ -10,11 +10,33 @@
         "block": "h3 subsection II.2.2"
       },
       "text": "II.2.2 Generating and storing the LOS redshift prior",
+      "tokenization": "core-15",
+      "tokenCount": 10,
       "adjudicationStatus": "adjudicated",
       "rationale": "章节编号不是独立片段主体:它与标题中心词共同构成一个 FRAGMENT_HEAD;编号被单列 = 编号与标题的人为割裂。",
       "constraints": [
-        { "type": "must-not-be-standalone-role", "tokenSpan": [0, 2], "role": "FRAGMENT_HEAD" },
-        { "type": "must-cover-together", "tokenSpans": [[0, 2], [3, 9]], "role": "FRAGMENT_HEAD" }
+        {
+          "type": "must-not-be-standalone-role",
+          "tokenSpan": [
+            0,
+            2
+          ],
+          "role": "FRAGMENT_HEAD"
+        },
+        {
+          "type": "must-cover-together",
+          "tokenSpans": [
+            [
+              0,
+              2
+            ],
+            [
+              3,
+              9
+            ]
+          ],
+          "role": "FRAGMENT_HEAD"
+        }
       ]
     },
     {
@@ -24,12 +46,32 @@
         "page": "https://arxiv.org/html/2609.04991v1",
         "block": "figcaption Figure 2"
       },
-      "text": "Figure 2: Comparison of six nside 64 GOOD pixels generated using the gridded LOS prior method (solid line) and the sampled LOS prior method (histogram) for a host galaxy weighting model with no weighting.",
+      "text": "Figure 2: Comparison of six nside 64 GOOD pixels generated using the gridded LOS prior method (solid line) and the sampled LOS prior method (histogram).",
+      "tokenization": "core-15",
+      "tokenCount": 31,
       "adjudicationStatus": "adjudicated",
-      "rationale": "label + 名词片段:Figure 2: 不与描述主体割裂成两个 FRAGMENT_HEAD;描述内的后置修饰照常按 ATTRIBUTE 拆。",
+      "rationale": "label + 名词片段:Figure 2: 与中心词 Comparison 同属一个 FRAGMENT_HEAD(0..3);后置 of 短语从 token 4 起照常按 ATTRIBUTE 拆,不得被主体吞入。",
       "constraints": [
-        { "type": "at-most-one-role", "role": "FRAGMENT_HEAD" },
-        { "type": "must-cover-together", "tokenSpans": [[0, 1], [3, 8]], "role": "FRAGMENT_HEAD" }
+        {
+          "type": "at-most-one-role",
+          "role": "FRAGMENT_HEAD"
+        },
+        {
+          "type": "component-exact",
+          "tokenSpan": [
+            0,
+            3
+          ],
+          "role": "FRAGMENT_HEAD"
+        },
+        {
+          "type": "component-exact",
+          "tokenSpan": [
+            4,
+            9
+          ],
+          "role": "ATTRIBUTE"
+        }
       ]
     },
     {
@@ -40,11 +82,26 @@
         "block": "p S1 first paragraph"
       },
       "text": "GW from CBC were first proposed as a new cosmological probe in the 1980s [61].",
+      "tokenization": "core-15",
       "adjudicationStatus": "adjudicated",
-      "rationale": "句末书目引用并入前一成分(此处为时间状语)一起译,不单独成分;句号照评分归一化处理,不混入本指标。",
+      "rationale": "句末书目引用的语义 token 15 必须与前驱时间状语 token 11..13 由同一 ADVERBIAL 覆盖;括号与句号覆盖差异不影响本指标。",
       "constraints": [
-        { "type": "must-not-be-standalone-span", "tokenSpan": [14, 16] }
-      ]
+        {
+          "type": "must-cover-together",
+          "tokenSpans": [
+            [
+              11,
+              13
+            ],
+            [
+              15,
+              15
+            ]
+          ],
+          "role": "ADVERBIAL"
+        }
+      ],
+      "tokenCount": 18
     }
   ]
 }

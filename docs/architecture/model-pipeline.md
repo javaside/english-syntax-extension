@@ -235,13 +235,15 @@ raw → validateCoreBatch（解析前预丢弃纯标点成分）
 
 ### 8.4 页面级覆盖版本的三次配对评测结论(deepseek-v4-flash,temperature 0,pipeline 模式)
 
-页面级 prompt/validator 收口(`CORE_PROMPT_VERSION` 15 / `DETAIL_PROMPT_VERSION` 8,`CORE_SCHEMA_VERSION` 3 未变)以**两套 corpus、各三次 baseline/candidate 配对**验收,`--compare-manifest` 机器校验 corpus/sentenceOrder/endpoint/model/batch/temperature/reasoning/response-format/timeout 逐项一致:
+页面级 prompt/validator 收口当时为 `CORE_PROMPT_VERSION` 13 / `DETAIL_PROMPT_VERSION` 7 / `CORE_SCHEMA_VERSION` 3,以**两套 corpus、各三次 baseline/candidate 配对**验收,`--compare-manifest` 机器校验 corpus/sentenceOrder/endpoint/model/batch/temperature/reasoning/response-format/timeout 逐项一致。**下表数字归属 13/7 与 corpus v1,记的是那次收口的历史结论**:
 
 - **固定 40 句**:最终整句 exact mean 0.875 → **0.84167**(35/33/33 of 40),labeled span F1 0.92496,role accuracy 三对均 100%。
 - **页面目标 corpus(20 句,Spring AI + arXiv 句型)**:finalFailures **3 → 0**(旧稳定失败 `spring-fragment-relative`/`arxiv-dark-siren-title`/`spring-verb-nested-pp` 全部消灭),exact mean 0.46667(10/9/9 of 20),labeled span F1 0.74663,role accuracy ~98.5%。口径注:baseline 按**冻结 partition** 记账(这是 baseline 不可变约定的直接后果),而这 3 个失败里有约 1.5–2 个(视 run,`spring-fragment-relative` 在 candidate 侧三份输出均结构合法、只差 span 粒度)在新 validator 的 fragment-relative 放行下**本来就不会发生**——「3 → 0」混合了 prompt 教学的真改善与 validator 放行的重算效应,不能全部归功于教学。
 - **两套口径下 `correctToWrongOrFailure` 均为 0**;visible 的 exact 缺口收敛为三句真退化 + `nonfinite-when-phrase` 教学空隙,记为 v14 回归靶:系表合并成单个 `PREDICATE`(`ho-clause-1/2`)、OBJECT 吞分词后置 ATTRIBUTE(`spring-vp-coordination`)、图注 FRAGMENT_HEAD+ATTRIBUTE 双重合并(`arxiv-figure-caption`)、非限定 when 短语的后置修饰归口无钉死正例。
 - 评测数字须按**评分器预测尾标点归一化**口径读取(见 [`build-test-release.md` §3](./build-test-release.md));页面 corpus 与 40 句 corpus 的总分**不可直接比较**——句型分布不同,页面 corpus 的 exact 显著更低是挑战集使然,不是回归。
 - **v14 重评前必须先落页面 corpus v2**:`spring-np-coordination`(末成分 `79..116`)与 `spring-zero-relative`(末成分 `152..214`)在 v1 中覆盖了句尾标点,与黄金集「标点总体不覆盖」约定不一致(v1 冻结后复核发现;`spring-portable-api-fragment` 与黄金例外句同文镜像,不算第二例外)。v1 这 2 句对「守约定不覆盖标点」的模型存在约 2/20 的 exact 惩罚偏置——评分归一化只裁预测多盖的尾标点,不补预测少盖的;黄金例外句自身对守约定模型也有同款约 1/95 偏置。重钉为 `79..115` / `152..213` 并升 corpus version 后再解读 v14 数字,否则偏置会混进对比。
+
+**15/8 的验收状态(2026-09-12 批次)**:P0 修复通道改用原始诊断坐标后,离线差分对两份旧真机 artifact 断言接受集合、成功 components 与错误文案均无差异(仅错误路径下标变化),并有新增单测覆盖;页面 corpus 升 v2、baseline 三份已冻结,但 candidate 三次配对与固定 40 句评测**尚未完成**——run2 因模型返回的 sentenceId 集合与 strict artifact 记账不符被拒,随后调用遇到 HTTP 402 `Insufficient Balance`,已停止付费请求。因此 15/8 **不得引用上表的 0.84167 / 0.46667 / `correctToWrongOrFailure` 为 0 等数字**,它们不属于本版本。
 
 ## 9. 缓存(`analysis-cache.ts`)
 
