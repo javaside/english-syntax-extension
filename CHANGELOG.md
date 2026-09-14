@@ -10,7 +10,7 @@
 
 ### 修复
 
-- **repair 错误按句分组并携带实例坐标**:多句 repair 的错误此前被扁平拼装且全部标着 `sentences[0]`(真机 47/108 个 repair 如此),模型无从判断该改哪一句;component 索引也因「先丢纯标点再重编号」与模型所见 JSON 错位(实测 15 例,错误指向隔壁成分)。现按 `sentenceId` 分组(invalid/missing/duplicate 四类路径 + `rawOccurrence`),错误路径改用原始数组下标,语法邻接仍按语义成分序列判。离线差分(283 例真机 Invalid JSON)证明接受集合与成功成分零变化,仅索引改变。
+- **repair 错误按句分组并携带实例坐标**:多句 repair 的错误此前被扁平拼装且全部标着 `sentences[0]`(真机 47/108 个 repair 如此),模型无从判断该改哪一句;component 索引也因「先丢纯标点再重编号」与模型所见 JSON 错位(实测 15 例,错误指向隔壁成分)。现按 `sentenceId` 分组(invalid/missing/duplicate 四类路径 + `rawOccurrence`),错误路径改用原始数组下标,语法邻接仍按语义成分序列判。新增单测覆盖原始下标、语义邻接与成功结果投影；纠正差分脚本的源码路径与 Token 重建后重跑两份真机 artifact：flash 168 例有 9 处路径变化、pro 115 例有 5 处，接受集合、成功成分与错误文案均为 0 差异，符合「仅诊断坐标改变」契约。
 - **公式文本改取可见 MathML**:LaTeXML 的 `alttext` 恒为 TeX 源码,旧实现「alttext 优先」把 `\Lambda`、`H_{0}` 这类源码送进句文本与页面(真机 79/1548 个成分含反斜杠)。现一律读「剔除 annotation/annotation-xml/mphantom/隐藏子树后的可见 MathML 文本」(`Λ`、`H0`),嵌套 math 只读一次,空表示不产出空片段。
 - **作者邮箱块按元数据排除**:整块由邮箱串与转换残留构成的段落不再被当正文解析(此前被切成「谓语 show + 三个宾语邮箱」);正文里出现的邮箱照常保留。
 - **对齐助动词相邻谓语的错误文案**:TS 侧更精确的 `auxiliary/modal verb "…" must be merged…` 指令此前 Kotlin 侧缺失,双端逐字一致并进共享 fixture。
@@ -25,7 +25,10 @@
 ### 测试
 
 - Chrome 45 个测试文件 / 1206 个单测全部通过;IntelliJ Kotlin 全绿。lint 保持唯一既有基线错误。
-- 离线差分脚本(`.superpowers/acceptance/diff-repair-coordinates.mjs`,gitignored)对两份真机报告 283 例 Invalid JSON 断言「仅索引可变」;P0 真实配对(4 对照组 × 多轮)确认修复通道不劣于旧通道。
+- E2E 本次完整重跑：37 通过，2 个商店截图用例跳过。构建前置步骤保留子进程输出，失败时不再只显示笼统的 `Command failed`。
+- 验收尚未全部完成：P0 离线差分已按正确源码路径与生产 tokenizer 重跑并通过；小规模真实配对存在模型波动，不构成不劣性证明。页面 corpus candidate 只完成 run1，run2 首次因 provider raw 与 strict artifact subset 不符被拒，随后页面 run2/run3 与 core40 评测因 HTTP 402 `Insufficient Balance` 无法继续，停止付费请求。
+- 最新全页 DOM 观察：公式中的 TeX 命令形态为 0、未见邮箱解析卡片；含失败卡片为 37/182，未达到 ≤5% 效果目标。该观察不是已证明的整页覆盖率。
+- 单个 artifact 的 `report.transitions.correctToWrongOrFailure` 描述首轮到修复终态的转移，不能当成 baseline/candidate 跨版本回归结论；完整配对验收仍待完成。
 
 ## Unreleased — 页面级英文句法覆盖
 
