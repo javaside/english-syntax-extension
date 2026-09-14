@@ -20,7 +20,7 @@
 - **句末引用附着与章节编号绑定口径**:prompt 新增 Trailing-citation(句末书目引用并入前一成分;括号列表值不算引用)与 Heading-number(编号不单独成片段主体)两条规则,黄金集新增两句真机样本。真机验证教学例句的引用已正确并入,全页独立引用成分 ~10→5;编号绑定 deepseek-flash 未学会,记为教学回归靶。
 - **静默错标审计器**:`scripts/silent-mislabel-audit.mjs` + 固定审计集,把「通过校验但标错」变成与失败率分开的两轴报告。局部约束通过只报 `meets-constraints`,只有 `acceptedAnalyses` 逐组整体命中才报 `meets-gold`;`pending` 不计正确分子;预测必须带逐句终态证据,没有就报 `not-terminal`;oracle 用生产 tokenizer 校验坐标。
 - **评测 runner 补齐 `--corpus`**:文档描述的开关此前未实现(fixturePath 写死);另支持 `CORE_EVAL_ROOT` 在 worktree 上评测。
-- **页面语料 v2**:重钉 `spring-np-coordination` / `spring-zero-relative` 的句尾标点边界,消除约 2/20 的 exact 惩罚偏置;baseline 三份已冻结。
+- **页面语料 v2 → v3**:v2 重钉 `spring-np-coordination` / `spring-zero-relative` 的句尾标点边界,消除约 2/20 的 exact 惩罚偏置;v3 按 spec D7 用真页面原文重核 arXiv 图注/表注——v1/v2 里 `arxiv-figure-caption` 与 `arxiv-table-definition` 省略了 `Figure 2:` / `Table 1:` 标签与 `(solid line)` / `(histogram)` 括注,现恢复 verbatim 文本并按生产 tokenizer 重新导出边界。**v3 的 baseline 与 candidate 均未运行**(外部模型额度耗尽),因此本批次没有可引用的 corpus 数字。
 
 ### 测试
 

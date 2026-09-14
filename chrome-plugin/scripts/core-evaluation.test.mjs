@@ -54,7 +54,7 @@ describe("visible page core evaluation corpus v1", () => {
     expect(corpus).toMatchObject({
       schemaVersion: "core-evaluation-corpus/v1",
       id: "visible-english-pages-spring-ai-arxiv",
-      version: 2, // v2:重钉 spring-np-coordination / spring-zero-relative 的句尾标点
+      version: 3, // v3:按 spec D7 用真页面原文重核 arXiv 图注/表注(label 与括注不再省略)
     });
     expect(validateCoreEvaluationCorpusV1(corpus)).toBe(corpus);
     expect(corpus.denominatorSentenceIds).toEqual(corpus.sentences.map(({ id }) => id));
@@ -271,22 +271,24 @@ describe("visible page core evaluation corpus v1", () => {
         ],
       },
       "arxiv-figure-caption": {
-        text: "Comparison of six nside 64 GOOD pixels generated using the gridded LOS prior method and the sampled LOS prior method.",
+        text: "Figure 2: Comparison of six nside 64 GOOD pixels generated using the gridded LOS prior method (solid line) and the sampled LOS prior method (histogram).",
         split: "arxiv",
         category: "fragment",
         boundaries: [
-          { startChar: 0, endChar: 10, role: "FRAGMENT_HEAD" },
-          { startChar: 11, endChar: 38, role: "ATTRIBUTE" },
-          { startChar: 39, endChar: 116, role: "ATTRIBUTE" },
+          { startChar: 0, endChar: 9, role: "FRAGMENT_HEAD" },
+          { startChar: 10, endChar: 48, role: "ATTRIBUTE" },
+          { startChar: 49, endChar: 151, role: "ATTRIBUTE" },
         ],
       },
       "arxiv-table-definition": {
-        text: "A list of parameters appearing in the dark siren methodology and their definitions",
+        text: "Table 1: A list of parameters appearing in the dark siren methodology and their definitions",
         split: "arxiv",
         category: "fragment",
         boundaries: [
-          { startChar: 0, endChar: 6, role: "FRAGMENT_HEAD" },
-          { startChar: 7, endChar: 82, role: "ATTRIBUTE" },
+          { startChar: 0, endChar: 15, role: "FRAGMENT_HEAD" },
+          { startChar: 16, endChar: 29, role: "ATTRIBUTE" },
+          { startChar: 30, endChar: 69, role: "ATTRIBUTE" },
+          { startChar: 70, endChar: 91, role: "ATTRIBUTE" },
         ],
       },
       "arxiv-inline-h0": {
