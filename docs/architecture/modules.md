@@ -51,7 +51,7 @@
 | `content-script.ts`        | 三件事:①`ContentScriptRouter` 路由 SW 下发的页面命令;②`ChromeRuntimeTransport` 传输层(sendMessage + 端口 + 重连);③`isRuntimeResponse()` **响应守卫**         |
 | `session-controller.ts`    | **最重的一个文件**:会话状态机、块与句的注册、相位流转、合批窗口、发请求与版本守卫、详解 / 纠正交互、MutationObserver、断线重连、状态上报                     |
 | `page-inventory.ts`        | **页面语义清单**:枚举安全可读的英文语义单元(标题/正文/列表/定义/表格/图注/脚注/文献题名),分类型门槛 + principal root + 父子去重,给每个单元「自动分析或稳定排除原因」的结局;`scanDocument` 只取其 `automatic` 投影。fixtures: `tests/fixtures/page-inventory/*.json` 全等钉住 |
-| `readable-dom-text.ts`     | 科学 DOM 文本归一化:普通文本按序、`<math>` 只取一个稳定表示(alttext 优先)、annotation/assistive 不重复、Unicode 空白折叠;不解析 TeX、不翻译公式            |
+| `readable-dom-text.ts`     | 科学 DOM 文本归一化:普通文本按序、`<math>` 一律读**可见 MathML 文本**(alttext 是 TeX 源码,已弃用)、annotation/annotation-xml/mphantom/assistive 不重复、math 内隐藏子树阻断、Unicode 空白折叠;不解析 TeX、不翻译公式。输出是表示树的文本线性化,只保证线性化文本可逆,不保证源公式可逆            |
 | `document-scanner.ts`      | `scanDocument()` = `page-inventory` 的 **automatic 投影**;`nearestSafeBlock()` 走显式手势路径(不设长度/正文容器门槛,英文占比仍适用)。**两者的取舍刻意不同**                  |
 | `hover-target.ts`          | 「鼠标指着谁」:查 `:is(:hover)` 取链尾(裸 `:hover` 在 quirks 页面恒为空集),链空才用记着的最后指针位置 `elementFromPoint` 兜底。装载即挂,冷启动快捷键才有坐标 |
 | `viewport-observer.ts`     | `IntersectionObserver`(`rootMargin: 100%`)包一层,不支持时退回 scroll/resize + rAF 轮询;`isVisible()` 供优先级判定                                            |

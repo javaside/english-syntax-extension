@@ -609,3 +609,33 @@
 **症状** 修复前后的真实差异被 9 句「差 1 字符」的 lost-exact 淹没;或反过来,归一化被当成洗白——它只对称移除记账差,`ho-clause-1/2` 这类真实合并照旧非 exact。
 
 **守护测试** `scripts/core-evaluation.test.mjs` 的归一化双向用例(纯标点丢弃、尾标点裁剪、gold 例外保持 exact、等值预测不反向惩罚);`core-evaluation-traces.json` 与真实 artifact 的内嵌 `report` 均按归一化 scorer 重算。
+
+### repair 错误坐标必须与模型所见 JSON 一致
+
+**规则**:repair prompt 里每条错误都要能唯一定位——按 `sentenceId` 分组(含 missing/duplicate 的四类路径与 `rawOccurrence`),组内 `components[k]` 的 `k` 必须是**该句 raw 数组的原始下标**,不是 validator 过滤纯标点成分后的下标;语法门的邻接判断仍按**语义成分序列**取(被跳过的纯标点不算「紧跟」)。
+
+**为什么** 验证器按句单独调用,错误路径恒以 `sentences[0]` 起;多句错误被 `flatMap` 扁平拼装后,真机 108 个 repair 里 47 个多句样本的所有错误都标着 `sentences[0]`,模型无从判断该改哪一句。component 索引错位实测 15 例:错误指向 `components[10]` 而模型 JSON 里真正该改的是第 11 个(中间一个纯标点成分被丢弃),模型照着指令改错成分,两轮修复预算被白白烧掉。
+
+**症状** repair 轮数居高不下但失败句不变;对 repair prompt 做 `toContain(sentenceId)` 断言通过(输入句列表本来就带 ID)却测不出分组缺失;把邻接判断误换成原数组下标后,定语从句后接宾语的拒绝门静默失效(接受集合改变)。
+
+**守护测试** `analysis-validator.test.ts`(原始下标用例 + 接受集合不变用例 + 邻接平移用例)、`repair-errors.test.ts`(四类路径与重复并存)、`analysis-service.test.ts`(解析 `Validation errors:` 段的分组与逐轮收窄)、Kotlin 同构三件套;离线差分脚本(新旧 validator 对同一批真机 Invalid JSON,唯一允许差异是路径)。
+
+### MathML `alttext` 是 TeX 源码,不是页面文本
+
+**规则**:`<math>` 送进句子层的文本一律读「剔除 annotation/annotation-xml/mphantom/隐藏子树后的可见 MathML 文本」,**绝不读 `alttext`**——LaTeXML 的 `alttext` 恒为 TeX 源码(`H_{0}={71.9}_{-7.5}^{+9.1}`、`\Lambda`),采它会把 TeX 语法污染进句文本、Token、缓存键与页面显示(2026-09-12 真机实测 79/1548 个成分含反斜杠,模型对公式 span 只能回显 LaTeX 而进译文质量门)。
+
+**为什么** 旧实现「alttext 优先」基于「alttext 是公式的规范文本表示」的假设;LaTeXML 生成的页面里它其实是渲染前的 TeX 源码,可见文本才是用户所见(`H0=71.9−7.5+9.1`、`Λ`)。该改动改变 token 文本,必须与两条提示词版本一起升(见 model-pipeline)。
+
+**症状** 页面卡片上出现 `\Lambda`、`\vec{\phi}` 这类源码;公式成分的译文是 LaTeX 回显;换任何模型都复现(不是模型问题,是输入表示问题)。
+
+**守护测试** `readable-dom-text.test.ts`(alttext 不采用、可见树读取、mtext 保留、mphantom 排除、嵌套 math 不重复、隐藏子树阻断、空表示不产出空片段);page-inventory 冻结契约(fixture 文本随可见文本更新,如 `p(z|Λ)` 不再是 alttext 的 ASCII 转写)。
+
+### 「通过校验但标错」必须与失败分开度量
+
+**规则**:验收不得只看 failures——`II.2.2` 编号被切成独立 `FRAGMENT_HEAD`、标题词降级 `ATTRIBUTE` 这类**静默错标**通过全部校验、写进缓存、长期显示。固定审计集(`shared-fixtures/audit-silent-mislabel.json`)按 token 区间约束裁决,报告两轴(运行:未请求/失败/通过 × 裁决:待裁决/符合/违反)与两个比率(静默错标率、正确率下界);分母为 0 报 N/A 不是 0%。
+
+**为什么** 只看失败率会把「模型从静默错变成全部失败」误读成退化,或反过来把静默错当成功;`silent-mislabel-audit` 对 2026-09-12 旧报告实测 2/3 违反(编号绑定 + 句末引用),新 prompt 后引用类已符合、编号类仍违反(教学回归靶,由审计集持续钉住)。
+
+**症状** 「失败块比例下降」但页面上的错标没人看见;prompt 教学效果的验收退化为主观目测。
+
+**守护测试** `scripts/silent-mislabel-audit.test.mjs`(坏预测判违反、好预测判符合、未运行不进分母、oracle 自洽校验);CLI 直接消费真机报告。

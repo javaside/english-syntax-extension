@@ -2,6 +2,31 @@
 
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## Unreleased — 修复通道坐标与科学页面准确性
+
+这一版先修**修复通道本身在指错位置**的缺陷,再修科学页面的文本表示与标注口径。真机验收(真 Chrome + 真扩展 + 真 DeepSeek,arXiv 2609.04991v1 全页两轮)是本批全部决策的证据来源。
+
+**升级后请重新加载扩展并刷新页面;IDEA 插件需要安装新版 zip。** `CORE_PROMPT_VERSION` 升为 `15`(13→14 repair 分组、14→15 引用/编号规则)、`DETAIL_PROMPT_VERSION` 升为 `8`(MathML token 文本),`CORE_SCHEMA_VERSION` 保持 `3`——已有缓存按版本键整体作废,是预期行为。
+
+### 修复
+
+- **repair 错误按句分组并携带实例坐标**:多句 repair 的错误此前被扁平拼装且全部标着 `sentences[0]`(真机 47/108 个 repair 如此),模型无从判断该改哪一句;component 索引也因「先丢纯标点再重编号」与模型所见 JSON 错位(实测 15 例,错误指向隔壁成分)。现按 `sentenceId` 分组(invalid/missing/duplicate 四类路径 + `rawOccurrence`),错误路径改用原始数组下标,语法邻接仍按语义成分序列判。离线差分(283 例真机 Invalid JSON)证明接受集合与成功成分零变化,仅索引改变。
+- **公式文本改取可见 MathML**:LaTeXML 的 `alttext` 恒为 TeX 源码,旧实现「alttext 优先」把 `\Lambda`、`H_{0}` 这类源码送进句文本与页面(真机 79/1548 个成分含反斜杠)。现一律读「剔除 annotation/annotation-xml/mphantom/隐藏子树后的可见 MathML 文本」(`Λ`、`H0`),嵌套 math 只读一次,空表示不产出空片段。
+- **作者邮箱块按元数据排除**:整块由邮箱串与转换残留构成的段落不再被当正文解析(此前被切成「谓语 show + 三个宾语邮箱」);正文里出现的邮箱照常保留。
+- **对齐助动词相邻谓语的错误文案**:TS 侧更精确的 `auxiliary/modal verb "…" must be merged…` 指令此前 Kotlin 侧缺失,双端逐字一致并进共享 fixture。
+
+### 新增
+
+- **句末引用附着与章节编号绑定口径**:prompt 新增 Trailing-citation(句末书目引用并入前一成分;括号列表值不算引用)与 Heading-number(编号不单独成片段主体)两条规则,黄金集新增两句真机样本。真机验证教学例句的引用已正确并入,全页独立引用成分 ~10→5;编号绑定 deepseek-flash 未学会,记为教学回归靶。
+- **静默错标审计器**:`scripts/silent-mislabel-audit.mjs` + 固定审计集,把「通过校验但标错」(旧报告实测 2/3 违反)变成与失败率分开的两轴报告;分母为 0 报 N/A。
+- **评测 runner 补齐 `--corpus`**:文档描述的开关此前未实现(fixturePath 写死);另支持 `CORE_EVAL_ROOT` 在 worktree 上评测。
+- **页面语料 v2**:重钉 `spring-np-coordination` / `spring-zero-relative` 的句尾标点边界,消除约 2/20 的 exact 惩罚偏置;baseline 三份已冻结。
+
+### 测试
+
+- Chrome 45 个测试文件 / 1206 个单测全部通过;IntelliJ Kotlin 全绿。lint 保持唯一既有基线错误。
+- 离线差分脚本(`.superpowers/acceptance/diff-repair-coordinates.mjs`,gitignored)对两份真机报告 283 例 Invalid JSON 断言「仅索引可变」;P0 真实配对(4 对照组 × 多轮)确认修复通道不劣于旧通道。
+
 ## Unreleased — 页面级英文句法覆盖
 
 这一版把「翻得好」的目标升级为「**看得见的英文页面都被覆盖**」:文档标题、章节标题、列表项、定义项、表格题名/表头/自然语言单元格、图注、脚注、callout 与参考文献题名等短语义单元进入页面语义清单并按分类型门槛自动分析;科学文档(MathML/公式/占位符)有专门的文本归一化;双端新增译文质量硬门,拒绝「英文原样回显当译文」。
