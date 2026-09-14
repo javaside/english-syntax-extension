@@ -33,23 +33,6 @@ const SENTENCE_BOUNDARY_PATTERN = new RegExp(
 );
 
 /**
- * 句末脚注标号:`uncertainties.2 While optimistic…`。
- *
- * LaTeXML 把 `<sup class="ltx_note_mark">2</sup>` 文本化后紧贴正文句号,与小数/版本号
- * 形态接近,主边界正则(要求标点后是空白)不认它,两句被粘成畸形长句(2026-09-14 真机
- * 97 词失败句的主因)。
- *
- * 处理是**整体剔除标号本身**(`\.2` 一起删),不是并入某一句:真模型实测(温度 0)
- * 保留编号时会把 `. 2` 编成 `FRAGMENT_HEAD` 并连带触发译文与混用两条错误;
- * 剔除后同一句的主谓宾与定语划分全部正确。判据只认「字母 + 句号 + 1~2 位数字 +
- * 空白 + 下一句以大写/引号/括号开头」,`Section 3.2` / `3.14` / `v1.2.3` 都不命中。
- */
-const FOOTNOTE_MARK_PATTERN = new RegExp(
-  `(\\p{L})[.](\\p{N}{1,2})(?=[${JS_WHITESPACE}]+["'“‘(\\[]*[\\p{Lu}])`,
-  "gu",
-);
-
-/**
  * `Intl.Segmenter` 只按 UAX#29 判句末,凡「小写字母 + 句点 + 空格 + 大写」都算边界,
  * 所以缩写会被切断。白名单里的每一条都是实测会被切错的(`vs.` / `pp.` / `Capt.` …),
  * 其余如 `etc.` / `Inc.` / `Ph.D.` 是同类风险的预防性补充。
@@ -141,7 +124,8 @@ const LEXICAL_WORD_PATTERN = /\p{L}{2,}/u;
  * 主语标成三段、要么把句点吞进主语;URL 一条 `https://example.com/a` 曾散成
  * 10 个 Token,几乎必然出现「非标点 token 未被覆盖」而整句进修复轮。
  *
- * 顺序即优先级:URL / 邮箱 → 缩写 → 带小数点或千分位的数 → 普通词 → 单个非空白字符。
+ * 顺序即优先级:URL / 邮箱 → 缩写 → 带字母前缀的点分标识符 → 带小数点或千分位的数 →
+ * 普通词 → 单个非空白字符。
  * 前四条都要求字面上的 `.`,所以不会咬进普通单词("stop." 里的 `p.` 匹配不到,
  * 因为扫描从 `s` 起就被普通词分支吃掉了)。
  */
@@ -234,21 +218,7 @@ function boundaryOffsets(text: string): number[] {
   return offsets;
 }
 
-/**
- * 去掉句末脚注标号:`uncertainties.2` -> `uncertainties.`(保留句号,删掉数字)。
- *
- * 必须在分句**之前**做:标号紧贴句号使 `\.` 后面不是空白,主边界正则认不出边界,
- * 两句会粘成畸形长句。剔除后 `uncertainties. While optimistic…` 是正常边界。
- * 选择删除而不是保留,是因为真模型实测保留时会给 `. 2` 编出 `FRAGMENT_HEAD` 角色
- * 并连带触发两条校验错误;删除后同一句的主谓宾与定语划分完全正确。
- */
-function stripFootnoteMarks(text: string): string {
-  return text.replace(FOOTNOTE_MARK_PATTERN, "$1.");
-}
-
 export function segmentBlock(text: string): SegmentedSentence[] {
-  const normalized = stripFootnoteMarks(text);
-  if (normalized !== text) return segmentBlock(normalized);
   const merged: SentenceRange[] = [];
   let start = 0;
   for (const end of boundaryOffsets(text)) {

@@ -631,11 +631,27 @@ function normalizeTranslationQuality(value: string): string {
 }
 
 /**
+ * 数学式的可靠标记:Unicode 数学运算符、希腊字母、与不可见函数应用符。
+ *
+ * **刻意排除 ASCII 歧义字符** `/ ~ ^ _ | \` —— 它们是普通技术英语的高频字符
+ * (`TCP/IP`、`km/h`、`A/B testing`、`and/or`、`foo_bar`),若算作数学标记,
+ * 这些成分的纯英文回显会被放行并写进缓存(用户看不到翻译),违反 spec §5.1/§5.2。
+ * `<` `>` `=` 保留:它们在自然语言成分里几乎只出现在公式中。
+ */
+/**
  * span 是否含**可译内容**。只有标点、数字、数学符号的 span 不可能译出中文:
  * `[24].` 是引用编号,`+` / `=` 是符号。
  *
  * 只要含字母就要求中文(守护 spec §5.2):`H0` / `GWTC-5.0` / `Lasair` 这类专名
  * 必须补中文类型,否则会以「全专名」为名合法显示零中文。
+ */
+/**
+ * 数学式的可靠标记:Unicode 数学运算符、希腊字母、与不可见函数应用符。
+ *
+ * **刻意排除 ASCII 歧义字符** `/ ~ ^ _ | \` —— 它们是普通技术英语的高频字符
+ * (`TCP/IP`、`km/h`、`A/B testing`、`and/or`、`foo_bar`),若算作数学标记,
+ * 这些成分的纯英文回显会被放行并写进缓存(用户看不到翻译),违反 spec §5.1/§5.2。
+ * `<` `>` `=` 保留:它们在自然语言成分里几乎只出现在公式中。
  */
 /**
  * span 是否含**可译内容**。
@@ -652,14 +668,22 @@ function normalizeTranslationQuality(value: string): string {
  * 为名合法显示零中文。
  */
 const MATH_MARKER_PATTERN =
-  /[=+−×÷<>≤≥→←↔∞∑∫√±∓≈∼~^_|/\\]|\p{Script=Greek}|[\u2061\u2062\u2063\u2064]/u;
+  /[=+−×÷<>≤≥→←↔∞∑∫√±∓≈∼∂∈∉⊂∩∪]|\p{Script=Greek}|[\u2061\u2062\u2063\u2064]/u;
+/**
+ * 数学式形态:括号包裹的表达式,如 `p(s|I)`、`f(x,y)`、`p(z,ϕ|Λ,I)`。
+ *
+ * `|` 单独出现时是普通英文里的「或」(`and/or`、`A/B` 同理),所以不能把它列进
+ * `MATH_MARKER_PATTERN`;但「括号内夹着逗号或竖线的短表达式」是公式的可靠形态,
+ * 且这种形态在自然语言成分里不会出现(自然语言不会写成 `(s|I)`)。
+ */
+const MATH_EXPRESSION_PATTERN = /\([^()\s]{1,40}[,|][^()\s]{0,40}\)/u;
 
 function hasTranslatableEnglishWord(tokens: readonly Token[], range: TokenRange): boolean {
   const covered = tokens.filter(
     (token) => token.id >= range.startToken && token.id <= range.endToken,
   );
   const span = rebuildEnglishSpan(tokens, range);
-  if (MATH_MARKER_PATTERN.test(span)) return false;
+  if (MATH_MARKER_PATTERN.test(span) || MATH_EXPRESSION_PATTERN.test(span)) return false;
   return covered.some((token) => !token.punctuation && /\p{L}/u.test(token.text));
 }
 

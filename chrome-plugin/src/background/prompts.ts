@@ -107,12 +107,13 @@ const TRAILING_CITATION_RULE =
   'Trailing-citation rule: a bibliography citation at the sentence end (as [61]) is absorbed into the preceding component ("…probe in the 1980s [61]." = ADVERBIAL "in the 1980s [61]"); a bracketed list value (\'The vector is [1, 2].\') is sentence content, not a citation.';
 
 const HEADING_NUMBER_RULE =
-  'Label-binding rule: a leading label never stands alone — a section number ("IV.2 Implications for the future" = FRAGMENT_HEAD "IV.2 Implications") and a caption label ("Figure 2: Comparison of six GOOD pixels" = FRAGMENT_HEAD "Figure 2: Comparison" + ATTRIBUTE "of six GOOD pixels") each bind to the headword that follows into one FRAGMENT_HEAD.';
+  'Label-binding rule: a leading label never stands alone — a section number ("IV.2 Implications for the future" = FRAGMENT_HEAD "IV.2 Implications") and a caption label ("Figure 2: Comparison" is one FRAGMENT_HEAD) each take the following headword into one FRAGMENT_HEAD.';
 
 const COLON_TITLE_RULE =
   "Colon-title rule: an indivisible supplement after a dash or colon takes APPOSITIVE or INDEPENDENT_ELEMENT, " +
   "but when the supplement contains separable predicate, object, or adverbial peers, emit those internal peers instead of an overlapping outer supplement. " +
-  "A long title whose part after the colon renames the part before it splits at the colon, and the colon stays uncovered: " +
+  "A long title whose part after the colon renames the part before it splits at the colon, and the colon stays uncovered " +
+  "(a caption or table label is the exception: its colon stays inside the FRAGMENT_HEAD): " +
   'in "Expanding the scope of dark siren cosmology: Inferring the population properties of gravitational wave-hosting galaxies", "Inferring the population properties" is ONE APPOSITIVE between FRAGMENT_HEAD "Expanding the scope", ATTRIBUTE "of dark siren cosmology", and ATTRIBUTE "of gravitational wave-hosting galaxies". ' +
   'Do not mechanically tag everything after a colon as APPOSITIVE: in "The result is clear: the sampled prior reduces uncertainty", "the sampled prior reduces uncertainty" is a full clause and is analysed as peer SUBJECT, PREDICATE, and OBJECT. ' +
   "Do not label a whole noun phrase plus its relative clause as ATTRIBUTIVE_CLAUSE: in 'the ones that matter', only 'that matter' is ATTRIBUTIVE_CLAUSE.";

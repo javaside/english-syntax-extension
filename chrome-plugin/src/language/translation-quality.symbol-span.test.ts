@@ -39,6 +39,24 @@ describe("Han 门与纯符号 span", () => {
     expect(r.ok).toBe(true);
   });
 
+  it.each([
+    "the TCP/IP stack",
+    "100 km/h",
+    "A/B testing",
+    "and/or",
+    "the I/O layer",
+    "foo_bar function",
+    "x^2 term",
+  ])("含 ASCII 歧义字符的英文成分仍要求中文:%s", (span) => {
+    // `/ ~ ^ _ | \` 是普通技术英语的高频字符,不是数学标记。
+    // 若把它们算作数学式,这些成分的纯英文回显会被放行并写进缓存。
+    const r = check(`We use ${span}.`, [
+      { startToken: 0, endToken: 1, role: "SUBJECT", translation: "我们使用" },
+      { startToken: 2, endToken: 2, role: "OBJECT", translation: span },
+    ]);
+    expect(r.ok).toBe(false);
+  });
+
   it("裸单字母缩写与专名同样要求中文(spec: 不得以专名为名显示零中文)", () => {
     const r = check("We use M data.", [
       { startToken: 0, endToken: 1, role: "SUBJECT", translation: "我们使用" },

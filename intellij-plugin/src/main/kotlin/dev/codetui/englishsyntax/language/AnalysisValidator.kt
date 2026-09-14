@@ -105,7 +105,13 @@ private fun normalizeTranslationQuality(value: String): String =
 
 /** 数学式标记(与 TS `MATH_MARKER_PATTERN` 同一字符类)。 */
 private val mathMarkerPattern =
-  Regex("[=+−×÷<>≤≥→←↔∞∑∫√±∓≈∼~^_|/\\\\]|\\p{Script=Greek}|[\\u2061\\u2062\\u2063\\u2064]")
+  Regex("[=+−×÷<>≤≥→←↔∞∑∫√±∓≈∼∂∈∉⊂∩∪]|\\p{Script=Greek}|[\\u2061\\u2062\\u2063\\u2064]")
+
+/** 含字母即要求中文;与 TS `/[\p{L}]/u` 等价。提升为顶层避免逐 token 重复编译。 */
+private val latinLetterPattern = Regex("\\p{L}")
+
+/** 数学式形态:括号内夹逗号或竖线的短表达式(`p(s|I)`),与 TS `MATH_EXPRESSION_PATTERN` 一致。 */
+private val mathExpressionPattern = Regex("\\([^()\\s]{1,40}[,|][^()\\s]{0,40}\\)")
 
 /**
  * span 是否含可译内容。不要求中文的只有两类:
@@ -114,11 +120,12 @@ private val mathMarkerPattern =
  * 含字母但无数学标记的仍要求中文——`JSON`/`GWTC-5.0`/`H0`/`GC` 必须补中文类型。
  */
 private fun hasTranslatableEnglishWord(tokens: List<Token>, range: TokenRange): Boolean {
-  if (mathMarkerPattern.containsMatchIn(rebuildEnglishSpan(tokens, range))) return false
+  val spanText = rebuildEnglishSpan(tokens, range)
+  if (mathMarkerPattern.containsMatchIn(spanText) || mathExpressionPattern.containsMatchIn(spanText)) return false
   return tokens.any { token ->
     !token.punctuation &&
       token.id in range.startToken..range.endToken &&
-      Regex("\\p{L}").containsMatchIn(token.text)
+      latinLetterPattern.containsMatchIn(token.text)
   }
 }
 
