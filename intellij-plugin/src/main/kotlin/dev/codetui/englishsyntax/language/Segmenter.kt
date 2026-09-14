@@ -55,6 +55,15 @@ private val urlSource = "[A-Za-z][A-Za-z0-9+.-]*://[^$jsWhitespaceClass]*[^$jsWh
 private val emailSource = "[\\p{L}\\p{N}._%+-]+@[\\p{L}\\p{N}-]+(?:\\.[\\p{L}\\p{N}-]+)+"
 /** 小数、千分位、语义化版本号。要求至少一组「分隔符 + 数字」，好让裸数字与 "1." 走普通词分支。 */
 private const val NUMBER_SOURCE = "\\p{N}+(?:[.,]\\p{N}+)+"
+
+/**
+ * 带字母前缀的点分标识符:`GWTC-5.0`(事件编号)、`II.2.1`(章节号)、`v1.2.3`(版本)。
+ * 必须在 WORD_SOURCE 前匹配,否则 `GWTC-5` 被普通词分支吃掉,剩下 `.0` 变成两个
+ * Token,label 与冒号不连贯,模型无法把它与中心词绑成一个 FRAGMENT_HEAD 并整句失败
+ * (2026-09-14 真机剩余失败里 6 句是这类论文标题)。与 TS `DOTTED_IDENTIFIER_SOURCE` 一致。
+ */
+private const val DOTTED_IDENTIFIER_SOURCE =
+  "\\p{L}[\\p{L}\\p{N}]*(?:[-][\\p{L}\\p{N}]+)*(?:[.](?:[\\p{L}\\p{N}]+))+"
 private const val WORD_SOURCE = "[\\p{L}\\p{N}]+(?:['’-][\\p{L}\\p{N}]+)*"
 
 /**
@@ -67,6 +76,7 @@ private val tokenPattern = Regex(
     urlSource,
     emailSource,
     abbreviations.sortedByDescending { it.length }.joinToString("|") { abbreviationSource(it) },
+    DOTTED_IDENTIFIER_SOURCE,
     NUMBER_SOURCE,
     WORD_SOURCE,
     "[^$jsWhitespaceClass]",

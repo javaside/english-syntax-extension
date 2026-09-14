@@ -11,15 +11,15 @@
       },
       "text": "II.2.2 Generating and storing the LOS redshift prior",
       "tokenization": "core-15",
-      "tokenCount": 10,
+      "tokenCount": 8,
       "adjudicationStatus": "adjudicated",
-      "rationale": "章节编号不是独立片段主体:它与标题中心词共同构成一个 FRAGMENT_HEAD;编号被单列 = 编号与标题的人为割裂。",
+      "rationale": "章节编号 II.2.2 不是独立片段主体:它与标题中心词共同构成一个 FRAGMENT_HEAD;编号被单列 = 编号与标题的人为割裂。(2026-09-14 分词整体化后同步坐标)",
       "constraints": [
         {
           "type": "must-not-be-standalone-role",
           "tokenSpan": [
             0,
-            2
+            0
           ],
           "role": "FRAGMENT_HEAD"
         },
@@ -28,11 +28,11 @@
           "tokenSpans": [
             [
               0,
-              2
+              0
             ],
             [
-              3,
-              9
+              1,
+              7
             ]
           ],
           "role": "FRAGMENT_HEAD"

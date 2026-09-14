@@ -100,7 +100,7 @@ private const val TRAILING_CITATION_RULE =
     "a bracketed list value ('The vector is [1, 2].') is sentence content, not a citation."
 
 private const val HEADING_NUMBER_RULE =
-  "Heading-number rule: a section number (IV.2, II.2.2) never stands alone; number and headword form one FRAGMENT_HEAD (\"IV.2 Implications for the future\" = FRAGMENT_HEAD \"IV.2 Implications\" + ATTRIBUTE \"for the future\")."
+  "Label-binding rule: a leading label never stands alone — a section number (\"IV.2 Implications for the future\" = FRAGMENT_HEAD \"IV.2 Implications\") and a caption label (\"Figure 2: Comparison of six GOOD pixels\" = FRAGMENT_HEAD \"Figure 2: Comparison\" + ATTRIBUTE \"of six GOOD pixels\") each bind to the headword that follows into one FRAGMENT_HEAD."
 
 private const val COLON_TITLE_RULE =
   "Colon-title rule: an indivisible supplement after a dash or colon takes APPOSITIVE or INDEPENDENT_ELEMENT, " +

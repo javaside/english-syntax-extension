@@ -25,7 +25,7 @@ function oneCase(overrides = {}) {
         category: "test",
         text: "IV.2 Implications for the future",
         tokenization: "core-15",
-        tokenCount: 7,
+        tokenCount: 5,
         adjudicationStatus: "adjudicated",
         constraints: [{ type: "at-most-one-role", role: "FRAGMENT_HEAD" }],
         ...overrides,
@@ -71,10 +71,10 @@ describe("validateAuditSetV1", () => {
     const set = validateAuditSetV1(
       oneCase({
         acceptedAnalyses: [
-          [{ startToken: 0, endToken: 3, role: "FRAGMENT_HEAD" }],
+          [{ startToken: 0, endToken: 4, role: "FRAGMENT_HEAD" }],
           [
             { startToken: 0, endToken: 2, role: "FRAGMENT_HEAD" },
-            { startToken: 3, endToken: 6, role: "ATTRIBUTE" },
+            { startToken: 3, endToken: 4, role: "ATTRIBUTE" },
           ],
         ],
       }),
@@ -85,14 +85,15 @@ describe("validateAuditSetV1", () => {
       new Map([
         [
           "case-1",
+          // 第一组的头(0..2) + 第二组的尾(4..4):两组的成分被拼在一起,
+          // 既不等于任何一组完整 gold,也留下了 token 3 的缺口。
           passed([
-            { startToken: 0, endToken: 3, role: "FRAGMENT_HEAD" },
-            { startToken: 4, endToken: 6, role: "ATTRIBUTE" },
+            { startToken: 0, endToken: 2, role: "FRAGMENT_HEAD" },
+            { startToken: 4, endToken: 4, role: "ATTRIBUTE" },
           ]),
         ],
       ]),
     );
-    // 拼接答案既不等于任何一组完整 gold，也越过 token 3 与 4 之间的缺口。
     expect(report.cases[0].verdict).toBe("violates-gold");
   });
 });
@@ -137,7 +138,7 @@ describe("auditPredictions", () => {
     const localOnly = validateAuditSetV1(oneCase(), tokenize);
     const report = auditPredictions(
       localOnly,
-      new Map([["case-1", passed([{ startToken: 0, endToken: 6, role: "FRAGMENT_HEAD" }])]]),
+      new Map([["case-1", passed([{ startToken: 0, endToken: 4, role: "FRAGMENT_HEAD" }])]]),
     );
     expect(report.cases[0].verdict).toBe("meets-constraints");
     expect(report.counts.adjudicatedGoldPassed).toBe(0);
@@ -149,8 +150,8 @@ describe("auditPredictions", () => {
       oneCase({
         acceptedAnalyses: [
           [
-            { startToken: 0, endToken: 3, role: "FRAGMENT_HEAD" },
-            { startToken: 4, endToken: 6, role: "ATTRIBUTE" },
+            { startToken: 0, endToken: 2, role: "FRAGMENT_HEAD" },
+            { startToken: 3, endToken: 4, role: "ATTRIBUTE" },
           ],
         ],
       }),
@@ -162,8 +163,8 @@ describe("auditPredictions", () => {
         [
           "case-1",
           passed([
-            { startToken: 0, endToken: 3, role: "FRAGMENT_HEAD" },
-            { startToken: 4, endToken: 6, role: "ATTRIBUTE" },
+            { startToken: 0, endToken: 2, role: "FRAGMENT_HEAD" },
+            { startToken: 3, endToken: 4, role: "ATTRIBUTE" },
           ]),
         ],
       ]),
@@ -177,7 +178,7 @@ describe("auditPredictions", () => {
     const pending = validateAuditSetV1(oneCase({ adjudicationStatus: "pending" }), tokenize);
     const report = auditPredictions(
       pending,
-      new Map([["case-1", passed([{ startToken: 0, endToken: 6, role: "FRAGMENT_HEAD" }])]]),
+      new Map([["case-1", passed([{ startToken: 0, endToken: 4, role: "FRAGMENT_HEAD" }])]]),
     );
     expect(report.cases[0].verdict).toBe("pending-adjudication");
     expect(report.correctnessLowerBound).toBe(0);

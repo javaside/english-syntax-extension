@@ -25,6 +25,16 @@
 const AUXILIARY_SELECTOR =
   "annotation,annotation-xml,semantics>annotation,[aria-hidden='true'],mphantom";
 
+/**
+ * 脚注容器整棵排除。LaTeXML 把脚注写成正文句号后紧跟的
+ * `<span class="ltx_role_footnote"><sup class="ltx_note_mark">2</sup>…</span>`,
+ * 里面还带一份脚注正文。若把它的文本拼进来,正文句末就变成 `uncertainties.2`,
+ * 分句器会当成小数/版本号而拒绝在句号处断句,两句粘成一个畸形长句,
+ * 模型只能硬划并失败(2026-09-14 真机 97 词失败句即此形态)。
+ */
+const FOOTNOTE_SELECTOR =
+  ".ltx_role_footnote,[role='doc-footnote'],sup.ltx_note_mark,section.footnotes";
+
 function isHiddenElement(element: Element): boolean {
   if (element.matches("[hidden],[aria-hidden='true']")) return true;
   const style = getComputedStyle(element);
@@ -76,6 +86,7 @@ function appendReadableText(node: Node, into: { text: string }): void {
     return;
   }
   if (node.matches(AUXILIARY_SELECTOR)) return;
+  if (node.matches(FOOTNOTE_SELECTOR)) return;
   for (const child of Array.from(node.childNodes)) appendReadableText(child, into);
 }
 

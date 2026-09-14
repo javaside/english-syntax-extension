@@ -15,9 +15,11 @@ import {
 } from "./versions";
 
 it("pins the shared analysis versions after the 2026-09-12 batch", () => {
-  // spec D6:core 随 repair 分组(13→14→15),detail 随 MathML token 文本(7→8)。
-  expect(CORE_PROMPT_VERSION).toBe(15);
-  expect(DETAIL_PROMPT_VERSION).toBe(8);
+  // spec D6:core 随 repair 分组(13→14→15);15→16 新增 Label-binding 规则。
+  // 16 同批:分词把 GWTC-5.0 / II.2.2 / spring.ai.tool 整体化,token 坐标全变,
+  // 所以 core 与 detail 必须同时提升(detail 8→9),缓存按版本键整体作废。
+  expect(CORE_PROMPT_VERSION).toBe(16);
+  expect(DETAIL_PROMPT_VERSION).toBe(9);
   expect(CORE_SCHEMA_VERSION).toBe(3);
 });
 

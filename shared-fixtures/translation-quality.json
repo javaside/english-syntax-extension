@@ -1,34 +1,112 @@
 {
   "schemaVersion": 1,
   "hanScriptBoundary": [
-    { "id": "cjk-unified", "text": "汉", "containsHan": true },
-    { "id": "cjk-unified-word", "text": "中文", "containsHan": true },
-    { "id": "han-plus-ascii-proper-noun", "text": "ＪＳＯＮ 数据", "containsHan": true },
-    { "id": "proper-noun-plus-han-type", "text": "JSON 数据格式", "containsHan": true },
-    { "id": "han-plus-ascii-symbols", "text": "哈勃常数 H0", "containsHan": true },
-    { "id": "extension-a", "text": "㐀", "containsHan": true },
-    { "id": "cjk-compatibility-ideograph", "text": "丽", "containsHan": true },
-    { "id": "cjk-radical-as-ideographic-zero", "text": "〇", "containsHan": true },
-    { "id": "hiragana-katakana", "text": "かなカナ", "containsHan": false },
-    { "id": "hangul", "text": "한국어", "containsHan": false },
-    { "id": "cjk-punctuation", "text": "。！", "containsHan": false },
-    { "id": "latin-1-accented", "text": "é", "containsHan": false },
-    { "id": "ascii-letters", "text": "JSON", "containsHan": false },
-    { "id": "ascii-words", "text": "Spring AI", "containsHan": false },
-    { "id": "ascii-alphanumeric", "text": "H0", "containsHan": false }
+    {
+      "id": "cjk-unified",
+      "text": "汉",
+      "containsHan": true
+    },
+    {
+      "id": "cjk-unified-word",
+      "text": "中文",
+      "containsHan": true
+    },
+    {
+      "id": "han-plus-ascii-proper-noun",
+      "text": "ＪＳＯＮ 数据",
+      "containsHan": true
+    },
+    {
+      "id": "proper-noun-plus-han-type",
+      "text": "JSON 数据格式",
+      "containsHan": true
+    },
+    {
+      "id": "han-plus-ascii-symbols",
+      "text": "哈勃常数 H0",
+      "containsHan": true
+    },
+    {
+      "id": "extension-a",
+      "text": "㐀",
+      "containsHan": true
+    },
+    {
+      "id": "cjk-compatibility-ideograph",
+      "text": "丽",
+      "containsHan": true
+    },
+    {
+      "id": "cjk-radical-as-ideographic-zero",
+      "text": "〇",
+      "containsHan": true
+    },
+    {
+      "id": "hiragana-katakana",
+      "text": "かなカナ",
+      "containsHan": false
+    },
+    {
+      "id": "hangul",
+      "text": "한국어",
+      "containsHan": false
+    },
+    {
+      "id": "cjk-punctuation",
+      "text": "。！",
+      "containsHan": false
+    },
+    {
+      "id": "latin-1-accented",
+      "text": "é",
+      "containsHan": false
+    },
+    {
+      "id": "ascii-letters",
+      "text": "JSON",
+      "containsHan": false
+    },
+    {
+      "id": "ascii-words",
+      "text": "Spring AI",
+      "containsHan": false
+    },
+    {
+      "id": "ascii-alphanumeric",
+      "text": "H0",
+      "containsHan": false
+    }
   ],
   "cases": [
     {
       "id": "echo-exact",
-      "sentence": { "id": "echo-exact", "text": "The service works well." },
+      "sentence": {
+        "id": "echo-exact",
+        "text": "The service works well."
+      },
       "raw": {
         "sentences": [
           {
             "sentenceId": "echo-exact",
             "components": [
-              { "startToken": 0, "endToken": 1, "role": "SUBJECT", "translation": "The service" },
-              { "startToken": 2, "endToken": 2, "role": "PREDICATE", "translation": "工作" },
-              { "startToken": 3, "endToken": 3, "role": "ADVERBIAL", "translation": "良好" }
+              {
+                "startToken": 0,
+                "endToken": 1,
+                "role": "SUBJECT",
+                "translation": "The service"
+              },
+              {
+                "startToken": 2,
+                "endToken": 2,
+                "role": "PREDICATE",
+                "translation": "工作"
+              },
+              {
+                "startToken": 3,
+                "endToken": 3,
+                "role": "ADVERBIAL",
+                "translation": "良好"
+              }
             ]
           }
         ]
@@ -43,15 +121,33 @@
     },
     {
       "id": "echo-case-whitespace",
-      "sentence": { "id": "echo-case-whitespace", "text": "The service works well." },
+      "sentence": {
+        "id": "echo-case-whitespace",
+        "text": "The service works well."
+      },
       "raw": {
         "sentences": [
           {
             "sentenceId": "echo-case-whitespace",
             "components": [
-              { "startToken": 0, "endToken": 1, "role": "SUBJECT", "translation": "  THE   service " },
-              { "startToken": 2, "endToken": 2, "role": "PREDICATE", "translation": "工作" },
-              { "startToken": 3, "endToken": 3, "role": "ADVERBIAL", "translation": "良好" }
+              {
+                "startToken": 0,
+                "endToken": 1,
+                "role": "SUBJECT",
+                "translation": "  THE   service "
+              },
+              {
+                "startToken": 2,
+                "endToken": 2,
+                "role": "PREDICATE",
+                "translation": "工作"
+              },
+              {
+                "startToken": 3,
+                "endToken": 3,
+                "role": "ADVERBIAL",
+                "translation": "良好"
+              }
             ]
           }
         ]
@@ -66,13 +162,21 @@
     },
     {
       "id": "echo-fullwidth",
-      "sentence": { "id": "echo-fullwidth", "text": "JSON" },
+      "sentence": {
+        "id": "echo-fullwidth",
+        "text": "JSON"
+      },
       "raw": {
         "sentences": [
           {
             "sentenceId": "echo-fullwidth",
             "components": [
-              { "startToken": 0, "endToken": 0, "role": "FRAGMENT_HEAD", "translation": "ＪＳＯＮ" }
+              {
+                "startToken": 0,
+                "endToken": 0,
+                "role": "FRAGMENT_HEAD",
+                "translation": "ＪＳＯＮ"
+              }
             ]
           }
         ]
@@ -87,15 +191,33 @@
     },
     {
       "id": "no-han-non-echo",
-      "sentence": { "id": "no-han-non-echo", "text": "The service works well." },
+      "sentence": {
+        "id": "no-han-non-echo",
+        "text": "The service works well."
+      },
       "raw": {
         "sentences": [
           {
             "sentenceId": "no-han-non-echo",
             "components": [
-              { "startToken": 0, "endToken": 1, "role": "SUBJECT", "translation": "the system" },
-              { "startToken": 2, "endToken": 2, "role": "PREDICATE", "translation": "工作" },
-              { "startToken": 3, "endToken": 3, "role": "ADVERBIAL", "translation": "良好" }
+              {
+                "startToken": 0,
+                "endToken": 1,
+                "role": "SUBJECT",
+                "translation": "the system"
+              },
+              {
+                "startToken": 2,
+                "endToken": 2,
+                "role": "PREDICATE",
+                "translation": "工作"
+              },
+              {
+                "startToken": 3,
+                "endToken": 3,
+                "role": "ADVERBIAL",
+                "translation": "良好"
+              }
             ]
           }
         ]
@@ -110,13 +232,21 @@
     },
     {
       "id": "proper-json",
-      "sentence": { "id": "proper-json", "text": "JSON" },
+      "sentence": {
+        "id": "proper-json",
+        "text": "JSON"
+      },
       "raw": {
         "sentences": [
           {
             "sentenceId": "proper-json",
             "components": [
-              { "startToken": 0, "endToken": 0, "role": "FRAGMENT_HEAD", "translation": "JSON" }
+              {
+                "startToken": 0,
+                "endToken": 0,
+                "role": "FRAGMENT_HEAD",
+                "translation": "JSON"
+              }
             ]
           }
         ]
@@ -131,13 +261,21 @@
     },
     {
       "id": "proper-spring-ai",
-      "sentence": { "id": "proper-spring-ai", "text": "Spring AI" },
+      "sentence": {
+        "id": "proper-spring-ai",
+        "text": "Spring AI"
+      },
       "raw": {
         "sentences": [
           {
             "sentenceId": "proper-spring-ai",
             "components": [
-              { "startToken": 0, "endToken": 1, "role": "FRAGMENT_HEAD", "translation": "Spring AI" }
+              {
+                "startToken": 0,
+                "endToken": 1,
+                "role": "FRAGMENT_HEAD",
+                "translation": "Spring AI"
+              }
             ]
           }
         ]
@@ -152,13 +290,21 @@
     },
     {
       "id": "proper-gwtc",
-      "sentence": { "id": "proper-gwtc", "text": "GWTC-5.0" },
+      "sentence": {
+        "id": "proper-gwtc",
+        "text": "GWTC-5.0"
+      },
       "raw": {
         "sentences": [
           {
             "sentenceId": "proper-gwtc",
             "components": [
-              { "startToken": 0, "endToken": 2, "role": "FRAGMENT_HEAD", "translation": "GWTC-5.0" }
+              {
+                "startToken": 0,
+                "endToken": 0,
+                "role": "FRAGMENT_HEAD",
+                "translation": "GWTC-5.0"
+              }
             ]
           }
         ]
@@ -173,13 +319,21 @@
     },
     {
       "id": "proper-h0",
-      "sentence": { "id": "proper-h0", "text": "H0" },
+      "sentence": {
+        "id": "proper-h0",
+        "text": "H0"
+      },
       "raw": {
         "sentences": [
           {
             "sentenceId": "proper-h0",
             "components": [
-              { "startToken": 0, "endToken": 0, "role": "FRAGMENT_HEAD", "translation": "H0" }
+              {
+                "startToken": 0,
+                "endToken": 0,
+                "role": "FRAGMENT_HEAD",
+                "translation": "H0"
+              }
             ]
           }
         ]
@@ -194,13 +348,21 @@
     },
     {
       "id": "accept-json",
-      "sentence": { "id": "accept-json", "text": "JSON" },
+      "sentence": {
+        "id": "accept-json",
+        "text": "JSON"
+      },
       "raw": {
         "sentences": [
           {
             "sentenceId": "accept-json",
             "components": [
-              { "startToken": 0, "endToken": 0, "role": "FRAGMENT_HEAD", "translation": "JSON 数据格式" }
+              {
+                "startToken": 0,
+                "endToken": 0,
+                "role": "FRAGMENT_HEAD",
+                "translation": "JSON 数据格式"
+              }
             ]
           }
         ]
@@ -210,13 +372,21 @@
     },
     {
       "id": "accept-spring-ai",
-      "sentence": { "id": "accept-spring-ai", "text": "Spring AI" },
+      "sentence": {
+        "id": "accept-spring-ai",
+        "text": "Spring AI"
+      },
       "raw": {
         "sentences": [
           {
             "sentenceId": "accept-spring-ai",
             "components": [
-              { "startToken": 0, "endToken": 1, "role": "FRAGMENT_HEAD", "translation": "Spring AI 框架" }
+              {
+                "startToken": 0,
+                "endToken": 1,
+                "role": "FRAGMENT_HEAD",
+                "translation": "Spring AI 框架"
+              }
             ]
           }
         ]
@@ -226,7 +396,10 @@
     },
     {
       "id": "accept-gwtc",
-      "sentence": { "id": "accept-gwtc", "text": "GWTC-5.0" },
+      "sentence": {
+        "id": "accept-gwtc",
+        "text": "GWTC-5.0"
+      },
       "raw": {
         "sentences": [
           {
@@ -234,7 +407,7 @@
             "components": [
               {
                 "startToken": 0,
-                "endToken": 2,
+                "endToken": 0,
                 "role": "FRAGMENT_HEAD",
                 "translation": "GWTC-5.0 引力波事件目录"
               }
@@ -247,13 +420,21 @@
     },
     {
       "id": "accept-h0",
-      "sentence": { "id": "accept-h0", "text": "H0" },
+      "sentence": {
+        "id": "accept-h0",
+        "text": "H0"
+      },
       "raw": {
         "sentences": [
           {
             "sentenceId": "accept-h0",
             "components": [
-              { "startToken": 0, "endToken": 0, "role": "FRAGMENT_HEAD", "translation": "哈勃常数 H0" }
+              {
+                "startToken": 0,
+                "endToken": 0,
+                "role": "FRAGMENT_HEAD",
+                "translation": "哈勃常数 H0"
+              }
             ]
           }
         ]
@@ -263,15 +444,33 @@
     },
     {
       "id": "echo-plus-grammar",
-      "sentence": { "id": "echo-plus-grammar", "text": "Help turn ideas." },
+      "sentence": {
+        "id": "echo-plus-grammar",
+        "text": "Help turn ideas."
+      },
       "raw": {
         "sentences": [
           {
             "sentenceId": "echo-plus-grammar",
             "components": [
-              { "startToken": 0, "endToken": 0, "role": "PREDICATE", "translation": "Help" },
-              { "startToken": 1, "endToken": 1, "role": "PREDICATE", "translation": "转化" },
-              { "startToken": 2, "endToken": 3, "role": "OBJECT", "translation": "想法" }
+              {
+                "startToken": 0,
+                "endToken": 0,
+                "role": "PREDICATE",
+                "translation": "Help"
+              },
+              {
+                "startToken": 1,
+                "endToken": 1,
+                "role": "PREDICATE",
+                "translation": "转化"
+              },
+              {
+                "startToken": 2,
+                "endToken": 3,
+                "role": "OBJECT",
+                "translation": "想法"
+              }
             ]
           }
         ]

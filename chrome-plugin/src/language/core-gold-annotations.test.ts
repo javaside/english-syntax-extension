@@ -76,8 +76,9 @@ describe("core gold annotations", () => {
       // 0 IV/1 .(p)/2 2/3 Implications/4 for/5 the/6 future
       "heading-number-binding",
       [
-        { startToken: 0, endToken: 3, role: GrammarRole.FRAGMENT_HEAD },
-        { startToken: 4, endToken: 6, role: GrammarRole.ATTRIBUTE },
+        // 2026-09-14:IV.2 整体化成一个 token,坐标随之左移。
+        { startToken: 0, endToken: 1, role: GrammarRole.FRAGMENT_HEAD },
+        { startToken: 2, endToken: 4, role: GrammarRole.ATTRIBUTE },
       ],
     ],
     [
@@ -171,9 +172,10 @@ describe("core gold annotations", () => {
     [
       "page-nonfinite-when-phrase",
       [
-        { startToken: 0, endToken: 6, role: GrammarRole.SUBJECT },
-        { startToken: 7, endToken: 8, role: GrammarRole.PREDICATE },
-        { startToken: 9, endToken: 20, role: GrammarRole.ADVERBIAL },
+        // 2026-09-14:spring.ai.tool 整体化成一个 token,坐标随之左移。
+        { startToken: 0, endToken: 1, role: GrammarRole.SUBJECT },
+        { startToken: 2, endToken: 3, role: GrammarRole.PREDICATE },
+        { startToken: 4, endToken: 16, role: GrammarRole.ADVERBIAL },
       ],
     ],
     [

@@ -16,7 +16,8 @@
     "不成句的标题、列表项、名词短语、形容词短语或非限定动词短语恰好一个 FRAGMENT_HEAD；不得虚构 SUBJECT / PREDICATE / OBJECT 强套句型。唯一例外：完整定语从句（ATTRIBUTIVE_CLAUSE，从引导词或零关系词位置起、一直覆盖到从句自己的宾语与状语）可以紧跟在 FRAGMENT_HEAD 之后，如 `An API` + `that returns JSON responses`；其余分句级角色与其余四类从句仍不得与 FRAGMENT_HEAD 混用。单一 FRAGMENT_HEAD 可以合法覆盖没有可分离同层修饰语的多词片段。祈使句仍是完整分句，必须以 PREDICATE 起始并按需标出 OBJECT。`Building production-ready AI applications at scale.` 按名词性活动采用扁平核心：活动整体为 FRAGMENT_HEAD，修饰该活动的 `at scale` 为 ATTRIBUTE。",
     "名词中心词后的零关系词完整从句一律整块标 ATTRIBUTIVE_CLAUSE，不并入它修饰的名词短语：`The way we build software` = SUBJECT(`The way`) + ATTRIBUTIVE_CLAUSE(`we build software`)，与显式引导词从句（`that she recommended`）同一口径；但缩减定语（过去分词/介词短语，无主谓结构，如 `documents signed yesterday`、`time spent performing the invocation`）仍是 ATTRIBUTE——有没有自己的主语和限定谓语是两者的分界。冒号或破折号后若为完整独立分句（自带主语与限定谓语），按其内部同层角色展开，不标 APPOSITIVE；只有不可拆的说明性补语才用 APPOSITIVE / INDEPENDENT_ELEMENT。",
     "句末紧贴的书目引用(如 [61] / [5, 6])并入前一成分一起译,不单独成分;仅指真实书目引用——向量/数组/编号字面量(如 The vector is [1, 2]. 的 [1, 2])不适用,字符串层面无法高把握区分,故不设 validator 硬门,由 prompt 与黄金集约束。",
-    "章节编号(如 IV.2 / II.2.2)不得单独作为 FRAGMENT_HEAD,须与标题中心词同属一个 FRAGMENT_HEAD;可分离的后置修饰(如 for the future)仍按后置修饰规则单列 ATTRIBUTE。"
+    "章节编号(如 IV.2 / II.2.2)不得单独作为 FRAGMENT_HEAD,须与标题中心词同属一个 FRAGMENT_HEAD;可分离的后置修饰(如 for the future)仍按后置修饰规则单列 ATTRIBUTE。",
+    "caption/表注的 leading label(Figure 2:、Table 1:、GWTC-2:)与紧随的中心词同属一个 FRAGMENT_HEAD,不得把 label 单独成成分;该口径与章节编号共用同一条 prompt 规则 Label-binding。"
   ],
   "sentences": [
     {
@@ -2690,23 +2691,21 @@
       "components": [
         {
           "startToken": 0,
-          "endToken": 6,
-          "role": "SUBJECT",
-          "translation": "spring.ai.tool 观测数据"
+          "endToken": 1,
+          "role": "SUBJECT"
         },
         {
-          "startToken": 7,
-          "endToken": 8,
-          "role": "PREDICATE",
-          "translation": "被记录"
+          "startToken": 2,
+          "endToken": 3,
+          "role": "PREDICATE"
         },
         {
-          "startToken": 9,
-          "endToken": 20,
-          "role": "ADVERBIAL",
-          "translation": "在聊天模型交互的上下文中执行工具调用时"
+          "startToken": 4,
+          "endToken": 16,
+          "role": "ADVERBIAL"
         }
-      ]
+      ],
+      "rationale": " (2026-09-14 分词整体化后同步 token 坐标)"
     },
     {
       "id": "page-vp-coordination",
@@ -2915,16 +2914,33 @@
       "components": [
         {
           "startToken": 0,
+          "endToken": 1,
+          "role": "FRAGMENT_HEAD"
+        },
+        {
+          "startToken": 2,
+          "endToken": 4,
+          "role": "ATTRIBUTE"
+        }
+      ],
+      "rationale": "章节编号 IV.2 与标题中心词 Implications 同属一个 FRAGMENT_HEAD,不得把编号单列;可分离后置修饰 for the future 仍标 ATTRIBUTE。来源:同上。 (2026-09-14 分词整体化后同步 token 坐标)"
+    },
+    {
+      "id": "caption-label-binding",
+      "text": "Figure 2: Comparison of six GOOD pixels.",
+      "components": [
+        {
+          "startToken": 0,
           "endToken": 3,
           "role": "FRAGMENT_HEAD"
         },
         {
           "startToken": 4,
-          "endToken": 6,
+          "endToken": 7,
           "role": "ATTRIBUTE"
         }
       ],
-      "rationale": "章节编号 IV.2 与标题中心词 Implications 同属一个 FRAGMENT_HEAD,不得把编号单列;可分离后置修饰 for the future 仍标 ATTRIBUTE。来源:同上。"
+      "rationale": "图注 label 与中心词同属一个 FRAGMENT_HEAD(Figure 2: Comparison),不得把 label 单列;后置 of 短语标 ATTRIBUTE。来源:arXiv 2609.04991v1 真机失败样例,2026-09-14 实测规则修正后通过。 (2026-09-14 分词整体化后同步 token 坐标)"
     }
   ]
 }

@@ -630,11 +630,47 @@ function normalizeTranslationQuality(value: string): string {
     .trim();
 }
 
+/**
+ * span 是否含**可译内容**。只有标点、数字、数学符号的 span 不可能译出中文:
+ * `[24].` 是引用编号,`+` / `=` 是符号。
+ *
+ * 只要含字母就要求中文(守护 spec §5.2):`H0` / `GWTC-5.0` / `Lasair` 这类专名
+ * 必须补中文类型,否则会以「全专名」为名合法显示零中文。
+ */
+/**
+ * span 是否含**可译内容**。
+ *
+ * 不要求中文的只有两类,判据都取「span 自身形态」而不是 token 数量:
+ *
+ * 1. **无字母**:`[24].` / `,` / `:` / `[20,43,65].`——引用编号与标点的译文
+ *    天然只能是标点,要求中文必然失败;
+ * 2. **数学式**:含数学运算符、希腊字母、上下标标记或关系符
+ *    (`p(Ωj|Λ,I)` / `ρ=m(M,z,Λ)` / `ϕ→` / `H0` 之外的 `M` 这类变量)。
+ *
+ * 含字母但不含上述数学标记的仍要求中文(spec §5.2):`JSON` / `Spring AI` /
+ * `GWTC-5.0` / `H0` / `GC` 这类缩略语与专名必须补中文类型,否则会以「全专名」
+ * 为名合法显示零中文。
+ */
+const MATH_MARKER_PATTERN =
+  /[=+−×÷<>≤≥→←↔∞∑∫√±∓≈∼~^_|/\\]|\p{Script=Greek}|[\u2061\u2062\u2063\u2064]/u;
+
+function hasTranslatableEnglishWord(tokens: readonly Token[], range: TokenRange): boolean {
+  const covered = tokens.filter(
+    (token) => token.id >= range.startToken && token.id <= range.endToken,
+  );
+  const span = rebuildEnglishSpan(tokens, range);
+  if (MATH_MARKER_PATTERN.test(span)) return false;
+  return covered.some((token) => !token.punctuation && /\p{L}/u.test(token.text));
+}
+
 function isMeaningfulChineseGloss(
   translation: string,
   tokens: readonly Token[],
   range: TokenRange,
 ): boolean {
+  // 纯符号 span 没有可译内容,不要求中文(2026-09-14 真机:35 个失败句里
+  // 10 句仅因引用标记/公式译文不含中文而失败,并烧掉两轮 repair)。
+  if (!hasTranslatableEnglishWord(tokens, range)) return true;
   const span = rebuildEnglishSpan(tokens, range);
   return (
     HAN_PATTERN.test(translation) &&

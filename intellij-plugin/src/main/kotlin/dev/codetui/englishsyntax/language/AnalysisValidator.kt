@@ -103,7 +103,27 @@ private fun rebuildEnglishSpan(tokens: List<Token>, range: TokenRange): String =
 private fun normalizeTranslationQuality(value: String): String =
   Normalizer.normalize(value, Normalizer.Form.NFKC).lowercase().replace(translationQualityWhitespaceFold, " ").trim()
 
+/** 数学式标记(与 TS `MATH_MARKER_PATTERN` 同一字符类)。 */
+private val mathMarkerPattern =
+  Regex("[=+−×÷<>≤≥→←↔∞∑∫√±∓≈∼~^_|/\\\\]|\\p{Script=Greek}|[\\u2061\\u2062\\u2063\\u2064]")
+
+/**
+ * span 是否含可译内容。不要求中文的只有两类:
+ * ①无字母(引用编号与纯标点,译文天然只能是标点);
+ * ②含数学标记(运算符、希腊字母、上下标、关系符)。
+ * 含字母但无数学标记的仍要求中文——`JSON`/`GWTC-5.0`/`H0`/`GC` 必须补中文类型。
+ */
+private fun hasTranslatableEnglishWord(tokens: List<Token>, range: TokenRange): Boolean {
+  if (mathMarkerPattern.containsMatchIn(rebuildEnglishSpan(tokens, range))) return false
+  return tokens.any { token ->
+    !token.punctuation &&
+      token.id in range.startToken..range.endToken &&
+      Regex("\\p{L}").containsMatchIn(token.text)
+  }
+}
+
 private fun isMeaningfulChineseGloss(translation: String, tokens: List<Token>, range: TokenRange): Boolean {
+  if (!hasTranslatableEnglishWord(tokens, range)) return true
   val span = rebuildEnglishSpan(tokens, range)
   return hanPattern.containsMatchIn(translation) &&
     normalizeTranslationQuality(translation) != normalizeTranslationQuality(span)

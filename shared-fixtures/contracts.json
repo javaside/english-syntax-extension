@@ -1,8 +1,8 @@
 {
   "messageVersion": 1,
   "coreSchemaVersion": 3,
-  "corePromptVersion": 15,
-  "detailPromptVersion": 8,
+  "corePromptVersion": 16,
+  "detailPromptVersion": 9,
   "maxSentencesPerRequest": 6,
   "cloudSentencesPerRequest": 2,
   "roles": [
