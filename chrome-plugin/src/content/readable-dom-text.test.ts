@@ -65,7 +65,7 @@ describe("normalizedReadableText", () => {
 
   it("annotation / annotation-xml 与 aria-hidden 辅助文本不与可见公式重复", () => {
     const element = elementFrom(
-      '<p>Read <math><mi>H</mi><mn>0</mn><annotation>H_0</annotation></math>' +
+      "<p>Read <math><mi>H</mi><mn>0</mn><annotation>H_0</annotation></math>" +
         ' <span class="ltx_MathML" aria-hidden="true">H0</span> today.</p>',
     );
 
@@ -93,9 +93,7 @@ describe("normalizedReadableText", () => {
   });
 
   it("mtext 是自然语言,照常保留", () => {
-    const element = elementFrom(
-      "<p>Mode <math><mtext>median</mtext></math> applies.</p>",
-    );
+    const element = elementFrom("<p>Mode <math><mtext>median</mtext></math> applies.</p>");
 
     expect(normalizedReadableText(element)).toBe("Mode median applies.");
   });
@@ -109,9 +107,7 @@ describe("normalizedReadableText", () => {
   });
 
   it("嵌套 math 递归读一次,不重复计入", () => {
-    const element = elementFrom(
-      "<p>Nest <math><mi>a</mi><math><mi>b</mi></math></math> end.</p>",
-    );
+    const element = elementFrom("<p>Nest <math><mi>a</mi><math><mi>b</mi></math></math> end.</p>");
 
     expect(normalizedReadableText(element)).toBe("Nest ab end.");
   });
@@ -125,9 +121,7 @@ describe("normalizedReadableText", () => {
   });
 
   it("空表示的 math 不产出空片段", () => {
-    const element = elementFrom(
-      "<p>A <math><mspace width=\"1em\"/></math> B.</p>",
-    );
+    const element = elementFrom('<p>A <math><mspace width="1em"/></math> B.</p>');
 
     // mspace 无文本、有意忽略;整个 math 的可见文本为空时不进句文本。
     expect(normalizedReadableText(element)).toBe("A B.");

@@ -81,10 +81,7 @@ describe("model-facing sentence payload", () => {
   });
 
   it("classifies complete clauses before fragments without adding sentence translations", () => {
-    const prompts = [
-      buildCorePrompt([sentence]),
-      buildRepairPrompt([sentence], [repairGroup], {}),
-    ];
+    const prompts = [buildCorePrompt([sentence]), buildRepairPrompt([sentence], [repairGroup], {})];
     const completenessRuleParts = [
       "Completeness-first rule:",
       "FRAGMENT_HEAD",

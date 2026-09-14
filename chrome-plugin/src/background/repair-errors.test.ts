@@ -103,7 +103,12 @@ describe("groupRepairErrors", () => {
 
   it("句对象级错误去掉 sentences 前缀后保留句级根路径", () => {
     const groups = groupRepairErrors(
-      [{ sentence: sentence("a"), errors: [error("sentences[0].sentenceId", "must be a safe string")] }],
+      [
+        {
+          sentence: sentence("a"),
+          errors: [error("sentences[0].sentenceId", "must be a safe string")],
+        },
+      ],
       { sentences: [{ sentenceId: "a" }] },
     );
     expect(groups).toEqual([

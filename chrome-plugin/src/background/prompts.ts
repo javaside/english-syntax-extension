@@ -104,10 +104,10 @@ const COMPLETENESS_FIRST_RULE =
  * 反例钉住「不是所有冒号后文本都是 APPOSITIVE」。
  */
 const TRAILING_CITATION_RULE =
-  "Trailing-citation rule: a bibliography citation at the sentence end (as [61]) is absorbed into the preceding component (\"…probe in the 1980s [61].\" = ADVERBIAL \"in the 1980s [61]\"); a bracketed list value ('The vector is [1, 2].') is sentence content, not a citation.";
+  'Trailing-citation rule: a bibliography citation at the sentence end (as [61]) is absorbed into the preceding component ("…probe in the 1980s [61]." = ADVERBIAL "in the 1980s [61]"); a bracketed list value (\'The vector is [1, 2].\') is sentence content, not a citation.';
 
 const HEADING_NUMBER_RULE =
-  "Heading-number rule: a section number (IV.2, II.2.2) never stands alone; number and headword form one FRAGMENT_HEAD (\"IV.2 Implications for the future\" = FRAGMENT_HEAD \"IV.2 Implications\" + ATTRIBUTE \"for the future\").";
+  'Heading-number rule: a section number (IV.2, II.2.2) never stands alone; number and headword form one FRAGMENT_HEAD ("IV.2 Implications for the future" = FRAGMENT_HEAD "IV.2 Implications" + ATTRIBUTE "for the future").';
 
 const COLON_TITLE_RULE =
   "Colon-title rule: an indivisible supplement after a dash or colon takes APPOSITIVE or INDEPENDENT_ELEMENT, " +

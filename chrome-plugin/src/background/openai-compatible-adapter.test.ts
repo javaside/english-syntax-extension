@@ -460,10 +460,18 @@ describe("syntax prompts", () => {
   it("keeps immutable sentence identity and tokens in repair instructions", () => {
     const prompt = buildRepairPrompt(
       [sentence],
-      [{ sentenceId: sentence.sentenceId, rawOccurrence: 0, kind: "invalid", errors: [{ path: "", message: "gap" }] }],
+      [
+        {
+          sentenceId: sentence.sentenceId,
+          rawOccurrence: 0,
+          kind: "invalid",
+          errors: [{ path: "", message: "gap" }],
+        },
+      ],
       {
-      broken: true,
-    });
+        broken: true,
+      },
+    );
     expect(prompt).toContain("gap");
     expect(prompt).toContain('"broken":true');
     expect(prompt).toMatch(/do not change.*sentence IDs.*Tokens/is);

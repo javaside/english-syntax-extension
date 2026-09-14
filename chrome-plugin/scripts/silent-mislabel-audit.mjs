@@ -3,13 +3,25 @@
 // (token 区间 + role)。输出两轴(运行轴 × 裁决轴)与两个比率。
 // 「正确」限定为 span/role 审计正确,不含译文语义正确性。
 import { readFileSync } from "node:fs";
-
-const HAN = /[\u4e00-\u9fff]/u;
+import { URL } from "node:url";
 const ROLES = new Set([
-  "SUBJECT", "PREDICATE", "OBJECT", "PREDICATIVE", "COMPLEMENT", "ATTRIBUTE",
-  "ADVERBIAL", "APPOSITIVE", "INDEPENDENT_ELEMENT", "CONJUNCTION",
-  "FRAGMENT_HEAD", "ATTRIBUTIVE_CLAUSE", "SUBJECT_CLAUSE", "OBJECT_CLAUSE",
-  "PREDICATIVE_CLAUSE", "ADVERBIAL_CLAUSE", "COORDINATE_CLAUSE",
+  "SUBJECT",
+  "PREDICATE",
+  "OBJECT",
+  "PREDICATIVE",
+  "COMPLEMENT",
+  "ATTRIBUTE",
+  "ADVERBIAL",
+  "APPOSITIVE",
+  "INDEPENDENT_ELEMENT",
+  "CONJUNCTION",
+  "FRAGMENT_HEAD",
+  "ATTRIBUTIVE_CLAUSE",
+  "SUBJECT_CLAUSE",
+  "OBJECT_CLAUSE",
+  "PREDICATIVE_CLAUSE",
+  "ADVERBIAL_CLAUSE",
+  "COORDINATE_CLAUSE",
 ]);
 
 /**
@@ -20,14 +32,20 @@ export function validateAuditSetV1(value) {
   if (typeof value !== "object" || value === null) throw new Error("audit set must be an object");
   if (value.schemaVersion !== "silent-mislabel-audit/v1") throw new Error("schemaVersion mismatch");
   if (!Number.isInteger(value.oracleVersion)) throw new Error("oracleVersion must be an integer");
-  if (!Array.isArray(value.cases) || value.cases.length === 0) throw new Error("cases must be non-empty");
+  if (!Array.isArray(value.cases) || value.cases.length === 0)
+    throw new Error("cases must be non-empty");
   const seen = new Set();
   for (const auditCase of value.cases) {
-    if (typeof auditCase.caseId !== "string" || auditCase.caseId.length === 0) throw new Error("caseId required");
+    if (typeof auditCase.caseId !== "string" || auditCase.caseId.length === 0)
+      throw new Error("caseId required");
     if (seen.has(auditCase.caseId)) throw new Error(`duplicate caseId: ${auditCase.caseId}`);
     seen.add(auditCase.caseId);
-    if (typeof auditCase.text !== "string" || auditCase.text.length === 0) throw new Error("text required");
-    if (auditCase.adjudicationStatus !== "adjudicated" && auditCase.adjudicationStatus !== "pending") {
+    if (typeof auditCase.text !== "string" || auditCase.text.length === 0)
+      throw new Error("text required");
+    if (
+      auditCase.adjudicationStatus !== "adjudicated" &&
+      auditCase.adjudicationStatus !== "pending"
+    ) {
       throw new Error("adjudicationStatus must be adjudicated|pending");
     }
     if (!Array.isArray(auditCase.constraints) || auditCase.constraints.length === 0) {
@@ -54,9 +72,7 @@ export function validateAuditSetV1(value) {
 
 function spanOf(components, span) {
   const [start, end] = span;
-  return components.find(
-    (component) => component.startToken <= start && component.endToken >= end,
-  );
+  return components.find((component) => component.startToken <= start && component.endToken >= end);
 }
 
 /** 判定单个 case 的预测是否满足其全部 constraints;返回首个违反的约束描述。 */
@@ -118,11 +134,21 @@ export function auditPredictions(auditSet, predictionsByCase) {
     const prediction = predictionsByCase.get(auditCase.caseId);
     const base = { caseId: auditCase.caseId, category: auditCase.category };
     if (prediction === undefined || prediction.ran !== true) {
-      cases.push({ ...base, runStatus: "not-run", adjudication: auditCase.adjudicationStatus, verdict: "not-run" });
+      cases.push({
+        ...base,
+        runStatus: "not-run",
+        adjudication: auditCase.adjudicationStatus,
+        verdict: "not-run",
+      });
       continue;
     }
     if (prediction.passedValidation !== true) {
-      cases.push({ ...base, runStatus: "failed-validation", adjudication: auditCase.adjudicationStatus, verdict: "failed-validation" });
+      cases.push({
+        ...base,
+        runStatus: "failed-validation",
+        adjudication: auditCase.adjudicationStatus,
+        verdict: "failed-validation",
+      });
       continue;
     }
     const violation = violates(auditCase, prediction.components ?? []);
@@ -164,11 +190,22 @@ export function loadAuditSet(path) {
 // 用法:node scripts/silent-mislabel-audit.mjs --report <probe-report.json>
 // 报告里的卡片按句子原文与审计集 text 前缀配对;role 是页面中文标签,映射回枚举。
 const LABEL_TO_ROLE = {
-  "主语": "SUBJECT", "谓语": "PREDICATE", "宾语": "OBJECT", "表语": "PREDICATIVE",
-  "补语": "COMPLEMENT", "定语": "ATTRIBUTE", "状语": "ADVERBIAL", "同位语": "APPOSITIVE",
-  "独立成分": "INDEPENDENT_ELEMENT", "并列连词": "CONJUNCTION", "片段主体": "FRAGMENT_HEAD",
-  "定语从句": "ATTRIBUTIVE_CLAUSE", "主语从句": "SUBJECT_CLAUSE", "宾语从句": "OBJECT_CLAUSE",
-  "表语从句": "PREDICATIVE_CLAUSE", "状语从句": "ADVERBIAL_CLAUSE",
+  主语: "SUBJECT",
+  谓语: "PREDICATE",
+  宾语: "OBJECT",
+  表语: "PREDICATIVE",
+  补语: "COMPLEMENT",
+  定语: "ATTRIBUTE",
+  状语: "ADVERBIAL",
+  同位语: "APPOSITIVE",
+  独立成分: "INDEPENDENT_ELEMENT",
+  并列连词: "CONJUNCTION",
+  片段主体: "FRAGMENT_HEAD",
+  定语从句: "ATTRIBUTIVE_CLAUSE",
+  主语从句: "SUBJECT_CLAUSE",
+  宾语从句: "OBJECT_CLAUSE",
+  表语从句: "PREDICATIVE_CLAUSE",
+  状语从句: "ADVERBIAL_CLAUSE",
 };
 
 function isCli() {
@@ -177,9 +214,12 @@ function isCli() {
 
 if (isCli()) {
   const args = new Map(
-    process.argv.slice(2).map((value, index, all) =>
-      value.startsWith("--") ? [value.slice(2), all[index + 1]] : null,
-    ).filter(Boolean),
+    process.argv
+      .slice(2)
+      .map((value, index, all) =>
+        value.startsWith("--") ? [value.slice(2), all[index + 1]] : null,
+      )
+      .filter(Boolean),
   );
   const auditSet = loadAuditSet(
     new URL("../../shared-fixtures/audit-silent-mislabel.json", import.meta.url).pathname,
@@ -217,10 +257,16 @@ if (isCli()) {
     }
   }
   const result = auditPredictions(auditSet, predictions);
-  console.log(JSON.stringify({
-    silentMislabelRate: result.silentMislabelRate,
-    correctnessLowerBound: result.correctnessLowerBound,
-    counts: result.counts,
-    cases: result.cases,
-  }, null, 2));
+  console.log(
+    JSON.stringify(
+      {
+        silentMislabelRate: result.silentMislabelRate,
+        correctnessLowerBound: result.correctnessLowerBound,
+        counts: result.counts,
+        cases: result.cases,
+      },
+      null,
+      2,
+    ),
+  );
 }

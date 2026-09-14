@@ -998,13 +998,20 @@ describe("analyzeSentenceDetails", () => {
 });
 
 describe("multi-sentence repair grouping and narrowing", () => {
+  interface RepairGroupFixture {
+    sentenceId: string;
+    errors: { path: string; message: string }[];
+  }
+
   /** 取出 repair prompt 里 `Validation errors:` 与 `Invalid JSON:` 之间的分组。 */
-  function errorGroupsOf(prompt: string) {
+  function errorGroupsOf(prompt: string): RepairGroupFixture[] {
     const start = prompt.indexOf("Validation errors:");
     const end = prompt.indexOf("Invalid JSON:");
     expect(start).toBeGreaterThanOrEqual(0);
     expect(end).toBeGreaterThan(start);
-    return JSON.parse(prompt.slice(start + "Validation errors:".length, end).trim());
+    return JSON.parse(
+      prompt.slice(start + "Validation errors:".length, end).trim(),
+    ) as RepairGroupFixture[];
   }
 
   /** 首部多一个纯标点成分(覆盖句号),其余一个成分回显英文。 */
@@ -1060,7 +1067,7 @@ describe("multi-sentence repair grouping and narrowing", () => {
       sentenceOne.sentenceId,
       sentenceTwo.sentenceId,
     ]);
-    for (const group of firstGroups) {
+    for (const group of firstGroups as { sentenceId: string; errors: { path: string }[] }[]) {
       expect(group.errors.length).toBeGreaterThan(0);
       for (const error of group.errors) {
         expect(error.path.startsWith("sentences[")).toBe(false);
@@ -1077,7 +1084,8 @@ describe("multi-sentence repair grouping and narrowing", () => {
   });
 });
 
-describe("service-built prompts reuse the compact sentence payload", () => {  const focus = { startToken: 1, endToken: 2 };
+describe("service-built prompts reuse the compact sentence payload", () => {
+  const focus = { startToken: 1, endToken: 2 };
 
   it("keeps token offsets out of the correction prompt", async () => {
     const { adapter, service } = harness([{ sentences: [rawCore(sentenceOne)] }]);

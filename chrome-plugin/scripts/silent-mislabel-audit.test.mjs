@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
+import { URL } from "node:url";
 import { auditPredictions, validateAuditSetV1 } from "./silent-mislabel-audit.mjs";
 
 // scripts/ → chrome-plugin/ → 仓库根 → shared-fixtures
 const fixture = JSON.parse(
-  readFileSync(new URL("../../shared-fixtures/audit-silent-mislabel.json", import.meta.url), "utf8"),
+  readFileSync(
+    new URL("../../shared-fixtures/audit-silent-mislabel.json", import.meta.url),
+    "utf8",
+  ),
 );
 
 describe("validateAuditSetV1", () => {
@@ -46,14 +50,17 @@ describe("auditPredictions", () => {
     const report = auditPredictions(
       set,
       new Map([
-        ["heading-number-binding-ii-2-2", {
-          ran: true,
-          passedValidation: true,
-          components: [
-            { startToken: 0, endToken: 2, role: "FRAGMENT_HEAD" },
-            { startToken: 3, endToken: 9, role: "ATTRIBUTE" },
-          ],
-        }],
+        [
+          "heading-number-binding-ii-2-2",
+          {
+            ran: true,
+            passedValidation: true,
+            components: [
+              { startToken: 0, endToken: 2, role: "FRAGMENT_HEAD" },
+              { startToken: 3, endToken: 9, role: "ATTRIBUTE" },
+            ],
+          },
+        ],
       ]),
     );
     const heading = report.cases.find((c) => c.caseId === "heading-number-binding-ii-2-2");
@@ -65,13 +72,14 @@ describe("auditPredictions", () => {
     const report = auditPredictions(
       set,
       new Map([
-        ["heading-number-binding-ii-2-2", {
-          ran: true,
-          passedValidation: true,
-          components: [
-            { startToken: 0, endToken: 9, role: "FRAGMENT_HEAD" },
-          ],
-        }],
+        [
+          "heading-number-binding-ii-2-2",
+          {
+            ran: true,
+            passedValidation: true,
+            components: [{ startToken: 0, endToken: 9, role: "FRAGMENT_HEAD" }],
+          },
+        ],
       ]),
     );
     const heading = report.cases.find((c) => c.caseId === "heading-number-binding-ii-2-2");
@@ -83,17 +91,20 @@ describe("auditPredictions", () => {
     const report = auditPredictions(
       set,
       new Map([
-        ["trailing-citation-61", {
-          ran: true,
-          passedValidation: true,
-          components: [
-            { startToken: 0, endToken: 2, role: "SUBJECT" },
-            { startToken: 3, endToken: 5, role: "PREDICATE" },
-            { startToken: 6, endToken: 10, role: "PREDICATIVE" },
-            { startToken: 11, endToken: 13, role: "ADVERBIAL" },
-            { startToken: 14, endToken: 16, role: "APPOSITIVE" }, // 引文数字串独立成成分
-          ],
-        }],
+        [
+          "trailing-citation-61",
+          {
+            ran: true,
+            passedValidation: true,
+            components: [
+              { startToken: 0, endToken: 2, role: "SUBJECT" },
+              { startToken: 3, endToken: 5, role: "PREDICATE" },
+              { startToken: 6, endToken: 10, role: "PREDICATIVE" },
+              { startToken: 11, endToken: 13, role: "ADVERBIAL" },
+              { startToken: 14, endToken: 16, role: "APPOSITIVE" }, // 引文数字串独立成成分
+            ],
+          },
+        ],
       ]),
     );
     const citation = report.cases.find((c) => c.caseId === "trailing-citation-61");

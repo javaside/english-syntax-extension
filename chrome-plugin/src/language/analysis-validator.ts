@@ -550,9 +550,7 @@ function collectGrammarErrors(
     );
   }
 
-  const fragmentHeads = roles.filter(
-    (component) => component.role === GrammarRole.FRAGMENT_HEAD,
-  );
+  const fragmentHeads = roles.filter((component) => component.role === GrammarRole.FRAGMENT_HEAD);
   if (fragmentHeads.length > 1) {
     addError(
       errors,

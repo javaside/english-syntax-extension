@@ -179,7 +179,10 @@ describe("core analysis validation", () => {
 
   it("非法元素(非对象)不被当作纯标点跳过,仍报 must be an object", () => {
     const result = validateCoreBatch(
-      rawIndexCore(["not-an-object", { startToken: 0, endToken: 3, role: "SUBJECT", translation: "服务运转良好" }]),
+      rawIndexCore([
+        "not-an-object",
+        { startToken: 0, endToken: 3, role: "SUBJECT", translation: "服务运转良好" },
+      ]),
       [rawIndexSentence],
       "profile-1",
     );
@@ -380,7 +383,12 @@ describe("core analysis grammar constraints", () => {
             sentenceId: adjacency.sentenceId,
             components: [
               { startToken: 0, endToken: 1, role: "SUBJECT", translation: "该 API" },
-              { startToken: 2, endToken: 5, role: "ATTRIBUTIVE_CLAUSE", translation: "返回 JSON 响应的" },
+              {
+                startToken: 2,
+                endToken: 5,
+                role: "ATTRIBUTIVE_CLAUSE",
+                translation: "返回 JSON 响应的",
+              },
               { startToken: 6, endToken: 6, role: "PUNCTUATION", translation: "，" },
               { startToken: 7, endToken: 8, role: "OBJECT", translation: "一个对象" },
             ],
@@ -408,7 +416,12 @@ describe("core analysis grammar constraints", () => {
             components: [
               { startToken: 9, endToken: 9, role: "PUNCTUATION", translation: "。" },
               { startToken: 0, endToken: 1, role: "SUBJECT", translation: "该 API" },
-              { startToken: 2, endToken: 5, role: "ATTRIBUTIVE_CLAUSE", translation: "返回 JSON 响应的" },
+              {
+                startToken: 2,
+                endToken: 5,
+                role: "ATTRIBUTIVE_CLAUSE",
+                translation: "返回 JSON 响应的",
+              },
               { startToken: 7, endToken: 8, role: "OBJECT", translation: "一个对象" },
             ],
           },
