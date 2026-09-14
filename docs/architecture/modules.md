@@ -135,6 +135,7 @@
 | `tests/fixtures/page-inventory/*.json`      | 页面语义清单契约:上述两份 coverage 页面的冻结 inventory(每单元 `id/kind/text/automatic/reason`),单测全等断言,自动分析单元即 `scanDocument` 的期望分母                                   |
 | `tests/fixtures/teaching-sentences.json`    | 12 类 × 3 句英语教学语料                                                                                                                                |
 | `shared-fixtures/core-gold-annotations.json` | 核心句法黄金标注集：显式标注约定、句文本及基于生产 tokenizer 的期望 span/role，供 TS/Kotlin 双端生产 validator replay 与可重复准确性比较                                                     |
+| `scripts/silent-mislabel-audit.mjs`        | 静默错标审计器:固定审计集(`shared-fixtures/audit-silent-mislabel.json`,token 区间约束 oracle)对「通过校验但标错」的预测做两轴(运行×裁决)判定,输出静默错标率(分母 0 报 N/A)与正确率下界;CLI 直接消费真机报告                                         |
 | `scripts/core-evaluation.mjs`               | 纯评分器：整句 exact、span exact 与 labeled span 的 P/R/F1、exact span role accuracy，以及逐句 missing/extra/role 错误；评分前对**预测**做尾标点归一化（纯标点成分丢弃 + 句尾终止标点尾巴裁剪，与生产 validator `semanticComponents` 同口径；gold 不动）                                  |
 | `scripts/core-evaluation-runner.mjs`        | 手动真模型 runner 的可测试公共件：base URL 规范化/安全校验、预测归一、provider 错误脱敏、两项能力降级请求                                               |
 | `scripts/release.mjs`                       | 一条命令走完发版:改版本 → 全套门禁 → 打包 → 提交 → 打 tag → 推送                                                                                        |
