@@ -336,6 +336,26 @@ function isMathAuxiliary(element: Element): boolean {
   return host !== null && host.querySelector("math") !== null;
 }
 
+/** 作者邮箱串与其转换残留(`show]`、孤立 `]`、逗号、连接词)构成的整块,不是可读正文。 */
+const EMAIL_TOKEN_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
+const AUTHOR_RESIDUE_PATTERN = /^(show|and|,|;|\]|\[|\|)$/iu;
+
+function isContactMetadataBlock(text: string): boolean {
+  const parts = text.trim().split(/\s+/u);
+  if (parts.length === 0) return false;
+  let emails = 0;
+  for (const part of parts) {
+    const bare = part.replace(/^[\]]+/u, "").replace(/[.,;]+$/u, "");
+    if (EMAIL_TOKEN_PATTERN.test(bare)) {
+      emails += 1;
+      continue;
+    }
+    if (AUTHOR_RESIDUE_PATTERN.test(part)) continue;
+    return false; // 出现任何其它实词,说明是正文(如 "Contact us at …")
+  }
+  return emails > 0;
+}
+
 /**
  * 科学语义排除:无论英文占比多高、门槛多松,这些单元都不是可读自然语言。返回
  * undefined 表示「没有科学层面的排除理由」,继续走通用分类。
@@ -344,6 +364,7 @@ function scientificExclusion(element: Element): ReadableUnitExclusionReason | un
   const text = normalizedReadableText(element);
   if (CONVERSION_PLACEHOLDER_PATTERN.test(text)) return "conversion-placeholder";
   if (isMathAuxiliary(element)) return "math-auxiliary";
+  if (isContactMetadataBlock(text)) return "reference-metadata";
   if (
     element.matches(REFERENCE_METADATA_SELECTOR) ||
     element.closest(REFERENCE_METADATA_SELECTOR) !== null

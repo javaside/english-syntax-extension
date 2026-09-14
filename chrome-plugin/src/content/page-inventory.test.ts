@@ -173,6 +173,36 @@ describe.each(fixtures)("%s page inventory contract", (fixtureName) => {
   });
 });
 
+describe("作者邮箱元数据排除(D3)", () => {
+  function inventoryOf(markup: string): Map<string, ReadableUnit> {
+    document.body.innerHTML = markup;
+    return new Map(
+      inventoryReadableUnits(document).map((unit) => [unit.element.id || unit.text.slice(0, 30), unit]),
+    );
+  }
+
+  it("整块由邮箱与转换残留构成时按 reference-metadata 排除", () => {
+    const units = inventoryOf(
+      "<main><p id=\"emails\">show]Rachel.Gray@glasgow.ac.uk ]Daniel.Williams@glasgow.ac.uk ]a.papadopoulos.1@research.gla.ac.uk</p></main>",
+    );
+    expect(units.get("emails")?.automatic).toBe(false);
+    expect(units.get("emails")?.exclusionReason).toBe("reference-metadata");
+  });
+
+  it("正文里出现的邮箱不触发排除(反向保留)", () => {
+    const units = inventoryOf(
+      "<main><p id=\"contact\">Contact us at author@example.org for details.</p></main>",
+    );
+    expect(units.get("contact")?.automatic).toBe(true);
+    expect(units.get("contact")?.exclusionReason).toBeUndefined();
+  });
+
+  it("单邮箱作者行同样排除", () => {
+    const units = inventoryOf("<main><p id=\"one\">author@example.org</p></main>");
+    expect(units.get("one")?.exclusionReason).toBe("reference-metadata");
+  });
+});
+
 /** 义务 b:covered-by-child 的方向语义——父被子吸收,而不是子被父吸收。 */
 describe("covered-by-child 方向语义", () => {
   function inventoryOf(markup: string): Map<string, ReadableUnit> {
