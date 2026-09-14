@@ -29,6 +29,7 @@
 - 验收尚未全部完成：P0 离线差分已按正确源码路径与生产 tokenizer 重跑并通过；小规模真实配对存在模型波动，不构成不劣性证明。页面 corpus candidate 只完成 run1，run2 首次因 provider raw 与 strict artifact subset 不符被拒，随后页面 run2/run3 与 core40 评测因 HTTP 402 `Insufficient Balance` 无法继续，停止付费请求。
 - 最新全页 DOM 观察：公式中的 TeX 命令形态为 0、未见邮箱解析卡片；含失败卡片为 37/182，未达到 ≤5% 效果目标。该观察不是已证明的整页覆盖率。审计器对这份报告的三项里,Figure 2 判为校验失败,其余两项因该报告不含逐句终态证据而报 `not-terminal`——修正后的审计器不把 DOM 卡片当通过,因此本批次尚未产出可信的静默错标率。
 - 单个 artifact 的 `report.transitions.correctToWrongOrFailure` 描述首轮到修复终态的转移，不能当成 baseline/candidate 跨版本回归结论；完整配对验收仍待完成。
+- 外部模型额度已耗尽（DeepSeek 402 `Insufficient Balance`、Zhipu 达到周期上限、OpenAI 未被本批使用），因此**真机全页运行与两套 corpus 配对都停在这里**；不依赖外部模型的确定性验证已全部完成：Chrome 1218 单测、37 E2E（含 arxiv 整页覆盖，其中作者邮箱单元按 `reference-metadata` 排除）、IntelliJ web 81 测试与 `test buildPlugin verifyPluginProjectConfiguration` 全过，lint 保持唯一基线错误，build/format/docs:drift 通过。
 
 ## Unreleased — 页面级英文句法覆盖
 
