@@ -378,7 +378,8 @@ class PromptsTest {
   /**
    * 重写后的规则段预算：spec §实施前置 5 要求增量有测量依据。旧版规则段(版本 12,
    * 单句)实测 8207 字符；重写删除 SUPPLEMENT_RULE 与内联 Compound/Simple 重复条目,
-   * 同时为页面语料新增约 10 组「正例 + 反例」对照,净增 +33%(新实测 ≤ 旧值 × 1.35)。
+   * 同时为页面语料新增约 10 组「正例 + 反例」对照,净增 +33%。2026-09-12 批次
+   * (spec D4/D5)新增 Trailing-citation 与 Heading-number 两条规则,系数 1.35 → 1.42。
    */
   @Test
   fun `core prompt rule text stays within the measured budget envelope`() {
@@ -386,6 +387,6 @@ class PromptsTest {
     val payloadStart = prompt.indexOf("Numbered sentence requests:")
     val ruleTextLength = prompt.slice(0 until payloadStart).length
 
-    assertTrue(ruleTextLength <= 8207 * 1.35, "rule text grew beyond budget: $ruleTextLength")
+    assertTrue(ruleTextLength <= 8207 * 1.42, "rule text grew beyond budget: $ruleTextLength")
   }
 }

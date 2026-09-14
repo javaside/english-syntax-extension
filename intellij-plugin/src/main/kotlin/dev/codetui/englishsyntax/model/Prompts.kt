@@ -95,6 +95,13 @@ private const val COMPLETENESS_FIRST_RULE =
  * FRAGMENT_HEAD + ATTRIBUTE + APPOSITIVE + ATTRIBUTE，冒号本身保持未覆盖；
  * 反例钉住「不是所有冒号后文本都是 APPOSITIVE」。
  */
+private const val TRAILING_CITATION_RULE =
+  "Trailing-citation rule: a bibliography citation at the sentence end (as [61]) is absorbed into the preceding component (\"…probe in the 1980s [61].\" = ADVERBIAL \"in the 1980s [61]\"); " +
+    "a bracketed list value ('The vector is [1, 2].') is sentence content, not a citation."
+
+private const val HEADING_NUMBER_RULE =
+  "Heading-number rule: a section number (IV.2, II.2.2) never stands alone; number and headword form one FRAGMENT_HEAD (\"IV.2 Implications for the future\" = FRAGMENT_HEAD \"IV.2 Implications\" + ATTRIBUTE \"for the future\")."
+
 private const val COLON_TITLE_RULE =
   "Colon-title rule: an indivisible supplement after a dash or colon takes APPOSITIVE or INDEPENDENT_ELEMENT, " +
     "but when the supplement contains separable predicate, object, or adverbial peers, emit those internal peers instead of an overlapping outer supplement. " +
@@ -212,6 +219,8 @@ private val CORE_ANALYSIS_RULES: List<String> = listOf(
   "Coverage rule: every non-punctuation Token must be covered exactly once. Components must be ordered, non-overlapping, and may include punctuation but may not contain punctuation only.",
   COMPLETENESS_FIRST_RULE,
   COLON_TITLE_RULE,
+  TRAILING_CITATION_RULE,
+  HEADING_NUMBER_RULE,
   CLAUSE_FIRST_RULE,
   COMPONENT_GRANULARITY_RULE,
   PREDICATE_SCOPE_RULE,

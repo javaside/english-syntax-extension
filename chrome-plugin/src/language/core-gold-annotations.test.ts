@@ -42,6 +42,11 @@ describe("core gold annotations", () => {
     expect(conventions).toMatch(/祈使句.*PREDICATE/);
     expect(conventions).toMatch(/总体.*不覆盖标点/);
     expect(conventions).toMatch(/fragment-portable-api.*6\.\.14.*例外.*不得推广/);
+    // D4:句末书目引用附着口径(不进 validator 硬门——裸字符串无法高把握区分
+    // 引用与向量/数组/编号,反例见 spec)。
+    expect(conventions).toMatch(/句末.*书目引用.*并入前一成分/);
+    // D5:章节编号绑定标题主体(可分离后置修饰仍可单列)。
+    expect(conventions).toMatch(/章节编号.*FRAGMENT_HEAD/);
   });
 
   it.each([
@@ -51,6 +56,28 @@ describe("core gold annotations", () => {
         { startToken: 0, endToken: 2, role: GrammarRole.FRAGMENT_HEAD },
         { startToken: 3, endToken: 5, role: GrammarRole.ATTRIBUTE },
         { startToken: 6, endToken: 14, role: GrammarRole.ATTRIBUTE },
+      ],
+    ],
+    [
+      // D4:句末引用并入前一成分(状语 "in the 1980s [61]"),不单独成 APPOSITIVE。
+      // 0 GW/1 from/2 CBC/3 were/4 first/5 proposed/6 as/7 a/8 new/9 cosmological/
+      // 10 probe/11 in/12 the/13 1980s/14 [(p)/15 61/16 ](p)/17 .(p)
+      "trailing-citation-merge",
+      [
+        { startToken: 0, endToken: 2, role: GrammarRole.SUBJECT },
+        { startToken: 3, endToken: 5, role: GrammarRole.PREDICATE },
+        { startToken: 6, endToken: 10, role: GrammarRole.PREDICATIVE },
+        { startToken: 11, endToken: 16, role: GrammarRole.ADVERBIAL },
+      ],
+    ],
+    [
+      // D5:编号与标题中心词同一 FRAGMENT_HEAD("IV.2 Implications");
+      // 后置修饰 "for the future" 照常 ATTRIBUTE。
+      // 0 IV/1 .(p)/2 2/3 Implications/4 for/5 the/6 future
+      "heading-number-binding",
+      [
+        { startToken: 0, endToken: 3, role: GrammarRole.FRAGMENT_HEAD },
+        { startToken: 4, endToken: 6, role: GrammarRole.ATTRIBUTE },
       ],
     ],
     [

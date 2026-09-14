@@ -475,13 +475,14 @@ describe("页面句型教学(版本 13 重写)", () => {
   // spec §实施前置 5:重写后预算必须有测量依据。旧版规则段(版本 12,单句)实测
   // 8207 字符;重写删掉 SUPPLEMENT_RULE 与内联 Compound/Simple 两条重复条目,
   // 同时为页面语料新增约 10 组「正例 + 反例」教学对照,净增量 +33%(
-  // 新实测 10903 字符 ≤ 旧值 × 1.35)。若净增超过 1.35x,说明又在机械追加
-  // 而不是删重复后加最小对照。
+  // 实测 10903 字符)。2026-09-12 批次(spec D4/D5)新增 Trailing-citation 与
+  // Heading-number 两条规则(含最小正反例),系数 1.35 → 1.42;两例都压缩到
+  // 最短可教形式后再计入,超出说明又在机械追加。
   it("keeps the rewritten rule text within the measured budget envelope", () => {
     const prompt = buildCorePrompt([sentence]);
     const payloadStart = prompt.indexOf("Numbered sentence requests:");
     const ruleTextLength = prompt.slice(0, payloadStart).length;
 
-    expect(ruleTextLength).toBeLessThanOrEqual(Math.ceil(8207 * 1.35));
+    expect(ruleTextLength).toBeLessThanOrEqual(Math.ceil(8207 * 1.42));
   });
 });
