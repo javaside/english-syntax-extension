@@ -11,8 +11,9 @@ function elementFrom(markup: string): Element {
 
 /**
  * 科学文档的 DOM 文本归一化。这一层只负责「读什么」:普通可见文本按 DOM 顺序、
- * MathML 用单一稳定表示、辅助内容不重复、Unicode 空白折叠。它刻意不做的事:
- * 不解析 TeX、不翻译公式、不按 URL 分支——见 spec 的「不采用的方案」。
+ * `<math>` 一律读「剔除辅助子树后的可见 MathML 文本」(LaTeXML 的 alttext 恒为
+ * TeX 源码,采它会污染句文本与 Token)、辅助内容不重复、Unicode 空白折叠。
+ * 它刻意不做的事:不解析 TeX、不翻译公式、不按 URL 分支——见 spec 的「不采用的方案」。
  */
 describe("normalizedReadableText", () => {
   it("按 DOM 顺序拼接普通内联文本", () => {
@@ -43,12 +44,13 @@ describe("normalizedReadableText", () => {
     expect(normalizedReadableText(hidden)).toBe("Hidden migration instructions.");
   });
 
-  it("math 优先使用 alttext 且只取一次", () => {
+  it("math 不再读 alttext(TeX 源码),改读可见 MathML 文本", () => {
     const element = elementFrom(
-      '<p>Value of <math alttext="H0"><semantics><msub><mi>H</mi><mn>0</mn></msub>' +
-        '<annotation encoding="application/x-tex">H_0</annotation></semantics></math> here.</p>',
+      '<p>Value of <math alttext="H_{0}={71.9}"><semantics><msub><mi>H</mi><mn>0</mn></msub>' +
+        '<annotation encoding="application/x-tex">H_{0}={71.9}</annotation></semantics></math> here.</p>',
     );
 
+    // 可见树只有 H 与 0;alttext 的 TeX 源码绝不进句文本。
     expect(normalizedReadableText(element)).toBe("Value of H0 here.");
   });
 
@@ -61,9 +63,9 @@ describe("normalizedReadableText", () => {
     expect(normalizedReadableText(element)).toBe("Ratio H0 set.");
   });
 
-  it("annotation 与 aria-hidden 辅助文本不与可见公式重复", () => {
+  it("annotation / annotation-xml 与 aria-hidden 辅助文本不与可见公式重复", () => {
     const element = elementFrom(
-      '<p>Read <math alttext="H0"><mi>H</mi><mn>0</mn><annotation>H_0</annotation></math>' +
+      '<p>Read <math><mi>H</mi><mn>0</mn><annotation>H_0</annotation></math>' +
         ' <span class="ltx_MathML" aria-hidden="true">H0</span> today.</p>',
     );
 
@@ -72,22 +74,71 @@ describe("normalizedReadableText", () => {
 
   it("独立公式容器只保留单一公式表示", () => {
     const element = elementFrom(
-      '<div class="ltx_equation"><math display="block" alttext="p(d | H0)">' +
+      '<div class="ltx_equation"><math display="block" alttext="p(d | H_0)">' +
         "<mi>p</mi><mo>(</mo><mi>d</mi><mo>|</mo><msub><mi>H</mi><mn>0</mn></msub><mo>)</mo></math></div>",
     );
 
-    expect(normalizedReadableText(element)).toBe("p(d | H0)");
+    expect(normalizedReadableText(element)).toBe("p(d|H0)");
   });
 
   it("内联数学保留为句内原子片段,不删除", () => {
     const element = elementFrom(
-      '<p>The goal of reaching a 2% measurement of <math alttext="H0"><mi>H</mi></math> is close.</p>',
+      '<p>The goal of reaching a 2% measurement of <math alttext="H0"><mi>H</mi><mn>0</mn></math> is close.</p>',
     );
 
-    // 删掉内联数学会让英文语法与缓存键失真,必须原位保留。
+    // 删掉内联数学会让英文语法与缓存键失真,必须原位保留(可见文本,非 alttext)。
     expect(normalizedReadableText(element)).toBe(
       "The goal of reaching a 2% measurement of H0 is close.",
     );
+  });
+
+  it("mtext 是自然语言,照常保留", () => {
+    const element = elementFrom(
+      "<p>Mode <math><mtext>median</mtext></math> applies.</p>",
+    );
+
+    expect(normalizedReadableText(element)).toBe("Mode median applies.");
+  });
+
+  it("mphantom 是不可见占位,整棵子树排除", () => {
+    const element = elementFrom(
+      "<p>Value <math><mi>x</mi><mphantom><mi>y</mi></mphantom></math> stands.</p>",
+    );
+
+    expect(normalizedReadableText(element)).toBe("Value x stands.");
+  });
+
+  it("嵌套 math 递归读一次,不重复计入", () => {
+    const element = elementFrom(
+      "<p>Nest <math><mi>a</mi><math><mi>b</mi></math></math> end.</p>",
+    );
+
+    expect(normalizedReadableText(element)).toBe("Nest ab end.");
+  });
+
+  it("math 内部的隐藏后代整棵子树阻断", () => {
+    const element = elementFrom(
+      '<p>V <math><mi>x</mi><mrow style="display: none"><mi>ghost</mi></mrow><mi>y</mi></math> W.</p>',
+    );
+
+    expect(normalizedReadableText(element)).toBe("V xy W.");
+  });
+
+  it("空表示的 math 不产出空片段", () => {
+    const element = elementFrom(
+      "<p>A <math><mspace width=\"1em\"/></math> B.</p>",
+    );
+
+    // mspace 无文本、有意忽略;整个 math 的可见文本为空时不进句文本。
+    expect(normalizedReadableText(element)).toBe("A B.");
+  });
+
+  it("math 与 span 交错不额外插空格,已有空格不丢", () => {
+    const element = elementFrom(
+      "<p>Prefix<math><mi>a</mi></math>, suffix <math><mi>b</mi></math>.</p>",
+    );
+
+    expect(normalizedReadableText(element)).toBe("Prefixa, suffix b.");
   });
 
   it("折叠 Unicode 空白并去除首尾空白", () => {

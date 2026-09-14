@@ -96,14 +96,14 @@
     {
       "id": "arxiv-display-equation",
       "kind": "loose-block",
-      "text": "p(H0 | d) proportional to p(d | H0) p(H0)",
+      "text": "p(H0|d)",
       "automatic": false,
       "reason": "display-math"
     },
     {
       "id": "arxiv-definition-table",
       "kind": "loose-block",
-      "text": "A list of parameters appearing in the dark siren methodology and their definitions Parameter Definition Galaxy population model p(z | Lambda)",
+      "text": "A list of parameters appearing in the dark siren methodology and their definitions Parameter Definition Galaxy population model p(z|Λ)",
       "automatic": false,
       "reason": "covered-by-child"
     },
@@ -138,7 +138,7 @@
     {
       "id": "arxiv-formula-cell",
       "kind": "table-cell",
-      "text": "p(z | Lambda)",
+      "text": "p(z|Λ)",
       "automatic": false,
       "reason": "display-math"
     },
