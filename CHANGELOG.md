@@ -8,6 +8,14 @@
 
 **升级后请重新加载扩展并刷新页面;IDEA 插件需要安装新版 zip。** `CORE_PROMPT_VERSION` 升为 `15`(13→14 repair 分组、14→15 引用/编号规则)、`DETAIL_PROMPT_VERSION` 升为 `8`(MathML token 文本),`CORE_SCHEMA_VERSION` 保持 `3`——已有缓存按版本键整体作废,是预期行为。
 
+### 复杂句成分划分改进（目标导向诊断）
+
+- **失败率随句子复杂度上升的根因不是翻译慢,而是结构输入被污染与规则无优先级**:真机逐句重放显示失败率从 ≤12 词 6.5% 单调升到 >40 词 20.9%;失败句的冒号/括号/引用密度分别是成功句的 4.2×/2.4×/5.1×。本批不再围绕聚合分数调参,而是逐类修正划分入口与结构决策。
+- **脚注 DOM 不再粘句**:LaTeXML `<sup>2</sup>` 曾把 `uncertainties.` 与下一句粘成 97 词畸形输入,模型产出 `FRAGMENT_HEAD("2")`。现只在 DOM 提取层排除脚注;审核发现纯文本启发式误杀 `IV.2` 后已删除。真机该 97 词句与 `recombined.4` 在同版 3 次中均 3/3 恢复成功。
+- **冒号结构改为有优先级的决策过程**:`COLON_STRUCTURE_RULE` 先判冒号后是否完整分句/疑问句(字段标签→`INDEPENDENT_ELEMENT`),再判 section/caption label(label+中心词→一个 `FRAGMENT_HEAD`),最后判长标题重命名(`APPOSITIVE`)。替代三条互相平铺的规则。
+- **点分标识符整体化**:`GWTC-5.0`/`II.2.1`/`spring.ai.tool` 不再拆成 `GWTC-5` `.` `0`;双端同步,core/detail 版本为 16/9。真机 `GWTC-*` 标题与脚注句在同版三次均稳定修好。
+- **Han 门只豁免真正不可译的符号 span**:纯引用/标点与含无歧义数学标记的公式不再必然失败;`TCP/IP`、`km/h`、`A/B testing`、`and/or`、`foo_bar` 等含歧义 ASCII 的技术英语仍要求中文,专名 `JSON`/`GWTC-5.0`/`H0`/`GC` 仍须补中文类型。
+
 ### 修复
 
 - **repair 错误按句分组并携带实例坐标**:多句 repair 的错误此前被扁平拼装且全部标着 `sentences[0]`(真机 47/108 个 repair 如此),模型无从判断该改哪一句;component 索引也因「先丢纯标点再重编号」与模型所见 JSON 错位(实测 15 例,错误指向隔壁成分)。现按 `sentenceId` 分组(invalid/missing/duplicate 四类路径 + `rawOccurrence`),错误路径改用原始数组下标,语法邻接仍按语义成分序列判。新增单测覆盖原始下标、语义邻接与成功结果投影；纠正差分脚本的源码路径与 Token 重建后重跑两份真机 artifact：flash 168 例有 9 处路径变化、pro 115 例有 5 处，接受集合、成功成分与错误文案均为 0 差异，符合「仅诊断坐标改变」契约。

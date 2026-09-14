@@ -175,7 +175,7 @@ describe("model-facing sentence payload", () => {
       "Predicate-scope rule:",
       "Prepositional-phrase rule:",
       "Peer-component rule:",
-      "Colon-title rule:",
+      "Colon-structure rule:",
       "Component-granularity rule:",
       "Give every component a concise, non-empty Chinese translation",
     ]) {
@@ -220,8 +220,8 @@ describe("model-facing sentence payload", () => {
     ];
 
     for (const prompt of prompts) {
-      expect(prompt).toContain("dash or colon");
-      expect(prompt).toContain("APPOSITIVE or INDEPENDENT_ELEMENT");
+      expect(prompt).toContain("Colon-structure rule:");
+      expect(prompt).toContain("INDEPENDENT_ELEMENT");
       expect(prompt).toContain("the ones");
       expect(prompt).toContain("that matter");
     }
@@ -340,13 +340,11 @@ describe("页面句型教学(版本 13 重写)", () => {
     const prompt = rules();
 
     expect(prompt).toContain(
-      'in "Expanding the scope of dark siren cosmology: Inferring the population properties of gravitational wave-hosting galaxies", "Inferring the population properties" is ONE APPOSITIVE',
+      '"Scope of X: Properties of Y" = FRAGMENT_HEAD "Scope" + ATTRIBUTE "of X" + APPOSITIVE "Properties" + ATTRIBUTE "of Y"',
     );
-    expect(prompt).toContain("the colon stays uncovered");
-    // 反例:冒号后是完整独立分句时按同层角色展开,不机械标 APPOSITIVE。
-    expect(prompt).toContain(
-      'in "The result is clear: the sampled prior reduces uncertainty", "the sampled prior reduces uncertainty" is a full clause and is analysed as peer SUBJECT, PREDICATE, and OBJECT',
-    );
+    expect(prompt).toContain("leave the colon uncovered");
+    // 反例:冒号后是完整分句/疑问句时整个输入按 clause 分析,不机械标 APPOSITIVE。
+    expect(prompt).toContain("If it is a complete clause or question");
   });
 
   it("contrasts VP coordination (FANBOYS as CONJUNCTION) with NP coordination (and stays inside)", () => {
@@ -475,6 +473,14 @@ describe("页面句型教学(版本 13 重写)", () => {
   // 实测 10903 字符)。2026-09-12 批次(spec D4/D5)新增 Trailing-citation 与
   // Heading-number 两条规则(含最小正反例),系数 1.35 → 1.42;两例都压缩到
   // 最短可教形式后再计入,超出说明又在机械追加。
+  it("teaches field-label + complete question as clause, not fragment", () => {
+    const prompt = buildCorePrompt([sentence]);
+
+    expect(prompt).toContain("Colon-structure rule:");
+    expect(prompt).toContain('INDEPENDENT_ELEMENT "Binary flag"');
+    expect(prompt).toContain("never mix FRAGMENT_HEAD with clause roles");
+  });
+
   it("keeps the rewritten rule text within the measured budget envelope", () => {
     const prompt = buildCorePrompt([sentence]);
     const payloadStart = prompt.indexOf("Numbered sentence requests:");

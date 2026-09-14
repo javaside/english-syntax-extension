@@ -260,7 +260,7 @@
 
 ### I-18.1 Tokenization 改动必须同时提升 core 与 detail 提示词版本
 
-**规则** 任何会改变 Token 数量或 ID 的分词改动，都必须同时提升 `CORE_PROMPT_VERSION` 与 `DETAIL_PROMPT_VERSION`；当前值分别为 `13` 与 `7`（版本 13/7 面向页面级英文覆盖重写双端 prompt 并给 detail 修复轮补输出模板与完整中文角色词表；`CORE_PROMPT_VERSION` 13 起单句规则段预算由预算测试钉住 ≤ 版本 12 实测 8207 字符的 1.35 倍），而输出契约未变，`CORE_SCHEMA_VERSION` 保持 `3`。
+**规则** 任何会改变 Token 数量或 ID 的分词改动，都必须同时提升 `CORE_PROMPT_VERSION` 与 `DETAIL_PROMPT_VERSION`；当前值分别为 `16` 与 `9`（版本 13/7 面向页面级英文覆盖重写双端 prompt 并给 detail 修复轮补输出模板与完整中文角色词表；`CORE_PROMPT_VERSION` 13 起单句规则段预算由预算测试钉住 ≤ 版本 12 实测 8207 字符的 1.35 倍），而输出契约未变，`CORE_SCHEMA_VERSION` 保持 `3`。
 
 **为什么** core span 与 detail focus 都使用 Token ID。两条缓存键虽各自带提示词版本，但 Token 坐标是共同依赖；只升一条会让另一类旧缓存仍以过期坐标命中新文本。
 
@@ -639,3 +639,30 @@
 **症状** 「失败块比例下降」但页面上的错标没人看见;prompt 教学效果的验收退化为主观目测。
 
 **守护测试** `scripts/silent-mislabel-audit.test.mjs`(坏预测判违反、好预测判符合、未运行不进分母、oracle 自洽校验);CLI 直接消费真机报告。
+
+
+### 脚注标号必须在 DOM 提取层处理,不能在纯文本分句层猜
+
+**规则**:LaTeXML/ARIA 脚注按 DOM 结构(`.ltx_role_footnote`/`[role=doc-footnote]`/`sup.ltx_note_mark`)整棵排除;`segmentBlock` 不写 `字母.数字` 脚注启发式。
+
+**为什么** 真实页面把 `<sup>2</sup>` 粘到句号后得到 `uncertainties.2`,会让两句粘成 97 词畸形长句。但纯文本层的 `字母.数字 + 大写` 无法区分脚注与 `IV.2 Implications` / `Appendix B.2`;曾在 segmenter 加删除规则,直接把规范章节号腰斩,还破坏 start/end 相对输入文本的偏移契约。脚注是 DOM 产物,应该在有结构证据的层解决。
+
+**症状** 长句中出现裸数字 `FRAGMENT_HEAD("2")`;或章节标题 `IV.2 Implications` 被切成两句。
+
+**守护测试** `readable-dom-text.footnote.test.ts`(真实脚注 DOM) + `segmenter.section-number.test.ts`(IV.2/II.2/Appendix B.2 不腰斩)。
+
+### 冒号先判结构类型,再赋角色
+
+**规则**:所有含冒号输入统一走三步优先级:①冒号后是完整分句/疑问句→整体按 clause 分析,短字段标签标 `INDEPENDENT_ELEMENT`,不得用 `FRAGMENT_HEAD`;②前缀是 section/caption label→label 与中心词绑定为一个 `FRAGMENT_HEAD`;③后半是长标题重命名→冒号不覆盖,重命名中心标 `APPOSITIVE`;其它按内部谓语/宾语/状语拆。不得把三种情形写成互相平铺、无优先级的独立规则。
+
+**为什么** 旧 prompt 同时有 Heading-number/Field-label/Colon-title 三条散文规则,模型不知道先判哪条:`Binary flag: is this galaxy…?` 5 次真机 9/10 失败(label 被标 `FRAGMENT_HEAD` 与主谓混用);`Table 1:`/`Figure 2:` 稳定产出两个 `FRAGMENT_HEAD`。
+
+**守护测试** `prompts.test.ts` 的 Colon-structure 三分支断言、`field-label-contract.test.ts`、黄金句 `caption-label-binding`/`heading-number-binding`。
+
+### 数学式豁免不能吞普通技术英语
+
+**规则**:Han 译文门只豁免纯标点/数字引用和含**无歧义 Unicode 数学标记/希腊字母/U+2061-2064/括号内短公式形态**的 span。ASCII `/ ~ ^ _ | \` 不算数学标记——`TCP/IP`、`km/h`、`A/B testing`、`and/or`、`foo_bar` 都仍要求中文。
+
+**为什么** 第一版把 ASCII 歧义字符放进数学字符类,会让整段技术英语的纯英文回显直接通过并写缓存,违背「翻译辅助理解英文」与 spec §5.2 专名必须补中文类型。
+
+**守护测试** `translation-quality.symbol-span.test.ts` 13 个正反例 + Kotlin 共享 `translation-quality.json`。

@@ -133,7 +133,7 @@ class PromptsTest {
       "Predicate-scope rule:",
       "Prepositional-phrase rule:",
       "Peer-component rule:",
-      "Colon-title rule:",
+      "Colon-structure rule:",
       "Component-granularity rule:",
       "Give every component a concise, non-empty Chinese translation",
     ).forEach { rule ->
@@ -179,8 +179,8 @@ class PromptsTest {
     )
 
     prompts.forEach { prompt ->
-      assertTrue(prompt.contains("dash or colon"))
-      assertTrue(prompt.contains("APPOSITIVE or INDEPENDENT_ELEMENT"))
+      assertTrue(prompt.contains("Colon-structure rule:"))
+      assertTrue(prompt.contains("INDEPENDENT_ELEMENT"))
       assertTrue(prompt.contains("the ones"))
       assertTrue(prompt.contains("that matter"))
     }
@@ -247,18 +247,17 @@ class PromptsTest {
       ),
     )
 
-    // arXiv 长冒号标题四段口径 + 冒号后完整分句反例
+    // 冒号结构三步决策:完整分句/问题 → label → 长标题重命名
+    assertTrue(prompt.contains("Colon-structure rule:"))
+    assertTrue(prompt.contains("If it is a complete clause or question"))
+    assertTrue(prompt.contains("INDEPENDENT_ELEMENT \"Binary flag\""))
+    assertTrue(prompt.contains("never mix FRAGMENT_HEAD with clause roles"))
     assertTrue(
       prompt.contains(
-        "in \"Expanding the scope of dark siren cosmology: Inferring the population properties of gravitational wave-hosting galaxies\", \"Inferring the population properties\" is ONE APPOSITIVE",
+        "\"Scope of X: Properties of Y\" = FRAGMENT_HEAD \"Scope\" + ATTRIBUTE \"of X\" + APPOSITIVE \"Properties\" + ATTRIBUTE \"of Y\"",
       ),
     )
-    assertTrue(prompt.contains("the colon stays uncovered"))
-    assertTrue(
-      prompt.contains(
-        "in \"The result is clear: the sampled prior reduces uncertainty\", \"the sampled prior reduces uncertainty\" is a full clause and is analysed as peer SUBJECT, PREDICATE, and OBJECT",
-      ),
-    )
+    assertTrue(prompt.contains("leave the colon uncovered"))
 
     // VP / NP coordination 对照
     assertTrue(

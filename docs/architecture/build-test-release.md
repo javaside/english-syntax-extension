@@ -215,3 +215,10 @@ tag `v*` 触发,`permissions: contents: write`:
 ## 静默错标审计器(2026-09-12 起)
 
 `chrome-plugin/scripts/silent-mislabel-audit.mjs` 及其 vitest 单测随 `npm test` 跑;CLI 用法 `node scripts/silent-mislabel-audit.mjs --report <真机报告.json>`,输出见 rendering.md 的审计一节。验收时与失败率分开报告。
+
+
+## 复杂句划分批次的 fixture 与验收(2026-09-15)
+
+改 `COLON_STRUCTURE_RULE` 或其它 core 规则后,`shared-fixtures/core-prompt-parity.json` 必须用生产 `buildCorePrompt()` 重算;`core-evaluation-traces.json` 的每轮 messages 与 `run.hashes.messages`/`run.hashes.prompt` 同步重算,provider raw 不动。改 tokenizer 后除上述两份还要同步黄金集、translation-quality 与 audit fixture 的 Token 坐标,并同时升 core/detail 版本。
+
+本批门禁新增:`readable-dom-text.footnote.test.ts`(脚注只在 DOM 层排除)、`segmenter.section-number.test.ts`(IV.2/Appendix B.2 不腰斩)、`segmenter.dotted-identifier.test.ts`(GWTC-5.0/II.2.1 整体化)、`translation-quality.symbol-span.test.ts`(13 个数学/技术英语正反例)、`field-label-contract.test.ts`(字段 label + 完整疑问句的口径)。真机单次失败率受模型方差影响(同版 6.2%/5.5%/4.2%),必须至少三次报告范围,不能拿一条低值作结论。

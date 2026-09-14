@@ -297,3 +297,8 @@ Chrome 端协议(SW↔content)之外,IntelliJ 端定义 JCEF 页面↔Kotlin 的
 | `__englishSyntaxSetTheme(isDark)`                            | 注入时与主题变化              | 供 `roles.ts` 选色板                                                                                                                                 |
 | `__englishSyntaxParseHoveredBlock(target?)`                  | 快捷键按段解析                | 省略 `target` 时查 `:is(:hover)` 取最深元素(Kotlin 就是这么调的;裸 `:hover` 在 quirks 页面恒为空集);定位成功即回传 `PARSE_BLOCK`                     |
 | `__englishSyntaxSetHotkey(descriptor)`                       | 注入时(读 keymap 之后)        | 下发页面兼底 keydown 的键位判据;**传 `null` 表示关掉兼底监听**(keymap 里没有可下发的单段字母数字绑定)                                                |
+
+
+## 2026-09-15 复杂句划分输入的协议影响
+
+外部消息结构未变化,`MESSAGE_VERSION` 与 `CORE_SCHEMA_VERSION` 不升。内部 Token 坐标变化:`GWTC-5.0`/`II.2.1`/`spring.ai.tool` 等点分标识符现在各是一个 Token;两端 tokenizer 正则与优先级一致(URL/邮箱→缩写→点分标识符→数字→普通词→单字符)。因为 core span 与 detail focus 都按 Token ID 定位,缓存版本同步为 core prompt 16 / detail prompt 9。`CORE_STREAM` 与 request/response 字段不变。
