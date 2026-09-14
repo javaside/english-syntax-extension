@@ -14,6 +14,13 @@ import {
   MESSAGE_VERSION,
 } from "./versions";
 
+it("pins the shared analysis versions after the 2026-09-12 batch", () => {
+  // spec D6:core 随 repair 分组(13→14→15),detail 随 MathML token 文本(7→8)。
+  expect(CORE_PROMPT_VERSION).toBe(15);
+  expect(DETAIL_PROMPT_VERSION).toBe(8);
+  expect(CORE_SCHEMA_VERSION).toBe(3);
+});
+
 it("keeps the shared IntelliJ contract synchronized", () => {
   expect(contracts).toMatchObject({
     messageVersion: MESSAGE_VERSION,
