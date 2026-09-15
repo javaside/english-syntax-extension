@@ -2,13 +2,17 @@
 
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## Unreleased — 修复通道坐标与科学页面准确性
+## 1.4.0 — 2026-09-12
 
-这一版先修**修复通道本身在指错位置**的缺陷,再修科学页面的文本表示与标注口径。真机验收(真 Chrome + 真扩展 + 真 DeepSeek,arXiv 2609.04991v1 全页两轮)是本批全部决策的证据来源。
+这一版把英语句法伴读从正文段落扩展到**完整页面语义覆盖**，同时修复复杂句在科学页面上的输入污染、无优先级结构判断与 repair 坐标错位。Chrome 与 IntelliJ 两端继续共享同一套分句、分词、提示词、校验和缓存契约。
 
-**升级后请重新加载扩展并刷新页面;IDEA 插件需要安装新版 zip。** `CORE_PROMPT_VERSION` 升为 `15`(13→14 repair 分组、14→15 引用/编号规则)、`DETAIL_PROMPT_VERSION` 升为 `8`(MathML token 文本),`CORE_SCHEMA_VERSION` 保持 `3`——已有缓存按版本键整体作废,是预期行为。
+**升级后请重新加载扩展并刷新页面；IDEA 插件需要安装新版 zip。** `CORE_PROMPT_VERSION` 由 `10` 升为 `16`，`DETAIL_PROMPT_VERSION` 由 `5` 升为 `9`，`CORE_SCHEMA_VERSION` 保持 `3`。已有 core 与 detail 缓存会按版本键整体作废并重新分析，这是预期行为。
 
-### 复杂句成分划分改进（目标导向诊断）
+### 修复通道与科学页面准确性
+
+本部分先修**修复通道本身在指错位置**的缺陷，再修科学页面的文本表示与标注口径。真机验收（真 Chrome + 真扩展 + 真 DeepSeek，arXiv 2609.04991v1）是相关决策的证据来源。
+
+#### 复杂句成分划分改进（目标导向诊断）
 
 - **失败率随句子复杂度上升的根因不是翻译慢,而是结构输入被污染与规则无优先级**:真机逐句重放显示失败率从 ≤12 词 6.5% 单调升到 >40 词 20.9%;失败句的冒号/括号/引用密度分别是成功句的 4.2×/2.4×/5.1×。本批不再围绕聚合分数调参,而是逐类修正划分入口与结构决策。
 - **脚注 DOM 不再粘句**:LaTeXML `<sup>2</sup>` 曾把 `uncertainties.` 与下一句粘成 97 词畸形输入,模型产出 `FRAGMENT_HEAD("2")`。现只在 DOM 提取层排除脚注;审核发现纯文本启发式误杀 `IV.2` 后已删除。真机该 97 词句与 `recombined.4` 在同版 3 次中均 3/3 恢复成功。
@@ -16,7 +20,7 @@
 - **点分标识符整体化**:`GWTC-5.0`/`II.2.1`/`spring.ai.tool` 不再拆成 `GWTC-5` `.` `0`;双端同步,core/detail 版本为 16/9。真机 `GWTC-*` 标题与脚注句在同版三次均稳定修好。
 - **Han 门只豁免真正不可译的符号 span**:纯引用/标点与含无歧义数学标记的公式不再必然失败;`TCP/IP`、`km/h`、`A/B testing`、`and/or`、`foo_bar` 等含歧义 ASCII 的技术英语仍要求中文,专名 `JSON`/`GWTC-5.0`/`H0`/`GC` 仍须补中文类型。
 
-### 修复
+#### 修复
 
 - **repair 错误按句分组并携带实例坐标**:多句 repair 的错误此前被扁平拼装且全部标着 `sentences[0]`(真机 47/108 个 repair 如此),模型无从判断该改哪一句;component 索引也因「先丢纯标点再重编号」与模型所见 JSON 错位(实测 15 例,错误指向隔壁成分)。现按 `sentenceId` 分组(invalid/missing/duplicate 四类路径 + `rawOccurrence`),错误路径改用原始数组下标,语法邻接仍按语义成分序列判。新增单测覆盖原始下标、语义邻接与成功结果投影；纠正差分脚本的源码路径与 Token 重建后重跑两份真机 artifact：flash 168 例有 9 处路径变化、pro 115 例有 5 处，接受集合、成功成分与错误文案均为 0 差异，符合「仅诊断坐标改变」契约。
 - **公式文本改取可见 MathML**:LaTeXML 的 `alttext` 恒为 TeX 源码,旧实现「alttext 优先」把 `\Lambda`、`H_{0}` 这类源码送进句文本与页面(真机 79/1548 个成分含反斜杠)。现一律读「剔除 annotation/annotation-xml/mphantom/隐藏子树后的可见 MathML 文本」(`Λ`、`H0`),嵌套 math 只读一次,空表示不产出空片段。
@@ -30,38 +34,36 @@
 - **评测 runner 补齐 `--corpus`**:文档描述的开关此前未实现(fixturePath 写死);另支持 `CORE_EVAL_ROOT` 在 worktree 上评测。
 - **页面语料 v2 → v3**:v2 重钉 `spring-np-coordination` / `spring-zero-relative` 的句尾标点边界,消除约 2/20 的 exact 惩罚偏置;v3 按 spec D7 用真页面原文重核 arXiv 图注/表注——v1/v2 里 `arxiv-figure-caption` 与 `arxiv-table-definition` 省略了 `Figure 2:` / `Table 1:` 标签与 `(solid line)` / `(histogram)` 括注,现恢复 verbatim 文本并按生产 tokenizer 重新导出边界。**v3 的 baseline 与 candidate 均未运行**(外部模型额度耗尽),因此本批次没有可引用的 corpus 数字。
 
-### 测试
+#### 测试与验收记录
 
-- Chrome 45 个测试文件 / 1206 个单测全部通过;IntelliJ Kotlin 全绿。lint 保持唯一既有基线错误。
-- E2E 本次完整重跑：37 通过，2 个商店截图用例跳过。构建前置步骤保留子进程输出，失败时不再只显示笼统的 `Command failed`。
-- 验收尚未全部完成：P0 离线差分已按正确源码路径与生产 tokenizer 重跑并通过；小规模真实配对存在模型波动，不构成不劣性证明。页面 corpus candidate 只完成 run1，run2 首次因 provider raw 与 strict artifact subset 不符被拒，随后页面 run2/run3 与 core40 评测因 HTTP 402 `Insufficient Balance` 无法继续，停止付费请求。
+- Chrome 发布候选为 51 个测试文件 / 1250 个单测全部通过；IntelliJ Web 为 5 个测试文件 / 81 个测试通过，Kotlin 测试、插件构建与项目配置校验通过。lint 保持唯一既有基线错误。
+- E2E 发布候选完整重跑：37 通过，2 个商店截图用例跳过。构建前置步骤保留子进程输出，失败时不再只显示笼统的 `Command failed`。
+- 验收尚未全部完成：P0 离线差分已按正确源码路径与生产 tokenizer 重跑并通过；小规模真实配对存在模型波动，不构成不劣性证明。页面 corpus v2 的 candidate 只完成 run1，run2 首次因 provider raw 与 strict artifact subset 不符被拒；之后页面 run2/run3 与 core40 评测因 HTTP 402 `Insufficient Balance` 无法继续，随后冻结的 v3 尚未运行 baseline 或 candidate，停止付费请求。
 - 最新全页 DOM 观察：公式中的 TeX 命令形态为 0、未见邮箱解析卡片；含失败卡片为 37/182，未达到 ≤5% 效果目标。该观察不是已证明的整页覆盖率。审计器对这份报告的三项里,Figure 2 判为校验失败,其余两项因该报告不含逐句终态证据而报 `not-terminal`——修正后的审计器不把 DOM 卡片当通过,因此本批次尚未产出可信的静默错标率。
 - 单个 artifact 的 `report.transitions.correctToWrongOrFailure` 描述首轮到修复终态的转移，不能当成 baseline/candidate 跨版本回归结论；完整配对验收仍待完成。
-- 外部模型额度已耗尽（DeepSeek 402 `Insufficient Balance`、Zhipu 达到周期上限、OpenAI 未被本批使用），因此**真机全页运行与两套 corpus 配对都停在这里**；不依赖外部模型的确定性验证已全部完成：Chrome 1218 单测、37 E2E（含 arxiv 整页覆盖，其中作者邮箱单元按 `reference-metadata` 排除）、IntelliJ web 81 测试与 `test buildPlugin verifyPluginProjectConfiguration` 全过，lint 保持唯一基线错误，build/format/docs:drift 通过。
+- 外部模型额度已耗尽（DeepSeek 402 `Insufficient Balance`、Zhipu 达到周期上限、OpenAI 未被本批使用），因此**真机全页运行与两套 corpus 配对都停在这里**；不依赖外部模型的确定性验证已全部完成，发布候选的最终门禁数字见本节首条。
 
-## Unreleased — 页面级英文句法覆盖
+### 页面级英文句法覆盖
 
 这一版把「翻得好」的目标升级为「**看得见的英文页面都被覆盖**」:文档标题、章节标题、列表项、定义项、表格题名/表头/自然语言单元格、图注、脚注、callout 与参考文献题名等短语义单元进入页面语义清单并按分类型门槛自动分析;科学文档(MathML/公式/占位符)有专门的文本归一化;双端新增译文质量硬门,拒绝「英文原样回显当译文」。
 
-**升级后请重新加载扩展并刷新页面；IDEA 插件需要安装新版 zip。** `CORE_PROMPT_VERSION` 升为 `13`、`DETAIL_PROMPT_VERSION` 升为 `7`（`CORE_SCHEMA_VERSION` 保持 `3`，结果 JSON 形状未变），**已有 core 与 detail 缓存按版本键整体作废、全量重取——这是预期行为**，升级后首次解析会重新请求全部句子。
-
-### 新增
+#### 新增
 
 - **页面语义清单（`page-inventory.ts`）**：自动扫描改为「语义单元枚举 → 分类型门槛 → principal root → 父子去重」的清单投影，枚举标题/正文/列表/定义/表格/图注/脚注/callout/文献题名/松散块，并给每个单元一个明确结局——自动分析，或 14 种稳定排除原因之一（`outside-principal-content` / `excluded-region` / `unsafe-interactive` / `hidden` / `non-english` / `no-readable-words` / `loose-block-too-short` / `display-math` / `math-auxiliary` / `conversion-placeholder` / `reference-metadata` / `unsupported-reference-layout` / `covered-by-child` / `unsafe-partial-replacement`）。排除不再静默消失。**统一 20 字符门取消**：标题/dt/th/caption 有可读英文实词即可，p/li/dd/td/figcaption/callout 靠语义标签 + principal root + 英文占比把关，仅 loose div/section/span 保留 20 字符。
-- **科学 DOM 文本归一化（`readable-dom-text.ts`）**：`<math>` 只取一个稳定表示（`alttext` 优先）、annotation 与 assistive fallback 不重复、Unicode 空白折叠；展示公式、`\Acp` 转换占位符、作者邮箱与无题名文献不再进入模型。
+- **科学 DOM 文本归一化（`readable-dom-text.ts`）**：页面覆盖初版让 `<math>` 只取一个稳定表示（当时为 `alttext` 优先）、annotation 与 assistive fallback 不重复，并折叠 Unicode 空白；后续真机发现 LaTeXML `alttext` 是 TeX 源码，本版最终实现已进一步改为读取可见 MathML（见上文“公式文本改取可见 MathML”）。展示公式、`\Acp` 转换占位符、作者邮箱与无题名文献不再进入模型。
 - **译文质量硬门（双端逐字一致）**：最终成分的 `translation` 必须至少含一个 Unicode Han 字符，且不得在 NFKC + 大小写/空白折叠后等于英文原文 span——回显与只有大小写/空白差异的回显都拒绝，进现有至多两轮修复配额，最终失败不写缓存；旧缓存里的回显值在读取时按 miss 重取。专名不是省略中文的理由：`JSON 数据格式`、`Spring AI 框架`、`GWTC-5.0 引力波事件目录`、`哈勃常数 H0` 这类「保留英文 + 补中文类型」合法，纯 `JSON` / `Spring AI` 回显拒绝。共享边界 case 由 `shared-fixtures/translation-quality.json` 双端 replay（15 个 `hanScriptBoundary` case 钉住 TS `\p{Script=Han}` 与 JVM `\p{IsHan}` 的跨区块等价）。
 - **页面级覆盖 E2E（`tests/e2e/page-coverage.spec.ts`）**：Spring AI 与 arXiv 两份 coverage fixture（HTML + 冻结 inventory）经生产 segmenter 得期望句集合，钉住「扫描发现 → 逐块滚动解析 → 请求集合全等且唯一 → 每卡译文含 Han → STOP 无损还原 → 重开缓存零请求」全链路；另有一例三轮非法脚本钉住失败可见、不写缓存与重新解析强制重发。
 
-### 修复
+#### 修复
 
 - **双端扫描覆盖短语义文档块**：Chrome 的语义标签免 20 字符门（loose 块保留）；IntelliJ Markdown 预览纳入 `dt/dd/caption/th/td/figcaption`、`.footnotes` 内段落与 `<HARD-GATE>` 一类连字符自定义元素，短语义标签有英文实词即可，表格与脚注不再整体排除（改由语义子单元 + 父子去重决定）。显式手势照旧不套自动扫描的取舍（无长度/正文容器门，英文占比仍适用）。
 - **片段允许内嵌完整定语从句（fragment-relative 放行）**：`An API` + `that returns JSON responses` 这类「片段主体 + 完整定语从句」合法，`FRAGMENT_FORBIDDEN_ROLES` 只移出 `ATTRIBUTIVE_CLAUSE` 一类，其余从句门（最小长度、follower 门、尾介词豁免、主语从句首词闭集）照旧约束放行的从句。
 - **页面句型提示词重写（`CORE_PROMPT_VERSION` 13）**：删除与黄金集 conventions 重复的旧条目，页面语料新句型（arXiv 冒号长标题四段口径、VP/NP 并列、finite/non-finite when、allow/force/let 宾语控制、零关系词定语从句、非限定补足成分整体 `COMPLEMENT`、PP 依附四类映射）按「正例 + 最接近反例」对偶教学；detail/sentence-details 修复轮补输出模板与完整中文角色词表（`DETAIL_PROMPT_VERSION` 7）。单句规则段预算实测 8207 → 10903 字符（+33%，预算测试钉住 ≤1.35×）。
 - **评分器预测尾标点归一化**：评分前对预测成分做「纯标点成分丢弃 + 句尾终止标点尾巴裁剪」（与生产 validator `semanticComponents` 同口径；gold 不动，`fragment-portable-api` 尾标点例外保持可区分）。归一化把三次配对评测的记账差对称移除：core40 整句 exact mean 0.84167（35/33/33 of 40）、页面目标 corpus 0.46667（10/9/9 of 20）、finalFailures 3 → 0、correctToWrongOrFailure 两套口径均为 0、role accuracy 不降；仍非 exact 的合并才是真退化（系表合并、OBJECT 吞分词后置 ATTRIBUTE、图注双重合并），连同 `nonfinite-when-phrase` 教学空隙记为 v14 回归靶。
 
-### 测试
+#### 历史验收记录
 
-- Chrome 43 个测试文件 / 1169 个单测与 37 个 Playwright E2E（新增页面级覆盖 3 例）全部通过；lint 保持唯一既有基线错误。
+- 页面级覆盖功能落地时，Chrome 43 个测试文件 / 1169 个单测与 37 个 Playwright E2E（新增页面级覆盖 3 例）全部通过；lint 保持唯一既有基线错误。
 - IntelliJ Web 测试、Kotlin 测试、插件构建与项目配置校验通过；动过 `shared-fixtures/` 时 Gradle 测试需 `--rerun-tasks`（配置缓存会把 fixture 变更标成 UP-TO-DATE）。
 - 两套 corpus（固定 40 句 + 页面目标 20 句）各完成三次 `pipeline` 配对评测，`--compare-manifest` 机器校验 corpus 与全部运行配置一致；`shared-fixtures/visible-page-core-evaluation-corpus.json` 冻结页面目标语料（浮动 Spring 来源带内嵌 `sourceEvidence`）。
 
