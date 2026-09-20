@@ -205,6 +205,46 @@ class PromptsTest {
   }
 
   @Test
+  fun `core and repair prompts teach natural local glosses for a noun head and its of phrase`() {
+    val input = sentence("The service works.")
+    val prompts = listOf(
+      buildCorePrompt(listOf(input)),
+      buildRepairPrompt(
+        listOf(input),
+        listOf(
+          RepairErrorGroup(
+            sentenceId = "s1",
+            rawOccurrence = 0,
+            kind = "invalid",
+            errors = listOf(ValidationError("sentences[0].components[0]", "invalid")),
+          ),
+        ),
+        buildJsonObject { put("sentences", buildJsonArray {}) },
+      ),
+    )
+
+    prompts.forEach { prompt ->
+      assertTrue(prompt.contains("\"the development\" is \"开发过程\", not \"该开发\""))
+      assertTrue(prompt.contains("\"of applications\" is \"应用程序的\", not \"的\""))
+    }
+  }
+
+  @Test
+  fun `detail prompts teach natural local glosses for a noun head and its postmodifying of phrase`() {
+    val input = sentence("The service works.")
+    val core = CoreAnalysis(
+      sentenceId = "s1",
+      components = listOf(CoreComponent(0, 1, GrammarRole.SUBJECT, "该服务")),
+      modelProfileId = "profile-1",
+    )
+    val prompt = buildDetailPrompt(input, core, TokenRange(0, 1))
+
+    assertTrue(prompt.contains("translate \"the development\" as \"开发过程\", not \"该开发\""))
+    assertTrue(prompt.contains("translate \"of applications\" as \"应用程序的\""))
+    assertTrue(prompt.contains("explain their combined meaning as \"应用程序的开发过程\""))
+  }
+
+  @Test
   fun `detail prompt starts with shared line and embeds verified core and focus`() {
     val core = CoreAnalysis(
       sentenceId = "s1",

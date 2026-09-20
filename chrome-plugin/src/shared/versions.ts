@@ -1,4 +1,4 @@
 export const MESSAGE_VERSION = 1 as const;
 export const CORE_SCHEMA_VERSION = 3 as const;
-export const CORE_PROMPT_VERSION = 16 as const;
-export const DETAIL_PROMPT_VERSION = 9 as const;
+export const CORE_PROMPT_VERSION = 17 as const;
+export const DETAIL_PROMPT_VERSION = 10 as const;

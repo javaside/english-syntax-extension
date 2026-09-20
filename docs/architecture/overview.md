@@ -121,7 +121,7 @@ MV3 把扩展拆成互不共享内存的几个世界。**每个模块能做什�
   │            │        └─ adapter.completeJson[Streaming]()
   │            │              流式时逐分片经 CoreStreamParser 上报暂定成分
   │            │              → SW 经端口推 CORE_STREAM(已脱敏)
-  │            ├─ validateCoreBatch()  结构/覆盖率 + 十五条本地语法粒度硬约束 + 译文质量门(含 Han、拒英文回显)
+  │            ├─ validateCoreBatch()  结构/覆盖率 + 十六条本地语法粒度硬约束 + 译文质量门(含 Han、拒英文回显)
   │            ├─ 不合格 → 错误文案原样进入最多两轮逐轮收窄 repair(jumpQueue,同优先级插队)
   │            └─ 合格 → 写缓存
   │
@@ -151,7 +151,7 @@ MV3 把扩展拆成互不共享内存的几个世界。**每个模块能做什�
 
 **预载路径**(选项页开启「预载成分详解」后):每句 core 就绪即 `DetailPrefetcher.enqueue()`,发 `PREFETCH_SENTENCE_DETAILS`——**一次整句请求覆盖该句所有缺失成分**,结果逐成分写进**与点击路径完全相同的缓存键**。于是后续点击零模型调用。
 
-> 缓存键 = 规范化句文本 + schema 版本 + 提示词版本(core 用 `CORE_PROMPT_VERSION`,详解用 `DETAIL_PROMPT_VERSION`)+ focus 区间,**与 profile / 模型无关**。改任一侧的键构造必须两侧同步,并用对方路径读回验证。当前契约为 core `16` / detail `9`(版本 16 把冒号结构收口为有优先级的判定过程,并将点分标识符整体化为单 Token;Token 坐标变化使 detail 同步升到 9;旧 core/detail 缓存按版本键**整体作废、全量重取**——这是预期行为,不是缺陷),版本四文件(`versions.ts` / `Domain.kt` / `contracts.json` / `core-prompt-parity.json`)必须一次同步。
+> 缓存键 = 规范化句文本 + schema 版本 + 提示词版本(core 用 `CORE_PROMPT_VERSION`,详解用 `DETAIL_PROMPT_VERSION`)+ focus 区间,**与 profile / 模型无关**。改任一侧的键构造必须两侧同步,并用对方路径读回验证。当前契约为 core `17` / detail `10`(core 17 在 16 的冒号/点分标识符口径上补充名词中心的自然局部译文;detail 10 新增名词中心与后置 `of` 短语的自然局部译文教学;core 与 detail 旧缓存均按新提示词版本键作废),版本四文件(`versions.ts` / `Domain.kt` / `contracts.json` / `core-prompt-parity.json`)必须一次同步。
 
 ## 6. 两个状态机
 

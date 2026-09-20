@@ -14,12 +14,11 @@ import {
   MESSAGE_VERSION,
 } from "./versions";
 
-it("pins the shared analysis versions after the 2026-09-12 batch", () => {
-  // spec D6:core 随 repair 分组(13→14→15);15→16 新增 Label-binding 规则。
-  // 16 同批:分词把 GWTC-5.0 / II.2.2 / spring.ai.tool 整体化,token 坐标全变,
-  // 所以 core 与 detail 必须同时提升(detail 8→9),缓存按版本键整体作废。
-  expect(CORE_PROMPT_VERSION).toBe(16);
-  expect(DETAIL_PROMPT_VERSION).toBe(9);
+it("pins the shared analysis versions after the of-phrase fix", () => {
+  // core/repair 与 detail 都新增局部译文教学，分别升到 17/10，确保旧的整块
+  // of-phrase core 与“该开发”详解缓存一起失效。
+  expect(CORE_PROMPT_VERSION).toBe(17);
+  expect(DETAIL_PROMPT_VERSION).toBe(10);
   expect(CORE_SCHEMA_VERSION).toBe(3);
 });
 

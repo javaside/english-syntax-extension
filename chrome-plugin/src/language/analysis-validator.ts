@@ -291,6 +291,34 @@ const CLAUSE_INTERNAL_FOLLOWERS: ReadonlySet<GrammarRole> = new Set([
   GrammarRole.OBJECT,
   GrammarRole.PREDICATIVE,
 ]);
+/**
+ * 名词性成分中，`of` 紧跟在**高把握名词中心词**之后，表示它吞入了本应单列的后置
+ * `of` 短语（`the development of applications` → 宾语只应到 `development`）。
+ *
+ * 角色集合与黄金集的同名机器断言一致；从句、状语与 `of ...` 自身(index 0)不检查。
+ * **判据刻意收窄到「of 前一个实词命中 `OF_HEAD_NOUNS` 白名单」**而不是「成分里出现
+ * 非首位 of」：后者会误拒一大类合法结构——系表/宾补里的 `made of steel`(分词)、
+ * `capable of handling failures`(形容词)、专名 `Bank of America`,它们的 of 前一个词
+ * 都不是「带后置定语的名词中心」。误拒会把正确分析送进无意义的修复轮,所以白名单只收
+ * 极高把握、几乎总带后置 of 定语的抽象名词,宁可漏判也不误伤(accuracy 优先于召回)。
+ */
+const NOUN_PHRASE_ROLES: ReadonlySet<GrammarRole> = new Set([
+  GrammarRole.SUBJECT,
+  GrammarRole.OBJECT,
+  GrammarRole.PREDICATIVE,
+  GrammarRole.COMPLEMENT,
+  GrammarRole.ATTRIBUTE,
+  GrammarRole.APPOSITIVE,
+]);
+/**
+ * 「几乎总带后置 of 定语」的抽象名词中心词白名单。命中即高把握地说明成分吞入了后置
+ * of 短语。先只收 `development`(用户报告的 `the development of applications`);扩表
+ * 必须逐词确认它作为 of 前一个词时几乎总是「名词中心 + 后置定语」,不能是分词/形容词/
+ * 专名兼类。
+ */
+const OF_HEAD_NOUNS: ReadonlySet<string> = new Set(["development"]);
+const SWALLOWED_OF_PHRASE_MESSAGE =
+  'a noun-phrase component must stop before a postmodifying of-phrase; keep the noun head in its current role and emit the span from "of" through its object as a separate ATTRIBUTE';
 
 /**
  * 「几乎不可能悬垂」的介词。成分以它们收尾就说明介词的宾语被切了出去
@@ -484,6 +512,18 @@ function collectGrammarErrors(
         componentPath,
         "an ATTRIBUTIVE_CLAUSE keeps its whole internal structure in one component; absorb the object or predicative that follows it",
       );
+    }
+
+    // 名词性成分吞入后置 of 短语 = 截止位置过晚。of 短语自身以 of 开头，index=0 不判。
+    // 只有 of 前一个实词命中高把握名词中心词白名单才拒绝，避免误伤 made of / capable of /
+    // Bank of America 这类 of 前不是名词中心的合法结构。
+    const ofIndex = words.indexOf("of");
+    if (
+      NOUN_PHRASE_ROLES.has(component.role) &&
+      ofIndex >= 1 &&
+      OF_HEAD_NOUNS.has(words[ofIndex - 1]!)
+    ) {
+      addError(errors, componentPath, SWALLOWED_OF_PHRASE_MESSAGE);
     }
 
     // 短语成分以「必带宾语的介词」收尾 = 介词的宾语被切了出去。单词介词另有专门的硬门。

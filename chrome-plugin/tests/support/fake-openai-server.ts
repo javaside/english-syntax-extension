@@ -192,6 +192,42 @@ interface GeneratedComponent {
  * keeps this fake independent of the fixture wording; the E2E assertions are
  * structural (component count, three rows) and never read the role label.
  */
+const NOMINAL_ROLES = new Set([
+  "SUBJECT",
+  "OBJECT",
+  "PREDICATIVE",
+  "COMPLEMENT",
+  "ATTRIBUTE",
+  "APPOSITIVE",
+]);
+
+/** Keep deterministic fake-model output compliant with the production postnominal-of rule. */
+function splitPostmodifyingOfPhrases(
+  sentence: PromptSentence,
+  components: readonly GeneratedComponent[],
+  translationSuffix = "",
+): GeneratedComponent[] {
+  return components.flatMap((component) => {
+    if (!NOMINAL_ROLES.has(component.role)) return [component];
+    const words = sentence.tokens.filter(
+      (token) =>
+        !token.punctuation && token.id >= component.startToken && token.id <= component.endToken,
+    );
+    const cuts = words.flatMap((token, index) =>
+      index >= 1 && token.text.toLowerCase() === "of" ? [index] : [],
+    );
+    if (cuts.length === 0) return [component];
+
+    const starts = [0, ...cuts];
+    return starts.map((start, index) => ({
+      startToken: words[start]!.id,
+      endToken: words[(starts[index + 1] ?? words.length) - 1]!.id,
+      role: index === 0 ? component.role : "ATTRIBUTE",
+      translation: index === 0 ? component.translation : `后置定语${translationSuffix}`,
+    }));
+  });
+}
+
 function autoComponents(sentence: PromptSentence, translationSuffix = ""): GeneratedComponent[] {
   const lexical = sentence.tokens.filter((token) => !token.punctuation);
   const first = lexical[0]!;
@@ -207,20 +243,24 @@ function autoComponents(sentence: PromptSentence, translationSuffix = ""): Gener
     ];
   }
   const second = lexical[1]!;
-  return [
-    {
-      startToken: first.id,
-      endToken: first.id,
-      role: "SUBJECT",
-      translation: `主语${translationSuffix}`,
-    },
-    {
-      startToken: second.id,
-      endToken: last.id,
-      role: "OBJECT",
-      translation: `其余成分${translationSuffix}`,
-    },
-  ];
+  return splitPostmodifyingOfPhrases(
+    sentence,
+    [
+      {
+        startToken: first.id,
+        endToken: first.id,
+        role: "SUBJECT",
+        translation: `主语${translationSuffix}`,
+      },
+      {
+        startToken: second.id,
+        endToken: last.id,
+        role: "OBJECT",
+        translation: `其余成分${translationSuffix}`,
+      },
+    ],
+    translationSuffix,
+  );
 }
 
 function coverageGapComponents(): GeneratedComponent[] {
@@ -316,20 +356,24 @@ function repairComponents(sentence: PromptSentence, translationSuffix = ""): Gen
     const commaToken = sentence.tokens.find((token) => token.text === ",");
     let headEnd = lexical[1]!.id;
     if (commaToken !== undefined && commaToken.id > first.id) headEnd = commaToken.id - 1;
-    return [
-      {
-        startToken: first.id,
-        endToken: headEnd,
-        role: "ADVERBIAL",
-        translation: `介词短语${translationSuffix}`,
-      },
-      {
-        startToken: headEnd + 1,
-        endToken: lexical.at(-1)!.id,
-        role: "OBJECT",
-        translation: `其余成分${translationSuffix}`,
-      },
-    ];
+    return splitPostmodifyingOfPhrases(
+      sentence,
+      [
+        {
+          startToken: first.id,
+          endToken: headEnd,
+          role: "ADVERBIAL",
+          translation: `介词短语${translationSuffix}`,
+        },
+        {
+          startToken: headEnd + 1,
+          endToken: lexical.at(-1)!.id,
+          role: "OBJECT",
+          translation: `其余成分${translationSuffix}`,
+        },
+      ],
+      translationSuffix,
+    );
   }
   return autoComponents(sentence, translationSuffix);
 }

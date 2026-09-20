@@ -19,7 +19,8 @@
     "a non-clausal fragment must contain at most one FRAGMENT_HEAD",
     "FRAGMENT_HEAD marks a non-clausal fragment",
     "translation must include a meaningful Chinese gloss",
-    "auxiliary/modal verb \"can\" must be merged"
+    "auxiliary/modal verb \"can\" must be merged",
+    "a noun-phrase component must stop before a postmodifying of-phrase"
   ],
   "cases": [
     {
@@ -787,6 +788,47 @@
         {
           "path": "sentences[0].components",
           "message": "FRAGMENT_HEAD marks a non-clausal fragment and must not be mixed with clause-level SUBJECT, PREDICATE, OBJECT, PREDICATIVE, COMPLEMENT, SUBJECT_CLAUSE, OBJECT_CLAUSE, PREDICATIVE_CLAUSE, ADVERBIAL_CLAUSE, or the deprecated COORDINATE_CLAUSE; a whole ATTRIBUTIVE_CLAUSE is the only clause role allowed beside a FRAGMENT_HEAD"
+        }
+      ]
+    },
+    {
+      "id": "swallowed-of-phrase",
+      "sentence": {
+        "id": "swallowed-of-phrase",
+        "text": "The project simplifies the development of applications."
+      },
+      "raw": {
+        "sentences": [
+          {
+            "sentenceId": "swallowed-of-phrase",
+            "components": [
+              {
+                "startToken": 0,
+                "endToken": 1,
+                "role": "SUBJECT",
+                "translation": "该项目"
+              },
+              {
+                "startToken": 2,
+                "endToken": 2,
+                "role": "PREDICATE",
+                "translation": "简化"
+              },
+              {
+                "startToken": 3,
+                "endToken": 6,
+                "role": "OBJECT",
+                "translation": "应用程序的开发"
+              }
+            ]
+          }
+        ]
+      },
+      "accepted": false,
+      "expected": [
+        {
+          "path": "sentences[0].components[2]",
+          "message": "a noun-phrase component must stop before a postmodifying of-phrase; keep the noun head in its current role and emit the span from \"of\" through its object as a separate ATTRIBUTE"
         }
       ]
     },

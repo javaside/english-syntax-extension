@@ -6,7 +6,7 @@
 
 这一版把英语句法伴读从正文段落扩展到**完整页面语义覆盖**，同时修复复杂句在科学页面上的输入污染、无优先级结构判断与 repair 坐标错位。Chrome 与 IntelliJ 两端继续共享同一套分句、分词、提示词、校验和缓存契约。
 
-**升级后请重新加载扩展并刷新页面；IDEA 插件需要安装新版 zip。** `CORE_PROMPT_VERSION` 由 `10` 升为 `16`，`DETAIL_PROMPT_VERSION` 由 `5` 升为 `9`，`CORE_SCHEMA_VERSION` 保持 `3`。已有 core 与 detail 缓存会按版本键整体作废并重新分析，这是预期行为。
+**升级后请重新加载扩展并刷新页面；IDEA 插件需要安装新版 zip。** `CORE_PROMPT_VERSION` 由 `10` 升为 `17`，`DETAIL_PROMPT_VERSION` 由 `5` 升为 `10`，`CORE_SCHEMA_VERSION` 保持 `3`。已有 core 与 detail 缓存会按版本键整体作废并重新分析，这是预期行为。
 
 ### 修复通道与科学页面准确性
 
@@ -18,6 +18,7 @@
 - **脚注 DOM 不再粘句**:LaTeXML `<sup>2</sup>` 曾把 `uncertainties.` 与下一句粘成 97 词畸形输入,模型产出 `FRAGMENT_HEAD("2")`。现只在 DOM 提取层排除脚注;审核发现纯文本启发式误杀 `IV.2` 后已删除。真机该 97 词句与 `recombined.4` 在同版 3 次中均 3/3 恢复成功。
 - **冒号结构改为有优先级的决策过程**:`COLON_STRUCTURE_RULE` 先判冒号后是否完整分句/疑问句(字段标签→`INDEPENDENT_ELEMENT`),再判 section/caption label(label+中心词→一个 `FRAGMENT_HEAD`),最后判长标题重命名(`APPOSITIVE`)。替代三条互相平铺的规则。
 - **点分标识符整体化**:`GWTC-5.0`/`II.2.1`/`spring.ai.tool` 不再拆成 `GWTC-5` `.` `0`;双端同步,core/detail 版本为 16/9。真机 `GWTC-*` 标题与脚注句在同版三次均稳定修好。
+- **名词后的 `of` 短语不再被吞进中心名词成分**：`the development of applications` 若整块标为 `OBJECT`，双端 validator 现在会要求在 `of` 前切开为 `OBJECT("the development") + ATTRIBUTE("of applications")`；从句、状语和以 `of` 开头的合法定语不受影响。core/repair/detail 同步钉住「开发过程」+「应用程序的」的自然局部译文，避免详解出现“该开发”；core/detail 版本升为 17/10，旧缓存自动失效。
 - **Han 门只豁免真正不可译的符号 span**:纯引用/标点与含无歧义数学标记的公式不再必然失败;`TCP/IP`、`km/h`、`A/B testing`、`and/or`、`foo_bar` 等含歧义 ASCII 的技术英语仍要求中文,专名 `JSON`/`GWTC-5.0`/`H0`/`GC` 仍须补中文类型。
 
 #### 修复
@@ -36,7 +37,7 @@
 
 #### 测试与验收记录
 
-- Chrome 发布候选为 51 个测试文件 / 1250 个单测全部通过；IntelliJ Web 为 5 个测试文件 / 81 个测试通过，Kotlin 测试、插件构建与项目配置校验通过。lint 保持唯一既有基线错误。
+- Chrome 发布候选为 51 个测试文件 / 1255 个单测全部通过；IntelliJ Web 为 5 个测试文件 / 81 个测试通过，Kotlin 312 个测试、插件构建与项目配置校验通过。lint 保持唯一既有基线错误。
 - E2E 发布候选完整重跑：37 通过，2 个商店截图用例跳过。构建前置步骤保留子进程输出，失败时不再只显示笼统的 `Command failed`。
 - 验收尚未全部完成：P0 离线差分已按正确源码路径与生产 tokenizer 重跑并通过；小规模真实配对存在模型波动，不构成不劣性证明。页面 corpus v2 的 candidate 只完成 run1，run2 首次因 provider raw 与 strict artifact subset 不符被拒；之后页面 run2/run3 与 core40 评测因 HTTP 402 `Insufficient Balance` 无法继续，随后冻结的 v3 尚未运行 baseline 或 candidate，停止付费请求。
 - 最新全页 DOM 观察：公式中的 TeX 命令形态为 0、未见邮箱解析卡片；含失败卡片为 37/182，未达到 ≤5% 效果目标。该观察不是已证明的整页覆盖率。审计器对这份报告的三项里,Figure 2 判为校验失败,其余两项因该报告不含逐句终态证据而报 `not-terminal`——修正后的审计器不把 DOM 卡片当通过,因此本批次尚未产出可信的静默错标率。

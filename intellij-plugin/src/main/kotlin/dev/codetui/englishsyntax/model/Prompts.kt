@@ -176,6 +176,10 @@ private val CORE_OUTPUT_SHAPE = listOf(
  */
 internal const val CHINESE_ROLE_GLOSSARY =
   "Use concise Chinese grammatical terms for roles (主语/谓语/宾语/定语/状语/表语/补语/同位语/独立成分/片段主体/系动词/引导词/连词 etc.), never English enum values."
+private const val LOCAL_GLOSS_RULE =
+  "For a noun followed by an of-phrase, keep each local gloss natural and composable: " +
+    "translate \"the development\" as \"开发过程\", not \"该开发\"; translate \"of applications\" as \"应用程序的\"; " +
+    "explain their combined meaning as \"应用程序的开发过程\"."
 
 internal val DETAIL_OUTPUT_SHAPE = listOf(
   "Output exactly one JSON object of this shape:",
@@ -183,6 +187,7 @@ internal val DETAIL_OUTPUT_SHAPE = listOf(
   "Echo the supplied sentenceId and focus unchanged. Write explanations, grammar points, and every structure's role field in Chinese. $CHINESE_ROLE_GLOSSARY",
   "The structures array must break down only the internal components of the focus range. Every structure must stay inside focus, be ordered by Token ID, and be disjoint from every other structure; never return a whole span and then repeat its nested words or phrases. When the focus contains multiple lexical Tokens, never return a single structure that covers the entire focus — split it into meaningful non-overlapping sub-components; an indivisible one-Token focus may return one structure (subject, predicate, object, clauses, etc.).",
   "Give every structure a concise Chinese translation of exactly its own English text in the translation field (a few words, like a gloss under the phrase); keep the longer analysis in explanation. The translation field must be written in Chinese characters (中文译文) — copying the English words unchanged is invalid.",
+  LOCAL_GLOSS_RULE,
   MINIFIED_OUTPUT,
 ).joinToString("\n")
 
@@ -193,6 +198,7 @@ internal val SENTENCE_DETAILS_OUTPUT_SHAPE = listOf(
   "Write explanations, grammar points, and every structure's role field in Chinese. $CHINESE_ROLE_GLOSSARY",
   "Each entry's structures array must break down only the internal components of its focus range. Every structure must stay inside that focus, be ordered by Token ID, and be disjoint from every other structure; never return a whole span and then repeat its nested words or phrases. When the focus contains multiple lexical Tokens, never return a single structure that covers the entire focus — split it into meaningful non-overlapping sub-components; an indivisible one-Token focus may return one structure (subject, predicate, object, clauses, etc.).",
   "Give every structure a concise Chinese translation of exactly its own English text in the translation field (a few words, like a gloss under the phrase); keep the longer analysis in explanation. The translation field must be written in Chinese characters (中文译文) — copying the English words unchanged is invalid.",
+  LOCAL_GLOSS_RULE,
   MINIFIED_OUTPUT,
 ).joinToString("\n")
 
@@ -221,7 +227,7 @@ private val CORE_ANALYSIS_RULES: List<String> = listOf(
   PREPOSITIONAL_PHRASE_RULE,
   PEER_COMPONENT_RULE,
   "Give every component a concise, non-empty Chinese translation that renders everything the component covers rather than only its head word: " +
-    "\"incorporate artificial intelligence functionality\" is \"整合人工智能功能\", not \"整合\", and \"of applications\" is \"应用程序的\", not \"的\". " +
+    "\"incorporate artificial intelligence functionality\" is \"整合人工智能功能\", not \"整合\"; \"the development\" is \"开发过程\", not \"该开发\"; and \"of applications\" is \"应用程序的\", not \"的\". " +
     "Proper names keep their English form and add a short Chinese type: \"Spring AI 框架\", \"JSON 数据格式\", \"哈勃常数 H0\"; a translation that only copies or echoes the English span is invalid and will be rejected.",
 )
 

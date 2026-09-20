@@ -254,6 +254,21 @@ describe("model-facing sentence payload", () => {
   });
 });
 
+describe("detail local translation teaching", () => {
+  it("teaches natural glosses for a noun head and its postmodifying of-phrase", () => {
+    const prompts = [
+      buildDetailPrompt(sentence, core, { startToken: 0, endToken: 1 }),
+      buildSentenceDetailsPrompt(sentence, core, [{ startToken: 0, endToken: 1 }]),
+    ];
+
+    for (const prompt of prompts) {
+      expect(prompt).toContain('translate "the development" as "开发过程", not "该开发"');
+      expect(prompt).toContain('translate "of applications" as "应用程序的"');
+      expect(prompt).toContain('explain their combined meaning as "应用程序的开发过程"');
+    }
+  });
+});
+
 describe("buildSentenceDetailsPrompt", () => {
   it("lists only the requested focus ranges and ends with them", () => {
     const prompt = buildSentenceDetailsPrompt(sentence, core, [
@@ -412,6 +427,15 @@ describe("页面句型教学(版本 13 重写)", () => {
     expect(prompt).toContain(
       '"pay attention to the details" is PREDICATE "pay" plus OBJECT "attention" plus ATTRIBUTE "to the details"',
     );
+  });
+
+  it("requires natural local glosses in both core and repair prompts", () => {
+    const prompts = [buildCorePrompt([sentence]), buildRepairPrompt([sentence], [repairGroup], {})];
+
+    for (const prompt of prompts) {
+      expect(prompt).toContain('"the development" is "开发过程", not "该开发"');
+      expect(prompt).toContain('"of applications" is "应用程序的", not "的"');
+    }
   });
 
   it("requires a Chinese gloss per component and Chinese-typed proper names, rejecting English echo", () => {

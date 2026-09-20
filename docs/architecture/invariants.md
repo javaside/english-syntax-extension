@@ -230,11 +230,11 @@
 
 ### I-17.2 本地可判的语法粒度规则必须进入双端 validator
 
-**规则** 不能只在 prompt 里要求模型遵守；TS/Kotlin `validateCoreBatch` 必须同步执行十五条可判硬门（完整清单与逐条理由见 [protocol.md](./protocol.md) 覆盖率规则第 6–19 条；`CORE_PROMPT_VERSION` 11 起含 `FRAGMENT_HEAD` 的两条边界门）。`SUBJECT_CLAUSE_INTRODUCERS = 15` 的闭集钉住主语从句首词；bare-preposition 仅对 role 不是 `CONJUNCTION`、去标点后恰好一个 lexical word 且命中**保守的高把握“必须带宾语”白名单**时生效；`after/before/down/off/over/since/until/throughout/around/inside/outside` 等常见副词/表语/连词兼类词不收。grammar 是否执行只看结构可信度（全部 component 都有可用 range/role/translation、区间句内、有序不重叠、非纯标点），不得被 unknown field、translation too long、sentenceId 等非结构错误阻断；两类错误必须可同次报告。错误英文文案逐字一致。
+**规则** 不能只在 prompt 里要求模型遵守；TS/Kotlin `validateCoreBatch` 必须同步执行十六条可判硬门（完整清单与逐条理由见 [protocol.md](./protocol.md) 覆盖率规则第 6–20 条；`CORE_PROMPT_VERSION` 11 起含 `FRAGMENT_HEAD` 的两条边界门）。`SUBJECT_CLAUSE_INTRODUCERS = 15` 的闭集钉住主语从句首词；bare-preposition 仅对 role 不是 `CONJUNCTION`、去标点后恰好一个 lexical word 且命中**保守的高把握“必须带宾语”白名单**时生效；`after/before/down/off/over/since/until/throughout/around/inside/outside` 等常见副词/表语/连词兼类词不收。grammar 是否执行只看结构可信度（全部 component 都有可用 range/role/translation、区间句内、有序不重叠、非纯标点），不得被 unknown field、translation too long、sentenceId 等非结构错误阻断；两类错误必须可同次报告。错误英文文案逐字一致。
 
 **为什么** prompt 只是生成建议，未被 validator 拒绝的违规结果会直接进入跨 profile 共用缓存。错误文案又会被 repair prompt 原样引用，因此它同时是可执行修复指令。
 
-**症状** 模型偶发把动词链/介词短语切碎或把简单句套成单个并列分句，首轮仍被当作成功缓存；双端若文案不同，同一错误会收到不同 repair 指令。
+**症状** 模型偶发把动词链/介词短语切碎、把 `the development of applications` 整块吞为宾语，或把简单句套成单个并列分句，首轮仍被当作成功缓存；双端若文案不同，同一错误会收到不同 repair 指令。
 
 **守护测试** 双端 `AnalysisValidatorTest` / `analysis-validator.test.ts` 的各类语法粒度用例，正反两侧都要有（每条硬门既有 reject 用例，也有证明它不误拒的 accept 用例：祈使句无主语、以情态动词开头的动词组、`announced that`、有 `CONJUNCTION` 的从属连词起首并列分句、三实词以内的片段、恰一个 `FRAGMENT_HEAD` 的非分句片段）。单成分片段语义角色 `{FRAGMENT_HEAD, INDEPENDENT_ELEMENT, APPOSITIVE}` 的启发式上限由 `MAX_WHOLE_SENTENCE_FRAGMENT_LEXICAL_TOKENS = 10` 固定；超过 10 必须拆主体与修饰语，挑战集审阅记录保留在对应 SDD workspace。`shared-fixtures/validator-messages.json` 再由 `validator-messages.test.ts` / `ValidatorMessagesTest.kt` 共同只读消费，逐 case 比较完整有序 errors，并要求 `coveredMessageSubstrings` 与实际错误并集双向闭合；fixture case 显式带 `accepted`，既能钉拒绝文案也能钉预过滤后通过；纯标点现已双端对齐，当前只排除单助动词相邻谓语与负数/`0.0` 输入。`core-gold-annotations.test.ts` 的 `passes the production core validator sentence by sentence` 再把整份黄金集压上——新硬门把正确答案判非法比漏判更糟。
 
@@ -260,7 +260,7 @@
 
 ### I-18.1 Tokenization 改动必须同时提升 core 与 detail 提示词版本
 
-**规则** 任何会改变 Token 数量或 ID 的分词改动，都必须同时提升 `CORE_PROMPT_VERSION` 与 `DETAIL_PROMPT_VERSION`；当前值分别为 `16` 与 `9`（版本 13/7 面向页面级英文覆盖重写双端 prompt 并给 detail 修复轮补输出模板与完整中文角色词表；`CORE_PROMPT_VERSION` 13 起单句规则段预算由预算测试钉住 ≤ 版本 12 实测 8207 字符的 1.35 倍），而输出契约未变，`CORE_SCHEMA_VERSION` 保持 `3`。
+**规则** 任何会改变 Token 数量或 ID 的分词改动，都必须同时提升 `CORE_PROMPT_VERSION` 与 `DETAIL_PROMPT_VERSION`；当前值分别为 `17` 与 `10`（版本 13/7 面向页面级英文覆盖重写双端 prompt 并给 detail 修复轮补输出模板与完整中文角色词表；`CORE_PROMPT_VERSION` 13 起单句规则段预算由预算测试钉住 ≤ 版本 12 实测 8207 字符的 1.35 倍），而输出契约未变，`CORE_SCHEMA_VERSION` 保持 `3`。
 
 **为什么** core span 与 detail focus 都使用 Token ID。两条缓存键虽各自带提示词版本，但 Token 坐标是共同依赖；只升一条会让另一类旧缓存仍以过期坐标命中新文本。
 
@@ -639,7 +639,6 @@
 **症状** 「失败块比例下降」但页面上的错标没人看见;prompt 教学效果的验收退化为主观目测。
 
 **守护测试** `scripts/silent-mislabel-audit.test.mjs`(坏预测判违反、好预测判符合、未运行不进分母、oracle 自洽校验);CLI 直接消费真机报告。
-
 
 ### 脚注标号必须在 DOM 提取层处理,不能在纯文本分句层猜
 

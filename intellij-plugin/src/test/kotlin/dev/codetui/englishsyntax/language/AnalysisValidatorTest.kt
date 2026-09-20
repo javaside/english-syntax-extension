@@ -154,6 +154,77 @@ class AnalysisValidatorTest {
   }
 
   @Test
+  fun `rejects a noun phrase component that swallows its postmodifying of phrase`() {
+    val request = sentence("The project simplifies the development of applications.")
+    val raw = core(
+      """
+      {"startToken":0,"endToken":1,"role":"SUBJECT","translation":"该项目"},
+      {"startToken":2,"endToken":2,"role":"PREDICATE","translation":"简化"},
+      {"startToken":3,"endToken":6,"role":"OBJECT","translation":"应用程序的开发"}
+      """.trimIndent(),
+      sentenceId = request.sentenceId,
+    )
+
+    val result = validateCoreBatch(raw, listOf(request), "profile-1")
+
+    assertFalse(result.ok)
+    assertTrue(
+      result.errors.any {
+        it.path == "sentences[0].components[2]" &&
+          it.message == "a noun-phrase component must stop before a postmodifying of-phrase; keep the noun head " +
+          "in its current role and emit the span from \"of\" through its object as a separate ATTRIBUTE"
+      },
+    )
+  }
+
+  @Test
+  fun `accepts a separate postmodifying of phrase and ignores clauses and adverbials internally`() {
+    val validCases = listOf(
+      sentence("The project simplifies the development of applications.") to """
+        {"startToken":0,"endToken":1,"role":"SUBJECT","translation":"该项目"},
+        {"startToken":2,"endToken":2,"role":"PREDICATE","translation":"简化"},
+        {"startToken":3,"endToken":4,"role":"OBJECT","translation":"开发过程"},
+        {"startToken":5,"endToken":6,"role":"ATTRIBUTE","translation":"应用程序的"}
+      """.trimIndent(),
+      sentence("They succeeded because of careful planning.") to """
+        {"startToken":0,"endToken":0,"role":"SUBJECT","translation":"他们"},
+        {"startToken":1,"endToken":1,"role":"PREDICATE","translation":"成功了"},
+        {"startToken":2,"endToken":5,"role":"ADVERBIAL","translation":"因为周密规划"}
+      """.trimIndent(),
+      sentence("This is what dreams are made of.") to """
+        {"startToken":0,"endToken":0,"role":"SUBJECT","translation":"这"},
+        {"startToken":1,"endToken":1,"role":"PREDICATE","translation":"是"},
+        {"startToken":2,"endToken":7,"role":"PREDICATIVE_CLAUSE","translation":"梦想的构成"}
+      """.trimIndent(),
+      sentence("The container is made of steel.") to """
+        {"startToken":0,"endToken":1,"role":"SUBJECT","translation":"该容器"},
+        {"startToken":2,"endToken":2,"role":"PREDICATE","translation":"是"},
+        {"startToken":3,"endToken":5,"role":"PREDICATIVE","translation":"钢制的"}
+      """.trimIndent(),
+      sentence("We consider it capable of handling failures.") to """
+        {"startToken":0,"endToken":0,"role":"SUBJECT","translation":"我们"},
+        {"startToken":1,"endToken":1,"role":"PREDICATE","translation":"认为"},
+        {"startToken":2,"endToken":2,"role":"OBJECT","translation":"它"},
+        {"startToken":3,"endToken":6,"role":"COMPLEMENT","translation":"能够处理故障"}
+      """.trimIndent(),
+      sentence("We selected a container made of steel.") to """
+        {"startToken":0,"endToken":0,"role":"SUBJECT","translation":"我们"},
+        {"startToken":1,"endToken":1,"role":"PREDICATE","translation":"选择了"},
+        {"startToken":2,"endToken":3,"role":"OBJECT","translation":"一个容器"},
+        {"startToken":4,"endToken":6,"role":"ATTRIBUTE","translation":"钢制的"}
+      """.trimIndent(),
+      sentence("Bank of America expanded.") to """
+        {"startToken":0,"endToken":2,"role":"SUBJECT","translation":"美国银行"},
+        {"startToken":3,"endToken":3,"role":"PREDICATE","translation":"扩张了"}
+      """.trimIndent(),
+    )
+
+    validCases.forEach { (request, components) ->
+      assertTrue(validateCoreBatch(core(components), listOf(request), "profile-1").ok, request.text)
+    }
+  }
+
+  @Test
   fun `rejects adjacent PREDICATE components and tells the model to merge the verb group`() {
     val request = sentence("Help turn ideas.")
     val raw = core(

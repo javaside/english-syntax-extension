@@ -5,8 +5,8 @@ import kotlinx.serialization.Serializable
 object ContractVersions {
   const val MESSAGE = 1
   const val CORE_SCHEMA = 3
-  const val CORE_PROMPT = 16
-  const val DETAIL_PROMPT = 9
+  const val CORE_PROMPT = 17
+  const val DETAIL_PROMPT = 10
   const val MAX_SENTENCES_PER_REQUEST = 6
   const val CLOUD_SENTENCES_PER_REQUEST = 2
 }

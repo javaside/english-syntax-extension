@@ -10,8 +10,8 @@
 | ----------------------- | ------ | ------------------------------------------------------------ | ------------------------------------------------------ |
 | `MESSAGE_VERSION`       | `1`    | 消息信封版本;收发两侧都校验                                  | 改了会让旧页面上残留的 content script 与新 SW 互不认账 |
 | `CORE_SCHEMA_VERSION`   | `3`    | core / detail 结果的语义契约版本;**参与缓存键**              | 改了等于全量作废缓存;缓存导入也会因版本不符整体拒绝    |
-| `CORE_PROMPT_VERSION`   | `13`   | core 提示词/Token 坐标版本;**参与 core / correction 缓存键** | 改了作废全部 core 缓存                                 |
-| `DETAIL_PROMPT_VERSION` | `7`    | detail 提示词/focus Token 坐标版本;**参与 detail 缓存键**    | 改了作废全部详解缓存                                   |
+| `CORE_PROMPT_VERSION`   | `17`   | core 提示词/Token 坐标版本;**参与 core / correction 缓存键** | 改了作废全部 core 缓存                                 |
+| `DETAIL_PROMPT_VERSION` | `10`   | detail 提示词/focus Token 坐标版本;**参与 detail 缓存键**    | 改了作废全部详解缓存                                   |
 
 > 缓存键**刻意不含** profile / 模型维度——换模型不该让已有译文全部作废;但**含提示词版本**,因为同一句在不同规则下会被切成不同粒度的成分,旧结果继续复用只会让新旧质量混在一屏。版本 8 彻底删除了要求输出 `COORDINATE_CLAUSE` 的残留旧指令；版本 9 强化 repair prompt 的限定词切分与逐条自检，并配套 core 至多两轮修复；版本 10 补齐从句右边界、后置介词短语和系表结构口径，并要求译文覆盖整段成分；版本 11 在分句角色前先判输入是否成句，无谓语标题/名词短语等使用唯一 `FRAGMENT_HEAD`，祈使句仍按完整分句处理；版本 12 把 `etc.` 合并为单个非标点 Token，并按可收句缩写处理；当前 `CORE_PROMPT_VERSION = 13` 面向页面级英文覆盖重写了双端规则（fragment 内嵌定语从句、arXiv 冒号长标题四段口径、VP/NP 并列对照、finite/non-finite when 对照、allow/force/let 宾语控制、零关系词定语从句、非限定补足成分整体 COMPLEMENT、PP 依附四类映射、中文释义与专名中文类型要求），并删除与黄金集 conventions 重复的旧条目。detail 修复轮同步补输出模板与完整中文角色词表，因此 `DETAIL_PROMPT_VERSION = 7` 同步提升；结果 JSON 形状未变，`CORE_SCHEMA_VERSION` 保持 `3`。
 
@@ -197,8 +197,9 @@ DetailAnalysis  = { sentenceId, focus, structures[], grammarPoints[], explanatio
 17. **非从句角色**成分的最后一个 lexical word 不得命中「几乎不可能在短语内悬垂」的介词表（`of/into/onto/upon/within/among/between/despite/during/toward/towards`）——命中通常说明介词的宾语被切了出去（实测 `near the frontier of` + 宾语从句）。五类从句角色豁免：从句内部 `what dreams are made of`、`the range the value stays within` 可合法以悬垂介词收尾；短语角色仍拒绝。`for`/`with`/`at`/`from`/`to` 刻意不收白名单。这一条与第 7 条互补，第 7 条只管「整个成分就是一个介词」。
 18. `FRAGMENT_HEAD` **至多一个**——非分句片段的主体只有一个,两个说明模型把一个片段当多句切;
 19. `FRAGMENT_HEAD` 存在时,整句不得再出现 `FRAGMENT_FORBIDDEN_ROLES` 列举的分句级角色（`SUBJECT` / `PREDICATE` / `OBJECT` / `PREDICATIVE` / `COMPLEMENT`、`SUBJECT_CLAUSE` / `OBJECT_CLAUSE` / `PREDICATIVE_CLAUSE` / `ADVERBIAL_CLAUSE` 四类从句、`COORDINATE_CLAUSE`）——唯一例外是完整 `ATTRIBUTIVE_CLAUSE` 可紧跟片段主体（fragment-relative）；成句与否是二值判定,其余混标说明模型在给不成句的输入虚构主谓宾。黄金集对应句 `page-zero-relative` 同时钉住非限定补足成分口径：`is steered to produce text` 里 `to produce text` 是一个 `COMPLEMENT`（不定式与其宾语同成分），不把 `text` 拆成同级 `OBJECT`。错误文案显式列出仍禁止的角色。
+20. 名词性角色 `{SUBJECT, OBJECT, PREDICATIVE, COMPLEMENT, ATTRIBUTE, APPOSITIVE}` 的 component 若在非首位 lexical word 出现 `of`，说明它吞入了按项目口径必须单列的后置介词短语：在 `of` 前截止，保留中心名词原角色，并把从 `of` 到其宾语标为独立 `ATTRIBUTE`。从句、`ADVERBIAL` 与本来就以 `of` 开头的 `ATTRIBUTE` 不检查，放行 `because of ...`、`what dreams are made of` 和正确的 `of applications` 定语。
 
-第 6–19 条按历史编号共十四项；第 14 条已被第 8 条的废弃门整体覆盖，仅作历史说明保留，而第 9、15 项现在各含两条独立判据（V6 从属连词短语角色门、V7 主语从句引导词门），所以当前共有**十五条 TS/Kotlin validator 逐条同步的代码判据**；第 12 条在废弃门之外仍会作为补充错误独立触发。它们不是 prompt 中一般语言学要求的完整实现。都只看「成分序列 + Token 文本」，不需要句法分析器；词表刻意保守（`then` 是副词不算从属连词，祈使句串的第三个分句就以它开头；缺主语本身不判，祈使句本来就没有主语，`First, install the CLI.` 这类副词开头的祈使句更常见）。**「输入是否成句」同样只用第 18 / 19 两条数量与互斥硬门约束,validator 刻意不试图用词表判定片段缺少限定谓语**——词形兼类(祈使句、`Building apps` 这类动名词短语)会大面积误拒;模型该用而没用 `FRAGMENT_HEAD` 由提示词 completeness-first 规则、黄金集口径与真模型评测约束。grammar 诊断只要求所有 component 都有可用 range/role/translation、区间句内、有序不重叠且非纯标点；unknown field、translation too long、sentenceId 等非结构错误不阻止同轮 grammar 诊断。校验错误文案会被 repair prompt 原样引用，因此两端不仅判据要一致，英文文案也要一致；否则同一个模型输出会得到不同修复指令与缓存结果。
+第 6–20 条按历史编号共十五项；第 14 条已被第 8 条的废弃门整体覆盖，仅作历史说明保留，而第 9、15 项现在各含两条独立判据（V6 从属连词短语角色门、V7 主语从句引导词门），所以当前共有**十六条 TS/Kotlin validator 逐条同步的代码判据**；第 12 条在废弃门之外仍会作为补充错误独立触发。它们不是 prompt 中一般语言学要求的完整实现。都只看「成分序列 + Token 文本」，不需要句法分析器；词表刻意保守（`then` 是副词不算从属连词，祈使句串的第三个分句就以它开头；缺主语本身不判，祈使句本来就没有主语，`First, install the CLI.` 这类副词开头的祈使句更常见）。**「输入是否成句」同样只用第 18 / 19 两条数量与互斥硬门约束,validator 刻意不试图用词表判定片段缺少限定谓语**——词形兼类(祈使句、`Building apps` 这类动名词短语)会大面积误拒;模型该用而没用 `FRAGMENT_HEAD` 由提示词 completeness-first 规则、黄金集口径与真模型评测约束。grammar 诊断只要求所有 component 都有可用 range/role/translation、区间句内、有序不重叠且非纯标点；unknown field、translation too long、sentenceId 等非结构错误不阻止同轮 grammar 诊断。校验错误文案会被 repair prompt 原样引用，因此两端不仅判据要一致，英文文案也要一致；否则同一个模型输出会得到不同修复指令与缓存结果。
 
 `shared-fixtures/validator-messages.json` 以 schema v1 保存固定句子、原始 core JSON、显式 `accepted` 与 TS 生产 validator 得出的完整有序 errors；TS/Kotlin 测试均只读消费，并用各自生产 tokenizer 重建 Token。`coveredMessageSubstrings` 与 cases 实际错误并集双向闭合，确保覆盖声明不虚报、实际错误不漏报。纯标点成分已由显式 accepted/rejected 两类 case 双端对齐；当前 fixture 只排除前一个 `PREDICATE` 仅含单个助动词/情态动词的相邻谓语，以及负数或 `0.0` Token 区间。
 
@@ -297,7 +298,6 @@ Chrome 端协议(SW↔content)之外,IntelliJ 端定义 JCEF 页面↔Kotlin 的
 | `__englishSyntaxSetTheme(isDark)`                            | 注入时与主题变化              | 供 `roles.ts` 选色板                                                                                                                                 |
 | `__englishSyntaxParseHoveredBlock(target?)`                  | 快捷键按段解析                | 省略 `target` 时查 `:is(:hover)` 取最深元素(Kotlin 就是这么调的;裸 `:hover` 在 quirks 页面恒为空集);定位成功即回传 `PARSE_BLOCK`                     |
 | `__englishSyntaxSetHotkey(descriptor)`                       | 注入时(读 keymap 之后)        | 下发页面兼底 keydown 的键位判据;**传 `null` 表示关掉兼底监听**(keymap 里没有可下发的单段字母数字绑定)                                                |
-
 
 ## 2026-09-15 复杂句划分输入的协议影响
 

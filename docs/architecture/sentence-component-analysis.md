@@ -642,7 +642,7 @@ Core 缓存键由规范化句文本、`CORE_SCHEMA_VERSION`、`CORE_PROMPT_VERSI
 
 ## 7. 本地 validator 的能力边界
 
-### 7.1 十五类高置信硬门
+### 7.1 十六类高置信硬门
 
 当前双端 validator 将以下可由“Token 文本 + 成分序列”高把握判断的约束落为硬门：
 
@@ -659,8 +659,9 @@ Core 缓存键由规范化句文本、`CORE_SCHEMA_VERSION`、`CORE_PROMPT_VERSI
 11. **单词从句**：五类从句至少含两个实词，不能只标 `that` 或 `developers`。
 12. **主语从句首词**：必须命中 15 词闭集；`if`、`however` 刻意不收。
 13. **定语从句被截断**：`ATTRIBUTIVE_CLAUSE` 后紧跟 `OBJECT` 或 `PREDICATIVE` 时，要求吸收从句内部后继；`COMPLEMENT` 为宾补结构保留。
-14. **成分尾部悬垂介词**：非从句成分以高置信必带宾语介词结尾时拒绝；完整从句允许 `what dreams are made of` 一类介词悬垂。
-15. **片段主体边界**：`FRAGMENT_HEAD` 至多一个，且不得与主语、谓语、宾语、表语、补语及四类非定语从句等分句级角色混用；完整 `ATTRIBUTIVE_CLAUSE` 是唯一允许与片段主体并存的从句角色。
+14. **名词性成分吞入后置 `of` 短语**：`SUBJECT`、`OBJECT`、`PREDICATIVE`、`COMPLEMENT`、`ATTRIBUTE`、`APPOSITIVE` 的非首位实词出现 `of` 时，要求在 `of` 前截止，并把 `of` 到其宾语单列为 `ATTRIBUTE`；从句、状语和以 `of` 开头的独立定语不检查。
+15. **成分尾部悬垂介词**：非从句成分以高置信必带宾语介词结尾时拒绝；完整从句允许 `what dreams are made of` 一类介词悬垂。
+16. **片段主体边界**：`FRAGMENT_HEAD` 至多一个，且不得与主语、谓语、宾语、表语、补语及四类非定语从句等分句级角色混用；完整 `ATTRIBUTIVE_CLAUSE` 是唯一允许与片段主体并存的从句角色。
 
 ### 7.2 为什么硬门必须保守
 
@@ -674,13 +675,13 @@ Core 缓存键由规范化句文本、`CORE_SCHEMA_VERSION`、`CORE_PROMPT_VERSI
 
 ### 7.3 Validator 通过不等于语言学正确
 
-以下错误可能完全通过结构与十五类硬门：
+以下错误可能完全通过结构与十六类硬门：
 
 - 一个边界合法但依附对象错的介词短语；
 - `OBJECT` 与 `PREDICATIVE` 角色互换；
 - 两个都合法的粒度选择中选了错误一种；
 - 完整句误标为短 `FRAGMENT_HEAD`，但未触发长度阈值；
-- 黄金口径要求拆出的后置修饰被并入名词短语。
+- `for/with/by` 等不属于当前高置信 `of` 门的后置修饰被并入名词短语。
 
 因此不能用“validator 通过率”替代准确率。2026 年 8 月曾有一批自动标注只过结构校验就进入黄金集，后续人工复核发现多处语言学错标；错误黄金答案会反过来奖励线上错误。
 
@@ -1008,8 +1009,8 @@ Token ID 已变时，旧 span 数字没有语义。必须用生产 tokenizer 重
 截至当前实现：
 
 - `CORE_SCHEMA_VERSION = 3`；
-- `CORE_PROMPT_VERSION = 16`；
-- `DETAIL_PROMPT_VERSION = 9`；
+- `CORE_PROMPT_VERSION = 17`；
+- `DETAIL_PROMPT_VERSION = 10`；
 - 单请求最多 6 句，云端默认每块 2 句、本地 loopback 每块 6 句；
 - core 首轮失败后最多两轮逐轮收窄 repair；
 - 角色协议含 17 个值，但 `COORDINATE_CLAUSE` 已废弃并由 validator 拒绝；
@@ -1019,6 +1020,7 @@ Token ID 已变时，旧 span 数字没有语义。必须用生产 tokenizer 重
 - 系表结构拆成 `PREDICATE + PREDICATIVE`；
 - 介词短语按依附对象判 `ATTRIBUTE` 或 `ADVERBIAL`；
 - 最终自然语言成分必须提供有意义的局部中文译文；
-- Chrome 与 IntelliJ 通过共享 fixture 保持同一坐标、规则、错误文案和评测口径。
+- Chrome 与 IntelliJ 通过共享 fixture 保持同一坐标、规则、错误文案和评测口径；
+- 名词性成分不得吞入非首位 `of` 后置短语，`the development` 与 `of applications` 分别译为“开发过程”与“应用程序的”。
 
 理解并维护这些约束的关键不是记住更多零散句型，而是始终遵守同一个方法：**先固定输入坐标，按优先级判断结构，只硬编码可证明的错误，用人工黄金答案评价最终划分。**

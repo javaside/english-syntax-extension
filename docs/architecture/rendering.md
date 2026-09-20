@@ -176,7 +176,7 @@ content script 跑在隔离世界,`window.customElements` 是 `null`。所以 `S
 | **片段主体**                | `FRAGMENT_HEAD`(标签「片段主体」)与其它结构角色一样走三行卡片:专属色浅色主题 `#0284c7`、IDEA 深色主题提亮 `#38bdf8`,IntelliJ 侧 `roles.ts` 的色板/标签与 Chrome 端逐值同源(`roles.test.ts` 钉住)。fragment-relative 放行后,`FRAGMENT_HEAD + ATTRIBUTIVE_CLAUSE` 的两成分片段句同样按各自角色正常渲染,渲染层对该组合没有任何特殊分支 |
 | **并列分句编号**            | 有 ≥2 个 `COORDINATE_CLAUSE` 时,可见标签加圈码 ①②,`aria-label` 用普通数字(屏幕阅读器念得准);`COORDINATE_CLAUSE` 输出已被提示词与 validator 双侧废弃,这条编号路径实际不会再触发                   |
 | **宽译文**                  | 超过 16 个字符的译文加 `.translation-wide`(`inline-size:0; min-inline-size:max(100%,16em)`),铺满卡宽而不是以 16em 窄列折行。Chrome 在内涵尺寸阶段解析不了含百分比的 `max()`,只能按长度分流       |
-| **回显译文**                | 小参数本地模型偶尔把英文原文回填进 `translation`;`isEchoTranslation()` 判等即视为无译文,退回两行                                                                                                 |
+| **回显译文**                | 小参数本地模型偶尔把英文原文回填进 `translation`;`isEchoTranslation()` 判等即视为无译文,退回两行。完整 core 在渲染前还会被 validator 拦截；名词性成分吞入非首位 `of` 后置短语同样不会进入最终卡片，而会先走 repair 拆成中心名词 + `ATTRIBUTE`；流式暂定成分仍只保证可安全绘制，完整结果到齐后覆盖                                                                                                 |
 | **句子按源序就位**          | `#placeSentenceSection()` 保证重渲染 / 失败句不会被追加到末尾,把自己和它下面的详解面板挤到后面去                                                                                                 |
 
 ### 详解面板的锚定
