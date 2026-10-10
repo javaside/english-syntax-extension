@@ -294,3 +294,51 @@ describe("header 条件排除(站点横幅 vs 内容标题区)", () => {
     expect(explicitCandidateText(document.getElementById("banner-text")!)).toBeNull();
   });
 });
+
+/**
+ * X Articles 的正文容器是 Draft.js 编辑器的只读渲染,根节点带 contenteditable="false"。
+ * 隐藏/危险判据此前按属性存在匹配,"false" 的只读展示区被整体判成不可见内容——
+ * 表现为整篇文章正文进不了清单,而同页的推文与评论正常。
+ */
+describe("contenteditable=false 只读展示区不触发隐藏排除", () => {
+  function inventoryOf(markup: string): Map<string, ReadableUnit> {
+    document.body.innerHTML = markup;
+    return new Map(inventoryReadableUnits(document).map((unit) => [unit.element.id, unit]));
+  }
+
+  it("只读容器里的段落进自动清单", () => {
+    const units = inventoryOf(
+      `<main><div contenteditable="false"><div id="para">Draft editor paragraphs stay perfectly readable content.</div></div></main>`,
+    );
+
+    expect(units.get("para")?.automatic).toBe(true);
+    expect(units.get("para")?.exclusionReason).toBeUndefined();
+  });
+
+  it("可编辑状态(true/空串/plaintext-only)照旧排除", () => {
+    const units = inventoryOf(
+      `<main>
+         <div contenteditable="true"><p id="ed-true">Editable true content paragraph here.</p></div>
+         <div contenteditable=""><p id="ed-empty">Editable empty content paragraph here.</p></div>
+         <div contenteditable="plaintext-only"><p id="ed-plain">Editable plain content paragraph.</p></div>
+       </main>`,
+    );
+
+    for (const id of ["ed-true", "ed-empty", "ed-plain"]) {
+      expect(units.get(id)?.automatic, id).toBe(false);
+      expect(units.get(id)?.exclusionReason, id).toBe("hidden");
+    }
+  });
+
+  it("只读后代不把宿主块判成危险后代,可读后代照旧", () => {
+    const units = inventoryOf(
+      `<main>
+         <div id="readonly-host">Host text <span contenteditable="false">read only words</span> more words.</div>
+         <div id="editable-host">Host text <span contenteditable="true">edit me</span> more words.</div>
+       </main>`,
+    );
+
+    expect(units.get("readonly-host")?.automatic).toBe(true);
+    expect(units.get("editable-host")?.exclusionReason).toBe("unsafe-interactive");
+  });
+});

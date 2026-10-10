@@ -76,10 +76,15 @@ const EXCLUDED_REGION_SELECTOR =
  * 页面引导段落渲染在里面,无条件排除会让页首段落永远翻不了。
  */
 const HEADER_CONTENT_ANCESTOR_SELECTOR = "article,main,section,[role='main']";
-const HIDDEN_SELECTOR = "[hidden],[aria-hidden='true'],[contenteditable]";
+/**
+ * 只匹配「可编辑」状态。`contenteditable="false"` 是明确的只读展示区(X Articles、
+ * 各类富文本预览),不是编辑器——按属性存在匹配会把整篇只读正文判成隐藏/危险内容。
+ */
+export const EDITABLE_CONTENT_SELECTOR =
+  "[contenteditable='true'],[contenteditable=''],[contenteditable='plaintext-only']";
+const HIDDEN_SELECTOR = `[hidden],[aria-hidden='true'],${EDITABLE_CONTENT_SELECTOR}`;
 // 图片不在排除之列:卡片替换只是 display:none,段落里夹插图不妨碍可逆渲染。
-const UNSAFE_DESCENDANT_SELECTOR =
-  "button,input,textarea,select,video,audio,canvas,iframe,[contenteditable]";
+const UNSAFE_DESCENDANT_SELECTOR = `button,input,textarea,select,video,audio,canvas,iframe,${EDITABLE_CONTENT_SELECTOR}`;
 const MINIMUM_AUTO_TEXT_LENGTH = 20;
 
 /** LaTeXML 语义类:参考文献的题名 / 作者 / 年份,论文作者块与邮箱。 */

@@ -1,4 +1,8 @@
-import { explicitCandidateText, inventoryReadableUnits } from "./page-inventory";
+import {
+  EDITABLE_CONTENT_SELECTOR,
+  explicitCandidateText,
+  inventoryReadableUnits,
+} from "./page-inventory";
 
 export interface CandidateBlock {
   id: string;
@@ -42,8 +46,8 @@ export function nearestSafeBlock(target: EventTarget | null): CandidateBlock | n
     target instanceof Element ? target : target instanceof Node ? target.parentElement : null;
   if (start === null) return null;
   if (
-    start.matches("input[type='password'],textarea,[contenteditable]") ||
-    start.closest("[contenteditable]") !== null
+    start.matches(`input[type='password'],textarea,${EDITABLE_CONTENT_SELECTOR}`) ||
+    start.closest(EDITABLE_CONTENT_SELECTOR) !== null
   ) {
     return null;
   }

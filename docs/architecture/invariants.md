@@ -328,6 +328,16 @@
 
 **测试** `chrome-plugin/src/content/page-inventory.test.ts` 的「header 条件排除(站点横幅 vs 内容标题区)」四用例(内容标题区进自动清单 / body 直属横幅仍排除 / header 内 nav 与按钮仍按各自理由排除 / 显式手势同口径);arXiv fixture 的 `arxiv-site-header` 是 `<body>` 直属,契约理由(`outside-principal-content`)不因本条变化。
 
+### I-21.4 `contenteditable="false"` 是只读展示区,不触发隐藏/危险排除
+
+**规则** 隐藏判据与危险后代判据、`nearestSafeBlock` 的编辑区守卫都只匹配**可编辑**状态:`[contenteditable='true'],[contenteditable=''],[contenteditable='plaintext-only']`(收敛在 `page-inventory.ts` 的 `EDITABLE_CONTENT_SELECTOR`,三处统一引用,不许再写裸 `[contenteditable]`)。`contenteditable="false"` 是明确的只读展示区,按普通内容参与扫描。
+
+**为什么** X Articles 的正文是 Draft.js 编辑器的只读渲染,根节点(`public-DraftEditor-content`)带着 `contenteditable="false"`;按属性存在匹配时,整篇文章正文连同 Alt+T 手势一起被判成隐藏内容,而同页的推文与评论正常——正是「富文本预览类站点整页翻不了」的成因。
+
+**症状** hyperframes.heygen.com 推文页里 X Articles 文章正文整页识别不出、评论区正常;任何用 `contenteditable="false"` 做只读富文本预览的站点同理。
+
+**测试** `chrome-plugin/src/content/page-inventory.test.ts` 的「contenteditable=false 只读展示区不触发隐藏排除」三用例(只读容器段落进自动清单 / true|""|plaintext-only 照旧排除 / 只读后代不把宿主判成危险后代);`chrome-plugin/src/content/document-scanner.test.ts` 的「nearestSafeBlock 对 contenteditable=false 的只读富文本」两用例(手势可达 / 可编辑照旧拒绝)。
+
 ### I-22 合批分桶与定时器顺序
 
 **规则** 待发块按 `${是否屏外}:${是否跳缓存}` 分桶;`enqueueForBatch` 里**先把条目写进 `pendingBatches` 再起定时器**。

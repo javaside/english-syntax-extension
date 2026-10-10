@@ -262,6 +262,40 @@ describe("nearestSafeBlock on an explicit gesture", () => {
 });
 
 /**
+ * X Articles 的正文是 Draft.js 编辑器的只读渲染:根节点带 contenteditable="false"。
+ * "false" 是明确的只读展示区而非编辑器——按属性存在与否判隐藏/危险,会把整篇
+ * 正文连同 Alt+T 手势一起拒绝,表现为「整个页面都翻译不了,评论区却正常」。
+ */
+describe("nearestSafeBlock 对 contenteditable=false 的只读富文本", () => {
+  const LONG = "This paragraph carries plenty of ordinary English words for the reader.";
+
+  function build(markup: string): void {
+    document.body.replaceChildren();
+    document.body.insertAdjacentHTML("afterbegin", markup);
+  }
+
+  beforeEach(() => {
+    document.body.replaceChildren();
+  });
+
+  it("只读富文本视图里的段落可作为手势目标", () => {
+    build(`<main><div contenteditable="false" data-testid="twitterArticleRichTextView">
+      <div class="DraftEditor-root"><div class="public-DraftEditor-content">
+        <div data-block="true"><div id="target">${LONG}</div></div>
+        <div data-block="true"><div>${LONG} Another block keeps the walk unambiguous.</div></div>
+      </div></div></div></main>`);
+
+    expect(nearestSafeBlock(document.querySelector("#target"))?.element.id).toBe("target");
+  });
+
+  it("可编辑状态照旧拒绝", () => {
+    build(`<main><div contenteditable="true"><p id="in-editor">${LONG}</p></div></main>`);
+
+    expect(nearestSafeBlock(document.querySelector("#in-editor"))).toBeNull();
+  });
+});
+
+/**
  * 自动扫描此前只认标签名,而 Mintlify 一类文档站(含 Claude Code 自己的文档)
  * 整篇正文是 <span data-as="p"> 靠 CSS 渲染成块——真实页面实测覆盖率仅 10%,
  * 22 个候选里一个正文段落都没有,点「开始学习」后大片正文没有译文。
