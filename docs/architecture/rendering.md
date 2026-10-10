@@ -45,7 +45,7 @@ enumerateUnitElements(root)                枚举语义单元
 
 排除单元的 14 种 reason:`outside-principal-content`、`excluded-region`、`unsafe-interactive`、`hidden`、`non-english`、`no-readable-words`、`loose-block-too-short`、`display-math`、`math-auxiliary`、`conversion-placeholder`、`reference-metadata`、`unsupported-reference-layout`、`covered-by-child`、`unsafe-partial-replacement`。**covered-by-child 的方向是"父被子吸收"**:内联单元(如 `<math>`)躺在自动分析的段落里 → 记在子节点上;父容器文本完全由子单元组成 → 记在父容器上。父带不可安全分离的直接文本 → `unsafe-partial-replacement`(整体替换会把这段文本连坐,优先显式路径)。契约由 `tests/fixtures/page-inventory/*.json` 全等钉住。
 
-- **排除区** `EXCLUDED_REGION_SELECTOR`:`nav, aside, footer, header, form, pre, code, script, style, noscript, template, svg, canvas, iframe`(显式含 header:arXiv 站点工具条)。隐藏判据 `[hidden], [aria-hidden=true], [contenteditable]` 另列。
+- **排除区** `EXCLUDED_REGION_SELECTOR`:`nav, aside, footer, form, pre, code, script, style, noscript, template, svg, canvas, iframe`。`header` 不在此列,由**横幅位置判定**条件排除:header 不被 `article, main, section, [role=main]` 包住时才算站点横幅(arXiv 站点工具条照旧排除);正文容器内的 header 是页面自己的标题区——Mintlify 把 h1 与页面引导段落渲染在里面,无条件排除会让页首段落永远进不了清单。判定收敛在 `excludedRegionAncestor()`,四处调用(安全块 / principal root 评分 / fallback 评分 / 排除分类)统一走它。隐藏判据 `[hidden], [aria-hidden=true], [contenteditable]` 另列。
 - **危险后代** `UNSAFE_DESCENDANT_SELECTOR`:`button, input, textarea, select, video, audio, canvas, iframe, [contenteditable]`。**图片不在此列**——替换只是把原节点 `display:none`,退出时原样恢复,段落里夹插图不妨碍可逆性;而按钮 / 输入控件会连交互状态一起被藏掉。
 - **为什么要收 loose 叶子**:只按标签名找会漏掉整类站点。Mintlify 一类文档站(含 Claude Code 自己的文档)整篇正文都是 `<span data-as="p">` 靠 CSS 渲染成块——真实页面实测覆盖率仅 10%。躲开边栏靠的是排除区与正文容器限制,不是标签名。
 

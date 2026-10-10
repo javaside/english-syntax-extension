@@ -318,6 +318,16 @@
 
 **测试** `chrome-plugin/src/content/hover-target.test.ts`(钉住选择器字面量与两条兜底分支)、`intellij-plugin/.../web/preview.test.ts` 的 `deepestHovered`;真机由 `sweep-d-hotkey` 的「quirks 页面冷启动照样解析」一条钉住(同时断言裸 `:hover` 仍恒空——若哪天不空了,说明 Chrome 改了怪癖,这条不变量该重写)。
 
+### I-21.3 `header` 只在站点横幅位置排除
+
+**规则** `header` 不在 `EXCLUDED_REGION_SELECTOR` 里。它由 `excludedRegionAncestor()` 条件排除:祖先链上的每个 header 逐个判定——**不被** `article, main, section, [role=main]` 包住的才算站点横幅(如 arXiv 站点工具条);正文容器内的 header 是页面自己的标题区,照常进清单。安全块、principal root 评分、fallback 评分、排除分类四处统一走这一个 helper,不许再有第二处直接 `closest(EXCLUDED_REGION_SELECTOR)` 的判定。
+
+**为什么** Mintlify(aspen 主题)把页面引导段落渲染在 `main > header > div > p` 里,当年为 arXiv 加的无条件 `header` 排除把这类页首段落(连同 h1)整体挡在清单外。
+
+**症状** hyperframes.heygen.com/thirty-days 的首段 "The official 30 Days of HyperFrames lessons…" 自动扫描与悬停手势都报不可解析(`excluded-region`),页面其余段落正常——凡「整页只有页头描述翻不了」先查这条。
+
+**测试** `chrome-plugin/src/content/page-inventory.test.ts` 的「header 条件排除(站点横幅 vs 内容标题区)」四用例(内容标题区进自动清单 / body 直属横幅仍排除 / header 内 nav 与按钮仍按各自理由排除 / 显式手势同口径);arXiv fixture 的 `arxiv-site-header` 是 `<body>` 直属,契约理由(`outside-principal-content`)不因本条变化。
+
 ### I-22 合批分桶与定时器顺序
 
 **规则** 待发块按 `${是否屏外}:${是否跳缓存}` 分桶;`enqueueForBatch` 里**先把条目写进 `pendingBatches` 再起定时器**。

@@ -67,9 +67,15 @@ const BLOCK_SELECTOR =
 const LOOSE_BLOCK_SELECTOR = "div,section,dd,td,figcaption";
 const LOOSE_CANDIDATE_SELECTOR = "div,section,span";
 const SEMANTIC_ROOT_SELECTOR = "article,main,[role='main']";
-/** 站点导航与模板噪声区域(显式含 header:arXiv 站点工具条)。 */
+/** 站点导航与模板噪声区域。`header` 不在此列:它由 banner 位置判定条件排除。 */
 const EXCLUDED_REGION_SELECTOR =
-  "nav,aside,footer,header,form,pre,code,script,style,noscript,template,svg,canvas,iframe";
+  "nav,aside,footer,form,pre,code,script,style,noscript,template,svg,canvas,iframe";
+/**
+ * header 只在「站点横幅位置」排除(横幅判定:不被任何正文容器包住,如 arXiv 站点
+ * 工具条)。正文容器内的 header 是页面自己的标题区——Mintlify 一类站点把 h1 与
+ * 页面引导段落渲染在里面,无条件排除会让页首段落永远翻不了。
+ */
+const HEADER_CONTENT_ANCESTOR_SELECTOR = "article,main,section,[role='main']";
 const HIDDEN_SELECTOR = "[hidden],[aria-hidden='true'],[contenteditable]";
 // 图片不在排除之列:卡片替换只是 display:none,段落里夹插图不妨碍可逆渲染。
 const UNSAFE_DESCENDANT_SELECTOR =
@@ -103,6 +109,28 @@ function queryElements(root: ParentNode, selector: string): Element[] {
   const matches = Array.from(root.querySelectorAll(selector));
   if (root instanceof Element && root.matches(selector)) matches.unshift(root);
   return matches;
+}
+
+/**
+ * 命中的排除区祖先:静态导航噪声区域,或处于站点横幅位置的 `header`。祖先链上
+ * 可能有多个 header(外层横幅包着正文容器、内层是页面标题区),逐个按各自位置
+ * 判定——内层在 article/main/section/[role=main] 内即内容标题区,外层横幅照旧排除。
+ */
+function excludedRegionAncestor(element: Element): Element | null {
+  const staticRegion = element.closest(EXCLUDED_REGION_SELECTOR);
+  if (staticRegion !== null) return staticRegion;
+  for (
+    let current: Element | null = element.parentElement;
+    current !== null;
+    current = current.parentElement
+  ) {
+    if (!current.matches("header")) continue;
+    const parent = current.parentElement;
+    if (parent === null || parent.closest(HEADER_CONTENT_ANCESTOR_SELECTOR) === null) {
+      return current;
+    }
+  }
+  return null;
 }
 
 // ─── 可见性与文本判定 ─────────────────────────────────────────────────────────
@@ -162,7 +190,8 @@ function isBlockCandidate(element: Element, loose: boolean): boolean {
 function isSafeElement(element: Element, loose: boolean): boolean {
   return (
     isBlockCandidate(element, loose) &&
-    element.closest(`${EXCLUDED_REGION_SELECTOR},${HIDDEN_SELECTOR}`) === null &&
+    excludedRegionAncestor(element) === null &&
+    element.closest(HIDDEN_SELECTOR) === null &&
     element.querySelector(UNSAFE_DESCENDANT_SELECTOR) === null &&
     isLayoutVisible(element)
   );
@@ -215,7 +244,9 @@ function contentScore(blocks: readonly ScoredBlock[]): number {
 
 function semanticRoot(root: ParentNode): Element | null {
   const ranked = queryElements(root, SEMANTIC_ROOT_SELECTOR).flatMap((element, order) => {
-    if (element.closest(`${EXCLUDED_REGION_SELECTOR},${HIDDEN_SELECTOR}`) !== null) return [];
+    if (excludedRegionAncestor(element) !== null || element.closest(HIDDEN_SELECTOR) !== null) {
+      return [];
+    }
     if (!isLayoutVisible(element)) return [];
     const blocks = eligibleBlocks(element);
     if (blocks.length === 0) return [];
@@ -249,7 +280,8 @@ function fallbackRoot(root: ParentNode): Element | null {
     ) {
       if (!root.contains(ancestor) && ancestor !== root) break;
       if (
-        ancestor.closest(`${EXCLUDED_REGION_SELECTOR},${HIDDEN_SELECTOR}`) !== null ||
+        excludedRegionAncestor(ancestor) !== null ||
+        ancestor.closest(HIDDEN_SELECTOR) !== null ||
         !isLayoutVisible(ancestor)
       ) {
         continue;
@@ -409,7 +441,7 @@ function classifyExclusion(
   if (principalRoot !== null && !principalRoot.contains(element) && element !== principalRoot) {
     return "outside-principal-content";
   }
-  if (element.closest(EXCLUDED_REGION_SELECTOR) !== null) return "excluded-region";
+  if (excludedRegionAncestor(element) !== null) return "excluded-region";
   if (
     element.matches(UNSAFE_DESCENDANT_SELECTOR) ||
     element.querySelector(UNSAFE_DESCENDANT_SELECTOR) !== null

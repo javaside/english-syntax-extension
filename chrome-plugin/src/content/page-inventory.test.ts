@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { Window } from "happy-dom";
-import { inventoryReadableUnits, type ReadableUnit } from "./page-inventory";
+import { explicitCandidateText, inventoryReadableUnits, type ReadableUnit } from "./page-inventory";
 import { scanDocument } from "./document-scanner";
 import { normalizedReadableText } from "./readable-dom-text";
 
@@ -241,5 +241,56 @@ describe("covered-by-child 方向语义", () => {
 
     expect(units.get("parent")?.exclusionReason).toBe("unsafe-partial-replacement");
     expect(units.get("child")?.automatic).toBe(true);
+  });
+});
+
+/**
+ * header 条件排除:Mintlify 一类站点把页面引导段落(h1 + 描述)渲染在 `<header>`
+ * 里。header 只有在站点横幅位置(不被 article/main/section/[role=main] 包住)时才
+ * 是导航噪声;正文容器内的 header 是页面自己的标题区,必须照常进清单。
+ */
+describe("header 条件排除(站点横幅 vs 内容标题区)", () => {
+  function inventoryOf(markup: string): Map<string, ReadableUnit> {
+    document.body.innerHTML = markup;
+    return new Map(inventoryReadableUnits(document).map((unit) => [unit.element.id, unit]));
+  }
+
+  it("main 内 header 的标题与引导段落进自动清单(Mintlify 页头)", () => {
+    const units = inventoryOf(
+      `<main><header id="page-header"><h1 id="title">30 Days of HyperFrames</h1><p id="lead">The official lessons, collected in one place as the series is published.</p></header><p id="body">Regular paragraph outside the header keeps scanning as before.</p></main>`,
+    );
+
+    for (const id of ["title", "lead", "body"]) {
+      expect(units.get(id)?.automatic, id).toBe(true);
+      expect(units.get(id)?.exclusionReason, id).toBeUndefined();
+    }
+    expect(units.get("lead")?.kind).toBe("paragraph");
+  });
+
+  it("body 直属的 header 仍按站点横幅排除", () => {
+    const units = inventoryOf(
+      `<header id="banner"><p id="banner-text">arXiv paper tools and site navigation live up here permanently.</p></header>`,
+    );
+
+    expect(units.get("banner-text")?.automatic).toBe(false);
+    expect(units.get("banner-text")?.exclusionReason).toBe("excluded-region");
+  });
+
+  it("header 内的导航与交互控件仍按各自理由排除", () => {
+    const units = inventoryOf(
+      `<main><header id="page-header"><nav id="nav"><p id="nav-text">On this page links for quick navigation between sections only.</p></nav><p id="actions">Edit this page <button id="edit" type="button">Edit</button> with the toolbar.</p></header></main>`,
+    );
+
+    expect(units.get("nav-text")?.exclusionReason).toBe("excluded-region");
+    expect(units.get("actions")?.exclusionReason).toBe("unsafe-interactive");
+  });
+
+  it("显式手势对内容标题区里的段落放行,对站点横幅照旧拒绝", () => {
+    document.body.innerHTML =
+      `<main><header id="page-header"><p id="lead">The official lessons, collected in one place as the series is published.</p></header></main>` +
+      `<header id="banner"><p id="banner-text">arXiv paper tools and site navigation live up here permanently.</p></header>`;
+
+    expect(explicitCandidateText(document.getElementById("lead")!)).not.toBeNull();
+    expect(explicitCandidateText(document.getElementById("banner-text")!)).toBeNull();
   });
 });
