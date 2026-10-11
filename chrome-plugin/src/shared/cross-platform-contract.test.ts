@@ -14,10 +14,10 @@ import {
   MESSAGE_VERSION,
 } from "./versions";
 
-it("pins the shared analysis versions after the of-phrase fix", () => {
-  // core/repair 与 detail 都新增局部译文教学，分别升到 17/10，确保旧的整块
-  // of-phrase core 与“该开发”详解缓存一起失效。
-  expect(CORE_PROMPT_VERSION).toBe(17);
+it("pins the shared analysis versions after the coordinated-fragment fix", () => {
+  // core 18 在 17 的 of-phrase 局部译文口径上补「并列片段各并列项各为一个 FRAGMENT_HEAD、
+  // 连词单列 CONJUNCTION」，旧的 core 缓存按新版本键作废；detail 提示词未动，保持 10。
+  expect(CORE_PROMPT_VERSION).toBe(18);
   expect(DETAIL_PROMPT_VERSION).toBe(10);
   expect(CORE_SCHEMA_VERSION).toBe(3);
 });

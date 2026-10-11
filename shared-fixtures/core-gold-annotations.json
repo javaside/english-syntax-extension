@@ -13,7 +13,7 @@
     "作为独立成分的名词短语后面紧跟的介词短语一律单独标 ATTRIBUTE，没有量词或部分结构的例外（`Four` + `of the biggest US technology companies`、`a lot` + `of context`、`No amount` + `of firewalls or patches`）。但介词短语或从句内部的介词短语不再拆，`without looking at any of the code` 保持一个 ADVERBIAL。",
     "非限定动词短语（动名词、不定式、分词）与它管辖的宾语同属一个成分（`avoiding blind adoption`、`building a software application`、`performing near the frontier of what AI can do`），不拆成两个同级宾语，也不让介词悬在成分末尾。作表语性补足成分的非限定短语同理：`is steered to produce text` 里 `to produce text` 整体标 COMPLEMENT（不定式 + 它的宾语），不得把 `text` 拆成同级 OBJECT。",
     "含 `It's` 这类「主语 + 系动词」缩写的句子不纳入：分词刻意不拆缩写，整个 `It's` 是一个 Token，主语与系动词无法分到两个成分里。`isn't` / `aren't` 这类「系动词 + 否定」是一个词，不受影响。",
-    "不成句的标题、列表项、名词短语、形容词短语或非限定动词短语恰好一个 FRAGMENT_HEAD；不得虚构 SUBJECT / PREDICATE / OBJECT 强套句型。唯一例外：完整定语从句（ATTRIBUTIVE_CLAUSE，从引导词或零关系词位置起、一直覆盖到从句自己的宾语与状语）可以紧跟在 FRAGMENT_HEAD 之后，如 `An API` + `that returns JSON responses`；其余分句级角色与其余四类从句仍不得与 FRAGMENT_HEAD 混用。单一 FRAGMENT_HEAD 可以合法覆盖没有可分离同层修饰语的多词片段。祈使句仍是完整分句，必须以 PREDICATE 起始并按需标出 OBJECT。`Building production-ready AI applications at scale.` 按名词性活动采用扁平核心：活动整体为 FRAGMENT_HEAD，修饰该活动的 `at scale` 为 ATTRIBUTE。",
+    "不成句的标题、列表项、名词短语、形容词短语或非限定动词短语没有并列时恰好一个 FRAGMENT_HEAD；有并列时**每个并列项各一个 FRAGMENT_HEAD**——同位语、破折号插入语或定语从句把并列项隔开时，连接它们的 and / or 单列 CONJUNCTION（`A DESIGN.md` + APPOSITIVE + CONJUNCTION `and` + `a FRAME.md`），未被隔断的并列短语仍保持一个成分（其中的 and 不标 CONJUNCTION）。不得虚构 SUBJECT / PREDICATE / OBJECT 强套句型。唯一例外：完整定语从句（ATTRIBUTIVE_CLAUSE，从引导词或零关系词位置起、一直覆盖到从句自己的宾语与状语）可以紧跟在 FRAGMENT_HEAD 之后，如 `An API` + `that returns JSON responses`；其余分句级角色与其余四类从句仍不得与 FRAGMENT_HEAD 混用。单一 FRAGMENT_HEAD 可以合法覆盖没有可分离同层修饰语的多词片段。祈使句仍是完整分句，必须以 PREDICATE 起始并按需标出 OBJECT。`Building production-ready AI applications at scale.` 按名词性活动采用扁平核心：活动整体为 FRAGMENT_HEAD，修饰该活动的 `at scale` 为 ATTRIBUTE。",
     "名词中心词后的零关系词完整从句一律整块标 ATTRIBUTIVE_CLAUSE，不并入它修饰的名词短语：`The way we build software` = SUBJECT(`The way`) + ATTRIBUTIVE_CLAUSE(`we build software`)，与显式引导词从句（`that she recommended`）同一口径；但缩减定语（过去分词/介词短语，无主谓结构，如 `documents signed yesterday`、`time spent performing the invocation`）仍是 ATTRIBUTE——有没有自己的主语和限定谓语是两者的分界。冒号或破折号后若为完整独立分句（自带主语与限定谓语），按其内部同层角色展开，不标 APPOSITIVE；只有不可拆的说明性补语才用 APPOSITIVE / INDEPENDENT_ELEMENT。",
     "句末紧贴的书目引用(如 [61] / [5, 6])并入前一成分一起译,不单独成分;仅指真实书目引用——向量/数组/编号字面量(如 The vector is [1, 2]. 的 [1, 2])不适用,字符串层面无法高把握区分,故不设 validator 硬门,由 prompt 与黄金集约束。",
     "章节编号(如 IV.2 / II.2.2)不得单独作为 FRAGMENT_HEAD,须与标题中心词同属一个 FRAGMENT_HEAD;可分离的后置修饰(如 for the future)仍按后置修饰规则单列 ATTRIBUTE。",
@@ -2558,6 +2558,49 @@
           "translation": "返回 JSON 响应的"
         }
       ]
+    },
+    {
+      "id": "fragment-coordinated-heads",
+      "text": "A DESIGN.md - a markdown file describing your brand's colors, type, and voice - and a FRAME.md, which is that same design system extended with a motion language: how things enter, exit, and move in your brand's videos.",
+      "components": [
+        {
+          "startToken": 0,
+          "endToken": 1,
+          "role": "FRAGMENT_HEAD",
+          "translation": "一份 DESIGN.md 文件"
+        },
+        {
+          "startToken": 2,
+          "endToken": 15,
+          "role": "APPOSITIVE",
+          "translation": "一个描述你品牌颜色、字体和声音的 markdown 文件"
+        },
+        {
+          "startToken": 16,
+          "endToken": 16,
+          "role": "CONJUNCTION",
+          "translation": "以及"
+        },
+        {
+          "startToken": 17,
+          "endToken": 18,
+          "role": "FRAGMENT_HEAD",
+          "translation": "一份 FRAME.md 文件"
+        },
+        {
+          "startToken": 19,
+          "endToken": 30,
+          "role": "ATTRIBUTIVE_CLAUSE",
+          "translation": "它是同一个设计系统扩展出的动态语言"
+        },
+        {
+          "startToken": 31,
+          "endToken": 43,
+          "role": "APPOSITIVE",
+          "translation": "即事物如何在你品牌的视频中进入、退出和移动"
+        }
+      ],
+      "rationale": "并列名词片段:两个并列项被破折号同位语隔开,第二项并不进同一个 FRAGMENT_HEAD(成分不得重叠)也不是修饰语,所以各项各标一个 FRAGMENT_HEAD,连接它们的 and 单列 CONJUNCTION;19-30 的完整定语从句整块标 ATTRIBUTIVE_CLAUSE,冒号后的说明性 how 从句标 APPOSITIVE。2026-10-11 用户报告「这段话翻译不了」的真机复现句。"
     },
     {
       "id": "full-relative-counterexample",

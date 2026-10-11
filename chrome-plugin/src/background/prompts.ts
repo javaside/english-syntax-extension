@@ -88,6 +88,9 @@ const COMPLETENESS_FIRST_RULE =
   "An input with an explicit finite predicate of its own, or an imperative with an omitted subject, is a clause and uses the clause-level roles; " +
   'a finite verb inside an embedded relative clause does not count — "The tool that we built passes every test" keeps PREDICATE "passes" at the top level instead of becoming a fragment. ' +
   "A heading, list item, noun phrase, adjective phrase, or non-finite verb phrase that does not form a clause must contain exactly one FRAGMENT_HEAD; never invent SUBJECT, PREDICATE, OBJECT, PREDICATIVE, or ADVERBIAL merely to force a fragment into a clause pattern. " +
+  "When a conjunction joins two conjuncts that a parenthetical or relative clause keeps apart, tag the conjunction as its own CONJUNCTION component and give each conjunct its own FRAGMENT_HEAD: " +
+  '"A DESIGN.md — a note — and a FRAME.md" = FRAGMENT_HEAD "A DESIGN.md" + APPOSITIVE "a note" + CONJUNCTION "and" + FRAGMENT_HEAD "a FRAME.md"; ' +
+  "a conjunction inside one uninterrupted phrase stays inside that single component. " +
   "A noun-phrase fragment may contain one embedded relative clause: " +
   '"An API that returns JSON responses" is FRAGMENT_HEAD "An API" plus ATTRIBUTIVE_CLAUSE "that returns JSON responses", and the finite verb inside that embedded clause does not turn the whole input into a main clause. ' +
   "Keep ordinary determiners and tightly bound single-word premodifiers with the FRAGMENT_HEAD, and emit separable postmodifying prepositional, participial, or infinitive phrases as ATTRIBUTE. " +
@@ -258,6 +261,7 @@ export function buildRepairPrompt(
     "Each error group below carries one sentenceId: apply its errors to that sentence only, never to another sentence in the same payload. A group's components[k] refers to entry k of that sentence's components array in the Invalid JSON below.",
     "Ranges, roles and translations may be corrected, but sentence IDs and Tokens must not change.",
     "For each PREDICATE error caused by a determiner inside the component, split that component immediately before the determiner and emit the resulting noun phrase as its own OBJECT, PREDICATIVE, or COMPLEMENT component.",
+    "For each FRAGMENT_HEAD error caused by more than one fragment head, keep one FRAGMENT_HEAD per coordinated conjunct and tag the coordinating conjunction as its own CONJUNCTION component directly in front of each conjunct after the first; never retag a coordinated conjunct as APPOSITIVE or ATTRIBUTE and never leave the conjunction inside a FRAGMENT_HEAD.",
     "Check the repaired JSON against every listed validation error before returning it; do not return until each listed error has been addressed.",
     "Return the repaired JSON only, without a Markdown fence or prose.",
     ...CORE_ANALYSIS_RULES,

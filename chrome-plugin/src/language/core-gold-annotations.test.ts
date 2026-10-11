@@ -35,9 +35,13 @@ describe("core gold annotations", () => {
     expect(new Set(fixture.sentences.map(({ text }) => text)).size).toBe(fixture.sentences.length);
   });
 
-  it("defines fragments as one FRAGMENT_HEAD without fake clause roles and preserves imperatives", () => {
+  it("defines fragments as one FRAGMENT_HEAD per conjunct without fake clause roles and preserves imperatives", () => {
     const conventions = fixture.conventions.join("\n");
     expect(conventions).toMatch(/不成句.*恰好一个 FRAGMENT_HEAD/);
+    // 2026-10-11:并列项被同位语/插入语隔开时各项各一个 FRAGMENT_HEAD,连词单列
+    // CONJUNCTION;未被隔断的并列短语仍是一个成分。
+    expect(conventions).toMatch(/有并列时.*每个并列项各一个 FRAGMENT_HEAD/);
+    expect(conventions).toMatch(/未被隔断的并列短语仍保持一个成分/);
     expect(conventions).toMatch(/不得.*SUBJECT.*PREDICATE.*OBJECT/);
     expect(conventions).toMatch(/祈使句.*PREDICATE/);
     expect(conventions).toMatch(/总体.*不覆盖标点/);
@@ -130,6 +134,21 @@ describe("core gold annotations", () => {
       [
         { startToken: 0, endToken: 1, role: GrammarRole.FRAGMENT_HEAD },
         { startToken: 2, endToken: 5, role: GrammarRole.ATTRIBUTIVE_CLAUSE },
+      ],
+    ],
+    [
+      // 2026-10-11 真机:并列名词片段,两个并列项被破折号同位语隔开——各标一个
+      // FRAGMENT_HEAD、and 单列 CONJUNCTION,而不是把第二项并进修饰语或错标 APPOSITIVE。
+      // 0 A/1 DESIGN.md/2 -/3 a…15 -/16 and/17 a/18 FRAME.md/19 ,/20 which…30 language/
+      // 31 :/32 how…43 videos/44 .
+      "fragment-coordinated-heads",
+      [
+        { startToken: 0, endToken: 1, role: GrammarRole.FRAGMENT_HEAD },
+        { startToken: 2, endToken: 15, role: GrammarRole.APPOSITIVE },
+        { startToken: 16, endToken: 16, role: GrammarRole.CONJUNCTION },
+        { startToken: 17, endToken: 18, role: GrammarRole.FRAGMENT_HEAD },
+        { startToken: 19, endToken: 30, role: GrammarRole.ATTRIBUTIVE_CLAUSE },
+        { startToken: 31, endToken: 43, role: GrammarRole.APPOSITIVE },
       ],
     ],
     [

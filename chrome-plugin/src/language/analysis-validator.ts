@@ -272,6 +272,22 @@ const FRAGMENT_MIXED_ROLE_MESSAGE =
   "SUBJECT, PREDICATE, OBJECT, PREDICATIVE, COMPLEMENT, SUBJECT_CLAUSE, OBJECT_CLAUSE, " +
   "PREDICATIVE_CLAUSE, ADVERBIAL_CLAUSE, or the deprecated COORDINATE_CLAUSE; a whole " +
   "ATTRIBUTIVE_CLAUSE is the only clause role allowed beside a FRAGMENT_HEAD";
+/**
+ * 片段里可以有多个 `FRAGMENT_HEAD`,但只限**并列项**:额外 head 的前一个语义成分必须是
+ * `CONJUNCTION`。2026-10-11 真机报告的并列名词片段
+ * (`A DESIGN.md - a markdown file … - and a FRAME.md, which is …`)里,第二项被破折号
+ * 同位语隔开:既并不进同一个 head(成分不得重叠),也不是 ATTRIBUTE/APPOSITIVE 类的
+ * 修饰语,只能自成一个并列 head——旧口径「至多一个 head」把这段正确答案判非法,两轮
+ * 修复轮都返回同一份 JSON,整段因此拿不到译文。
+ *
+ * 口子刻意只开在并列上:`Portable API` + `across providers` 这类把修饰语标成第二个
+ * head 的错标(本门 2026-09-02 就是为了拦它)照旧被拒。
+ */
+const DUPLICATE_FRAGMENT_HEAD_MESSAGE =
+  "a non-clausal fragment must contain at most one FRAGMENT_HEAD; a coordinated conjunct " +
+  "may carry its own FRAGMENT_HEAD only when the coordinating conjunction is a separate " +
+  'CONJUNCTION component directly in front of it ("A" + CONJUNCTION "and" + "B") — ' +
+  "otherwise merge the extra span into the fragment head or retag it as ATTRIBUTE or APPOSITIVE";
 
 /**
  * 一个从句至少要有引导词 + 谓语,或主语 + 谓语,所以实词数 1 一定不是从句。
@@ -348,6 +364,22 @@ function lexicalTexts(tokens: readonly Token[], range: TokenRange): string[] {
     .filter((token) => token.id >= range.startToken && token.id <= range.endToken)
     .filter((token) => !token.punctuation)
     .map((token) => token.text.toLowerCase());
+}
+
+/**
+ * 多个 `FRAGMENT_HEAD` 只有在**并列**时才合法:每个额外 head 的紧邻前一个语义成分必须是
+ * `CONJUNCTION`。顺序按语义成分序列取(纯标点成分已被过滤),与被跳过的标点无关。
+ */
+function areFragmentHeadsCoordinated(components: readonly IndexedCoreComponent[]): boolean {
+  const firstHeadIndex = components.findIndex(
+    ({ component }) => component.role === GrammarRole.FRAGMENT_HEAD,
+  );
+  return components.every(
+    ({ component }, index) =>
+      component.role !== GrammarRole.FRAGMENT_HEAD ||
+      index === firstHeadIndex ||
+      components[index - 1]?.component.role === GrammarRole.CONJUNCTION,
+  );
 }
 
 /**
@@ -591,12 +623,8 @@ function collectGrammarErrors(
   }
 
   const fragmentHeads = roles.filter((component) => component.role === GrammarRole.FRAGMENT_HEAD);
-  if (fragmentHeads.length > 1) {
-    addError(
-      errors,
-      `${path}.components`,
-      "a non-clausal fragment must contain at most one FRAGMENT_HEAD",
-    );
+  if (fragmentHeads.length > 1 && !areFragmentHeadsCoordinated(components)) {
+    addError(errors, `${path}.components`, DUPLICATE_FRAGMENT_HEAD_MESSAGE);
   }
   if (
     fragmentHeads.length > 0 &&

@@ -614,7 +614,10 @@ describe("core analysis grammar constraints", () => {
     "one component must not cover the whole sentence; split it into peer components " +
     "(subject, predicate, object, adverbial, …)";
   const DUPLICATE_FRAGMENT_HEAD_MESSAGE =
-    "a non-clausal fragment must contain at most one FRAGMENT_HEAD";
+    "a non-clausal fragment must contain at most one FRAGMENT_HEAD; a coordinated conjunct " +
+    "may carry its own FRAGMENT_HEAD only when the coordinating conjunction is a separate " +
+    'CONJUNCTION component directly in front of it ("A" + CONJUNCTION "and" + "B") — ' +
+    "otherwise merge the extra span into the fragment head or retag it as ATTRIBUTE or APPOSITIVE";
   const MIXED_FRAGMENT_ROLE_MESSAGE =
     "FRAGMENT_HEAD marks a non-clausal fragment and must not be mixed with clause-level " +
     "SUBJECT, PREDICATE, OBJECT, PREDICATIVE, COMPLEMENT, SUBJECT_CLAUSE, OBJECT_CLAUSE, " +
@@ -683,6 +686,82 @@ describe("core analysis grammar constraints", () => {
       grammarErrors(sentence, [
         { startToken: 0, endToken: 1, role: "FRAGMENT_HEAD", translation: "可移植 API" },
         { startToken: 2, endToken: 5, role: "FRAGMENT_HEAD", translation: "跨提供商支持" },
+      ]),
+    ).toContainEqual({
+      path: "sentences[0].components",
+      message: DUPLICATE_FRAGMENT_HEAD_MESSAGE,
+    });
+  });
+
+  it("accepts coordinated conjunct heads joined by a CONJUNCTION component", () => {
+    // 2026-10-11 真机:并列名词片段里两个并列项被破折号同位语隔开时,第二项并不进
+    // 同一个 FRAGMENT_HEAD(成分不得重叠),也不可能是修饰语——它就是一个并列 head,
+    // 连接它的 and 单列 CONJUNCTION。旧口径下这段反复重试两轮后整句拿不到译文。
+    // 0 A/1 DESIGN.md/2 -/3 a…15 -/16 and/17 a/18 FRAME.md/19 ,/20 which…30 language/
+    // 31 :/32 how…43 videos/44 .
+    const sentence = sentenceOf(
+      "A DESIGN.md - a markdown file describing your brand's colors, type, and voice - and a " +
+        "FRAME.md, which is that same design system extended with a motion language: how things " +
+        "enter, exit, and move in your brand's videos.",
+    );
+
+    const result = validateCoreBatch(
+      {
+        sentences: [
+          {
+            sentenceId: sentence.sentenceId,
+            components: [
+              {
+                startToken: 0,
+                endToken: 1,
+                role: "FRAGMENT_HEAD",
+                translation: "一份 DESIGN.md 文件",
+              },
+              {
+                startToken: 2,
+                endToken: 15,
+                role: "APPOSITIVE",
+                translation: "一个描述你品牌颜色、字体和声音的 markdown 文件",
+              },
+              { startToken: 16, endToken: 16, role: "CONJUNCTION", translation: "以及" },
+              {
+                startToken: 17,
+                endToken: 18,
+                role: "FRAGMENT_HEAD",
+                translation: "一份 FRAME.md 文件",
+              },
+              {
+                startToken: 19,
+                endToken: 30,
+                role: "ATTRIBUTIVE_CLAUSE",
+                translation: "它是同一个设计系统扩展出的动态语言",
+              },
+              {
+                startToken: 31,
+                endToken: 43,
+                role: "APPOSITIVE",
+                translation: "即事物如何在你品牌的视频中进入、退出和移动",
+              },
+            ],
+          },
+        ],
+      },
+      [sentence],
+      "profile-1",
+    );
+
+    expect(result.ok ? [] : result.errors).toEqual([]);
+  });
+
+  it("rejects a second FRAGMENT_HEAD that swallows its coordinating conjunction", () => {
+    // 「and a FRAME.md」整块当 head = 连词没单列,门禁要求把 and 切出来当 CONJUNCTION,
+    // 再把剩下的并列项作为自己的 head——这是原句首轮输出的形态。
+    const sentence = sentenceOf("Portable API support and JSON responses.");
+
+    expect(
+      grammarErrors(sentence, [
+        { startToken: 0, endToken: 2, role: "FRAGMENT_HEAD", translation: "可移植 API 支持" },
+        { startToken: 3, endToken: 5, role: "FRAGMENT_HEAD", translation: "以及 JSON 响应" },
       ]),
     ).toContainEqual({
       path: "sentences[0].components",

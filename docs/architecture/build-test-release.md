@@ -221,3 +221,11 @@ tag `v*` 触发,`permissions: contents: write`:
 改 `COLON_STRUCTURE_RULE` 或其它 core 规则后,`shared-fixtures/core-prompt-parity.json` 必须用生产 `buildCorePrompt()` 重算;`core-evaluation-traces.json` 的每轮 messages 与 `run.hashes.messages`/`run.hashes.prompt` 同步重算,provider raw 不动。改 tokenizer 后除上述两份还要同步黄金集、translation-quality 与 audit fixture 的 Token 坐标,并同时升 core/detail 版本。
 
 本批门禁新增:`readable-dom-text.footnote.test.ts`(脚注只在 DOM 层排除)、`segmenter.section-number.test.ts`(IV.2/Appendix B.2 不腰斩)、`segmenter.dotted-identifier.test.ts`(GWTC-5.0/II.2.1 整体化)、`translation-quality.symbol-span.test.ts`(13 个数学/技术英语正反例)、`field-label-contract.test.ts`(字段 label + 完整疑问句的口径)。真机单次失败率受模型方差影响(同版 6.2%/5.5%/4.2%),必须至少三次报告范围,不能拿一条低值作结论。
+
+## 片段并列修正批次的 fixture 与验收(2026-10-11)
+
+`CORE_PROMPT_VERSION` 17→18(只改片段并列口径,不动 tokenization,`DETAIL_PROMPT_VERSION` 保持 10)。本批同步的共享 fixture 与做法,后续改 core 规则照此办理:
+
+- `core-prompt-parity.json` 用生产 `buildCorePrompt()` 重算;`core-evaluation-traces.json` 的每轮 messages(首轮 `buildCorePrompt`、repair 轮走生产 `AnalysisService` 重放,顺带校验 `subsetSentenceIds` 未漂移)与 `run.hashes.messages`/`run.hashes.prompt`/`report` 同步重算,provider raw、corpus 与 tokenizer 哈希不动——重算脚本留在 `.superpowers/acceptance/`(不提交)。
+- `validator-messages.json` 补 `coordinated-fragment-heads`(接受)与 `fragment-head-swallowing-conjunction`(拒绝)两例并改 `duplicate-fragment-head` 的期望文案;`core-gold-annotations.json` 新增 `fragment-coordinated-heads` 句子、改写 convention 13 的并列口径,TS 端 `core-gold-annotations.test.ts` 与 Kotlin 端 `CoreGoldAnnotationsTest` 各增一条机器断言。
+- 真机验收:`CORE_EVAL_ROOT=<worktree>/chrome-plugin node .superpowers/acceptance/run-core-gold-evaluation.mjs --corpus <单句 corpus> --mode pipeline`,对比修复前后同一句的 `final.status` 与首轮 validatorErrors。
