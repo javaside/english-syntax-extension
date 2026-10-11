@@ -2,6 +2,20 @@
 
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## 1.4.2 — 2026-10-11
+
+并列名词片段不再整段拿不到译文。`CORE_PROMPT_VERSION` 由 `17` 升为 `18`，`DETAIL_PROMPT_VERSION` 保持 `10`——已有 core 缓存会按版本键整体作废并重新分析，这是预期行为；IntelliJ 插件同批修复，版本号随扩展同步。
+
+### 修复
+
+- **并列片段的第二个并列项不再被判非法**：`A DESIGN.md - a markdown file describing your brand's colors, type, and voice - and a FRAME.md, which is that same design system extended with a motion language: how things enter, exit, and move in your brand's videos.` 这类片段里，两个并列项被破折号同位语隔开，第二项既并不进同一个 `FRAGMENT_HEAD`（成分不得重叠）也不是修饰语。旧硬门「片段至多一个 `FRAGMENT_HEAD`」把这种正确划分判非法，模型首轮与两轮修复都返回同一份划分，整段因此**没有译文**。现在双端 validator 只对**并列项**放行：每个额外 head 的紧邻前一个语义成分必须是 `CONJUNCTION`（`A DESIGN.md` + APPOSITIVE + CONJUNCTION `and` + `a FRAME.md`），把修饰语标成第二个 head 的错标照旧被拒。
+- **提示词两端同步教会并列片段**：core 规则补上「未并列时恰好一个 `FRAGMENT_HEAD`、并列时各项各一个 head、连词单列」的正例与「未被隔断的并列短语仍是一个成分」的反例；修复轮明确要求不得把并列项改标 `APPOSITIVE` / `ATTRIBUTE`、不得把连词留在 head 里（真机对照实验里，同结构的逗号版本正是被这样"修"成错标的）。
+- 黄金集新增 `fragment-coordinated-heads` 一句并钉住 span/role，conventions 同步改写；`validator-messages.json` 补正反两例。
+
+### 测试与验收记录
+
+- 真机复现与验收脚本留在 `.superpowers/acceptance/`（不提交）：真 DeepSeek 上对比修复前后同一句的划分与失败原因。
+
 ## 1.4.1 — 2026-10-11
 
 两处页面扫描修复：只读富文本展示区（X Articles 等）与正文容器内的页首区域不再被整体排除。本版不涉及提示词与缓存键变化（`CORE_PROMPT_VERSION` 仍为 `17`、`DETAIL_PROMPT_VERSION` 仍为 `10`），已有缓存继续有效；IntelliJ 插件无功能变化，版本号随扩展同步升为 1.4.1。

@@ -73,7 +73,7 @@
 | `ADVERBIAL`           | 状语     | 修饰动作、性质或整句的短语级成分                   |
 | `COMPLEMENT`          | 补语     | 对宾语或谓语意义作必要补足的成分                   |
 | `APPOSITIVE`          | 同位语   | 对前项重命名或补充说明的名词性成分                 |
-| `FRAGMENT_HEAD`       | 片段主体 | 非完整分句的中心部分，每个片段至多一个             |
+| `FRAGMENT_HEAD`       | 片段主体 | 非完整分句的中心部分，每个片段至多一个（并列项各一个） |
 | `SUBJECT_CLAUSE`      | 主语从句 | 整个从句在上层充当主语                             |
 | `OBJECT_CLAUSE`       | 宾语从句 | 整个从句在上层充当宾语                             |
 | `PREDICATIVE_CLAUSE`  | 表语从句 | 整个从句在上层充当表语                             |
@@ -184,7 +184,7 @@ Core span 与 detail focus 都依赖 Token ID。若 `GWTC-5.0` 从三个 Token �
 - 形容词短语；
 - 非限定动词短语。
 
-片段必须使用恰好一个 `FRAGMENT_HEAD`，可分离的后置介词、分词或不定式修饰语标为 `ATTRIBUTE`，不得为了凑主谓宾而虚构 `SUBJECT`、`PREDICATE` 或 `OBJECT`。
+片段必须使用恰好一个 `FRAGMENT_HEAD`；有并列时每个并列项各一个 head、连接它们的 and / or 单列 `CONJUNCTION`（被同位语、破折号插入语或定语从句隔开的并列项无法并进同一成分）；可分离的后置介词、分词或不定式修饰语标为 `ATTRIBUTE`，不得为了凑主谓宾而虚构 `SUBJECT`、`PREDICATE` 或 `OBJECT`。
 
 正确例：
 
@@ -661,7 +661,7 @@ Core 缓存键由规范化句文本、`CORE_SCHEMA_VERSION`、`CORE_PROMPT_VERSI
 13. **定语从句被截断**：`ATTRIBUTIVE_CLAUSE` 后紧跟 `OBJECT` 或 `PREDICATIVE` 时，要求吸收从句内部后继；`COMPLEMENT` 为宾补结构保留。
 14. **名词性成分吞入后置 `of` 短语**：`SUBJECT`、`OBJECT`、`PREDICATIVE`、`COMPLEMENT`、`ATTRIBUTE`、`APPOSITIVE` 的非首位实词出现 `of` 时，要求在 `of` 前截止，并把 `of` 到其宾语单列为 `ATTRIBUTE`；从句、状语和以 `of` 开头的独立定语不检查。
 15. **成分尾部悬垂介词**：非从句成分以高置信必带宾语介词结尾时拒绝；完整从句允许 `what dreams are made of` 一类介词悬垂。
-16. **片段主体边界**：`FRAGMENT_HEAD` 至多一个，且不得与主语、谓语、宾语、表语、补语及四类非定语从句等分句级角色混用；完整 `ATTRIBUTIVE_CLAUSE` 是唯一允许与片段主体并存的从句角色。
+16. **片段主体边界**：`FRAGMENT_HEAD` 至多一个，例外只有并列项——每个额外 head 的紧邻前一个语义成分必须是 `CONJUNCTION`（并列名词片段被同位语 / 插入语 / 定语从句隔开时各项各一个 head，连词单列；把修饰语标成第二个 head 的错标照旧被拒）；且不得与主语、谓语、宾语、表语、补语及四类非定语从句等分句级角色混用；完整 `ATTRIBUTIVE_CLAUSE` 是唯一允许与片段主体并存的从句角色。
 
 ### 7.2 为什么硬门必须保守
 
@@ -1009,7 +1009,7 @@ Token ID 已变时，旧 span 数字没有语义。必须用生产 tokenizer 重
 截至当前实现：
 
 - `CORE_SCHEMA_VERSION = 3`；
-- `CORE_PROMPT_VERSION = 17`；
+- `CORE_PROMPT_VERSION = 18`；
 - `DETAIL_PROMPT_VERSION = 10`；
 - 单请求最多 6 句，云端默认每块 2 句、本地 loopback 每块 6 句；
 - core 首轮失败后最多两轮逐轮收窄 repair；

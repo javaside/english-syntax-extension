@@ -254,6 +254,30 @@ private const val FRAGMENT_MIXED_ROLE_MESSAGE =
     "PREDICATIVE_CLAUSE, ADVERBIAL_CLAUSE, or the deprecated COORDINATE_CLAUSE; a whole " +
     "ATTRIBUTIVE_CLAUSE is the only clause role allowed beside a FRAGMENT_HEAD"
 
+// 片段可以有多个 FRAGMENT_HEAD,但只限并列项(额外 head 的前一个语义成分是 CONJUNCTION)。
+// 2026-10-11 真机报告的并列名词片段里第二项被破折号同位语隔开:既并不进同一个 head
+// (成分不得重叠),也不是 ATTRIBUTE/APPOSITIVE 类修饰语,只能自成一个并列 head。口子
+// 刻意只开在并列上——把修饰语标成第二个 head 的错标照旧被拒。与 TS 侧逐字一致。
+private const val DUPLICATE_FRAGMENT_HEAD_MESSAGE =
+  "a non-clausal fragment must contain at most one FRAGMENT_HEAD; a coordinated conjunct " +
+    "may carry its own FRAGMENT_HEAD only when the coordinating conjunction is a separate " +
+    "CONJUNCTION component directly in front of it (\"A\" + CONJUNCTION \"and\" + \"B\") — " +
+    "otherwise merge the extra span into the fragment head or retag it as ATTRIBUTE or APPOSITIVE"
+
+/**
+ * 多个 FRAGMENT_HEAD 只有在并列时才合法:每个额外 head 的紧邻前一个语义成分必须是
+ * CONJUNCTION。顺序按语义成分序列取(纯标点成分已被过滤)。
+ */
+private fun areFragmentHeadsCoordinated(components: List<IndexedCoreComponent>): Boolean {
+  val firstHeadIndex =
+    components.indexOfFirst { it.component.role == GrammarRole.FRAGMENT_HEAD }
+  return components.withIndex().all { (index, entry) ->
+    entry.component.role != GrammarRole.FRAGMENT_HEAD ||
+      index == firstHeadIndex ||
+      components.getOrNull(index - 1)?.component?.role == GrammarRole.CONJUNCTION
+  }
+}
+
 /**
  * 一个从句至少要有引导词 + 谓语，或主语 + 谓语，所以实词数 1 一定不是从句。
  * 实测线上把 `that` 单独标成 `ATTRIBUTIVE_CLAUSE`、把 `developers` 标成
@@ -526,11 +550,8 @@ private fun collectGrammarErrors(
   }
 
   val fragmentHeads = roles.filter { it.role == GrammarRole.FRAGMENT_HEAD }
-  if (fragmentHeads.size > 1) {
-    errors += error(
-      "$path.components",
-      "a non-clausal fragment must contain at most one FRAGMENT_HEAD",
-    )
+  if (fragmentHeads.size > 1 && !areFragmentHeadsCoordinated(components)) {
+    errors += error("$path.components", DUPLICATE_FRAGMENT_HEAD_MESSAGE)
   }
   if (fragmentHeads.isNotEmpty() && roles.any { it.role in fragmentForbiddenRoles }) {
     errors += error("$path.components", FRAGMENT_MIXED_ROLE_MESSAGE)

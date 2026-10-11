@@ -208,6 +208,25 @@ describe("model-facing sentence payload", () => {
     expect(repair).toContain("Check the repaired JSON against every listed validation error");
   });
 
+  // 2026-10-11 真机:并列名词片段(`A DESIGN.md — a note — and a FRAME.md`)里第二项被
+  // 同位语隔开,不能被并进同一个 FRAGMENT_HEAD,也不该被改标成修饰语——core 教「各项各
+  // 自成一个 head、连词单列 CONJUNCTION」,repair 明确禁止把并列项改标 APPOSITIVE。
+  it("teaches coordinated fragment heads and tells repair to split the conjunction out", () => {
+    const core = buildCorePrompt([sentence]);
+    const repair = buildRepairPrompt([sentence], [repairGroup], {});
+
+    for (const prompt of [core, repair]) {
+      expect(prompt).toContain(
+        '"A DESIGN.md — a note — and a FRAME.md" = FRAGMENT_HEAD "A DESIGN.md" + APPOSITIVE "a note" + CONJUNCTION "and" + FRAGMENT_HEAD "a FRAME.md"',
+      );
+      expect(prompt).toContain(
+        "a conjunction inside one uninterrupted phrase stays inside that single component",
+      );
+    }
+    expect(repair).toContain("never retag a coordinated conjunct as APPOSITIVE or ATTRIBUTE");
+    expect(repair).toContain("never leave the conjunction inside a FRAGMENT_HEAD");
+  });
+
   it("treats dash supplements as explanations instead of coordination", () => {
     const dashSentence: SentenceInput = {
       sentenceId: "dash-1",

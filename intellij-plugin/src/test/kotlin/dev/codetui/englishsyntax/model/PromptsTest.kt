@@ -166,6 +166,31 @@ class PromptsTest {
     assertTrue(prompt.contains("Check the repaired JSON against every listed validation error"))
   }
 
+  /**
+   * 2026-10-11 真机：并列名词片段里第二项被同位语隔开，既不能被并进同一个
+   * FRAGMENT_HEAD，也不该被改标成修饰语。与 TS `prompts.test.ts` 同一清单。
+   */
+  @Test
+  fun `teaches coordinated fragment heads and tells repair to split the conjunction out`() {
+    val core = buildCorePrompt(listOf(sentence("Classify the request.")))
+    val repair = buildRepairPrompt(
+      listOf(sentence("Classify the request.")),
+      listOf(RepairErrorGroup("s1", 0, "invalid", listOf(ValidationError("components[0]", "bad")))),
+      buildJsonObject { put("sentences", buildJsonArray { }) },
+    )
+
+    listOf(core, repair).forEach { prompt ->
+      assertTrue(
+        prompt.contains(
+          "\"A DESIGN.md — a note — and a FRAME.md\" = FRAGMENT_HEAD \"A DESIGN.md\" + APPOSITIVE \"a note\" + CONJUNCTION \"and\" + FRAGMENT_HEAD \"a FRAME.md\"",
+        ),
+      )
+      assertTrue(prompt.contains("a conjunction inside one uninterrupted phrase stays inside that single component"))
+    }
+    assertTrue(repair.contains("never retag a coordinated conjunct as APPOSITIVE or ATTRIBUTE"))
+    assertTrue(repair.contains("never leave the conjunction inside a FRAGMENT_HEAD"))
+  }
+
   @Test
   fun `dash supplements remain explanations and keep relative clause boundaries`() {
     val input = sentence("Ask clarifying questions — one at a time, the ones that matter.")
