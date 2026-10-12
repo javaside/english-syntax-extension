@@ -25,11 +25,11 @@ CachedAnalysisService.analyzeCore(input, signal)
         failures 里的 AUTH_FAILED 会让 SW 暂停该 profile
 ```
 
-`analyzeDetail` / `analyzeSentenceDetails` / `reanalyzeWithFeedback` 是同一套骨架的变体:**查缓存 → 请求 → 校验 → 至多一次修复 → 写缓存**。
+`analyzeDetail` / `analyzeSentenceDetails` / `reanalyzeWithFeedback` 是同一套骨架的变体:**查缓存 → 请求 → 校验 → 至多一次修复 → 写缓存**。`explainDiagnosis`(段落诊断的模型解释)是骨架外的**只读旁路**:单轮、无修复、不读写任何缓存,abort 走 `${documentId}:diagnosis` 隔离后缀(见 §2)。
 
 ## 2. 提示词(`prompts.ts`)
 
-四类主提示词 + 四类修复提示词:
+五类主提示词 + 四类修复提示词(诊断提示词没有修复轮):
 
 | 构造函数                                       | 首行前缀(**E2E 假服务器靠它识别请求类型,改了会炸**)              |
 | ---------------------------------------------- | ---------------------------------------------------------------- |
@@ -42,6 +42,12 @@ CachedAnalysisService.analyzeCore(input, signal)
 | `correctionPrompt`                             | `Reanalyze the supplied sentence`                                |
 | `correctionRepairPrompt`                       | `Repair only the structure of the invalid correction analysis`   |
 | `buildDiagnosisPrompt`                         | `Diagnose why the extension did not translate the page block`    |
+
+### 2.1 诊断提示词(`buildDiagnosisPrompt`)的三条特殊约定
+
+1. **首行刻意是函数内字面量,不进 `PROMPT_FIRST_LINES`**——那张表被 `cross-platform-contract` 的 contracts.json 与 Kotlin 侧双侧钉死,扩它就破坏 Chrome-only 改动范围;假服务器对 diagnosis 首行的识别独立写在 `detectKind` 里。
+2. **证据走隐私白名单**:只发门结果(`gates`)、目标标签与选择器路径、文本度量、分句/分词、请求可行性、失败句的 phase 与错误 code、会话状态与(可选)选中文本;**URL 与 `outerHTML` 原文绝不进 prompt**——它们只留在页面本地报告里供用户自查。
+3. **单轮、无修复、不缓存、不升版本**:形状校验(`validateDiagnosisExplanation`,配 `DIAGNOSIS_SCHEMA`)不符直接 `INVALID_MODEL_OUTPUT`,诊断报告是一次性证据,没有任何版本常量参与缓存键。调度走 `detail-click` 档(用户显式手势),去重键 `diagnosis:<selectorPath>:<capturedAt>`;`requestModel` 的 abort 监听会 `cancelDocument(documentId)`,所以诊断请求的 documentId 带 **`${documentId}:diagnosis` 隔离后缀**——不加后缀,诊断的中止会连坐取消该页正在跑的 core 请求。
 
 ### 两条省 token 的硬规则
 
@@ -62,7 +68,7 @@ CachedAnalysisService.analyzeCore(input, signal)
 
 ## 3. JSON Schema(`analysis-service.ts`)
 
-三份 `JsonSchemaSpec`:`CORE_SCHEMA`、`DETAIL_SCHEMA`、`SENTENCE_DETAILS_SCHEMA`(= `{details: [DETAIL_SCHEMA]}`)。
+四份 `JsonSchemaSpec`:`CORE_SCHEMA`、`DETAIL_SCHEMA`、`SENTENCE_DETAILS_SCHEMA`(= `{details: [DETAIL_SCHEMA]}`)、`DIAGNOSIS_SCHEMA`(`likelyCause` / `explanation` / `suggestions` 三字段全必填,`additionalProperties: false`)。
 
 支持 `response_format: json_schema` 的端点走 schema 约束;不支持的走**兼容模式**——此时输出形状只能靠提示词里的 `*_OUTPUT_SHAPE` 说清楚,所以那几段文字不是冗余。Kotlin 端也必须生成标准 JSON Schema:`required` 是字符串数组,字段定义放在 `properties`;连续 `put("required", "...")` 会相互覆盖,顶层直放字段也不是 Schema 属性。
 

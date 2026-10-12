@@ -58,6 +58,8 @@ MV3 把扩展拆成互不共享内存的几个世界。**每个模块能做什�
             ▼
 ┌──────────────────────────────────────────────────────────┐
 │ src/content/content-script.ts   路由 + 传输 + 响应守卫      │
+│   ├── block-diagnosis      段落诊断证据采集                 │
+│   ├── diagnosis-panel      段落诊断面板                     │
 │   └── session-controller   会话状态机 / 相位 / 合批 / 重连   │
 │         ├── document-scanner    正文识别                   │
 │         ├── viewport-observer   进入视口即入队               │

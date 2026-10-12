@@ -37,7 +37,7 @@
 | `PARSE_CONTEXT_BLOCK`       | 受信任 UI;或 SW 自发 | —                                           | 转发页面:解析右键处的块(会话须非 stopped)                | ✅    | ❌       |
 | `PARSE_HOVERED_BLOCK`       | 受信任 UI;或 SW 自发 | —                                           | 转发页面:解析鼠标悬停的块                                | ✅    | ❌       |
 | `DIAGNOSE_BLOCK`            | SW 自发(右键菜单)    | `selectionText?`                            | 菜单监听器经 `sendPageCommand` 下发;`route()` 里穷尽性拒绝 | ❌    | ❌       |
-| `EXPLAIN_DIAGNOSIS`         | 页面(有 tabId)       | `diagnosis`                                 | 诊断模型解释请求;回 `DIAGNOSIS_RESULT`                   | ❌    | ✅       |
+| `EXPLAIN_DIAGNOSIS`         | 页面(有 tabId)       | `diagnosis`                                 | 诊断模型解释请求;回 `DIAGNOSIS_RESULT`                   | ❌    | ❌       |
 | `TEST_PROFILE`              | options              | `profileId`                                 | 探测端点能力;**成功即解除鉴权暂停**                      | —     | —        |
 | `GET_CACHE_STATS`           | options              | —                                           | 缓存统计                                                 | —     | —        |
 | `CLEAR_CACHE`               | options              | —                                           | 清空三个 store                                           | —     | —        |
@@ -46,7 +46,7 @@
 
 三个 `PARSE_*` 有两条入口:SW 自己的右键菜单 / 快捷键监听器用 `sendPageCommand()` **直接** `tabs.sendMessage` 给页面(不经 `route()`);而 `route()` 里的同名分支是留给受信任 UI 调用的。`DIAGNOSE_BLOCK` 不同:合法下发方只有 SW 自己的「诊断」菜单监听器(同样走 `sendPageCommand`,且**不写 `activeTabs`**),`route()` 里的 case 仅为满足 `assertNever` 穷尽性——页面侧伪造的入站一律回 `MALFORMED_MESSAGE`。
 
-`DIAGNOSE_BLOCK` 落到**页面路由**(`content-script.ts`)后是一条 fire-and-forget 分支:立即回 `ACK`(页面命令只承诺"已受理"),诊断编排异步执行——本地证据先上 `DiagnosisPanel`,再经 `EXPLAIN_DIAGNOSIS` 请求模型解释。两个配套的 content 侧守卫:①页面路由开头的入站拒绝列表(`ANALYZE_CORE` / `ANALYZE_DETAIL` / `REANALYZE_WITH_FEEDBACK` / `EXPLAIN_DIAGNOSIS`)把页面伪造的 `EXPLAIN_DIAGNOSIS` 拒成 `MALFORMED_MESSAGE`——这条只有 content 自己会发;②`isRuntimeResponse()` 有 `DIAGNOSIS_RESULT` case(`isBlockDiagnosis` 查 `diagnosis` 回显,`model` 三字段 / `modelError` / `profile.model` 逐项把关),这是三层校验的第 3 层。
+`DIAGNOSE_BLOCK` 落到**页面路由**(`content-script.ts`)后是一条 fire-and-forget 分支:立即回 `ACK`(页面命令只承诺"已受理"),诊断编排异步执行——本地证据先上 `DiagnosisPanel`,再经 `EXPLAIN_DIAGNOSIS` 请求模型解释。两个配套的 content 侧守卫:①页面路由开头的入站拒绝列表(`ANALYZE_CORE` / `ANALYZE_DETAIL` / `REANALYZE_WITH_FEEDBACK` / `EXPLAIN_DIAGNOSIS`)把页面伪造的 `EXPLAIN_DIAGNOSIS` 拒成 `MALFORMED_MESSAGE`——这条只有 content 自己会发;②`isRuntimeResponse()` 有 `DIAGNOSIS_RESULT` case(`isBlockDiagnosis` 查 `diagnosis` 回显,`model` 三字段 / `modelError` / `profile.model` 逐项把关),这是三层校验的第 3 层。`EXPLAIN_DIAGNOSIS` **不豁免②**:content 用 `DIAGNOSE_BLOCK` 命令里 SW 已解析出的真实 `documentId` 发请求,凭与账上一致**合规通过**;文档换代后旧 controller 攥着旧 id 再发,照旧被判 `REQUEST_CANCELLED`——这正是想要的。
 
 > **注意 `STOP_SESSION` 的一条死路径。** `ChromeRuntimeTransport.cancelDocument()` 也会从 content 发这条消息,但该分支要求受信任 UI,所以它必然被回成 `UNSUPPORTED_PAGE`(调用处 fire-and-forget 吞掉了响应)。真正的取消依赖端口断开与 `tabs.onRemoved` / `onUpdated` 触发的 `cancelTab()`。
 
@@ -98,7 +98,7 @@ trustedPageControl = trustedExtensionUi && type ∈ {START_SESSION, PAUSE_SESSIO
 
 `CORE_RESULT` 上的 **`error` 是批级的**:鉴权失败或 profile 被暂停时,缓存命中照常返回(键与模型无关),只有未命中句由 content 按该错误标失败——换 / 修模型前译文不消失。
 
-`DIAGNOSIS_RESULT` 同理**从不整包 ERROR**:模型解释只是渐进增强,页面本地采集的诊断证据(`diagnosis` 回显)始终可用,失败一律嵌在 `modelError` 里——无 profile → `CONFIG_MISSING`,profile 被暂停 → `AUTH_FAILED`(命中同时 `pauseProfile`),模型请求失败(`ModelRequestError`)→ 原错误码,其余一切异常(含 `validateDiagnosisExplanation` 形状不符)→ `INVALID_MODEL_OUTPUT`。成功路径的 `model` 三字段逐一过 `redactProfileSecrets`,`profile` 只回 `{ model }`(不下发 profile id 或凭据指纹);`explainDiagnosis` 本身不写任何缓存。
+`DIAGNOSIS_RESULT` 同理**从不整包 ERROR**:模型解释只是渐进增强,页面本地采集的诊断证据(`diagnosis` 回显)始终可用,失败一律嵌在 `modelError` 里——无 profile → `CONFIG_MISSING`,profile 已被暂停(早退分支)→ `AUTH_FAILED`,模型请求失败(`ModelRequestError`)→ 原错误码(命中 `AUTH_FAILED` 时同时 `pauseProfile`),其余一切异常(含 `validateDiagnosisExplanation` 形状不符)→ `INVALID_MODEL_OUTPUT`。成功路径的 `model` 三字段逐一过 `redactProfileSecrets`,`profile` 只回 `{ model }`(不下发 profile id 或凭据指纹);`explainDiagnosis` 本身不写任何缓存。
 
 ## 4. 端口推送(不是响应)
 
