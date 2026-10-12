@@ -43,6 +43,29 @@ describe("resolveDiagnosisTarget（spec D1 落点优先级：选区锚点 → �
     }
   });
 
+  it("陈旧选区锚点（DOM 重置后脱离文档）回落到右键落点", () => {
+    // ① 在 #a 的文本节点上建立选区（真实用户选区的锚点形态）
+    document.body.innerHTML = '<main><p id="a">First para.</p><p id="b">Second para.</p></main>';
+    const textNode = document.getElementById("a")!.firstChild!;
+    const selection = document.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(textNode);
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    // ② DOM 重置（选区锚点脱离文档），再记录右键落点
+    document.body.innerHTML = '<main><p id="c">Third para.</p></main>';
+    // 前置自检：本用例的守卫覆盖依赖「happy-dom 的 Selection 跨 innerHTML 重置存活，
+    // 锚点滞留在已脱离文档的节点上」这一行为。若未来 happy-dom 改为重置时清空选区，
+    // 这里先红——提醒调整构造，而不是让守卫覆盖静默归零而测试全绿。
+    expect(selection?.anchorNode).toBe(textNode);
+    expect(document.contains(textNode.parentElement)).toBe(false);
+    recordDiagnosisTarget({ target: document.getElementById("c") } as unknown as Event);
+    // ③ 陈旧锚点不得当选区源：必须回落到 contextmenu 落点
+    const resolved = resolveDiagnosisTarget();
+    expect(resolved.element).toBe(document.getElementById("c"));
+    expect(resolved.source).toBe("contextmenu");
+  });
+
   it("无选区无记录时回落 body", () => {
     document.body.innerHTML = "<main><p>x</p></main>";
     recordDiagnosisTarget({ target: null } as unknown as Event); // 清掉记录
