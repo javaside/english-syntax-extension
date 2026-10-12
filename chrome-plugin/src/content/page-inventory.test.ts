@@ -5,7 +5,12 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { Window } from "happy-dom";
-import { explicitCandidateText, inventoryReadableUnits, type ReadableUnit } from "./page-inventory";
+import {
+  explainElement,
+  explicitCandidateText,
+  inventoryReadableUnits,
+  type ReadableUnit,
+} from "./page-inventory";
 import { scanDocument } from "./document-scanner";
 import { normalizedReadableText } from "./readable-dom-text";
 
@@ -340,5 +345,111 @@ describe("contenteditable=false 只读展示区不触发隐藏排除", () => {
 
     expect(units.get("readonly-host")?.automatic).toBe(true);
     expect(units.get("editable-host")?.exclusionReason).toBe("unsafe-interactive");
+  });
+});
+
+describe("explainElement 只读诊断出口", () => {
+  // 集合包含式一致性（刻意不是「首个失败门唯一决定 reason」）：classifyExclusion
+  // (page-inventory.ts:430-472) 的优先级链 + covered-by-child 的方向①（内联单元被
+  // 自动父吸收）都依赖整页两遍算法，单元素函数无法逐门复刻优先级。断言改为两条：
+  // ① automatic 单元无任何失败门；② 非自动单元的失败门集合 ⊇ 产出其 reason 所需的门。
+  // 这就是防「诊断逻辑漂移」的核心断言：诊断说的原因必须与生产判定一致。
+  const SCIENTIFIC_REASONS = [
+    "conversion-placeholder",
+    "math-auxiliary",
+    "reference-metadata",
+    "display-math",
+    "unsupported-reference-layout",
+  ];
+  const requiredGateByReason: Record<string, string> = {
+    "outside-principal-content": "inside-principal-root",
+    "excluded-region": "excluded-region",
+    "unsafe-interactive": "unsafe-descendant",
+    "no-readable-words": "readable-words",
+    "non-english": "english-dominant",
+    "loose-block-too-short": "min-auto-text-length",
+    "covered-by-child": "covered-by-child",
+    "unsafe-partial-replacement": "has-separable-direct-text",
+  };
+
+  it("对两份冻结 fixture 的每个 unit，失败门集合覆盖其 exclusionReason 所需的门", () => {
+    for (const fixtureName of fixtures) {
+      const page = parsePage(readFixture(fixtureName, "html"));
+      const contract = JSON.parse(readFixture(fixtureName, "json")) as InventoryContract;
+      const units = new Map(
+        inventoryReadableUnits(page).map((unit) => [
+          unit.element.getAttribute("data-audit-id") ?? unit.id,
+          unit,
+        ]),
+      );
+      for (const { id, reason } of contract.units) {
+        const unit = units.get(id);
+        if (unit === undefined || reason === null) continue;
+        const failed = new Set(
+          explainElement(unit.element)
+            .filter(({ ok }) => !ok)
+            .map(({ gate }) => gate),
+        );
+        if (unit.automatic) {
+          expect([...failed], `${fixtureName}:${id} 自动单元不应有失败门`).toEqual([]);
+          continue;
+        }
+        if (SCIENTIFIC_REASONS.includes(reason)) {
+          expect(failed, `${fixtureName}:${id} reason=${reason}`).toContain("scientific-exclusion");
+          continue;
+        }
+        if (reason === "hidden") {
+          expect(
+            failed.has("hidden-ancestor") || failed.has("layout-visible"),
+            `${fixtureName}:${id} hidden 应有 hidden-ancestor 或 layout-visible 失败`,
+          ).toBe(true);
+          continue;
+        }
+        if (reason === "covered-by-child") {
+          // 两方向：方向②自身有可分析子（covered-by-child 门失败）；方向①被某个自动
+          // 祖先吸收（整页判定，这里用 inventory 结果验证，explainElement 单元素复算不了）。
+          const absorbed = [...units.values()].some(
+            (other) =>
+              other.automatic &&
+              other.element !== unit.element &&
+              other.element.contains(unit.element),
+          );
+          expect(
+            failed.has("covered-by-child") || absorbed,
+            `${fixtureName}:${id} covered-by-child 两方向均不满足`,
+          ).toBe(true);
+          continue;
+        }
+        const required = requiredGateByReason[reason];
+        expect(
+          required,
+          `${fixtureName}:${id} 未知的 reason=${reason}——映射表缺条目`,
+        ).toBeDefined();
+        expect(failed, `${fixtureName}:${id} reason=${reason} 缺门 ${required}`).toContain(
+          required,
+        );
+      }
+    }
+  });
+
+  it("english-dominant 门带回词级占比（isEnglishDominant 是词级判定，不是字符级）", () => {
+    // 3/6 英文词 = 0.5 < 0.6（englishLetterRatio 的词级占比，page-inventory.ts:163-167）。
+    document.body.innerHTML = '<main><p id="mixed">你好 hello 世界 test again 更多</p></main>';
+    const gates = explainElement(document.getElementById("mixed")!);
+    const gate = gates.find(({ gate }) => gate === "english-dominant")!;
+    expect(gate.ok).toBe(false);
+    expect(gate.value).toBe(0.5);
+  });
+
+  it("min-auto-text-length 门的条件与 classifyExclusion 同款（非 BLOCK/CALLOUT 且 <20）", () => {
+    document.body.innerHTML = '<main><div id="tiny">Short text</div></main>';
+    const gates = explainElement(document.getElementById("tiny")!);
+    const gate = gates.find(({ gate }) => gate === "min-auto-text-length")!;
+    expect(gate.ok).toBe(false);
+    expect(gate.value).toBe(10);
+    // BLOCK_SELECTOR 命中的元素不受短块门限制（classifyExclusion:464-470 同款）。
+    document.body.innerHTML = '<main><figcaption id="cap">Tiny.</figcaption></main>';
+    const caption = explainElement(document.getElementById("cap")!);
+    expect(caption.find(({ gate }) => gate === "min-auto-text-length")!.ok).toBe(true);
   });
 });
