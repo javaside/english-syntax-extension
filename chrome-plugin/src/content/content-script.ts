@@ -1,15 +1,24 @@
 import type { ExtensionError } from "../shared/errors";
 import { ERROR_CODES } from "../shared/errors";
 import { GrammarRole } from "../shared/grammar";
-import { isCoreStreamPush, isDetailStreamPush, isRequestMessage } from "../shared/protocol";
+import {
+  isBlockDiagnosis,
+  isCoreStreamPush,
+  isDetailStreamPush,
+  isRequestMessage,
+} from "../shared/protocol";
 import type {
+  DiagnosisExplanation,
   CoreStreamPush,
   DetailStreamPush,
   RequestMessage,
   ResponseMessage,
+  SessionDiagnosisSnapshot,
   SessionStatus,
 } from "../shared/protocol";
 import { CORE_SCHEMA_VERSION, MESSAGE_VERSION } from "../shared/versions";
+import { diagnoseElement, recordDiagnosisTarget, resolveDiagnosisTarget } from "./block-diagnosis";
+import { DiagnosisPanel } from "./diagnosis-panel";
 import { installHoverTracker } from "./hover-target";
 import { SyntaxProgressPill } from "./progress-pill";
 import { SessionController } from "./session-controller";
@@ -17,6 +26,9 @@ import type { RuntimeTransport, SessionControllerOptions } from "./session-contr
 
 interface RoutedController {
   readonly status: SessionStatus;
+  /** 诊断等页面侧一次性请求复用会话通道（S5）：绝不能另开 transport/端口。 */
+  readonly transport: RuntimeTransport;
+  diagnosisSnapshot(element: Element | null): SessionDiagnosisSnapshot;
   start(options?: { prefetchDetail?: boolean }): Promise<void>;
   pause(): void;
   resume(): void;
@@ -161,6 +173,20 @@ function isExtensionError(value: unknown): value is ExtensionError {
   );
 }
 
+/**
+ * DIAGNOSIS_RESULT.model 的小守卫：协议层的 isBlockDiagnosis 只管 diagnosis 载荷，
+ * 模型解释的形状在这里独立把关（三层校验的 content 层一环）。
+ */
+function isDiagnosisExplanation(value: unknown): value is DiagnosisExplanation {
+  return (
+    isRecord(value) &&
+    typeof value.likelyCause === "string" &&
+    typeof value.explanation === "string" &&
+    Array.isArray(value.suggestions) &&
+    value.suggestions.every((item) => typeof item === "string")
+  );
+}
+
 export function isRuntimeResponse(value: unknown, requestId: string): value is ResponseMessage {
   if (
     !isRecord(value) ||
@@ -201,6 +227,14 @@ export function isRuntimeResponse(value: unknown, requestId: string): value is R
           value.jsonSchemaSupport === "supported" ||
           value.jsonSchemaSupport === "unsupported") &&
         (value.error === undefined || isExtensionError(value.error))
+      );
+    case "DIAGNOSIS_RESULT":
+      return (
+        isBlockDiagnosis(value.diagnosis) &&
+        (value.model === undefined || isDiagnosisExplanation(value.model)) &&
+        (value.modelError === undefined || isExtensionError(value.modelError)) &&
+        (value.profile === undefined ||
+          (isRecord(value.profile) && typeof value.profile.model === "string"))
       );
     case "ERROR":
       return isExtensionError(value.error);
@@ -331,10 +365,74 @@ export class ChromeRuntimeTransport implements RuntimeTransport {
   }
 }
 
+/** SW 右键菜单下发的诊断页面命令（不含页面侧自己发的 EXPLAIN_DIAGNOSIS——那是出站）。 */
+type DiagnoseBlockRequest = Extract<RequestMessage, { type: "DIAGNOSE_BLOCK" }>;
+
 export class ContentScriptRouter {
   private readonly controllers = new Map<string, RoutedController>();
+  private diagnosisPanelInstance?: DiagnosisPanel;
+  private diagnosisRequestCounter = 0;
 
   constructor(private readonly options: ContentScriptRouterOptions = {}) {}
+
+  /** 诊断面板惰性单例（评审 I2）：首次诊断才建 host，不占冷启动预算。 */
+  private diagnosisPanel(): DiagnosisPanel {
+    if (this.diagnosisPanelInstance === undefined) {
+      this.diagnosisPanelInstance = new DiagnosisPanel();
+    }
+    return this.diagnosisPanelInstance;
+  }
+
+  /**
+   * 诊断编排：本地证据立即上屏（show 不等模型），模型解释走会话 transport 的
+   * EXPLAIN_DIAGNOSIS——S5：复用 controller 的 transport，绝不 new 一个新的
+   * （新 transport 会开第二个 watchdog 端口，SW onConnect 无条件覆写
+   * documentPorts，会话流式推送被劫持）。
+   */
+  private async runDiagnosis(request: DiagnoseBlockRequest): Promise<void> {
+    const panel = this.diagnosisPanel();
+    const controller = this.controller(request.tabId, request.documentId);
+    const { element, source } = resolveDiagnosisTarget();
+    const diagnosis = diagnoseElement({
+      target: element,
+      targetSource: source,
+      ...(request.selectionText === undefined ? {} : { selectionText: request.selectionText }),
+      document,
+      sessionSnapshot: (target) => controller.diagnosisSnapshot(target),
+      url: location.href,
+    });
+    panel.show(diagnosis);
+    const requestId = `${request.documentId}:diagnosis:${++this.diagnosisRequestCounter}`;
+    panel.trackRequest(requestId);
+    const response = await controller.transport.send({
+      version: MESSAGE_VERSION,
+      requestId,
+      type: "EXPLAIN_DIAGNOSIS",
+      tabId: request.tabId,
+      documentId: request.documentId,
+      diagnosis,
+    });
+    if (response.type === "DIAGNOSIS_RESULT") {
+      panel.updateModel({
+        requestId,
+        ...(response.model === undefined ? {} : { model: response.model }),
+        ...(response.modelError === undefined ? {} : { modelError: response.modelError }),
+        ...(response.profile === undefined ? {} : { profile: response.profile }),
+      });
+      return;
+    }
+    panel.updateModel({
+      requestId,
+      modelError:
+        response.type === "ERROR"
+          ? response.error
+          : {
+              code: "INVALID_MODEL_OUTPUT",
+              message: "响应不是 DIAGNOSIS_RESULT",
+              retryable: false,
+            },
+    });
+  }
 
   async route(value: unknown): Promise<ResponseMessage> {
     if (!isRequestMessage(value) || !("documentId" in value) || !("tabId" in value)) {
@@ -350,7 +448,8 @@ export class ContentScriptRouter {
     if (
       request.type === "ANALYZE_CORE" ||
       request.type === "ANALYZE_DETAIL" ||
-      request.type === "REANALYZE_WITH_FEEDBACK"
+      request.type === "REANALYZE_WITH_FEEDBACK" ||
+      request.type === "EXPLAIN_DIAGNOSIS"
     ) {
       return invalidMessage(request.requestId);
     }
@@ -382,6 +481,12 @@ export class ContentScriptRouter {
         case "PARSE_HOVERED_BLOCK": {
           const error = await controller.parseHoveredBlock();
           return error === undefined ? ack(request) : errorResponse(request.requestId, error);
+        }
+        case "DIAGNOSE_BLOCK": {
+          // 诊断编排是页面侧主动：本地证据立即上屏，模型解释走 EXPLAIN_DIAGNOSIS。
+          // 不 await——页面命令只承诺"已受理"（ack），模型结果经面板回调呈现。
+          void this.runDiagnosis(request);
+          return ack(request);
         }
         case "REANALYZE_VISIBLE":
           controller.reanalyzeVisible();
@@ -434,6 +539,9 @@ function installContentScript(): void {
   const pill = new SyntaxProgressPill();
   // 先挂指针追踪:快捷键冷启动时会话还不存在,那时才开始记就晚了。
   const hoverTarget = installHoverTracker(document);
+  // 诊断落点：contextmenu 捕获监听，与 SessionController 的 contextTarget 无关——
+  // 那个只在会话运行时记录，而「识别不出段落」的用户多半没启动会话（spec D1）。
+  document.addEventListener("contextmenu", recordDiagnosisTarget, true);
   const router = new ContentScriptRouter({
     hoverTarget,
     relayStatus: (documentId, status) => {

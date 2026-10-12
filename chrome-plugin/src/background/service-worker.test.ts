@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GrammarRole } from "../shared/grammar";
 import { CORE_SCHEMA_VERSION } from "../shared/versions";
 import type {
+  BlockDiagnosis,
   RequestMessage,
   ResponseMessage,
   SentenceInput,
@@ -135,6 +136,7 @@ function dependencies(
     analyzeSentenceDetails: vi.fn<AnalysisService["analyzeSentenceDetails"]>(() =>
       Promise.resolve({ succeeded: 0, failed: 0 }),
     ),
+    explainDiagnosis: vi.fn<AnalysisService["explainDiagnosis"]>(),
     ...analysisOverrides,
   };
   const deps: ServiceWorkerDependencies = {
@@ -221,17 +223,21 @@ async function dispatch(
 describe("service worker orchestration", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("creates both context menu commands exactly once on install", async () => {
+  it("注册第三个右键菜单项——同时更新被钉死的两项注册断言", async () => {
     const subject = chromeMock();
     registerServiceWorker(dependencies(), subject.api);
-
     subject.events.runtime.onInstalled.listeners[0]!({ reason: "install" });
     await vi.waitFor(() => expect(subject.events.contextMenus.removeAll).toHaveBeenCalledOnce());
-
-    expect(subject.events.contextMenus.removeAll).toHaveBeenCalledOnce();
     expect(subject.events.contextMenus.create.mock.calls).toEqual([
       [{ id: "syntax-parse-selection", title: "解析选中文本", contexts: ["selection"] }],
       [{ id: "syntax-parse-context-block", title: "解析此区域", contexts: ["page"] }],
+      [
+        {
+          id: "syntax-diagnose-block",
+          title: "诊断：这段为什么没解析",
+          contexts: ["page", "selection"],
+        },
+      ],
     ]);
   });
 
@@ -1158,6 +1164,167 @@ describe("service worker orchestration", () => {
 
     expect(retried.type).toBe("CORE_RESULT");
     expect(analyzeCore).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("diagnosis 路由", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  function sampleDiagnosis(): BlockDiagnosis {
+    return {
+      target: {
+        tagName: "P",
+        className: "content",
+        id: "para-1",
+        selectorPath: "main > p#para-1",
+        outerHtml: '<p id="para-1" class="content">Learners read.</p>',
+      },
+      targetSource: "contextmenu",
+      inventory: { isUnit: true, kind: "p", automatic: true },
+      explicit: { resolvable: true, selectorPath: "main > p#para-1" },
+      gates: [{ gate: "english-ratio", ok: false, value: 0.2 }],
+      text: { length: 15, letterWords: 2, englishRatio: 0.2, minAutoTextLength: 20 },
+      segmentation: { sentenceCount: 1, sentenceLengths: [15], tokenCount: 2, emptyText: false },
+      requestFeasibility: {
+        maxSentenceLength: 15,
+        sentenceLengthLimit: 1200,
+        maxSentencesPerRequest: 6,
+        cloudSentencesPerRequest: 6,
+      },
+      session: { state: "stopped", registered: false, sentences: [] },
+      page: { url: "https://example.com/article", readyState: "complete" },
+      capturedAt: "2026-10-11T00:00:00.000Z",
+    };
+  }
+
+  it("无 profile 时 EXPLAIN_DIAGNOSIS 回 DIAGNOSIS_RESULT 且 modelError=CONFIG_MISSING", async () => {
+    const subject = chromeMock();
+    registerServiceWorker(dependencies({}, []), subject.api);
+
+    const response = await dispatch(
+      subject.events.runtime.onMessage.listeners[0]!,
+      pageRequest({ type: "EXPLAIN_DIAGNOSIS", diagnosis: sampleDiagnosis() }),
+    );
+
+    expect(response.type).toBe("DIAGNOSIS_RESULT");
+    if (response.type !== "DIAGNOSIS_RESULT") return;
+    expect(response.model).toBeUndefined();
+    expect(response.modelError?.code).toBe("CONFIG_MISSING");
+    expect(response.diagnosis).toEqual(sampleDiagnosis());
+  });
+
+  it("有 profile 时调 explainDiagnosis 并回填 model 与 profile.model", async () => {
+    const explainDiagnosis = vi.fn<AnalysisService["explainDiagnosis"]>().mockResolvedValueOnce({
+      likelyCause: "english ratio below threshold",
+      explanation: "占比不足",
+      suggestions: [],
+    });
+    const subject = chromeMock();
+    registerServiceWorker(dependencies({ explainDiagnosis }), subject.api);
+
+    const response = await dispatch(
+      subject.events.runtime.onMessage.listeners[0]!,
+      pageRequest({ type: "EXPLAIN_DIAGNOSIS", diagnosis: sampleDiagnosis() }),
+    );
+
+    expect(explainDiagnosis).toHaveBeenCalledWith(
+      expect.objectContaining({ documentId: "document-1" }),
+      expect.any(AbortSignal),
+    );
+    if (response.type !== "DIAGNOSIS_RESULT") throw new Error("expected DIAGNOSIS_RESULT");
+    expect(response.model?.likelyCause).toBe("english ratio below threshold");
+    expect(response.profile).toEqual({ model: "model-a" });
+  });
+
+  it("explainDiagnosis 抛错时 modelError 带错误码且仍回 DIAGNOSIS_RESULT", async () => {
+    const explainDiagnosis = vi
+      .fn<AnalysisService["explainDiagnosis"]>()
+      .mockRejectedValueOnce(new ModelRequestError("REQUEST_TIMEOUT", "timeout", true));
+    const subject = chromeMock();
+    registerServiceWorker(dependencies({ explainDiagnosis }), subject.api);
+
+    const response = await dispatch(
+      subject.events.runtime.onMessage.listeners[0]!,
+      pageRequest({ type: "EXPLAIN_DIAGNOSIS", diagnosis: sampleDiagnosis() }),
+    );
+
+    if (response.type !== "DIAGNOSIS_RESULT") throw new Error("expected DIAGNOSIS_RESULT");
+    expect(response.modelError?.code).toBe("REQUEST_TIMEOUT");
+  });
+
+  it("形状非法的模型输出回 INVALID_MODEL_OUTPUT 而不是 NETWORK_ERROR", async () => {
+    // validateDiagnosisExplanation(Task 4)抛的是普通 Error:形状不符=模型输出非法(spec D4),
+    // 只有真正的模型请求错误(ModelRequestError)才携带可映射的错误码。
+    const explainDiagnosis = vi
+      .fn<AnalysisService["explainDiagnosis"]>()
+      .mockRejectedValueOnce(new Error("Invalid diagnosis explanation shape"));
+    const subject = chromeMock();
+    registerServiceWorker(dependencies({ explainDiagnosis }), subject.api);
+
+    const response = await dispatch(
+      subject.events.runtime.onMessage.listeners[0]!,
+      pageRequest({ type: "EXPLAIN_DIAGNOSIS", diagnosis: sampleDiagnosis() }),
+    );
+
+    if (response.type !== "DIAGNOSIS_RESULT") throw new Error("expected DIAGNOSIS_RESULT");
+    expect(response.modelError?.code).toBe("INVALID_MODEL_OUTPUT");
+  });
+
+  it("DIAGNOSE_BLOCK 入站被拒（无合法入站来源）", async () => {
+    const subject = chromeMock();
+    registerServiceWorker(dependencies(), subject.api);
+
+    const response = await dispatch(
+      subject.events.runtime.onMessage.listeners[0]!,
+      pageRequest({ type: "DIAGNOSE_BLOCK" }),
+    );
+
+    expect(response.type).toBe("ERROR");
+    if (response.type === "ERROR") expect(response.error.code).toBe("MALFORMED_MESSAGE");
+  });
+
+  it("菜单点击下发 DIAGNOSE_BLOCK 且不写 activeTabs", async () => {
+    const subject = chromeMock();
+    registerServiceWorker(dependencies(), subject.api);
+
+    subject.events.contextMenus.onClicked.listeners[0]!(
+      { menuItemId: "syntax-diagnose-block", selectionText: "hello", editable: false },
+      { id: 7 } as chrome.tabs.Tab,
+    );
+    await vi.waitFor(() => expect(subject.events.tabs.sendMessage).toHaveBeenCalledOnce());
+
+    expect(subject.events.tabs.sendMessage).toHaveBeenCalledWith(
+      expect.any(Number),
+      expect.objectContaining({ type: "DIAGNOSE_BLOCK", selectionText: "hello" }),
+    );
+    // spec D1：不记账、不伪造 running——activeTabs 的每次 set 都会经
+    // persistActiveTabs 落到 session 存储，这里必须保持空。
+    expect(subject.sessionData["activeTabs.v1"]).toBeUndefined();
+  });
+
+  it("无会话时同 tab 两次诊断下发相同 documentId（controller 按记忆复用）", async () => {
+    const subject = chromeMock();
+    registerServiceWorker(dependencies(), subject.api);
+
+    const click = (): void => {
+      subject.events.contextMenus.onClicked.listeners[0]!(
+        { menuItemId: "syntax-diagnose-block", editable: false },
+        { id: 9 } as chrome.tabs.Tab,
+      );
+    };
+    click();
+    await vi.waitFor(() => expect(subject.events.tabs.sendMessage).toHaveBeenCalledTimes(1));
+    click();
+    await vi.waitFor(() => expect(subject.events.tabs.sendMessage).toHaveBeenCalledTimes(2));
+
+    const first = subject.events.tabs.sendMessage.mock.calls[0]![1] as { documentId?: string };
+    const second = subject.events.tabs.sendMessage.mock.calls[1]![1] as { documentId?: string };
+    // 反复右键若每次都换新 id，content 侧 router 会按 id 再建一个 controller +
+    // watchdog 端口 + contextmenu 监听且永不回收（diagnosisDocumentIds 的注释）。
+    expect(first.documentId).toBeTypeOf("string");
+    expect(second.documentId).toBe(first.documentId);
+    // 记忆不等于记账：activeTabs 仍必须保持空（spec D1）。
+    expect(subject.sessionData["activeTabs.v1"]).toBeUndefined();
   });
 });
 

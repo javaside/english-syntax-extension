@@ -30,7 +30,7 @@ IntelliJ 插件(动了 `intellij-plugin/`、`shared-fixtures/` 或桥协议时;�
 
 ## 关键工程约定
 
-- **协议三层校验必须同步**:新增 `ResponseMessage` 成员时,`src/shared/protocol.ts` 类型、SW 侧校验/路由、content 侧 `isRuntimeResponse` 的 switch case 三处缺一不可。content 层漏 case 会把 SW 的成功响应静默替换成 ERROR(缓存写对但计数全错,曾在真机验收才暴露)。
+- **协议三层校验必须同步**:新增 `ResponseMessage` 成员时,`src/shared/protocol.ts` 类型、SW 侧校验/路由、content 侧 `isRuntimeResponse` 的 switch case 三处缺一不可。content 层漏 case 会把 SW 的成功响应静默替换成 ERROR(缓存写对但计数全错,曾在真机验收才暴露)。对称的第四处:新增**只有 content 自己会发**的 `RequestMessage` 成员(如 `EXPLAIN_DIAGNOSIS`)要同步进 content 页面路由开头的入站拒绝列表,漏了会让页面伪造的同名消息直达 SW。
 - **E2E/验收断言用探针,不用墙钟**:判"是否真调了模型"用 fetch 计数/请求记录;判"预载成功"断言 `detailReady === detailTotal && detailFailed === 0`,不能只断言"结束了"。
 - **content script 读不到 chrome.storage**(TRUSTED_CONTEXTS):设置必须由 SW 在 START_SESSION 页面命令上快照下发。
 - **流式分片走端口推送,不是 sendMessage 响应**:`CORE_STREAM` 由 SW 经 `syntax-learning:<documentId>` 端口 `postMessage`,content 侧用 `isCoreStreamPush` 独立把关(`isRuntimeResponse` 的 switch 对它不适用),但"类型 / SW 侧构造 / content 侧守卫"三处同步的要求照旧。

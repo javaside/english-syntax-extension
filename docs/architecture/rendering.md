@@ -255,7 +255,18 @@ currentElement(original)                  当前呈现的元素:替换中返回�
 
 `discard(sentenceId)`(块失效时调用):还在排队的立即丢弃并扣 total;已完成或在飞的只释放 `trackedIds`(计数不动,在飞的跑完照常计数),使句子重新就绪后能再次 enqueue。
 
-## 10. 动态内容与断线重连
+## 10. 段落诊断面板(`diagnosis-panel.ts`)
+
+host + open shadow root,结构照 progress-pill,但**面板本身可交互**(刻意不写 `pointer-events:none`)。定位 `position:fixed; right:16px; bottom:64px; z-index:2147483647`,挂在 `documentElement` 上,`close()` 移除。
+
+- `show(diagnosis)` 本地证据立即渲染(逐门 ✅/❌ 表格 + 第一个失败门摘要);`trackRequest` 记最新请求并回到等待态。
+- **requestId 即 generation**:`updateModel` 对不匹配 `trackRequest` 最新记录的响应直接忽略——晚到的旧解释不能覆盖新一轮结果。`show()` 的重置**连 `requestId` 一起作废**(`trackRequest` 因此必须先重置再登记),「show 后、track 前」的陈旧响应接受窗口就此关闭。
+- 面板实例由 `ContentScriptRouter` 内部**惰性单例**持有:首次 `DIAGNOSE_BLOCK` 才建 host,不占内容脚本冷启动预算;`installContentScript()` 处不需要额外装配。
+- 诊断落点由 `installContentScript()` 装配的 `contextmenu` **捕获**监听记录(`recordDiagnosisTarget`),与会话的 `contextTarget` 无关——后者只在会话运行时记录,而「识别不出段落」的用户多半没启动会话。
+- `report()` 点击复制时才组装(经 `block-diagnosis.ts` 的 `formatDiagnosisReport`,含 `generatedAt`);`navigator.clipboard.writeText` 成功则按钮变「已复制」,失败(非安全上下文 / 权限拒绝)降级为 shadow root 内**已全选的只读 textarea**(在面板根上、不在 button 内,因此可聚焦可手动复制),重复点击替换旧兜底。
+- 隐私两句常驻:报告含页面 URL 与截断 HTML 的自查提示,以及模型解释只外发判定证据(不含 URL 与 HTML)的说明。
+
+## 11. 动态内容与断线重连
 
 ### MutationObserver
 

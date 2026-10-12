@@ -338,6 +338,16 @@
 
 **测试** `chrome-plugin/src/content/page-inventory.test.ts` 的「contenteditable=false 只读展示区不触发隐藏排除」三用例(只读容器段落进自动清单 / true|""|plaintext-only 照旧排除 / 只读后代不把宿主判成危险后代);`chrome-plugin/src/content/document-scanner.test.ts` 的「nearestSafeBlock 对 contenteditable=false 的只读富文本」两用例(手势可达 / 可编辑照旧拒绝)。
 
+### I-21.5 诊断必须复用生产判定,不得复制判据
+
+**规则** 段落诊断(`block-diagnosis.ts`)的每一项证据都必须调用**生产判定函数本身**——逐门判定走 `page-inventory.ts` 的 `explainElement`,分句/分词走生产 `segmentBlock`/`tokenize`,英文占比、短块阈值、请求可行性批上限一律取生产实现——不得在诊断路径里重写一份判据副本。对 `explainElement` 的守护刻意是**集合包含式**断言(排除单元的失败门集合 ⊇ 产出其 `exclusionReason` 所需的门),而不是「首个失败门唯一决定 reason」:classifyExclusion 的优先级链与 covered-by-child 的吸收方向都依赖整页两遍算法,单元素函数无法逐门复刻优先级。
+
+**为什么** 诊断的价值在于回答「生产管线为什么拒绝了这个块」。判据一旦分叉,报告描述的就是一条不存在的管线——用户照着报告去改页面或配置,生产扫描却按另一套判据行事;模型解释也基于失真证据给出南辕北辙的建议。这类分叉只在「诊断与生产各改一处」时出现,两侧单测可以同时全绿。
+
+**症状** 报告说「english-dominant 门拒绝(占比 0.5)」而生产扫描实际放行(或反之);报告的分句数与卡片句数对不上;阈值调整后报告里的门数值停在旧值。
+
+**守护测试** `chrome-plugin/src/content/page-inventory.test.ts` 的「explainElement 只读诊断出口」组(两份冻结 fixture 的集合包含式一致性 + english-dominant 词级占比数值 + min-auto-text-length 条件门与 classifyExclusion 同款);`chrome-plugin/src/content/block-diagnosis.test.ts`(resolveDiagnosisTarget 三优先级、diagnoseElement 证据字段、URL 净化、requestFeasibility 两档批上限、formatDiagnosisReport 小节)。
+
 ### I-22 合批分桶与定时器顺序
 
 **规则** 待发块按 `${是否屏外}:${是否跳缓存}` 分桶;`enqueueForBatch` 里**先把条目写进 `pendingBatches` 再起定时器**。

@@ -1,3 +1,4 @@
+import type { DiagnosisGateResult as CandidateGateResult } from "../shared/protocol";
 import { normalizedReadableText } from "./readable-dom-text";
 
 /**
@@ -85,7 +86,7 @@ export const EDITABLE_CONTENT_SELECTOR =
 const HIDDEN_SELECTOR = `[hidden],[aria-hidden='true'],${EDITABLE_CONTENT_SELECTOR}`;
 // 图片不在排除之列:卡片替换只是 display:none,段落里夹插图不妨碍可逆渲染。
 const UNSAFE_DESCENDANT_SELECTOR = `button,input,textarea,select,video,audio,canvas,iframe,${EDITABLE_CONTENT_SELECTOR}`;
-const MINIMUM_AUTO_TEXT_LENGTH = 20;
+export const MINIMUM_AUTO_TEXT_LENGTH = 20;
 
 /** LaTeXML 语义类:参考文献的题名 / 作者 / 年份,论文作者块与邮箱。 */
 const REFERENCE_TITLE_SELECTOR = ".ltx_bib_title";
@@ -159,10 +160,15 @@ function letterWords(text: string): string[] {
   return text.match(/\p{L}+(?:['’-]\p{L}+)*/gu) ?? [];
 }
 
-function isEnglishDominant(text: string): boolean {
+/** 英文词占全部实词的比例——词级判定,不是字符级(中文实词同样计入分母)。 */
+function englishLetterRatio(text: string): number {
   const words = letterWords(text);
   const english = words.filter((word) => /^[A-Za-z]+(?:['’-][A-Za-z]+)*$/u.test(word)).length;
-  return english / Math.max(1, words.length) >= 0.6;
+  return english / Math.max(1, words.length);
+}
+
+function isEnglishDominant(text: string): boolean {
+  return englishLetterRatio(text) >= 0.6;
 }
 
 /**
@@ -551,4 +557,68 @@ export function inventoryReadableUnits(root: ParentNode): ReadableUnit[] {
     units.push(unit);
   }
   return units;
+}
+
+// 单一形状单一处定义:门的 wire 形状由协议层拥有,这里按既有名字 re-export,
+// explainElement 的返回类型与 EXPLAIN_DIAGNOSIS 载荷天然同构。
+export type { DiagnosisGateResult as CandidateGateResult } from "../shared/protocol";
+
+/**
+ * 只读诊断出口:对单个元素按生产判据逐门复算,返回每门结果与当时取值。
+ * 门顺序刻意镜像 classifyExclusion(:430-472) 的优先级链(科学排除 → 覆盖/部分替换 →
+ * principal root → 排除区 → 交互元素 → 可见性 → 实词 → 英文 → 短块),block-candidate
+ * 作为额外语义证据放最后;它与 inventoryReadableUnits 的判定必须一致——诊断报告要拿去
+ * 改代码,不能复制一份会漂移的判据。不改任何生产路径行为,纯新增导出。
+ */
+export function explainElement(element: Element): CandidateGateResult[] {
+  const text = normalizedReadableText(element);
+  const words = letterWords(text).length;
+  const ratio = englishLetterRatio(text);
+  const scientific = scientificExclusion(element);
+  const owner = element.ownerDocument; // 绝不引用全局 document——fixture 元素在独立 Window 文档里
+  const principalRoot = selectPrincipalRoot(owner);
+  const excluded = excludedRegionAncestor(element);
+  const hasAnalyzableChildren = analyzableDescendants(element).length > 0;
+  const unsafeSelf = element.matches(UNSAFE_DESCENDANT_SELECTOR); // 注意拼写 DESCENDANT
+  const unsafeChild = element.querySelector(UNSAFE_DESCENDANT_SELECTOR) !== null;
+  return [
+    {
+      gate: "scientific-exclusion",
+      ok: scientific === undefined,
+      ...(scientific === undefined ? {} : { value: scientific }),
+    },
+    { gate: "covered-by-child", ok: !hasAnalyzableChildren },
+    // 条件门:仅在有可分析子时才评估(automatic 单元没有可分析子,恒 ok)——
+    // 镜像 classifyExclusion 里 children 检查先于 hasSeparableDirectText 的顺序。
+    {
+      gate: "has-separable-direct-text",
+      ok: !hasAnalyzableChildren || !hasSeparableDirectText(element),
+    },
+    {
+      gate: "inside-principal-root",
+      ok: principalRoot === null || principalRoot.contains(element) || element === principalRoot,
+    },
+    {
+      gate: "excluded-region",
+      ok: excluded === null,
+      ...(excluded === null ? {} : { value: "excluded-region-ancestor" }),
+    },
+    // classifyExclusion:456 是 matches(自身) || querySelector(后代)——isSafeElement:205 只查后代,
+    // 这里按 classifyExclusion 的口径(自身也算),unsafe-interactive 才有门可依。
+    { gate: "unsafe-descendant", ok: !unsafeSelf && !unsafeChild },
+    { gate: "hidden-ancestor", ok: element.closest(HIDDEN_SELECTOR) === null },
+    { gate: "layout-visible", ok: isLayoutVisible(element) },
+    { gate: "readable-words", ok: words > 0, value: words },
+    { gate: "english-dominant", ok: ratio >= 0.6, value: Math.round(ratio * 100) / 100 },
+    {
+      gate: "min-auto-text-length",
+      // 与 classifyExclusion:464-470 逐字同款:非 BLOCK 且非 CALLOUT 且 <20 才失败。
+      ok:
+        element.matches(BLOCK_SELECTOR) ||
+        element.matches(CALLOUT_SELECTOR) ||
+        text.length >= MINIMUM_AUTO_TEXT_LENGTH,
+      value: text.length,
+    },
+    { gate: "block-candidate", ok: isBlockCandidate(element, true) },
+  ];
 }

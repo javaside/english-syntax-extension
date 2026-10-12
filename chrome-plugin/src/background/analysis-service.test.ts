@@ -6,12 +6,13 @@ import { GrammarRole } from "../shared/grammar";
 import { CORE_SCHEMA_VERSION } from "../shared/versions";
 import type { CoreAnalysis, TokenRange } from "../shared/grammar";
 import { MAX_SENTENCES_PER_REQUEST } from "../shared/protocol";
-import type { SentenceInput } from "../shared/protocol";
+import type { BlockDiagnosis, SentenceInput } from "../shared/protocol";
 import { ModelRequestError } from "./openai-compatible-adapter";
 import { buildCorePrompt } from "./prompts";
 import type { ModelProfile } from "./config-repository";
 import {
   CachedAnalysisService,
+  validateDiagnosisExplanation,
   type AnalysisCachePort,
   type AnalysisModelWork,
   type AnalysisScheduledRequest,
@@ -1859,5 +1860,140 @@ describe("英文回显译文被拒并走修复", () => {
     expect(outcome.failures[0]!.error).toMatchObject({ code: "INVALID_MODEL_OUTPUT" });
     expect(adapter.completeJson).toHaveBeenCalledTimes(3);
     expect(cache.core.size).toBe(0);
+  });
+});
+
+describe("validateDiagnosisExplanation", () => {
+  it("接受合法形状并拒绝缺字段/空串/非字符串数组", () => {
+    const valid = {
+      likelyCause: "english ratio below threshold",
+      explanation: "该块英文占比不足",
+      suggestions: ["检查语言"],
+    };
+    expect(validateDiagnosisExplanation(valid)).toEqual(valid);
+    expect(() =>
+      validateDiagnosisExplanation({ likelyCause: "", explanation: "x", suggestions: [] }),
+    ).toThrow();
+    expect(() =>
+      validateDiagnosisExplanation({ likelyCause: "a", explanation: "x", suggestions: "no" }),
+    ).toThrow();
+    expect(() => validateDiagnosisExplanation({ likelyCause: "a" })).toThrow();
+    expect(() => validateDiagnosisExplanation("not an object")).toThrow();
+  });
+
+  it("长度上限 500/4000/10×500 逐字段拒绝且边界值合法", () => {
+    const base = { likelyCause: "gate failed", explanation: "说明", suggestions: ["建议"] };
+    expect(() => validateDiagnosisExplanation({ ...base, likelyCause: "x".repeat(501) })).toThrow();
+    expect(() =>
+      validateDiagnosisExplanation({ ...base, explanation: "x".repeat(4001) }),
+    ).toThrow();
+    expect(() =>
+      validateDiagnosisExplanation({ ...base, suggestions: Array.from({ length: 11 }, () => "s") }),
+    ).toThrow();
+    expect(() =>
+      validateDiagnosisExplanation({ ...base, suggestions: ["x".repeat(501)] }),
+    ).toThrow();
+    expect(() => validateDiagnosisExplanation({ ...base, suggestions: [""] })).toThrow();
+
+    const atLimit = validateDiagnosisExplanation({
+      likelyCause: "x".repeat(500),
+      explanation: "x".repeat(4000),
+      suggestions: Array.from({ length: 10 }, () => "y".repeat(500)),
+    });
+    expect(atLimit.likelyCause).toHaveLength(500);
+    expect(atLimit.suggestions).toHaveLength(10);
+  });
+
+  it("只做形状校验:纯英文输出不进 grammar/译文门", () => {
+    const englishOnly = {
+      likelyCause: "english ratio below threshold",
+      explanation: "the measured english ratio is below the configured gate",
+      suggestions: ["open the options page and check the language gate"],
+    };
+    expect(validateDiagnosisExplanation(englishOnly)).toEqual(englishOnly);
+  });
+});
+
+describe("explainDiagnosis", () => {
+  // 照 prompts.test.ts 的 sampleDiagnosis 抄:带 URL/outerHTML/selectionText 与
+  // 失败会话句——前者是白名单外字段,只用于构造完整 wire 形状。
+  function sampleDiagnosis(): BlockDiagnosis {
+    return {
+      target: {
+        tagName: "P",
+        className: "content",
+        id: "p1",
+        selectorPath: "main > p#p1",
+        outerHtml: '<p id="p1">',
+      },
+      targetSource: "contextmenu",
+      selectionText: "hello world",
+      inventory: {
+        isUnit: true,
+        kind: "paragraph",
+        automatic: false,
+        exclusionReason: "non-english",
+      },
+      explicit: { resolvable: false },
+      gates: [{ gate: "english-dominant", ok: false, value: 0.2 }],
+      text: { length: 40, letterWords: 8, englishRatio: 0.2, minAutoTextLength: 20 },
+      segmentation: { sentenceCount: 1, sentenceLengths: [40], tokenCount: 9, emptyText: false },
+      requestFeasibility: {
+        maxSentenceLength: 40,
+        sentenceLengthLimit: 2000,
+        maxSentencesPerRequest: 6,
+        cloudSentencesPerRequest: 2,
+      },
+      session: {
+        state: "stopped",
+        registered: false,
+        sentences: [
+          { text: "Learners read.", phase: "failed", failureMessage: "AUTH_FAILED" },
+          { text: "Writers revise.", phase: "ready" },
+        ],
+      },
+      page: { url: "https://example.com/a", readyState: "complete" },
+      capturedAt: "2026-10-11T00:00:00.000Z",
+    };
+  }
+
+  it("经调度器发出 detail-click 请求并返回校验后的解释", async () => {
+    const { service, adapter, cache, scheduler } = harness([
+      {
+        likelyCause: "english ratio below threshold",
+        explanation: "该块英文占比不足，被 non-english 门排除。",
+        suggestions: ["确认目标段落是英文正文"],
+      },
+    ]);
+    // harness 的 scheduler 是真 DedupeScheduler 实例（不是 vi.fn）——用 spy 取调度参数。
+    const scheduleSpy = vi.spyOn(scheduler, "schedule");
+
+    const result = await service.explainDiagnosis(
+      { profile, documentId: "doc-1", diagnosis: sampleDiagnosis() },
+      new AbortController().signal,
+    );
+
+    expect(result.likelyCause).toBe("english ratio below threshold");
+    expect(adapter.completeJson).toHaveBeenCalledTimes(1);
+    const scheduled = scheduleSpy.mock.calls[0]![0] as {
+      priority: string;
+      documentId: string;
+    };
+    expect(scheduled.priority).toBe("detail-click");
+    expect(scheduled.documentId).toBe("doc-1:diagnosis"); // abort 连坐隔离
+    expect(cache.core.size).toBe(0); // 诊断不写缓存
+  });
+
+  it("模型输出形状非法时抛错且不写缓存", async () => {
+    const { service, cache } = harness([{ likelyCause: "" }]);
+    await expect(
+      service.explainDiagnosis(
+        { profile, documentId: "doc-1", diagnosis: sampleDiagnosis() },
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow();
+    // MemoryCache 是普通类（putCore/putDetail 非 mock）——断言 store 为空，不是 toHaveBeenCalled。
+    expect(cache.core.size).toBe(0);
+    expect(cache.detail.size).toBe(0);
   });
 });

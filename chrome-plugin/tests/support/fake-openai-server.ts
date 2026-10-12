@@ -20,6 +20,7 @@ export type RequestKind =
   | "sentence-details-repair"
   | "correction"
   | "correction-repair"
+  | "diagnosis"
   | "unknown";
 
 export type ScriptedOutcome =
@@ -89,6 +90,9 @@ function detectKind(text: string): RequestKind {
   if (text.startsWith("Reanalyze the supplied sentence")) return "correction";
   if (text.startsWith("Repair only the structure of the invalid correction analysis")) {
     return "correction-repair";
+  }
+  if (text.startsWith("Diagnose why the extension did not translate the page block")) {
+    return "diagnosis";
   }
   return "unknown";
 }
@@ -624,6 +628,19 @@ export class FakeOpenAiServer {
       case "detail":
       case "detail-repair":
         await this.respondDetail(response, sentences, streaming);
+        return;
+      case "diagnosis":
+        // 段落诊断解释:单轮、无修复、形状校验(likelyCause/explanation/suggestions)。
+        // 红线:模型内容必须经 writeContent,不许 response.end 直发。
+        await this.writeContent(
+          response,
+          JSON.stringify({
+            likelyCause: "english ratio below threshold",
+            explanation: "该块被 english-dominant 门排除：英文占比低于 0.6 阈值。",
+            suggestions: ["确认该段是英文正文；中文内容不在自动解析范围内。"],
+          }),
+          streaming,
+        );
         return;
       case "sentence-details":
       case "sentence-details-repair": {

@@ -5,6 +5,7 @@ import {
   isCoreStreamPush,
   isRequestMessage,
   isSessionComplete,
+  type BlockDiagnosis,
   type SessionStatus,
 } from "./protocol";
 
@@ -365,5 +366,63 @@ describe("isSessionComplete 与屏外未触发的句子", () => {
   it("落地的那一句可以是失败或纯缓存跳过", () => {
     expect(isSessionComplete({ ...base, ready: 0, failed: 1, inFlight: 0 })).toBe(true);
     expect(isSessionComplete({ ...base, ready: 0, skipped: 1, inFlight: 0 })).toBe(true);
+  });
+});
+
+describe("diagnosis 消息守卫", () => {
+  const baseDiagnosis: BlockDiagnosis = {
+    target: {
+      tagName: "P",
+      className: "content",
+      id: "p1",
+      selectorPath: "main > p#p1",
+      outerHtml: '<p id="p1">',
+    },
+    targetSource: "contextmenu",
+    inventory: {
+      isUnit: true,
+      kind: "paragraph",
+      automatic: false,
+      exclusionReason: "non-english",
+    },
+    explicit: { resolvable: false },
+    gates: [{ gate: "english-dominant", ok: false, value: 0.2 }],
+    text: { length: 40, letterWords: 8, englishRatio: 0.2, minAutoTextLength: 20 },
+    segmentation: { sentenceCount: 1, sentenceLengths: [40], tokenCount: 9, emptyText: false },
+    requestFeasibility: {
+      maxSentenceLength: 40,
+      sentenceLengthLimit: 2000,
+      maxSentencesPerRequest: 6,
+      cloudSentencesPerRequest: 2,
+    },
+    session: { state: "stopped", registered: false, sentences: [] },
+    page: { url: "https://example.com/a", readyState: "complete" },
+    capturedAt: "2026-10-11T00:00:00.000Z",
+  };
+
+  it("接受合法 DIAGNOSE_BLOCK（带与不带 selectionText）", () => {
+    expect(isRequestMessage({ ...page, type: "DIAGNOSE_BLOCK" })).toBe(true);
+    expect(
+      isRequestMessage({ ...page, type: "DIAGNOSE_BLOCK", selectionText: "hello world" }),
+    ).toBe(true);
+  });
+
+  it("拒绝空白 selectionText 与未知字段", () => {
+    expect(isRequestMessage({ ...page, type: "DIAGNOSE_BLOCK", selectionText: "  " })).toBe(false);
+    expect(isRequestMessage({ ...page, type: "DIAGNOSE_BLOCK", extra: 1 })).toBe(false);
+  });
+
+  it("接受合法 EXPLAIN_DIAGNOSIS 并拒绝非法 diagnosis", () => {
+    expect(isRequestMessage({ ...page, type: "EXPLAIN_DIAGNOSIS", diagnosis: baseDiagnosis })).toBe(
+      true,
+    );
+    expect(isRequestMessage({ ...page, type: "EXPLAIN_DIAGNOSIS" })).toBe(false);
+    expect(
+      isRequestMessage({
+        ...page,
+        type: "EXPLAIN_DIAGNOSIS",
+        diagnosis: { ...baseDiagnosis, gates: "x" },
+      }),
+    ).toBe(false);
   });
 });

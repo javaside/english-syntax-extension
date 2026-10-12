@@ -55,6 +55,10 @@ E2E 配置:`fullyParallel: false`、`workers: 1`(共享持久化 profile 的权�
 6. STOP 无损还原(标题/表格/图注/链接 `outerHTML` 逐字节还原)+ 换 tab 换 documentId 重开缓存零请求;
 7. 另有一例三轮非法脚本钉「失败可见、不写缓存、重新解析强制重发」。
 
+### 段落诊断 E2E(`chrome-plugin/tests/e2e/diagnose.spec.ts`)
+
+Playwright 点不开 Chrome 原生右键菜单,所以复刻 SW 右键菜单分支的两个动作:`chrome.scripting.executeScript` 注入 content script(manifest 没有声明式 `content_scripts`,各手势都先注入)+ `chrome.tabs.sendMessage` 下发 `DIAGNOSE_BLOCK`。落点靠对目标段落发一次真实右键(`click({ button: "right" })` 不打开原生菜单,但会派发 contextmenu DOM 事件 + 在点击处放下折叠光标)——D1 的选区锚点优先、contextmenu 捕获监听次之,两条路都解析到被右键的段落,断言落点不是 body 兜底。两例:有 profile 时 `recordedOfKind("diagnosis")` 探针 ≥1、面板含本地证据与 `english-dominant` 门、复制出的 markdown 含 `## 概述` / `## 模型解释` 与模型应答本体;无 profile 时面板嵌 `CONFIG_MISSING`、`recorded()` 恒 0、报告只含本地段。剪贴板断言需要 `harness.context.grantPermissions(["clipboard-read", "clipboard-write"])`——`test.use` 的 permissions 只作用于 Playwright 默认 context,E2E 的页面在 harness 的持久化 context 里;无头环境下 `writeText` 的 user-activation 判定不稳定,clipboard-write 走权限路径才不会误触面板的 textarea 降级。
+
 ### E2E harness(`chrome-plugin/tests/e2e/fixtures.ts`)
 
 worker 级 fixture 做一次构建,然后:
@@ -72,7 +76,7 @@ harness 提供三个口子:`seedProfiles()`(直接写 `chrome.storage.local`)、
 四条契约,破了就是一连串莫名其妙的 E2E 失败:
 
 1. **按 prompt 首行前缀识别请求类型**(`detectKind`)。前缀表见 [`model-pipeline.md` §2](./model-pipeline.md#2-提示词promptsts)。改 prompt 首行措辞 = 破坏 E2E。
-2. **任何"模型内容"都必须经 `writeContent` 出去**——core / detail / sentence-details / compound / probe 一个都不能漏。**这条踩过两次**(第一次漏了 scripted 分支,第二次漏了详解路径):直接 `response.end(completion(...))` 会让流式请求收到 JSON 体,客户端判定不支持流式后回落重发,依赖 fetch 计数的用例随之错乱。
+2. **任何"模型内容"都必须经 `writeContent` 出去**——core / detail / sentence-details / compound / probe / diagnosis 一个都不能漏。**这条踩过两次**(第一次漏了 scripted 分支,第二次漏了详解路径):直接 `response.end(completion(...))` 会让流式请求收到 JSON 体,客户端判定不支持流式后回落重发,依赖 fetch 计数的用例随之错乱。
 3. **`script()` 的队列耗尽即回落默认合法响应**,所以脚本要覆盖生产里的每一轮:core 最终失败路径必须为首轮 + 两轮 repair 排满三份非法响应。少排任何一轮 = 后续 repair 拿到默认合法响应、页面渲染成功,用例从"验证失败可见"悄悄变成"验证成功渲染"。E2E 要同时用请求记录断言 `core = 1`、`core-repair = 2`(详见 [`invariants.md` I-13.1](./invariants.md))。
 4. **默认合法响应必须过得了本地语法硬门。** `autoComponents` 的尾段刻意标 `OBJECT` 而**不是** `PREDICATE`:两条硬门只作用于 `PREDICATE`(首词不得是限定词/主格代词、内部不得含限定词),而按位置切分对任意 fixture 散文都保证不了这两条(`Although the passage…` / `However, you may need…` 都会撞上)。同理,「单成分包住整句」现在也非法,所以 Kotlin 侧 `AnalysisServiceTest.validCoreRaw` 与 `MarkdownSyntaxIntegrationTest.validCore` 都必须给真的同层划分。E2E 断言是结构性的(成分个数、三行结构),从不读 role 文案,所以换 role 是安全的。**core 的修复轮(`kind: "core-repair"`)作答用 `repairComponents` 而不是 `autoComponents`**:首词为介词的句子(`With …` 一类)若仍按「首词 SUBJECT + 其余 OBJECT」拆,会被本地 validator 的介词硬门连拒两轮,表现成假模型服务器特有的最终失败(真模型按修复指令一轮就修好);修复轮因此把首个介词短语并入 ADVERBIAL。默认 core/repair 响应还必须统一经 `splitPostmodifyingOfPhrases` 把名词性 component 内每个非首位 `of` 依次切成独立 `ATTRIBUTE`；只切第一个会让 `the goal of ... measurement of H0` 的第二个 `of` 继续藏在 ATTRIBUTE 里并耗尽两轮 repair。故意非法的 scripted 分支不走这层归一化。译文同样必须含 Han(译文质量硬门对修复结果照样生效)。
 
