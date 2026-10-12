@@ -65,8 +65,10 @@ export class DiagnosisPanel {
 
   /** 记录最新请求并回到等待态:同一面板上发起的新请求不能沿用旧解释。 */
   trackRequest(requestId: string): void {
-    this.#latestRequestId = requestId;
+    // 先重置再登记：#resetModelState 会连 requestId 一起清（关掉「show 后、track 前」
+    // 的陈旧响应接受窗口），顺序反了就把刚登记的 id 也清掉了。
     this.#resetModelState();
+    this.#latestRequestId = requestId;
     this.#renderModelSection();
   }
 
@@ -102,6 +104,9 @@ export class DiagnosisPanel {
     this.#model = undefined;
     this.#modelError = undefined;
     this.#profile = undefined;
+    // requestId 一并作废：show 之后、trackRequest 之前抵达的旧响应不得再被接受
+    //（parked finding——上一轮的 id 残留会开着这个窗口）。
+    this.#latestRequestId = undefined;
   }
 
   #render(): void {

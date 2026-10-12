@@ -81,6 +81,26 @@ describe("DiagnosisPanel", () => {
     expect(strip(panel.host.shadowRoot!.textContent)).toContain("CONFIG_MISSING");
   });
 
+  it("show 后、track 前的陈旧响应不得被接受（parked fix：show 重置连 requestId 一起作废）", () => {
+    panel.show(sampleDiagnosis());
+    panel.trackRequest("req-1");
+    // 下一轮诊断：show 之后、trackRequest 之前，上一轮 requestId 的响应抵达
+    panel.show(sampleDiagnosis());
+    panel.updateModel({
+      requestId: "req-1",
+      model: { likelyCause: "stale-window", explanation: "旧", suggestions: [] },
+    });
+    expect(strip(panel.host.shadowRoot!.textContent)).not.toContain("stale-window");
+    expect(strip(panel.host.shadowRoot!.textContent)).toContain("模型解释生成中");
+    // 登记新请求后，新响应照常接受
+    panel.trackRequest("req-2");
+    panel.updateModel({
+      requestId: "req-2",
+      model: { likelyCause: "fresh", explanation: "新", suggestions: [] },
+    });
+    expect(strip(panel.host.shadowRoot!.textContent)).toContain("fresh");
+  });
+
   it("report() 在模型返回后含解释与 profile 模型名", () => {
     panel.show(sampleDiagnosis());
     panel.trackRequest("req-1");

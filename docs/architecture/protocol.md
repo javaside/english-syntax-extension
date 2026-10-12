@@ -46,6 +46,8 @@
 
 三个 `PARSE_*` 有两条入口:SW 自己的右键菜单 / 快捷键监听器用 `sendPageCommand()` **直接** `tabs.sendMessage` 给页面(不经 `route()`);而 `route()` 里的同名分支是留给受信任 UI 调用的。`DIAGNOSE_BLOCK` 不同:合法下发方只有 SW 自己的「诊断」菜单监听器(同样走 `sendPageCommand`,且**不写 `activeTabs`**),`route()` 里的 case 仅为满足 `assertNever` 穷尽性——页面侧伪造的入站一律回 `MALFORMED_MESSAGE`。
 
+`DIAGNOSE_BLOCK` 落到**页面路由**(`content-script.ts`)后是一条 fire-and-forget 分支:立即回 `ACK`(页面命令只承诺"已受理"),诊断编排异步执行——本地证据先上 `DiagnosisPanel`,再经 `EXPLAIN_DIAGNOSIS` 请求模型解释。两个配套的 content 侧守卫:①页面路由开头的入站拒绝列表(`ANALYZE_CORE` / `ANALYZE_DETAIL` / `REANALYZE_WITH_FEEDBACK` / `EXPLAIN_DIAGNOSIS`)把页面伪造的 `EXPLAIN_DIAGNOSIS` 拒成 `MALFORMED_MESSAGE`——这条只有 content 自己会发;②`isRuntimeResponse()` 有 `DIAGNOSIS_RESULT` case(`isBlockDiagnosis` 查 `diagnosis` 回显,`model` 三字段 / `modelError` / `profile.model` 逐项把关),这是三层校验的第 3 层。
+
 > **注意 `STOP_SESSION` 的一条死路径。** `ChromeRuntimeTransport.cancelDocument()` 也会从 content 发这条消息,但该分支要求受信任 UI,所以它必然被回成 `UNSUPPORTED_PAGE`(调用处 fire-and-forget 吞掉了响应)。真正的取消依赖端口断开与 `tabs.onRemoved` / `onUpdated` 触发的 `cancelTab()`。
 
 关键语义:

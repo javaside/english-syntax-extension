@@ -1914,6 +1914,8 @@ describe("ContentScriptRouter", () => {
     const controller = {
       documentId: "controller-document",
       status: { state: "running" as const, discovered: 0, queued: 0, ready: 0, failed: 0 },
+      transport: new FakeTransport(),
+      diagnosisSnapshot: () => ({ state: "stopped" as const, registered: false, sentences: [] }),
       start,
       pause: vi.fn(),
       resume: vi.fn(),
@@ -1987,6 +1989,8 @@ describe("ContentScriptRouter", () => {
       controllerFactory: () => ({
         documentId: "document-1",
         status: { state: "running" as const, discovered: 0, queued: 0, ready: 0, failed: 0 },
+        transport: new FakeTransport(),
+        diagnosisSnapshot: () => ({ state: "stopped" as const, registered: false, sentences: [] }),
         start: vi.fn(() => Promise.reject(new Error("session start failed"))),
         pause: vi.fn(),
         resume: vi.fn(),
@@ -2044,6 +2048,8 @@ describe("ContentScriptRouter", () => {
       controllerFactory: () => ({
         documentId: "document-1",
         status: { state: "running" as const, discovered: 0, queued: 0, ready: 0, failed: 0 },
+        transport: new FakeTransport(),
+        diagnosisSnapshot: () => ({ state: "stopped" as const, registered: false, sentences: [] }),
         start,
         pause: vi.fn(),
         resume: vi.fn(),
@@ -2076,6 +2082,8 @@ describe("ContentScriptRouter", () => {
       controllerFactory: () => ({
         documentId: "document-1",
         status: { state: "running", discovered: 1, queued: 0, ready: 1, failed: 0 },
+        transport: new FakeTransport(),
+        diagnosisSnapshot: () => ({ state: "stopped" as const, registered: false, sentences: [] }),
         start: vi.fn(() => Promise.resolve()),
         pause: vi.fn(),
         resume: vi.fn(),
@@ -2107,6 +2115,8 @@ describe("ContentScriptRouter", () => {
       controllerFactory: () => ({
         documentId: "document-1",
         status: { state: "running" as const, discovered: 0, queued: 0, ready: 0, failed: 0 },
+        transport: new FakeTransport(),
+        diagnosisSnapshot: () => ({ state: "stopped" as const, registered: false, sentences: [] }),
         start: vi.fn(() => Promise.resolve()),
         pause: vi.fn(),
         resume: vi.fn(),
@@ -2137,6 +2147,8 @@ describe("ContentScriptRouter", () => {
       controllerFactory: () => ({
         documentId: "document-1",
         status: { state: "running" as const, discovered: 0, queued: 0, ready: 0, failed: 0 },
+        transport: new FakeTransport(),
+        diagnosisSnapshot: () => ({ state: "stopped" as const, registered: false, sentences: [] }),
         start: vi.fn(() => Promise.resolve()),
         pause: vi.fn(),
         resume: vi.fn(),

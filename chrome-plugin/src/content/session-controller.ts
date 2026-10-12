@@ -281,6 +281,15 @@ export class SessionController {
     );
   }
 
+  /**
+   * 诊断等页面侧一次性请求复用会话通道——绝不能另开端口：ChromeRuntimeTransport
+   * 构造即 connectWatchdog 建第二个 `syntax-learning:<documentId>` 端口，而 SW 的
+   * onConnect 会无条件覆写 documentPorts，会话的流式推送就改走没有 handler 的新端口。
+   */
+  get transport(): RuntimeTransport {
+    return this.options.transport;
+  }
+
   get status(): SessionStatus {
     const records = [...this.sentences.values()];
     return {
