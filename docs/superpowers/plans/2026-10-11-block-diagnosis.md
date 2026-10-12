@@ -60,29 +60,33 @@ export function serialize 未导出——serialize 在 prompts.ts
 export interface CandidateGateResult { gate: string; ok: boolean; value?: string | number }
 export function explainElement(element: Element): CandidateGateResult[];
 ```
-gate 名固定为：`editable-content` / `block-candidate` / `excluded-region` / `hidden-ancestor` / `unsafe-descendant` / `layout-visible` / `readable-words` / `english-dominant` / `min-auto-text-length` / `scientific-exclusion` / `inside-principal-root` / `covered-by-child`。
+gate 名固定为（顺序镜像 `classifyExclusion` 优先级链）：`scientific-exclusion` / `covered-by-child` / `has-separable-direct-text`（条件门） / `inside-principal-root` / `excluded-region` / `unsafe-descendant`（含自身 matches） / `hidden-ancestor` / `layout-visible` / `readable-words` / `english-dominant` / `min-auto-text-length` / `block-candidate`（额外语义证据，放最后）。
 
 - [ ] **Step 1: 写失败测试**（追加到 `page-inventory.test.ts` 末尾）
 
 ```ts
 describe("explainElement 只读诊断出口", () => {
-  // gate 首个失败项 → inventory exclusionReason 的期望映射。
+  // 集合包含式一致性（刻意不是「首个失败门唯一决定 reason」）：classifyExclusion
+  // (page-inventory.ts:425-467) 的优先级链 + covered-by-child 的方向①（内联单元被
+  // 自动父吸收）都依赖整页两遍算法，单元素函数无法逐门复刻优先级。断言改为两条：
+  // ① automatic 单元无任何失败门；② 非自动单元的失败门集合 ⊇ 产出其 reason 所需的门。
   // 这就是防「诊断逻辑漂移」的核心断言：诊断说的原因必须与生产判定一致。
-  const reasonByFirstFailingGate: Record<string, string> = {
-    "editable-content": "hidden",            // 可编辑区在 HIDDEN_SELECTOR 内，语义同为不可安全替换
-    "block-candidate": "unsafe-partial-replacement",
+  const SCIENTIFIC_REASONS = [
+    "conversion-placeholder", "math-auxiliary", "reference-metadata",
+    "display-math", "unsupported-reference-layout",
+  ];
+  const requiredGateByReason: Record<string, string> = {
+    "outside-principal-content": "inside-principal-root",
     "excluded-region": "excluded-region",
-    "hidden-ancestor": "hidden",
-    "layout-visible": "hidden",
-    "readable-words": "no-readable-words",
-    "english-dominant": "non-english",
-    "min-auto-text-length": "loose-block-too-short",
-    "scientific-exclusion": "reference-metadata", // fixture 里科学排除的代表值，逐条见下
-    "inside-principal-root": "outside-principal-content",
+    "unsafe-interactive": "unsafe-descendant",
+    "no-readable-words": "readable-words",
+    "non-english": "english-dominant",
+    "loose-block-too-short": "min-auto-text-length",
     "covered-by-child": "covered-by-child",
+    "unsafe-partial-replacement": "has-separable-direct-text",
   };
 
-  it("对两份冻结 fixture 的每个 unit，门结论与 inventory 判定逐一致", () => {
+  it("对两份冻结 fixture 的每个 unit，失败门集合覆盖其 exclusionReason 所需的门", () => {
     for (const fixtureName of fixtures) {
       const page = parsePage(readFixture(fixtureName, "html"));
       const contract = JSON.parse(readFixture(fixtureName, "json")) as InventoryContract;
@@ -91,47 +95,68 @@ describe("explainElement 只读诊断出口", () => {
       );
       for (const { id, reason } of contract.units) {
         const unit = units.get(id);
-        if (unit === undefined) continue; // fixture 契约里允许 null reason 的行
-        const gates = explainElement(unit.element);
-        const failed = gates.filter(({ ok }) => !ok);
+        if (unit === undefined || reason === null) continue;
+        const failed = new Set(
+          explainElement(unit.element).filter(({ ok }) => !ok).map(({ gate }) => gate),
+        );
         if (unit.automatic) {
-          expect(failed, `${fixtureName}:${id} 自动单元不应有失败门`).toEqual([]);
-        } else {
-          expect(failed.length, `${fixtureName}:${id} 非自动单元应至少有一门失败`).toBeGreaterThan(0);
-          const first = reasonByFirstFailingGate[failed[0]!.gate];
-          // scientific-exclusion 的 5 个子 reason 单独对表
-          if (failed[0]!.gate === "scientific-exclusion") {
-            expect(
-              ["conversion-placeholder","math-auxiliary","reference-metadata","display-math","unsupported-reference-layout"],
-              `${fixtureName}:${id}`,
-            ).toContain(reason);
-          } else {
-            expect(first, `${fixtureName}:${id} gate=${failed[0]!.gate}`).toBe(reason);
-          }
+          expect([...failed], `${fixtureName}:${id} 自动单元不应有失败门`).toEqual([]);
+          continue;
         }
+        if (SCIENTIFIC_REASONS.includes(reason)) {
+          expect(failed, `${fixtureName}:${id} reason=${reason}`).toContain("scientific-exclusion");
+          continue;
+        }
+        if (reason === "hidden") {
+          expect(
+            failed.has("hidden-ancestor") || failed.has("layout-visible"),
+            `${fixtureName}:${id} hidden 应有 hidden-ancestor 或 layout-visible 失败`,
+          ).toBe(true);
+          continue;
+        }
+        if (reason === "covered-by-child") {
+          // 两方向：方向②自身有可分析子（covered-by-child 门失败）；方向①被某个自动
+          // 祖先吸收（整页判定，这里用 inventory 结果验证，explainElement 单元素复算不了）。
+          const absorbed = [...units.values()].some(
+            (other) => other.automatic && other.element !== unit.element && other.element.contains(unit.element),
+          );
+          expect(
+            failed.has("covered-by-child") || absorbed,
+            `${fixtureName}:${id} covered-by-child 两方向均不满足`,
+          ).toBe(true);
+          continue;
+        }
+        const required = requiredGateByReason[reason];
+        expect(required, `${fixtureName}:${id} 未知的 reason=${reason}——映射表缺条目`).toBeDefined();
+        expect(failed, `${fixtureName}:${id} reason=${reason} 缺门 ${required}`).toContain(required);
       }
     }
   });
 
-  it("english-dominant 门带回当时取值（占比数值）", () => {
-    document.body.innerHTML = '<main><p id="mixed">Hello world 你好世界测试</p></main>';
+  it("english-dominant 门带回词级占比（isEnglishDominant 是词级判定，不是字符级）", () => {
+    // 3/6 英文词 = 0.5 < 0.6（page-inventory.ts:162-166 的口径）。
+    document.body.innerHTML = '<main><p id="mixed">你好 hello 世界 test again 更多</p></main>';
     const gates = explainElement(document.getElementById("mixed")!);
     const gate = gates.find(({ gate }) => gate === "english-dominant")!;
-    expect(typeof gate.value).toBe("number");
-    expect(gate.ok).toBe(false); // 2/6 < 0.6
+    expect(gate.ok).toBe(false);
+    expect(gate.value).toBe(0.5);
   });
 
-  it("min-auto-text-length 门带文本长度与阈值 20", () => {
+  it("min-auto-text-length 门的条件与 classifyExclusion 同款（非 BLOCK/CALLOUT 且 <20）", () => {
     document.body.innerHTML = '<main><div id="tiny">Short text</div></main>';
     const gates = explainElement(document.getElementById("tiny")!);
     const gate = gates.find(({ gate }) => gate === "min-auto-text-length")!;
     expect(gate.ok).toBe(false);
     expect(gate.value).toBe(10);
+    // BLOCK_SELECTOR 命中的元素不受短块门限制（classifyExclusion:459-465 同款）。
+    document.body.innerHTML = '<main><figcaption id="cap">Tiny.</figcaption></main>';
+    const caption = explainElement(document.getElementById("cap")!);
+    expect(caption.find(({ gate }) => gate === "min-auto-text-length")!.ok).toBe(true);
   });
 });
 ```
 
-注意：`fixtures` / `readFixture` / `parsePage` / `InventoryContract` 已在该测试文件 59-94 行定义，直接复用；`explainElement` 从 `./page-inventory` import。
+注意：`fixtures` / `readFixture` / `parsePage` / `InventoryContract` 已在该测试文件 59-94 行定义，直接复用；`explainElement` 从 `./page-inventory` import。fixture 页是独立 `new Window()` 文档——**explainElement 内部严禁引用全局 `document`**（见 Step 3 的 S2 修复）。
 
 - [ ] **Step 2: 跑测试确认失败**
 
@@ -149,54 +174,61 @@ export interface CandidateGateResult {
 
 /**
  * 只读诊断出口：对单个元素按生产判据逐门复算，返回每门结果与当时取值。
- * 与 inventoryReadableUnits 的判定必须一致——诊断报告要拿去改代码，不能复制一份
- * 会漂移的判据。不改任何生产路径行为，纯新增导出。
+ * 门顺序刻意镜像 classifyExclusion(:425-467) 的优先级链（科学排除 → 覆盖/部分替换 →
+ * principal root → 排除区 → 交互元素 → 可见性 → 实词 → 英文 → 短块），block-candidate
+ * 作为额外语义证据放最后；它与 inventoryReadableUnits 的判定必须一致——诊断报告要拿去
+ * 改代码，不能复制一份会漂移的判据。不改任何生产路径行为，纯新增导出。
  */
 export function explainElement(element: Element): CandidateGateResult[] {
   const text = normalizedReadableText(element);
-  const ratio = englishLetterRatio(text);
   const words = letterWords(text).length;
+  const ratio = englishLetterRatio(text); // 从 isEnglishDominant(:162-166) 提取的词级占比
   const scientific = scientificExclusion(element);
-  const inBlockSelector = BLOCK_SELECTOR.split(",").some((selector) => element.matches(selector.trim()));
-  const inCallout = CALLOUT_SELECTOR.split(",").some((selector) => element.matches(selector.trim()));
-  const shortGateApplies = !inBlockSelector && !inCallout;
-  const principalRoot = selectPrincipalRoot(document);
+  const owner = element.ownerDocument; // S2 修复：绝不引用全局 document——fixture 元素在独立 Window 文档里
+  const principalRoot = selectPrincipalRoot(owner);
+  const excluded = excludedRegionAncestor(element);
+  const hasAnalyzableChildren = analyzableDescendants(element).length > 0;
+  const unsafeSelf = element.matches(UNSAFE_DESCENDANT_SELECTOR); // 注意拼写 DESCENDANT(:87)
+  const unsafeChild = element.querySelector(UNSAFE_DESCENDANT_SELECTOR) !== null;
   return [
+    { gate: "scientific-exclusion", ok: scientific === undefined, ...(scientific === undefined ? {} : { value: scientific }) },
+    { gate: "covered-by-child", ok: !hasAnalyzableChildren },
+    // 条件门：仅在有可分析子时才评估（automatic 单元没有可分析子，恒 ok）——
+    // 镜像 classifyExclusion 里 children 检查先于 hasSeparableDirectText 的顺序。
     {
-      gate: "editable-content",
-      ok: !element.closest(EDITABLE_CONTENT_SELECTOR),
-      value: element.closest(EDITABLE_CONTENT_SELECTOR)?.selectorText ?? undefined,
+      gate: "has-separable-direct-text",
+      ok: !hasAnalyzableChildren || !hasSeparableDirectText(element),
     },
-    { gate: "block-candidate", ok: isBlockCandidate(element, true) },
     {
-      gate: "excluded-region",
-      ok: excludedRegionAncestor(element) === null,
-      value: excludedRegionAncestor(element)?.selectorText ?? undefined,
+      gate: "inside-principal-root",
+      ok: principalRoot === null || principalRoot.contains(element) || element === principalRoot,
     },
+    { gate: "excluded-region", ok: excluded === null, ...(excluded === null ? {} : { value: "excluded-region-ancestor" }) },
+    // classifyExclusion:451 是 matches(自身) || querySelector(后代)——isSafeElement:200 只查后代，
+    // 这里按 classifyExclusion 的口径（自身也算），unsafe-interactive 才有门可依。
+    { gate: "unsafe-descendant", ok: !unsafeSelf && !unsafeChild },
     { gate: "hidden-ancestor", ok: element.closest(HIDDEN_SELECTOR) === null },
-    {
-      gate: "unsafe-descendant",
-      ok: element.querySelector(UNSAFE_DESCANDANT_SELECTOR) === null,
-    },
     { gate: "layout-visible", ok: isLayoutVisible(element) },
     { gate: "readable-words", ok: words > 0, value: words },
     { gate: "english-dominant", ok: ratio >= 0.6, value: Math.round(ratio * 100) / 100 },
     {
       gate: "min-auto-text-length",
-      ok: !shortGateApplies || text.length >= MINIMUM_AUTO_TEXT_LENGTH,
+      // 与 classifyExclusion:459-465 逐字同款：非 BLOCK 且非 CALLOUT 且 <20 才失败。
+      ok:
+        element.matches(BLOCK_SELECTOR) ||
+        element.matches(CALLOUT_SELECTOR) ||
+        text.length >= MINIMUM_AUTO_TEXT_LENGTH,
       value: text.length,
     },
-    { gate: "scientific-exclusion", ok: scientific === undefined, value: scientific },
-    {
-      gate: "inside-principal-root",
-      ok: principalRoot === null || principalRoot.contains(element) || element === principalRoot,
-    },
-    { gate: "covered-by-child", ok: analyzableDescendants(element).length === 0 },
+    { gate: "block-candidate", ok: isBlockCandidate(element, true) },
   ];
 }
 ```
 
-**实现注意（执行者必读）**：上面的代码是骨架——`element.closest(...)?.selectorText` 不是真实 API，`excludedRegionAncestor` / `scientificExclusion` 的真实返回形态、`isBlockCandidate` 的真实签名、以及英文占比是否已有私有函数（`isEnglishDominant` 在 `:165` 附近，内部算 ratio），**先读 `page-inventory.ts` 的 165-230 行再落码**，让每门直接复用真实判据；`value` 字段用真实可得的值（如 closest 命中的选择器字符串、`scientificExclusion` 返回的 reason）。判据本身一行都不许重写——`ratio` 如果已有私有函数就提出来共用（把 `isEnglishDominant` 内部计算提为 `englishLetterRatio(text): number` 私有函数并让两者共用，属允许的最小重构）。
+**实现注意（执行者必读）**：
+- `isBlockCandidate` 的真实签名以 `page-inventory.ts:185-193` 为准（若第二参不是 `loose: boolean` 就按真实签名调用）；`englishLetterRatio` 不存在——把 `isEnglishDominant`（`:162-166`）的词级占比计算提为私有 `englishLetterRatio(text): number` 并让两者共用（允许的最小重构，判据一行不重写）。
+- `hasSeparableDirectText` / `excludedRegionAncestor` / `analyzableDescendants` / `scientificExclusion` / `isLayoutVisible` / `letterWords` 均为该文件既有私有函数，直接调用。
+- 门 `value` 用真实可得的值（`scientificExclusion` 的 reason、词数、文本长度、占比）；`excluded-region` 的 value 给固定标记即可（`excludedRegionAncestor` 的真实返回形态以代码为准）。
 
 - [ ] **Step 4: 跑测试确认通过**
 
@@ -244,9 +276,11 @@ describe("diagnosisSnapshot 只读快照", () => {
   });
 
   it("已登记块返回句相位与失败文案", async () => {
-    // 用既有 harness 起一个会话并让一句失败（该文件里已有「失败句渲染」类用例，照抄其
-    // CORE_RESULT ERROR/缺失句的 fake 响应构造），然后：
-    const snapshot = controller.diagnosisSnapshot(knownBlockElement);
+    // 该文件里已有「失败句渲染」类用例（CORE_RESULT ERROR / 缺失句的 fake transport
+    // 响应构造）——先读文件找到最接近的一个照抄其 setup：起会话、等块登记、让响应
+    // 携带一个失败句。目标元素句柄这样取（harness 返回值里没有元素）：
+    //   const target = document.querySelector("p") as HTMLElement;  // 用例 setup 里写进 DOM 的那个块
+    const snapshot = controller.diagnosisSnapshot(document.querySelector("p"));
     expect(snapshot.registered).toBe(true);
     expect(snapshot.state).toBe("running");
     expect(snapshot.sentences).toEqual(
@@ -361,7 +395,12 @@ export interface BlockDiagnosis {
   gates: DiagnosisGateResult[];
   text: { length: number; letterWords: number; englishRatio?: number; minAutoTextLength: number };
   segmentation: { sentenceCount: number; sentenceLengths: number[]; tokenCount: number; emptyText: boolean };
-  requestFeasibility: { maxSentenceLength: number; sentenceLengthLimit: number; maxSentencesPerRequest: number };
+  requestFeasibility: {
+    maxSentenceLength: number;
+    sentenceLengthLimit: number;
+    maxSentencesPerRequest: number;
+    cloudSentencesPerRequest: number;
+  };
   session: SessionDiagnosisSnapshot;
   page: { url: string; readyState: string };
   capturedAt: string;
@@ -398,29 +437,29 @@ describe("diagnosis 消息守卫", () => {
     gates: [{ gate: "english-dominant", ok: false, value: 0.2 }],
     text: { length: 40, letterWords: 8, englishRatio: 0.2, minAutoTextLength: 20 },
     segmentation: { sentenceCount: 1, sentenceLengths: [40], tokenCount: 9, emptyText: false },
-    requestFeasibility: { maxSentenceLength: 40, sentenceLengthLimit: 2000, maxSentencesPerRequest: 6 },
+    requestFeasibility: { maxSentenceLength: 40, sentenceLengthLimit: 2000, maxSentencesPerRequest: 6, cloudSentencesPerRequest: 2 },
     session: { state: "stopped", registered: false, sentences: [] },
     page: { url: "https://example.com/a", readyState: "complete" },
     capturedAt: "2026-10-11T00:00:00.000Z",
   };
 
   it("接受合法 DIAGNOSE_BLOCK（带与不带 selectionText）", () => {
-    expect(isRequestMessage({ ...pageBase, type: "DIAGNOSE_BLOCK" })).toBe(true);
-    expect(isRequestMessage({ ...pageBase, type: "DIAGNOSE_BLOCK", selectionText: "hello world" })).toBe(true);
+    expect(isRequestMessage({ ...page, type: "DIAGNOSE_BLOCK" })).toBe(true);
+    expect(isRequestMessage({ ...page, type: "DIAGNOSE_BLOCK", selectionText: "hello world" })).toBe(true);
   });
   it("拒绝空白 selectionText 与未知字段", () => {
-    expect(isRequestMessage({ ...pageBase, type: "DIAGNOSE_BLOCK", selectionText: "  " })).toBe(false);
-    expect(isRequestMessage({ ...pageBase, type: "DIAGNOSE_BLOCK", extra: 1 })).toBe(false);
+    expect(isRequestMessage({ ...page, type: "DIAGNOSE_BLOCK", selectionText: "  " })).toBe(false);
+    expect(isRequestMessage({ ...page, type: "DIAGNOSE_BLOCK", extra: 1 })).toBe(false);
   });
   it("接受合法 EXPLAIN_DIAGNOSIS 并拒绝非法 diagnosis", () => {
-    expect(isRequestMessage({ ...pageBase, type: "EXPLAIN_DIAGNOSIS", diagnosis: baseDiagnosis })).toBe(true);
-    expect(isRequestMessage({ ...pageBase, type: "EXPLAIN_DIAGNOSIS" })).toBe(false);
-    expect(isRequestMessage({ ...pageBase, type: "EXPLAIN_DIAGNOSIS", diagnosis: { ...baseDiagnosis, gates: "x" } })).toBe(false);
+    expect(isRequestMessage({ ...page, type: "EXPLAIN_DIAGNOSIS", diagnosis: baseDiagnosis })).toBe(true);
+    expect(isRequestMessage({ ...page, type: "EXPLAIN_DIAGNOSIS" })).toBe(false);
+    expect(isRequestMessage({ ...page, type: "EXPLAIN_DIAGNOSIS", diagnosis: { ...baseDiagnosis, gates: "x" } })).toBe(false);
   });
 });
 ```
 
-（`pageBase` 用该文件既有的页面请求基线构造——先看文件内 `PARSE_SELECTION` 守卫用例怎么造 `version/requestId/tabId/documentId` 基线，照抄。）
+（`page` 是该文件既有的页面请求基线常量（`protocol.test.ts:11-16`），字段拼装照抄。）
 
 - [ ] **Step 2: 跑测试确认失败**
 
@@ -430,7 +469,7 @@ Expected: FAIL——新 type 未定义。
 - [ ] **Step 3: 实现**（protocol.ts 三处）
 
 1. 类型定义（放在 `CacheStats` 附近）+ RequestMessage/ResponseMessage 联合体追加成员（照 `PARSE_SELECTION`/`PROFILE_TEST_RESULT` 的写法）。
-2. `isBlockDiagnosis(value: unknown): value is BlockDiagnosis` 守卫——**结构抽查**即可（消息来自我们自己的 content script，不是不可信输入；但缺字段必须拒）：
+2. `export function isBlockDiagnosis(value: unknown): value is BlockDiagnosis` 守卫（**导出**——Task 10 的 `isRuntimeResponse` case 要 import 它）——**结构抽查**即可（消息来自我们自己的 content script，不是不可信输入；但缺字段必须拒）：
 
 ```ts
 function isDiagnosisGateResult(value: unknown): value is DiagnosisGateResult {
@@ -665,6 +704,7 @@ git commit -m "feat: 诊断提示词与形状校验（证据白名单，不含 U
 
 **Files:**
 - Modify: `chrome-plugin/src/background/analysis-service.ts`（接口 + 实现）
+- Modify: `chrome-plugin/src/background/service-worker.test.ts`（`analysisService` 字面量 `:129-139` 补 `explainDiagnosis: vi.fn()`——接口加方法后该文件立即编译失败，必须同批修）
 - Test: `chrome-plugin/src/background/analysis-service.test.ts`（追加 describe）
 
 **Interfaces (Produces):**
@@ -687,12 +727,15 @@ explainDiagnosis(input: DiagnosisInput, signal: AbortSignal): Promise<DiagnosisE
 ```ts
 describe("explainDiagnosis", () => {
   it("经调度器发出 detail-click 请求并返回校验后的解释", async () => {
-    const { service, adapter, scheduler } = harness();
-    adapter.completeJson.mockResolvedValueOnce({
-      likelyCause: "english ratio below threshold",
-      explanation: "该块英文占比不足，被 non-english 门排除。",
-      suggestions: ["确认目标段落是英文正文"],
-    });
+    const { service, adapter, cache, scheduler } = harness([
+      {
+        likelyCause: "english ratio below threshold",
+        explanation: "该块英文占比不足，被 non-english 门排除。",
+        suggestions: ["确认目标段落是英文正文"],
+      },
+    ]);
+    // harness 的 scheduler 是真 DedupeScheduler 实例（不是 vi.fn）——用 spy 取调度参数。
+    const scheduleSpy = vi.spyOn(scheduler, "schedule");
 
     const result = await service.explainDiagnosis(
       { profile, documentId: "doc-1", diagnosis: sampleDiagnosis() },
@@ -701,22 +744,31 @@ describe("explainDiagnosis", () => {
 
     expect(result.likelyCause).toBe("english ratio below threshold");
     expect(adapter.completeJson).toHaveBeenCalledTimes(1);
-    const scheduled = scheduler.schedule.mock.calls[0]![0];
+    const scheduled = scheduleSpy.mock.calls[0]![0] as {
+      priority: string;
+      documentId: string;
+    };
     expect(scheduled.priority).toBe("detail-click");
     expect(scheduled.documentId).toBe("doc-1:diagnosis"); // abort 连坐隔离
+    expect(cache.core.size).toBe(0); // 诊断不写缓存
   });
 
   it("模型输出形状非法时抛错且不写缓存", async () => {
-    const { service, adapter, cache } = harness();
-    adapter.completeJson.mockResolvedValueOnce({ likelyCause: "" });
+    const { service, cache } = harness([{ likelyCause: "" }]);
     await expect(
-      service.explainDiagnosis({ profile, documentId: "doc-1", diagnosis: sampleDiagnosis() }, new AbortController().signal),
+      service.explainDiagnosis(
+        { profile, documentId: "doc-1", diagnosis: sampleDiagnosis() },
+        new AbortController().signal,
+      ),
     ).rejects.toThrow();
-    expect(cache.putCore).not.toHaveBeenCalled();
-    expect(cache.putDetail).not.toHaveBeenCalled();
+    // MemoryCache 是普通类（putCore/putDetail 非 mock）——断言 store 为空，不是 toHaveBeenCalled。
+    expect(cache.core.size).toBe(0);
+    expect(cache.detail.size).toBe(0);
   });
 });
 ```
+
+（`harness(outputs)` 必须传参（`analysis-service.test.ts:140`）；`cache.core` / `cache.detail` 是 MemoryCache 的两个 Map store，见 `:84-105`。）
 
 - [ ] **Step 2: 跑测试确认失败**
 
@@ -775,12 +827,22 @@ git commit -m "feat: AnalysisService.explainDiagnosis（detail-click 档 + abort
 
 ```ts
 describe("diagnosis 路由", () => {
-  it("注册第三个右键菜单项（page+selection 上下文）", async () => {
-    await triggerOnInstalled(); // 复用文件内既有 onInstalled 触发方式
-    const created = chromeApi.contextMenus.create.mock.calls.map(([item]) => item);
-    expect(created).toContainEqual(
-      expect.objectContaining({ id: "syntax-diagnose-block", contexts: ["page", "selection"] }),
-    );
+  // 路由用例的调用方式照文件内既有 ANALYZE_DETAIL / TEST_PROFILE 路由用例的
+  // chromeMock()/dependencies()/registerServiceWorker 三件套（先读文件头 harness）。
+
+  it("注册第三个右键菜单项——同时更新被钉死的两项注册断言", async () => {
+    // 既有用例 "creates both context menu commands exactly once on install"（:224-236）
+    // 用 toEqual 钉死两项菜单的精确列表，加第三项必红：**修改该既有用例**（而非新增
+    // 重复用例），期望数组改为三项：
+    const subject = chromeMock();
+    registerServiceWorker(dependencies(), subject.api);
+    subject.events.runtime.onInstalled.listeners[0]!({ reason: "install" });
+    await vi.waitFor(() => expect(subject.events.contextMenus.removeAll).toHaveBeenCalledOnce());
+    expect(subject.events.contextMenus.create.mock.calls).toEqual([
+      [{ id: "syntax-parse-selection", title: "解析选中文本", contexts: ["selection"] }],
+      [{ id: "syntax-parse-context-block", title: "解析此区域", contexts: ["page"] }],
+      [{ id: "syntax-diagnose-block", title: "诊断：这段为什么没解析", contexts: ["page", "selection"] }],
+    ]);
   });
 
   it("无 profile 时 EXPLAIN_DIAGNOSIS 回 DIAGNOSIS_RESULT 且 modelError=CONFIG_MISSING", async () => {
@@ -838,7 +900,7 @@ describe("diagnosis 路由", () => {
 });
 ```
 
-（`sampleDiagnosis()` / `pageRequestBase` / `profile` / `triggerOnInstalled` / `triggerMenuClick` / `activeTabsGet`/`Set` 的名字以该测试文件既有 harness 为准——先读文件头，把它造 fake chromeApi/configRepository/analysisService 的方式照抄过来；若 harness 不存在 `triggerMenuClick`，直接调用被测的 `contextMenus.onClicked` mock listener。）
+（下方路由用例里的 `route(...)` / `configRepository` / `analysisService` / `profile` / `pageRequestBase` / `activeTabsGet`/`activeTabsSet` 是**行为断言的简写**——落到该文件的真实 harness 上：`chromeMock()` + `dependencies(覆盖)` + `registerServiceWorker`，路由调用方式照文件内既有 `ANALYZE_DETAIL` / `TEST_PROFILE` 路由用例的 dispatch 写法（先读文件），请求基线照既有页面请求用例构造。断言体（右侧 expect 部分）照抄不改。）
 
 - [ ] **Step 2: 跑测试确认失败**
 
@@ -926,21 +988,25 @@ Expected: FAIL。
 `redactDiagnosisExplanation` 是本文件新增的小 helper：
 
 ```ts
-function redactDiagnosisExplanation(model: DiagnosisExplanation): DiagnosisExplanation {
+// redactProfileSecrets 的真实签名是 (value: string, profile: ModelProfile)（:134-139）。
+function redactDiagnosisExplanation(
+  model: DiagnosisExplanation,
+  profile: ModelProfile,
+): DiagnosisExplanation {
   return {
-    likelyCause: redactProfileSecrets(model.likelyCause),
-    explanation: redactProfileSecrets(model.explanation),
-    suggestions: model.suggestions.map((item) => redactProfileSecrets(item)),
+    likelyCause: redactProfileSecrets(model.likelyCause, profile),
+    explanation: redactProfileSecrets(model.explanation, profile),
+    suggestions: model.suggestions.map((item) => redactProfileSecrets(item, profile)),
   };
 }
 ```
 
-（若 `redactProfileSecrets` 签名不是 `(text: string) => string`，按其真实签名调整——它就在 `:134-139`，读一眼再写。`DiagnosisExplanation` 从 `../shared/protocol` import。）
+（调用处相应改为 `model: redactDiagnosisExplanation(model, profile)`；`DiagnosisExplanation` 从 `../shared/protocol` import。）
 
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `cd chrome-plugin && npx vitest run src/background/service-worker.test.ts`
-Expected: PASS 全部（56 个既有用例不红）。
+Expected: PASS 全部（含按 Step 1 更新后的菜单注册断言；其余既有用例不红）。
 
 - [ ] **Step 5: 提交**
 
@@ -955,14 +1021,18 @@ git commit -m "feat: SW 诊断路由与右键菜单（不记账，错误嵌 mode
 
 **Files:**
 - Create: `chrome-plugin/src/content/block-diagnosis.ts`
+- Modify: `docs/architecture/modules.md`（**同批**加一行——`architecture-docs.test.ts:113-121` 钉了新源文件必须出现在模块地图，拖到 Task 12 会让 Task 7-11 期间全量 `npm test` 带红）
 - Test: `chrome-plugin/src/content/block-diagnosis.test.ts`
 
 **Interfaces (Produces):**
 ```ts
+export type DiagnosisTargetSource = "selection" | "contextmenu" | "body" | "extension-ascended";
 export function recordDiagnosisTarget(event: Event): void;   // contextmenu 捕获监听用
-export function currentDiagnosisTarget(): Element | null;
+export interface ResolvedDiagnosisTarget { element: Element | null; source: DiagnosisTargetSource }
+export function resolveDiagnosisTarget(doc?: Document): ResolvedDiagnosisTarget;
 export interface DiagnoseElementInput {
   target: Element | null;
+  targetSource: DiagnosisTargetSource;
   selectionText?: string;
   document: Document;
   sessionSnapshot?: (element: Element | null) => SessionDiagnosisSnapshot;
@@ -979,7 +1049,7 @@ export function diagnoseElement(input: DiagnoseElementInput): BlockDiagnosis;
 ```ts
 // @vitest-environment happy-dom
 import { describe, expect, it, beforeEach } from "vitest";
-import { currentDiagnosisTarget, diagnoseElement, recordDiagnosisTarget } from "./block-diagnosis";
+import { diagnoseElement, recordDiagnosisTarget, resolveDiagnosisTarget } from "./block-diagnosis";
 
 const baseInput = {
   document,
@@ -992,27 +1062,67 @@ beforeEach(() => {
   document.body.innerHTML = "";
 });
 
-describe("落点记录", () => {
-  it("recordDiagnosisTarget 记录元素且不受会话状态约束", () => {
+describe("resolveDiagnosisTarget（spec D1 落点优先级：选区锚点 → 右键落点 → body）", () => {
+  it("recordDiagnosisTarget 记录元素，resolve 返回 contextmenu 源", () => {
     document.body.innerHTML = '<main><p id="p">Text</p></main>';
-    const event = { target: document.getElementById("p") } as unknown as Event;
-    recordDiagnosisTarget(event);
-    expect(currentDiagnosisTarget()).toBe(document.getElementById("p"));
+    recordDiagnosisTarget({ target: document.getElementById("p") } as unknown as Event);
+    const resolved = resolveDiagnosisTarget();
+    expect(resolved.element).toBe(document.getElementById("p"));
+    expect(resolved.source).toBe("contextmenu");
   });
-  it("落点在扩展自身元素上时上溯并标记 source", () => {
-    document.body.innerHTML = '<main><p id="p">Text</p><div data-syntax-learning-block></div></main>';
+
+  it("选区锚点优先于右键落点（spec D1：三者都记进报告）", () => {
+    document.body.innerHTML = '<main><p id="a">First para.</p><p id="b">Second para.</p></main>';
+    recordDiagnosisTarget({ target: document.getElementById("b") } as unknown as Event);
+    const selection = document.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(document.getElementById("a")!);
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    const resolved = resolveDiagnosisTarget();
+    // happy-dom 的 getSelection 实现有限：若 anchorNode 取不到就跳过该断言分支（真机/E2E 覆盖）
+    if (selection?.anchorNode != null) {
+      expect(resolved.source).toBe("selection");
+      expect(resolved.element).toBe(document.getElementById("a"));
+    }
+  });
+
+  it("无选区无记录时回落 body", () => {
+    document.body.innerHTML = "<main><p>x</p></main>";
+    recordDiagnosisTarget({ target: null } as unknown as Event); // 清掉记录
+    const resolved = resolveDiagnosisTarget();
+    expect(resolved.element).toBe(document.body);
+    expect(resolved.source).toBe("body");
+  });
+
+  it("S4：documentElement 的 ready 标记不算扩展自身元素；卡片/胶囊才上溯", () => {
+    // installContentScript 会在 <html> 上设 data-syntax-learning-extension="ready"
+    // （content-script.ts:462）——任何元素 closest 都会命中它；若把它当扩展元素，
+    // 生产环境所有落点都会退化成 html.parentElement === null。必须排除。
+    document.documentElement.dataset.syntaxLearningExtension = "ready";
+    document.body.innerHTML = '<main><p id="p">Text</p></main>';
+    recordDiagnosisTarget({ target: document.getElementById("p") } as unknown as Event);
+    expect(resolveDiagnosisTarget().element).toBe(document.getElementById("p"));
+    delete document.documentElement.dataset.syntaxLearningExtension;
+
+    // 真正的扩展元素（卡片 host）仍然上溯并标记 extension-ascended
+    document.body.innerHTML = '<main><div id="wrap"><div data-syntax-learning-block></div></div></main>';
     const card = document.querySelector("[data-syntax-learning-block]")!;
-    const event = { target: card } as unknown as Event;
-    recordDiagnosisTarget(event);
-    // 卡片 host 挂在 p 之后的浅 DOM；上溯跳过扩展元素后落到容器
-    expect(currentDiagnosisTarget()?.matches("[data-syntax-learning-block]")).toBe(false);
+    recordDiagnosisTarget({ target: card } as unknown as Event);
+    const resolved = resolveDiagnosisTarget();
+    expect(resolved.element).toBe(document.getElementById("wrap"));
+    expect(resolved.source).toBe("extension-ascended");
   });
 });
 
 describe("diagnoseElement", () => {
   it("非英文段落的证据指向 english-dominant 门并带数值", () => {
     document.body.innerHTML = '<main><p id="mixed">Hello 你好世界测试数据</p></main>';
-    const diagnosis = diagnoseElement({ ...baseInput, target: document.getElementById("mixed") });
+    const diagnosis = diagnoseElement({
+      ...baseInput,
+      target: document.getElementById("mixed"),
+      targetSource: "contextmenu",
+    });
     const gate = diagnosis.gates.find(({ gate }) => gate === "english-dominant")!;
     expect(gate.ok).toBe(false);
     expect(gate.value).toBeLessThan(0.6);
@@ -1021,7 +1131,11 @@ describe("diagnoseElement", () => {
 
   it("text 度量与短块阈值进证据", () => {
     document.body.innerHTML = '<main><div id="tiny">Short text</div></main>';
-    const diagnosis = diagnoseElement({ ...baseInput, target: document.getElementById("tiny") });
+    const diagnosis = diagnoseElement({
+      ...baseInput,
+      target: document.getElementById("tiny"),
+      targetSource: "contextmenu",
+    });
     expect(diagnosis.text.minAutoTextLength).toBe(20);
     expect(diagnosis.text.length).toBe(10);
   });
@@ -1029,7 +1143,11 @@ describe("diagnoseElement", () => {
   it("segmentation 用生产分句/分词", () => {
     document.body.innerHTML =
       '<main><p id="two">First sentence here. Second sentence there now.</p></main>';
-    const diagnosis = diagnoseElement({ ...baseInput, target: document.getElementById("two") });
+    const diagnosis = diagnoseElement({
+      ...baseInput,
+      target: document.getElementById("two"),
+      targetSource: "contextmenu",
+    });
     expect(diagnosis.segmentation.sentenceCount).toBe(2);
     expect(diagnosis.segmentation.tokenCount).toBeGreaterThan(4);
     expect(diagnosis.segmentation.emptyText).toBe(false);
@@ -1038,18 +1156,27 @@ describe("diagnoseElement", () => {
   it("URL 去 query 与 fragment；outerHTML 截断并脱敏表单值", () => {
     document.body.innerHTML =
       '<main><p id="x" data-secret="keep">Value <input value="hunter2"></p></main>';
-    const diagnosis = diagnoseElement({ ...baseInput, target: document.getElementById("x") });
+    const diagnosis = diagnoseElement({
+      ...baseInput,
+      target: document.getElementById("x"),
+      targetSource: "contextmenu",
+    });
     expect(diagnosis.page.url).toBe("https://example.com/docs");
     expect(diagnosis.target.outerHtml).not.toContain("hunter2");
     expect(diagnosis.target.outerHtml.length).toBeLessThanOrEqual(220); // 200 + 少量省略标记
   });
 
-  it("requestFeasibility 标出超长句", () => {
+  it("requestFeasibility 标出超长句并带两档批上限", () => {
     document.body.innerHTML = `<main><p id="long">${"word ".repeat(600)}</p></main>`;
-    const diagnosis = diagnoseElement({ ...baseInput, target: document.getElementById("long") });
+    const diagnosis = diagnoseElement({
+      ...baseInput,
+      target: document.getElementById("long"),
+      targetSource: "contextmenu",
+    });
     expect(diagnosis.requestFeasibility.maxSentenceLength).toBeGreaterThan(2000);
     expect(diagnosis.requestFeasibility.sentenceLengthLimit).toBe(2000);
     expect(diagnosis.requestFeasibility.maxSentencesPerRequest).toBe(6);
+    expect(diagnosis.requestFeasibility.cloudSentencesPerRequest).toBe(2);
   });
 
   it("会话快照透传", () => {
@@ -1058,9 +1185,11 @@ describe("diagnoseElement", () => {
     const diagnosis = diagnoseElement({
       ...baseInput,
       target: document.getElementById("p"),
+      targetSource: "contextmenu",
       sessionSnapshot: () => snapshot,
     });
     expect(diagnosis.session).toEqual(snapshot);
+    expect(diagnosis.targetSource).toBe("contextmenu");
   });
 });
 ```
@@ -1075,6 +1204,7 @@ Expected: FAIL——模块不存在。
 ```ts
 import type { BlockDiagnosis, SessionDiagnosisSnapshot } from "../shared/protocol";
 import { MAX_SENTENCES_PER_REQUEST } from "../shared/protocol";
+import { CLOUD_SENTENCES_PER_REQUEST_FOR_CONTRACT } from "../background/analysis-service";
 import { explainElement, inventoryReadableUnits, type ReadableUnit } from "./page-inventory";
 import { nearestSafeBlock } from "./document-scanner";
 import { normalizedReadableText } from "./readable-dom-text";
@@ -1082,8 +1212,18 @@ import { segmentBlock, tokenize } from "../language/segmenter";
 
 const SENTENCE_LENGTH_LIMIT = 2_000;
 const OUTER_HTML_LIMIT = 200;
+// 注意：刻意不含 [data-syntax-learning-extension]——那是 installContentScript 设在
+// <html> 上的「已安装」标记（content-script.ts:462），任何元素的 closest 都会命中它；
+// 把它算进来会让生产环境所有落点退化成 html.parentElement === null（评审 S4）。
 const EXTENSION_OWN_SELECTOR =
-  "[data-syntax-learning-extension],[data-syntax-learning-block],[data-syntax-learning-selection-anchor],[data-syntax-progress-pill],[data-syntax-diagnosis-panel]";
+  "[data-syntax-learning-block],[data-syntax-learning-selection-anchor],[data-syntax-progress-pill],[data-syntax-diagnosis-panel]";
+
+export type DiagnosisTargetSource = "selection" | "contextmenu" | "body" | "extension-ascended";
+
+export interface ResolvedDiagnosisTarget {
+  element: Element | null;
+  source: DiagnosisTargetSource;
+}
 
 let lastTarget: Element | null = null;
 
@@ -1092,13 +1232,19 @@ export function recordDiagnosisTarget(event: Event): void {
   if (target instanceof Element) lastTarget = target;
 }
 
-export function currentDiagnosisTarget(): Element | null {
-  if (lastTarget === null) return null;
-  // 落点在扩展自身元素上：沿祖先链跳出扩展容器再取（spec D1 次要11）。
-  if (lastTarget.closest(EXTENSION_OWN_SELECTOR) !== null) {
-    return lastTarget.closest(EXTENSION_OWN_SELECTOR)!.parentElement;
+/** spec D1 落点优先级：选区锚点 → 右键落点 → body；扩展自身元素上溯。 */
+export function resolveDiagnosisTarget(doc: Document = document): ResolvedDiagnosisTarget {
+  // ① 选区锚点（getSelection().anchorNode 的 parentElement）
+  const anchor = doc.getSelection()?.anchorNode?.parentElement ?? null;
+  if (anchor !== null) return { element: anchor, source: "selection" };
+  // ② 右键落点；落点在扩展自身元素（卡片/胶囊/面板 host）上时上溯到其父元素
+  if (lastTarget !== null) {
+    const own = lastTarget.closest(EXTENSION_OWN_SELECTOR);
+    if (own === null) return { element: lastTarget, source: "contextmenu" };
+    return { element: own.parentElement, source: "extension-ascended" };
   }
-  return lastTarget;
+  // ③ 兜底
+  return { element: doc.body, source: "body" };
 }
 
 function cssPath(element: Element): string {
@@ -1123,6 +1269,7 @@ function sanitizedOuterHtml(element: Element): string {
 
 export interface DiagnoseElementInput {
   target: Element | null;
+  targetSource: DiagnosisTargetSource;
   selectionText?: string;
   document: Document;
   sessionSnapshot?: (element: Element | null) => SessionDiagnosisSnapshot;
@@ -1161,7 +1308,7 @@ export function diagnoseElement(input: DiagnoseElementInput): BlockDiagnosis {
           selectorPath: cssPath(target),
           outerHtml: sanitizedOuterHtml(target),
         },
-    targetSource: input.selectionText !== undefined ? "selection" : target === document.body ? "body" : "contextmenu",
+    targetSource: input.targetSource,
     ...(input.selectionText === undefined ? {} : { selectionText: input.selectionText }),
     inventory: {
       isUnit: unit !== undefined,
@@ -1190,6 +1337,7 @@ export function diagnoseElement(input: DiagnoseElementInput): BlockDiagnosis {
       maxSentenceLength: sentenceLengths.reduce((max, length) => Math.max(max, length), 0),
       sentenceLengthLimit: SENTENCE_LENGTH_LIMIT,
       maxSentencesPerRequest: MAX_SENTENCES_PER_REQUEST,
+      cloudSentencesPerRequest: CLOUD_SENTENCES_PER_REQUEST_FOR_CONTRACT,
     },
     session: input.sessionSnapshot?.(target) ?? { state: "stopped", registered: false, sentences: [] },
     page: { url, readyState: document.readyState },
@@ -1198,7 +1346,7 @@ export function diagnoseElement(input: DiagnoseElementInput): BlockDiagnosis {
 }
 ```
 
-（`nearestSafeBlock` 的真实返回形态以 `document-scanner.ts:44-60` 为准——若它返回 `CandidateBlock` 形状，取 `.element`；`ReadableUnit.kind` 的真实字段名同上以 `page-inventory.ts:20-33` 为准。）
+（`nearestSafeBlock` 的真实返回形态以 `document-scanner.ts:44-60` 为准——若它返回 `CandidateBlock` 形状，取 `.element`；`ReadableUnit.kind` 的真实字段名同上以 `page-inventory.ts:20-33` 为准。`CLOUD_SENTENCES_PER_REQUEST_FOR_CONTRACT` 已从 `analysis-service.ts` 导出（`cross-platform-contract.test.ts:4` 在用）；content import background 模块在该仓库已有先例吗——**若 vite 构建不允许 content→background 引用**，就把常量挪到 `shared/protocol.ts` 并让 analysis-service re-export，单一来源不变。提交前确认 `npm run build` 通过。）
 
 - [ ] **Step 4: 跑测试确认通过**
 
@@ -1208,7 +1356,7 @@ Expected: PASS。
 - [ ] **Step 5: 提交**
 
 ```bash
-git add src/content/block-diagnosis.ts src/content/block-diagnosis.test.ts
+git add src/content/block-diagnosis.ts src/content/block-diagnosis.test.ts docs/architecture/modules.md
 git commit -m "feat: block-diagnosis 证据采集（复用生产判定，不复制判据）"
 ```
 
@@ -1237,7 +1385,7 @@ export function formatDiagnosisReport(diagnosis: BlockDiagnosis, options?: Diagn
 ```ts
 describe("formatDiagnosisReport", () => {
   const diagnosisOf = (target: string) =>
-    diagnoseElement({ ...baseInput, target: document.querySelector(target) });
+    diagnoseElement({ ...baseInput, target: document.querySelector(target), targetSource: "contextmenu" });
 
   it("七个小节齐全且顺序固定", () => {
     document.body.innerHTML = '<main><p id="p">Hello world from the test page.</p></main>';
@@ -1326,8 +1474,9 @@ export function formatDiagnosisReport(
     `- 目标元素: \`${diagnosis.target.tagName}\` class=\`${diagnosis.target.className}\``,
     `- outerHTML（截断并脱敏）: \`${diagnosis.target.outerHtml}\``,
     `- document.readyState: ${diagnosis.page.readyState}`,
-    diagnosis.selectionText === undefined ? "" : `- 选中文本: ${diagnosis.selectionText.slice(0, 200)}`,
-    "",
+    ...(diagnosis.selectionText === undefined
+      ? []
+      : [`- 选中文本: ${diagnosis.selectionText.slice(0, 200)}`, ""]),
     `## 本地判定证据`,
     `- inventory: ${diagnosis.inventory.isUnit ? "是语义单元" : "不是语义单元"}；automatic=${diagnosis.inventory.automatic}${diagnosis.inventory.exclusionReason === undefined ? "" : `；exclusionReason=\`${diagnosis.inventory.exclusionReason}\`}`,
     `- 显式手势路径: ${diagnosis.explicit.resolvable ? "可解析" : "不可解析"}`,
@@ -1341,7 +1490,7 @@ export function formatDiagnosisReport(
     `## 分句与请求可行性`,
     `- 分句数: ${diagnosis.segmentation.sentenceCount}；token 数: ${diagnosis.segmentation.tokenCount}`,
     `- 最长句: ${diagnosis.requestFeasibility.maxSentenceLength} / 上限 ${diagnosis.requestFeasibility.sentenceLengthLimit}`,
-    `- 单请求句数上限: ${diagnosis.requestFeasibility.maxSentencesPerRequest}`,
+    `- 单请求句数上限: loopback ${diagnosis.requestFeasibility.maxSentencesPerRequest} / 云端 ${diagnosis.requestFeasibility.cloudSentencesPerRequest}`,
     "",
     `## 会话状态`,
     `- state: ${diagnosis.session.state}；registered: ${diagnosis.session.registered}${diagnosis.session.blockId === undefined ? "" : `（blockId \`${diagnosis.session.blockId}\`）`}`,
@@ -1363,11 +1512,12 @@ export function formatDiagnosisReport(
     `- profile 模型: ${options.profileModel ?? "未返回 / 未配置"}`,
     `- 证据采集时间: ${diagnosis.capturedAt}；报告生成时间: ${options.generatedAt ?? "未知"}`,
   ];
-  return lines.filter((line) => line !== "").join("\n").replace(/\n{3,}/gu, "\n\n") + "\n";
+  // 不做 filter：空行是小节分隔符，滤掉会让 markdown 渲染成一坨（评审 次要7）。
+  return lines.join("\n").replace(/\n{3,}/gu, "\n\n") + "\n";
 }
 ```
 
-（注意 `selectionText` 那行用空串过滤会把空行吃掉——上面末尾的 `filter + replace` 已经兜住空行压缩；`DiagnosisExplanation` / `ExtensionError` import 自 `../shared/protocol` / `../shared/errors`。）
+（`DiagnosisExplanation` / `ExtensionError` import 自 `../shared/protocol` / `../shared/errors`；可选段（选中文本）用条件 push 而不是空串占位。）
 
 - [ ] **Step 4: 跑测试确认通过**
 
@@ -1387,6 +1537,7 @@ git commit -m "feat: formatDiagnosisReport 结构化 markdown 报告"
 
 **Files:**
 - Create: `chrome-plugin/src/content/diagnosis-panel.ts`
+- Modify: `docs/architecture/modules.md`（同批加一行——理由同 Task 7 的 I9）
 - Test: `chrome-plugin/src/content/diagnosis-panel.test.ts`
 
 **Interfaces (Produces):**
@@ -1410,6 +1561,8 @@ export class DiagnosisPanel {
 - [ ] **Step 1: 写失败测试**（新文件，`// @vitest-environment happy-dom`；`sampleDiagnosis` 用 Task 3 的 baseDiagnosis 内联）
 
 ```ts
+// @vitest-environment happy-dom
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DiagnosisPanel } from "./diagnosis-panel";
 
 const strip = (text: string | null | undefined) => (text ?? "").replace(/\s+/gu, " ").trim();
@@ -1694,7 +1847,7 @@ Expected: PASS。
 - [ ] **Step 5: 提交**
 
 ```bash
-git add src/content/diagnosis-panel.ts src/content/diagnosis-panel.test.ts
+git add src/content/diagnosis-panel.ts src/content/diagnosis-panel.test.ts docs/architecture/modules.md
 git commit -m "feat: DiagnosisPanel 面板（requestId 防过期响应，剪贴板降级）"
 ```
 
@@ -1703,8 +1856,9 @@ git commit -m "feat: DiagnosisPanel 面板（requestId 防过期响应，剪贴�
 ### Task 10: 协议第三层——content 接线
 
 **Files:**
-- Modify: `chrome-plugin/src/content/content-script.ts`（`isRuntimeResponse` case、入站拒绝列表、router case、`installContentScript` 装配落点监听与面板）
-- Test: 复用 `chrome-plugin/src/content/session-controller.test.ts`？否——**新建 `chrome-plugin/src/content/content-script-diagnosis.test.ts`**（isRuntimeResponse 是 content-script 的导出，可直接单测；router 行为用 ContentScriptRouter + fake transportFactory 测）
+- Modify: `chrome-plugin/src/content/content-script.ts`（`isRuntimeResponse` case、入站拒绝列表、router case、`RoutedController` 接口扩两个成员、`installContentScript` 装配落点监听）
+- Modify: `chrome-plugin/src/content/session-controller.ts`（`RoutedController` 需要暴露 `transport`——给 `SessionController` 加一个 public getter，见 Step 3 第 4 点）
+- Test: **新建 `chrome-plugin/src/content/content-script-diagnosis.test.ts`**（isRuntimeResponse 是 content-script 的导出，可直接单测；router 行为用 ContentScriptRouter + fake transportFactory 测）
 
 **Interfaces (Produces):** 无新导出（`runDiagnosis` 为模块内私有）。
 
@@ -1739,15 +1893,24 @@ describe("isRuntimeResponse 诊断 case", () => {
 describe("ContentScriptRouter 诊断命令", () => {
   it("DIAGNOSE_BLOCK 回 ack 且发出 EXPLAIN_DIAGNOSIS", async () => {
     const sent: RequestMessage[] = [];
+    const fakeTransportInstance = {
+      send: (message: RequestMessage) => {
+        sent.push(message);
+        return Promise.resolve(validResult); // 顶部那个合法 DIAGNOSIS_RESULT，requestId 换成消息里的
+      },
+    };
     const router = new ContentScriptRouter({
-      transportFactory: () => fakeTransport(sent), // fakeTransport: 记录 send() 并回预设 DIAGNOSIS_RESULT
+      transportFactory: () => fakeTransportInstance as unknown as ReturnType<
+        typeof ChromeRuntimeTransport
+      >,
     });
     document.body.innerHTML = '<p id="p">Hello target text here.</p>';
-    // 先用 contextmenu 记录落点（capture 监听由 installContentScript 装配；单测里手动调 recordDiagnosisTarget）
+    // 先用 contextmenu 记录落点（capture 监听由 installContentScript 装配；单测里手动调）
     recordDiagnosisTarget({ target: document.getElementById("p") } as unknown as Event);
 
     const response = await router.route({ ...pageCommandBase, type: "DIAGNOSE_BLOCK" });
     expect(response.type).toBe("ACK");
+    // runDiagnosis 同步执行到 transport.send（首个 await 前），route 返回时 sent 已就绪
     expect(sent.at(-1)?.type).toBe("EXPLAIN_DIAGNOSIS");
   });
 
@@ -1784,7 +1947,7 @@ Expected: FAIL。
       );
 ```
 
-（`isBlockDiagnosis` 从 `../shared/protocol` **导出**（Task 3 里改为 export），`isDiagnosisExplanation` 小守卫同文件内新增：三字段 typeof 检查。）
+（`isBlockDiagnosis` 已在 Task 3 导出，直接 import；`isDiagnosisExplanation` 小守卫同文件内新增：三字段 typeof 检查。）
 
 2. 入站拒绝列表（`:350-356`）追加 `request.type === "EXPLAIN_DIAGNOSIS"`。
 3. `route()` switch 加 case（`PARSE_HOVERED_BLOCK` 后）：
@@ -1798,43 +1961,58 @@ Expected: FAIL。
         }
 ```
 
-4. `ContentScriptRouter` 内新增私有编排方法与 transport 复用（transport 按 documentId 复用，避免每次诊断新开一个 watchdog 端口）：
+4. **transport 复用会话通道（评审 S5，关键）+ 编排方法**。诊断**绝不能新建 transport**：`ChromeRuntimeTransport` 构造即 `connectWatchdog()` 建第二个 `syntax-learning:<documentId>` 端口（`content-script.ts:314-315`），而 SW 的 `onConnect` 会无条件 `documentPorts.set(documentId, port)`（`service-worker.ts:987`）——会话运行中触发一次诊断，流式推送就改走没有注册任何 handler 的新端口，会话的流式预览静默断流。router 的 `controller()` 已经为每个 documentId 建好了 controller+transport，诊断复用它。
+
+先给 `SessionController` 加 public getter 并扩 `RoutedController` 接口（`content-script.ts:18-29`）：
 
 ```ts
-  private readonly diagnosisTransports = new Map<string, RuntimeTransport>();
+// session-controller.ts（Task 2 的提交里一并加）：
+/** 诊断等页面侧一次性请求复用会话通道——绝不能另开端口（会劫持流式推送）。 */
+get transport(): RuntimeTransport {
+  return this.options.transport;
+}
+
+// content-script.ts 的 RoutedController 接口追加两个成员：
+//   readonly transport: RuntimeTransport;
+//   diagnosisSnapshot(element: Element | null): SessionDiagnosisSnapshot;
+```
+
+router 内编排（**`diagnosisPanel` 惰性单例必须真的定义**，评审 I2）：
+
+```ts
+  private diagnosisPanelInstance?: DiagnosisPanel;
   private diagnosisRequestCounter = 0;
 
+  private diagnosisPanel(): DiagnosisPanel {
+    if (this.diagnosisPanelInstance === undefined) {
+      this.diagnosisPanelInstance = new DiagnosisPanel();
+    }
+    return this.diagnosisPanelInstance;
+  }
+
   private async runDiagnosis(request: DiagnoseBlockRequest): Promise<void> {
-    const panel = this.diagnosisPanel(); // 惰性单例：new DiagnosisPanel(this.document ?? document)
+    const panel = this.diagnosisPanel();
     const controller = this.controller(request.tabId, request.documentId);
-    const target = currentDiagnosisTarget() ?? (typeof document !== "undefined" ? document.body : null);
+    const { element, source } = resolveDiagnosisTarget();
     const diagnosis = diagnoseElement({
-      target,
+      target: element,
+      targetSource: source,
       ...(request.selectionText === undefined ? {} : { selectionText: request.selectionText }),
-      document: typeof document !== "undefined" ? document : controller.document,
-      sessionSnapshot: (element) => controller.diagnosisSnapshot(element),
-      url: typeof location !== "undefined" ? location.href : "",
+      document,
+      sessionSnapshot: (target) => controller.diagnosisSnapshot(target),
+      url: location.href,
     });
     panel.show(diagnosis);
     const requestId = `${request.documentId}:diagnosis:${++this.diagnosisRequestCounter}`;
-    const message: RequestMessage = {
+    panel.trackRequest(requestId);
+    const response = await controller.transport.send({
       version: MESSAGE_VERSION,
       requestId,
       type: "EXPLAIN_DIAGNOSIS",
       tabId: request.tabId,
       documentId: request.documentId,
       diagnosis,
-    };
-    panel.trackRequest(requestId);
-    let transport = this.diagnosisTransports.get(request.documentId);
-    if (transport === undefined) {
-      transport = (this.options.transportFactory ?? ((tabId, documentId) => new ChromeRuntimeTransport(tabId, documentId)))(
-        request.tabId,
-        request.documentId,
-      );
-      this.diagnosisTransports.set(request.documentId, transport);
-    }
-    const response = await transport.send(message);
+    });
     if (response.type === "DIAGNOSIS_RESULT") {
       panel.updateModel({
         requestId,
@@ -1854,7 +2032,7 @@ Expected: FAIL。
   }
 ```
 
-（`DiagnoseBlockRequest` 类型 = `Extract<RequestMessage, { type: "DIAGNOSE_BLOCK" }>`。`controller.document`——`SessionControllerOptions.document` 已有该注入（`:125` 附近），但 `RoutedController` 接口暴露哪些方法以现状为准：若 router 拿不到 document，就只在真实浏览器上下文跑（`typeof document !== "undefined"` 恒真，content script 场景成立）；测试注入 `document` 全局即可。）
+（`DiagnoseBlockRequest` 类型 = `Extract<RequestMessage, { type: "DIAGNOSE_BLOCK" }>`；`resolveDiagnosisTarget` / `diagnoseElement` / `DiagnosisPanel` import 自 `./block-diagnosis` / `./diagnosis-panel`。测试的 `transportFactory` fake 会同时喂给 controller 与诊断——`send` 里按 `message.type` 区分回应即可。）
 
 5. `installContentScript()`（`:430-465`）装配两件事（`installHoverTracker(document)` 之后）：
 
@@ -1868,14 +2046,14 @@ Expected: FAIL。
 
 - [ ] **Step 4: 跑测试确认通过**
 
-Run: `cd chrome-plugin && npx vitest run src/content/content-script-diagnosis.test.ts src/content/session-controller.test.ts`
-Expected: PASS。
+Run: `cd chrome-plugin && npx vitest run src/content/content-script-diagnosis.test.ts src/content/session-controller.test.ts src/content/content-script-related 2>/dev/null || npx vitest run src/content/content-script-diagnosis.test.ts src/content/session-controller.test.ts`
+Expected: PASS（若 content-script.ts 已有旧测试文件，一并跑，确认 additive）。
 
 - [ ] **Step 5: 提交**
 
 ```bash
-git add src/content/content-script.ts src/content/content-script-diagnosis.test.ts src/shared/protocol.ts
-git commit -m "feat: content 接线诊断命令与面板（第三层守卫 + 落点捕获监听）"
+git add src/content/content-script.ts src/content/session-controller.ts src/content/content-script-diagnosis.test.ts
+git commit -m "feat: content 接线诊断命令与面板（复用会话通道，第三层守卫 + 落点捕获监听）"
 ```
 
 ---
@@ -1892,46 +2070,73 @@ git commit -m "feat: content 接线诊断命令与面板（第三层守卫 + 落
 - [ ] **Step 1: 写失败 E2E**（`tests/e2e/diagnose.spec.ts`；参考 `tests/e2e/extension.spec.ts` 里「显式手势」与 fixtures 的假服务器探针断言写法）
 
 ```ts
-import { expect, test } from "@playwright/test";
-import { testServer } from "./fixtures"; // 以 fixtures.ts 实际导出为准
+// fixtures.ts 的真实导出是扩展后的 test/expect（:105/:209），测试从 "./fixtures" 导入；
+// harness fixture 暴露 serviceWorker/fakeModel/pagesOrigin/seedProfiles/tabIdFor（:85-103）。
+import { expect, test } from "./fixtures";
+
+// 剪贴板读取需要授权（fixture 页是 http://127.0.0.1 源，可授）。
+test.use({ permissions: ["clipboard-read"] });
+
+/** 经 SW 侧 chrome.tabs.sendMessage 下发 DIAGNOSE_BLOCK——Playwright 点不开原生右键菜单。 */
+async function sendDiagnoseBlock(harness: ExtensionHarness, tabId: number): Promise<unknown> {
+  return harness.serviceWorker.evaluate(
+    (id: number) =>
+      chrome.tabs.sendMessage(id, {
+        version: 1,
+        requestId: `e2e-diagnose-${Date.now()}`,
+        type: "DIAGNOSE_BLOCK",
+        tabId: id,
+        documentId: "e2e-diagnosis",
+      }),
+    tabId,
+  );
+}
 
 test.describe("段落诊断", () => {
-  test("右键诊断命令 → 面板出现 → 发了模型请求 → 报告可复制", async ({ page }) => {
-    const server = await testServer(); // 假服务器；profile 已按既有 E2E 配好
-    await page.goto(fixtureUrl("spring-ai-coverage")); // 以既有 fixture 页加载方式为准
+  test("诊断命令 → 面板出现 → 发了模型请求 → 报告可复制", async ({ page, harness }) => {
+    // seed 的写法照既有 spec（如 extension.spec.ts）里 seedProfiles 的调用；baseUrl 指向假服务器。
+    await harness.seedProfiles(
+      [{ id: "p1", name: "fake", baseUrl: harness.fakeModel.url(), apiKey: "k", model: "m" }],
+      "p1",
+    );
+    // fixture 页的 goto 照 page-coverage.spec.ts 里同名页的写法（pagesOrigin 下的固定路径）。
+    await page.goto(`${harness.pagesOrigin}/spring-ai-coverage.html`);
+    const tabId = await harness.tabIdFor(page.url());
 
-    // Playwright 点不开 Chrome 原生右键菜单：按既有 harness 用 SW 侧下发页面命令
-    await serviceWorkerEvaluate((api) => api.sendDiagnoseCommand()); // helper 形态以 fixtures 为准；
-    // 没有现成 helper 就直接 chrome.tabs.sendMessage 一条 DIAGNOSE_BLOCK（照 fixtures.ts:136-180 的写法）
+    await sendDiagnoseBlock(harness, tabId);
 
     await expect(page.locator("[data-syntax-diagnosis-panel]")).toBeAttached();
-    // 探针断言（不用墙钟）：假服务器确实收到 diagnosis 请求
+    // 探针断言（不用墙钟）：假服务器确实收到 diagnosis 请求（记录 API 是 recordedOfKind）。
     await expect
-      .poll(() => server.requestsOfKind("diagnosis").length)
+      .poll(() => harness.fakeModel.recordedOfKind("diagnosis").length)
       .toBeGreaterThanOrEqual(1);
     const panel = page.locator("[data-syntax-diagnosis-panel]");
+    await expect(panel).toContainText("本地判定证据");
     await expect(panel).toContainText("english-dominant");
-    // 点击复制 → 剪贴板内容含报告骨架（E2E 里用 context.grantPermissions(["clipboard-read"])）
     await panel.locator(".copy").click();
     const clip = await page.evaluate(() => navigator.clipboard.readText());
     expect(clip).toContain("## 概述");
     expect(clip).toContain("## 模型解释");
   });
 
-  test("无 profile → 面板只出本地段，modelError=CONFIG_MISSING，且不发请求", async ({ page }) => {
-    const server = await testServer({ withoutProfile: true }); // 以 fixtures 支持的构造方式为准
-    await page.goto(fixtureUrl("spring-ai-coverage"));
-    await serviceWorkerEvaluate((api) => api.sendDiagnoseCommand());
+  test("无 profile → 面板只出本地段，modelError=CONFIG_MISSING，且不发请求", async ({ page, harness }) => {
+    // 刻意不 seedProfiles：storage 里没有可用档案。
+    await page.goto(`${harness.pagesOrigin}/spring-ai-coverage.html`);
+    const tabId = await harness.tabIdFor(page.url());
+
+    await sendDiagnoseBlock(harness, tabId);
+
     const panel = page.locator("[data-syntax-diagnosis-panel]");
     await expect(panel).toContainText("CONFIG_MISSING");
-    expect(server.requests().length).toBe(0);
+    expect(harness.fakeModel.recorded().length).toBe(0);
+    await panel.locator(".copy").click();
     const clip = await page.evaluate(() => navigator.clipboard.readText());
     expect(clip).toContain("## 本地判定证据");
   });
 });
 ```
 
-（fixture/helper 名以 `tests/e2e/fixtures.ts` 实际导出为准——**先读它**，把 `serviceWorkerEvaluate` / fixture 页加载 / 假服务器启动的既有方式照抄；上面是行为契约不是逐字代码。）
+（`harness.fakeModel` 是 Node 侧的 `FakeOpenAiServer` 实例，`recordedOfKind(kind)`（`:437-439`）与 `recorded()`（`:433`）直接可用；`fakeModel.url()` 若与实际方法名不符，以 `FakeOpenAiServer` 的真实取 URL 方法为准（先读一遍）。fixture 页路径、seedProfiles 的 profile 字段照 `tests/e2e/extension.spec.ts` / `page-coverage.spec.ts` 的既有用法对齐。）
 
 - [ ] **Step 2: 跑 E2E 确认失败**
 
@@ -1999,7 +2204,7 @@ Expected: PASS（消息类型、modules.md 新文件、常量数值全部钉住�
 
 - [ ] **Step 3: drift 检查**
 
-Run: `cd chrome-plugin && node scripts/check-docs-drift.mjs --strict`
+Run: `cd chrome-plugin && npm run docs:drift`（仓库门禁脚本无 `--strict` 参数，`--strict` 是脚本 CLI 的可选项——按 AGENTS.md 跑 `npm run docs:drift` 即可，想加严再手动 `node scripts/check-docs-drift.mjs --strict`）
 Expected: 相关文档都动过，无未处理项。
 
 - [ ] **Step 4: 全量门禁**（AGENTS.md 门禁清单）
@@ -2031,5 +2236,18 @@ git commit -m "docs: 段落诊断功能的架构文档同步"
 
 1. **Spec 覆盖**：D1（Task 6 菜单+不记账、Task 7 落点、Task 10 捕获监听）/ D1.5（Task 3 两条消息、Task 10 编排与第四处同步点）/ D2（Task 1 出口、Task 2 快照、Task 7 采集）/ D3（Task 3/6/10 三层 + Task 5 调度与 abort 隔离 + 不缓存不升版本的「不做」由 Global Constraints 钉死）/ D4（Task 4 提示词+白名单+形状校验、Task 11 假服务器）/ D5（Task 9 面板）/ D6（Task 8 报告）/ §3 TDD 顺序（每 Task 红-绿-提交）/ §4 验收（Task 11 E2E + Task 12 门禁）。无遗漏。
 2. **占位符扫描**：Task 6/7/10/11 含「以既有 harness/真实签名为准」的指引——这些不是占位符，是对既有代码形态的显式核对指令（避免计划凭记忆写死错误的 mock 名/签名）；所有新代码（类型、函数体、prompt、样式、测试断言）均已给出全文。
-3. **类型一致性**：`BlockDiagnosis`/`DiagnosisExplanation`/`SessionDiagnosisSnapshot`/`DiagnosisGateResult` 定义一次（Task 3），Task 1 re-export、Task 4/5/6/7/8/9/10 引用同名；`explainDiagnosis(input: DiagnosisInput, signal)` 在 Task 5 定义、Task 6 消费；`recordDiagnosisTarget`/`currentDiagnosisTarget` Task 7 定义、Task 10 消费；面板方法 `show/trackRequest/updateModel/report/close` Task 9 定义、Task 10 消费。
+3. **类型一致性**：`BlockDiagnosis`/`DiagnosisExplanation`/`SessionDiagnosisSnapshot`/`DiagnosisGateResult` 定义一次（Task 3），Task 1 re-export、Task 4/5/6/7/8/9/10 引用同名；`explainDiagnosis(input: DiagnosisInput, signal)` 在 Task 5 定义、Task 6 消费；`recordDiagnosisTarget`/`resolveDiagnosisTarget` Task 7 定义、Task 10 消费；面板方法 `show/trackRequest/updateModel/report/close` Task 9 定义、Task 10 消费。
+
+## 评审修订记录（2026-10-11，glm-5.3 计划评审后修订）
+
+评审子代理对照实码逐项核验后返回 6 严重 / 9 重要 / 8 次要；全部经主线核实成立并修订：
+
+- **S1** Task 1 一致性测试从「首个失败门决定 reason」改为**集合包含式**（`classifyExclusion:425-467` 的优先级链与 covered-by-child 方向①依赖整页两遍算法，单元素函数无法复刻优先级）；门清单与顺序改为镜像 classifyExclusion；新增条件门 `has-separable-direct-text`；`unsafe-descendant` 门补 `element.matches(UNSAFE_DESCENDANT_SELECTOR)`（拼写修正 DESCENDANT）。
+- **S2** `explainElement` 内部一律 `element.ownerDocument`，严禁全局 `document`（fixture 页是独立 Window 文档）。
+- **S3** `english-dominant` 小测试改为词级口径（`isEnglishDominant:162-166` 是词级 0.6，非字符级）；`englishLetterRatio` 从其提取共用。
+- **S4** `EXTENSION_OWN_SELECTOR` 剔除 `[data-syntax-learning-extension]`（那是 `<html>` 上的 ready 标记 `content-script.ts:462`，含它会让所有落点退化成 `html.parentElement === null`）；上溯以 `documentElement` 为界。
+- **S5** 诊断**复用会话 transport**（`controller.transport.send`），不再新建 `ChromeRuntimeTransport`——新 transport 会开第二个 `syntax-learning:<documentId>` 端口，SW `onConnect` 无条件覆写 `documentPorts`（`service-worker.ts:987`），会话流式推送被劫持。
+- **S6** Task 6 显式修改既有用例 "creates both context menu commands exactly once on install"（`service-worker.test.ts:224-236` 用 `toEqual` 钉死两项）为三项。
+- **I1** Task 5 同批给 `service-worker.test.ts:129-139` 的 `analysisService` 字面量补 `explainDiagnosis: vi.fn()`（接口加方法后该文件立即编译失败）。**I2** Task 10 补 `diagnosisPanel()` 惰性单例的完整定义。**I3** `RoutedController` 接口补 `transport` / `diagnosisSnapshot`，`SessionController` 加 `get transport()`；删掉 `controller.document` 分支。**I4** `redactDiagnosisExplanation(model, profile)` 按真实签名 `(value: string, profile: ModelProfile)`（`:134-139`）。**I5** Task 5 测试改 `harness([...])` 传参 + `vi.spyOn(scheduler, "schedule")`（harness 的 scheduler 是真 `DedupeScheduler` 非 mock）+ 断言 `cache.core.size === 0`（`MemoryCache.putCore` 非 mock）。**I6** Task 2 第二个测试的目标元素改为 `document.querySelector("p")` 具体获取。**I7** Task 7 重设计为 `resolveDiagnosisTarget()` 返回 `{element, source}`，落实 spec D1 的「选区锚点 → 右键落点 → body」优先级与 `extension-ascended` 标记。**I8** Task 11 E2E 全部改为 fixtures 真实 API（`test/expect` from `./fixtures`、`harness.serviceWorker.evaluate` + `chrome.tabs.sendMessage`、`fakeModel.recordedOfKind`）。**I9** Task 7/9 创建新源文件的同批各补一行 `modules.md`（`architecture-docs.test.ts:113-121` 钉住，否则 Task 7-11 期间全量测试带红）。
+- 次要：诊断报告不做 `filter`（空行是小节分隔符）、可选段条件 push；Task 9 测试补 `vi/beforeEach/afterEach` import；`requestFeasibility` 补云端批上限 2（`CLOUD_SENTENCES_PER_REQUEST_FOR_CONTRACT`）；`docs:drift` 命令回归 `npm run docs:drift`。
 
