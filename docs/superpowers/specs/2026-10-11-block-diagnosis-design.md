@@ -120,7 +120,7 @@ export function explainElement(element: Element): CandidateGateResult[]
 - 新 `buildDiagnosisPrompt(diagnosis)`（`background/prompts.ts`），首行是**新前缀**，且必须同步加进假服务器 `detectKind`（`tests/support/fake-openai-server.ts:75-94`），否则该类请求落到 `unknown`、E2E 一片红（AGENTS.md 明写「改 prompt 首行 = 破坏 E2E」）。
 - **首行常量不进 `PROMPT_FIRST_LINES`**：那张表被 `cross-platform-contract.test.ts:35` 要求与 `shared-fixtures/contracts.json` 的 `promptFirstLines` 全等，而 contracts.json 属共享 fixture——一动它就必须跑整套 IntelliJ gradle 门禁，「Chrome-only」即告破产。先例：`sentence-details` 的首行就是 `buildSentenceDetailsPrompt` 内的字面量（`prompts.ts:303`），不在 `PROMPT_FIRST_LINES` 里。诊断首行照此办理，用独立常量。
 - 输出走 `writeContent`（`fake-openai-server.ts:671-683`）——AGENTS.md 红线，任何模型内容都不能直接 `response.end`。
-- **进 prompt 的证据白名单（隐私边界）**：只发 `gates[]`（门名 + 取值）、`text` 度量、`segmentation`、`requestFeasibility`、`session` 的失败句 `code`、`target` 的标签名/类名/选择器路径、`exclusionReason`；**不发**页面 URL、**不发** `outerHTML` 原文（两者只留在本地报告里）。这是把「发给云端 provider 的东西」与「粘给本地 agent 的报告」分开——本扩展此前只外发过句子文本，这是第一次外发页面结构信息，边界收紧在不可识别个人的结构度量上。
+- **进 prompt 的证据白名单（隐私边界）**：只发 `gates[]`（门名 + 取值）、`text` 度量、`segmentation`、`requestFeasibility`、`session` 的失败句 `code`、`target` 的标签名/类名/选择器路径、`exclusionReason`、（可选）`selectionText`；**不发**页面 URL、**不发** `outerHTML` 原文（两者只留在本地报告里）。这是把「发给云端 provider 的东西」与「粘给本地 agent 的报告」分开——本扩展此前只外发过句子文本，这是第一次外发页面结构信息，边界收紧在不可识别个人的结构度量上。
 - 提示词内容要点：说明「你收到的是一份本地判定门的证据（gate 名、当时取值）；哪一门取值越界就是最可能的原因」，并要求返回小 JSON：
 
 ```json

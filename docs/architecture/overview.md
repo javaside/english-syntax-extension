@@ -90,7 +90,7 @@ MV3 把扩展拆成互不共享内存的几个世界。**每个模块能做什�
 
 轻量会话(快捷键冷启动)后若用户再点图标,`SessionController.start()` 会**补做全页扫描并补建预载器**,升级为完整会话——扫描时以 id 去重,不会把悬停那段注册两次。
 
-右键还有第三个菜单项「诊断:这段为什么没解析」(`syntax-diagnose-block`,page/selection 双上下文)。它**不是解析入口**:只读手势,SW 侧经 `sendPageCommand` 下发 `DIAGNOSE_BLOCK` 给页面采集证据,全程**刻意不写 `activeTabs`**——记账会把未启动会话的 tab 伪造成 running,弹窗随即显示不存在的进行中会话,还会绕过「解析此区域」的 stopped 门。页面侧 `ContentScriptRouter` 收到后只回 ack,诊断编排异步跑:本地证据立即上 `DiagnosisPanel`,模型解释(`EXPLAIN_DIAGNOSIS` → `analysisService.explainDiagnosis`)走 `detail-click` 档且**不写任何缓存**;该请求**复用会话 transport**(`SessionController.transport` getter)——另开 transport 会建第二个 `syntax-learning:<documentId>` 端口,SW `onConnect` 无条件覆写 `documentPorts`,会话的流式推送就被劫持了。
+右键还有第三个菜单项「诊断:这段为什么没解析」(`syntax-diagnose-block`,page/selection 双上下文)。它**不是解析入口**:只读手势,SW 侧经 `sendPageCommand` 下发 `DIAGNOSE_BLOCK` 给页面采集证据,全程**刻意不写 `activeTabs`**——记账会把未启动会话的 tab 伪造成 running,弹窗随即显示不存在的进行中会话,还会绕过「解析此区域」的 stopped 门。无账 tab 的诊断 `documentId` 因此由 SW 按表记忆复用(模块级 `diagnosisDocumentIds`):每次右键都现生成新 id 的话,content 侧会按 id 再建一个 controller 与 `syntax-learning:<documentId>` 端口,且只在 STOP_SESSION 回收——反复诊断即按次泄漏;会话启动后走账上 id,陈旧记忆随之清除。页面侧 `ContentScriptRouter` 收到后只回 ack,诊断编排异步跑:本地证据立即上 `DiagnosisPanel`,模型解释(`EXPLAIN_DIAGNOSIS` → `analysisService.explainDiagnosis`)走 `detail-click` 档且**不写任何缓存**;该请求**复用会话 transport**(`SessionController.transport` getter)——另开 transport 会建第二个 `syntax-learning:<documentId>` 端口,SW `onConnect` 无条件覆写 `documentPorts`,会话的流式推送就被劫持了。
 
 ## 4. 端到端链路:核心解析
 

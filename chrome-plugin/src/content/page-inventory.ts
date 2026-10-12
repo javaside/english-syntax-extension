@@ -86,7 +86,7 @@ export const EDITABLE_CONTENT_SELECTOR =
 const HIDDEN_SELECTOR = `[hidden],[aria-hidden='true'],${EDITABLE_CONTENT_SELECTOR}`;
 // 图片不在排除之列:卡片替换只是 display:none,段落里夹插图不妨碍可逆渲染。
 const UNSAFE_DESCENDANT_SELECTOR = `button,input,textarea,select,video,audio,canvas,iframe,${EDITABLE_CONTENT_SELECTOR}`;
-const MINIMUM_AUTO_TEXT_LENGTH = 20;
+export const MINIMUM_AUTO_TEXT_LENGTH = 20;
 
 /** LaTeXML 语义类:参考文献的题名 / 作者 / 年份,论文作者块与邮箱。 */
 const REFERENCE_TITLE_SELECTOR = ".ltx_bib_title";

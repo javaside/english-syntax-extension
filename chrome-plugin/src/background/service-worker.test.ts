@@ -1301,6 +1301,31 @@ describe("diagnosis 路由", () => {
     // persistActiveTabs 落到 session 存储，这里必须保持空。
     expect(subject.sessionData["activeTabs.v1"]).toBeUndefined();
   });
+
+  it("无会话时同 tab 两次诊断下发相同 documentId（controller 按记忆复用）", async () => {
+    const subject = chromeMock();
+    registerServiceWorker(dependencies(), subject.api);
+
+    const click = (): void => {
+      subject.events.contextMenus.onClicked.listeners[0]!(
+        { menuItemId: "syntax-diagnose-block", editable: false },
+        { id: 9 } as chrome.tabs.Tab,
+      );
+    };
+    click();
+    await vi.waitFor(() => expect(subject.events.tabs.sendMessage).toHaveBeenCalledTimes(1));
+    click();
+    await vi.waitFor(() => expect(subject.events.tabs.sendMessage).toHaveBeenCalledTimes(2));
+
+    const first = subject.events.tabs.sendMessage.mock.calls[0]![1] as { documentId?: string };
+    const second = subject.events.tabs.sendMessage.mock.calls[1]![1] as { documentId?: string };
+    // 反复右键若每次都换新 id，content 侧 router 会按 id 再建一个 controller +
+    // watchdog 端口 + contextmenu 监听且永不回收（diagnosisDocumentIds 的注释）。
+    expect(first.documentId).toBeTypeOf("string");
+    expect(second.documentId).toBe(first.documentId);
+    // 记忆不等于记账：activeTabs 仍必须保持空（spec D1）。
+    expect(subject.sessionData["activeTabs.v1"]).toBeUndefined();
+  });
 });
 
 describe("detail prefetch", () => {

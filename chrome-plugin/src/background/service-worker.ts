@@ -242,6 +242,16 @@ function generatedDocumentId(tabId: number): string {
   return `tab-${tabId}:${crypto.randomUUID()}`;
 }
 
+/**
+ * 无 activeTabs 账（未启动会话）的 tab 的诊断 documentId 记忆。诊断刻意不写
+ * activeTabs（见菜单分支注释），若每次右键都现生成新 id，content 侧 router 会按
+ * 新 id 再建一个 SessionController + ChromeRuntimeTransport（构造即开 watchdog
+ * 端口）+ contextmenu 监听，且只在 STOP_SESSION 回收——反复诊断就是按次泄漏。
+ * 按 tab 记住 id 即可复用同一个 controller；会话启动后账上有 id，陈旧记忆随之
+ * 清除。仅存内存：SW 休眠重启即清空，代价只是下一次诊断新建一个 controller，有界。
+ */
+const diagnosisDocumentIds = new Map<number, string>();
+
 export function registerServiceWorker(
   dependencies: ServiceWorkerDependencies,
   chromeApi: typeof chrome = chrome,
@@ -1014,7 +1024,18 @@ export function registerServiceWorker(
     if (info.menuItemId === DIAGNOSE_MENU_ID) {
       void (async () => {
         await hydrated;
-        const documentId = activeTabs.get(tabId)?.documentId ?? generatedDocumentId(tabId);
+        // 会话有账优先用账上 id 并清掉诊断记忆；无账则按 tab 复用记忆的 id，首次
+        // 才现生成——同一 tab 反复诊断复用 content 侧同一个 controller/transport
+        // （见 diagnosisDocumentIds 的注释）。
+        const recorded = activeTabs.get(tabId)?.documentId;
+        if (recorded !== undefined) {
+          diagnosisDocumentIds.delete(tabId);
+        }
+        let documentId = recorded ?? diagnosisDocumentIds.get(tabId);
+        if (documentId === undefined) {
+          documentId = generatedDocumentId(tabId);
+          diagnosisDocumentIds.set(tabId, documentId);
+        }
         await inject(tabId);
         // 诊断是只读手势，刻意不写 activeTabs：记账会把未启动会话的 tab 伪造成
         // running，popup 随即显示不存在的进行中会话，还绕过「解析此区域」的 stopped

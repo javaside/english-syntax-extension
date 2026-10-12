@@ -6,7 +6,12 @@ import type {
 import { MAX_SENTENCES_PER_REQUEST } from "../shared/protocol";
 import type { ExtensionError } from "../shared/errors";
 import { CLOUD_SENTENCES_PER_REQUEST_FOR_CONTRACT } from "../background/analysis-service";
-import { explainElement, inventoryReadableUnits, type ReadableUnit } from "./page-inventory";
+import {
+  explainElement,
+  inventoryReadableUnits,
+  MINIMUM_AUTO_TEXT_LENGTH,
+  type ReadableUnit,
+} from "./page-inventory";
 import { nearestSafeBlock } from "./document-scanner";
 import { normalizedReadableText } from "./readable-dom-text";
 import { segmentBlock, tokenize } from "../language/segmenter";
@@ -142,7 +147,7 @@ export function diagnoseElement(input: DiagnoseElementInput): BlockDiagnosis {
       length: text.length,
       letterWords: typeof letterGate?.value === "number" ? letterGate.value : 0,
       ...(typeof englishGate?.value === "number" ? { englishRatio: englishGate.value } : {}),
-      minAutoTextLength: 20,
+      minAutoTextLength: MINIMUM_AUTO_TEXT_LENGTH,
     },
     segmentation: {
       sentenceCount: sentences.length,

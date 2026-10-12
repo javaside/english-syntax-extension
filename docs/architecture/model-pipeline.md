@@ -46,7 +46,7 @@ CachedAnalysisService.analyzeCore(input, signal)
 ### 2.1 诊断提示词(`buildDiagnosisPrompt`)的三条特殊约定
 
 1. **首行刻意是函数内字面量,不进 `PROMPT_FIRST_LINES`**——那张表被 `cross-platform-contract` 的 contracts.json 与 Kotlin 侧双侧钉死,扩它就破坏 Chrome-only 改动范围;假服务器对 diagnosis 首行的识别独立写在 `detectKind` 里。
-2. **证据走隐私白名单**:只发门结果(`gates`)、目标标签与选择器路径、文本度量、分句/分词、请求可行性、失败句的 phase 与错误 code、会话状态与(可选)选中文本;**URL 与 `outerHTML` 原文绝不进 prompt**——它们只留在页面本地报告里供用户自查。
+2. **证据走隐私白名单**:只发门结果(`gates`)、目标标签与选择器路径、`inventory`(含 `exclusionReason`)、文本度量、分句/分词、请求可行性、失败句的 phase 与 `failureMessage`(含 code)、会话状态与(可选)选中文本;**URL 与 `outerHTML` 原文绝不进 prompt**——它们只留在页面本地报告里供用户自查。
 3. **单轮、无修复、不缓存、不升版本**:形状校验(`validateDiagnosisExplanation`,配 `DIAGNOSIS_SCHEMA`)不符直接 `INVALID_MODEL_OUTPUT`,诊断报告是一次性证据,没有任何版本常量参与缓存键。调度走 `detail-click` 档(用户显式手势),去重键 `diagnosis:<selectorPath>:<capturedAt>`;`requestModel` 的 abort 监听会 `cancelDocument(documentId)`,所以诊断请求的 documentId 带 **`${documentId}:diagnosis` 隔离后缀**——不加后缀,诊断的中止会连坐取消该页正在跑的 core 请求。
 
 ### 两条省 token 的硬规则
