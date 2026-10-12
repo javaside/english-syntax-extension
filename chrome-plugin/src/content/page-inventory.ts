@@ -1,3 +1,4 @@
+import type { DiagnosisGateResult as CandidateGateResult } from "../shared/protocol";
 import { normalizedReadableText } from "./readable-dom-text";
 
 /**
@@ -558,11 +559,9 @@ export function inventoryReadableUnits(root: ParentNode): ReadableUnit[] {
   return units;
 }
 
-export interface CandidateGateResult {
-  gate: string;
-  ok: boolean;
-  value?: string | number;
-}
+// 单一形状单一处定义:门的 wire 形状由协议层拥有,这里按既有名字 re-export,
+// explainElement 的返回类型与 EXPLAIN_DIAGNOSIS 载荷天然同构。
+export type { DiagnosisGateResult as CandidateGateResult } from "../shared/protocol";
 
 /**
  * 只读诊断出口:对单个元素按生产判据逐门复算,返回每门结果与当时取值。

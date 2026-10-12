@@ -19,7 +19,7 @@
 
 共同字段:`version`、`requestId`;带页面上下文的另有 `tabId`、`documentId`。
 
-共 16 条。「UI 门」「文档豁免」两列的含义见下一节。
+共 18 条。「UI 门」「文档豁免」两列的含义见下一节。
 
 | type                        | 发送方               | 额外字段                                    | SW 侧行为                                                | UI 门 | 文档豁免 |
 | --------------------------- | -------------------- | ------------------------------------------- | -------------------------------------------------------- | ----- | -------- |
@@ -36,6 +36,8 @@
 | `PARSE_SELECTION`           | 受信任 UI;或 SW 自发 | `selectionText`                             | 转发页面:解析选中文本                                    | ✅    | ❌       |
 | `PARSE_CONTEXT_BLOCK`       | 受信任 UI;或 SW 自发 | —                                           | 转发页面:解析右键处的块(会话须非 stopped)                | ✅    | ❌       |
 | `PARSE_HOVERED_BLOCK`       | 受信任 UI;或 SW 自发 | —                                           | 转发页面:解析鼠标悬停的块                                | ✅    | ❌       |
+| `DIAGNOSE_BLOCK`            | 受信任 UI;或 SW 自发 | `selectionText?`                            | 转发页面:诊断落点段落为什么没解析(纯触发)                | ✅    | ❌       |
+| `EXPLAIN_DIAGNOSIS`         | 页面(有 tabId)       | `diagnosis`                                 | 诊断模型解释请求;回 `DIAGNOSIS_RESULT`                   | ❌    | ✅       |
 | `TEST_PROFILE`              | options              | `profileId`                                 | 探测端点能力;**成功即解除鉴权暂停**                      | —     | —        |
 | `GET_CACHE_STATS`           | options              | —                                           | 缓存统计                                                 | —     | —        |
 | `CLEAR_CACHE`               | options              | —                                           | 清空三个 store                                           | —     | —        |
@@ -89,6 +91,7 @@ trustedPageControl = trustedExtensionUi && type ∈ {START_SESSION, PAUSE_SESSIO
 | `SENTENCE_DETAILS_RESULT` | `succeeded`、`failed`                                                | 整句预载                                        |
 | `CACHE_STATS`             | `stats`                                                              | 缓存统计                                        |
 | `PROFILE_TEST_RESULT`     | `profileId`、`success`、`latencyMs?`、`jsonSchemaSupport?`、`error?` | 测试连接                                        |
+| `DIAGNOSIS_RESULT`        | `diagnosis`、`model?`、`modelError?`、`profile?`                     | 诊断解释请求的回包(诊断回显 + 模型解释或失败)   |
 | `ERROR`                   | `error: ExtensionError`                                              | 任何失败                                        |
 
 `CORE_RESULT` 上的 **`error` 是批级的**:鉴权失败或 profile 被暂停时,缓存命中照常返回(键与模型无关),只有未命中句由 content 按该错误标失败——换 / 修模型前译文不消失。

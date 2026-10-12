@@ -68,7 +68,9 @@ export type RequestMessage =
   | (MessageBase & { type: "CLEAR_CACHE" })
   | (PageRequestBase & { type: "PARSE_SELECTION"; selectionText: string })
   | (PageRequestBase & { type: "PARSE_CONTEXT_BLOCK" })
-  | (PageRequestBase & { type: "PARSE_HOVERED_BLOCK" });
+  | (PageRequestBase & { type: "PARSE_HOVERED_BLOCK" })
+  | (PageRequestBase & { type: "DIAGNOSE_BLOCK"; selectionText?: string })
+  | (PageRequestBase & { type: "EXPLAIN_DIAGNOSIS"; diagnosis: BlockDiagnosis });
 
 export type SessionState = "stopped" | "running" | "paused";
 
@@ -114,6 +116,61 @@ export interface CacheStats {
   entries: number;
   estimatedBytes: number;
   limitBytes: number;
+}
+
+/**
+ * 段落诊断的 wire 类型(BlockDiagnosis / SessionDiagnosisSnapshot /
+ * DiagnosisExplanation / DiagnosisGateResult)。诊断数据由 content 侧采集、经
+ * EXPLAIN_DIAGNOSIS 发给 SW、随 DIAGNOSIS_RESULT 回显——三段共用同一形状。
+ */
+export interface DiagnosisGateResult {
+  gate: string;
+  ok: boolean;
+  value?: string | number;
+}
+
+export interface SessionDiagnosisSnapshot {
+  state: "stopped" | "running" | "paused";
+  registered: boolean;
+  blockId?: string;
+  sentences: Array<{ text: string; phase: string; failureMessage?: string }>;
+}
+
+export interface BlockDiagnosis {
+  target: {
+    tagName: string;
+    className: string;
+    id: string;
+    selectorPath: string;
+    outerHtml: string;
+  };
+  targetSource: "selection" | "contextmenu" | "body" | "extension-ascended";
+  selectionText?: string;
+  inventory: { isUnit: boolean; kind?: string; automatic: boolean; exclusionReason?: string };
+  explicit: { resolvable: boolean; selectorPath?: string };
+  gates: DiagnosisGateResult[];
+  text: { length: number; letterWords: number; englishRatio?: number; minAutoTextLength: number };
+  segmentation: {
+    sentenceCount: number;
+    sentenceLengths: number[];
+    tokenCount: number;
+    emptyText: boolean;
+  };
+  requestFeasibility: {
+    maxSentenceLength: number;
+    sentenceLengthLimit: number;
+    maxSentencesPerRequest: number;
+    cloudSentencesPerRequest: number;
+  };
+  session: SessionDiagnosisSnapshot;
+  page: { url: string; readyState: string };
+  capturedAt: string;
+}
+
+export interface DiagnosisExplanation {
+  likelyCause: string;
+  explanation: string;
+  suggestions: string[];
 }
 
 /**
@@ -199,6 +256,13 @@ export type ResponseMessage =
       latencyMs?: number;
       jsonSchemaSupport?: "supported" | "unsupported";
       error?: ExtensionError;
+    })
+  | (MessageBase & {
+      type: "DIAGNOSIS_RESULT";
+      diagnosis: BlockDiagnosis;
+      model?: DiagnosisExplanation;
+      modelError?: ExtensionError;
+      profile?: { model: string };
     })
   | (MessageBase & { type: "ERROR"; error: ExtensionError });
 
@@ -286,6 +350,43 @@ function isCoreAnalysis(value: unknown): value is CoreAnalysis {
   );
 }
 
+function isDiagnosisGateResult(value: unknown): value is DiagnosisGateResult {
+  return (
+    isRecord(value) &&
+    typeof value.gate === "string" &&
+    typeof value.ok === "boolean" &&
+    (value.value === undefined ||
+      typeof value.value === "string" ||
+      typeof value.value === "number")
+  );
+}
+
+/**
+ * 结构抽查即可:EXPLAIN_DIAGNOSIS 来自我们自己的 content script,不是不可信输入;
+ * 但缺关键字段必须拒——守卫漏字段会把残缺诊断静默送进模型解释链路。
+ */
+export function isBlockDiagnosis(value: unknown): value is BlockDiagnosis {
+  if (
+    !isRecord(value) ||
+    !isRecord(value.target) ||
+    !isRecord(value.inventory) ||
+    !isRecord(value.session)
+  ) {
+    return false;
+  }
+  return (
+    typeof value.target.tagName === "string" &&
+    typeof value.target.selectorPath === "string" &&
+    typeof value.inventory.automatic === "boolean" &&
+    Array.isArray(value.gates) &&
+    value.gates.every(isDiagnosisGateResult) &&
+    typeof value.capturedAt === "string" &&
+    (value.session.state === "stopped" ||
+      value.session.state === "running" ||
+      value.session.state === "paused")
+  );
+}
+
 export function isRequestMessage(value: unknown): value is RequestMessage {
   if (
     !isRecord(value) ||
@@ -361,6 +462,18 @@ export function isRequestMessage(value: unknown): value is RequestMessage {
         hasOnlyKeys(value, [...pageOnlyKeys, "selectionText"]) &&
         hasPageContext(value) &&
         isNonBlankString(value.selectionText)
+      );
+    case "DIAGNOSE_BLOCK":
+      return (
+        hasOnlyKeys(value, [...pageOnlyKeys, "selectionText"]) &&
+        hasPageContext(value) &&
+        (value.selectionText === undefined || isNonBlankString(value.selectionText))
+      );
+    case "EXPLAIN_DIAGNOSIS":
+      return (
+        hasOnlyKeys(value, [...pageOnlyKeys, "diagnosis"]) &&
+        hasPageContext(value) &&
+        isBlockDiagnosis(value.diagnosis)
       );
     default:
       return false;
