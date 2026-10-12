@@ -1,6 +1,6 @@
 import { GrammarRole } from "../shared/grammar";
 import type { CoreAnalysis, TokenRange } from "../shared/grammar";
-import type { SentenceInput } from "../shared/protocol";
+import type { BlockDiagnosis, SentenceInput } from "../shared/protocol";
 import type { RepairErrorGroup } from "./repair-errors";
 
 export interface ValidationErrorDescription {
@@ -310,5 +310,46 @@ export function buildSentenceDetailsPrompt(
     serialize(verifiedCore),
     "Requested focus ranges:",
     serialize(focuses),
+  ].join("\n\n");
+}
+
+/**
+ * 诊断提示词。首行刻意是函数内字面量、不进 PROMPT_FIRST_LINES——那张表被
+ * contracts.json + Kotlin 双侧钉死，动它就破坏 Chrome-only 范围（先例：
+ * buildSentenceDetailsPrompt）。
+ *
+ * 隐私白名单（spec D4）：只发门结果/文本度量/分句/失败 code/标签与选择器路径；
+ * URL 与 outerHTML 原文绝不进 prompt（只留在本地报告）。
+ */
+export function buildDiagnosisPrompt(diagnosis: BlockDiagnosis): string {
+  const evidence = {
+    target: {
+      tagName: diagnosis.target.tagName,
+      className: diagnosis.target.className,
+      id: diagnosis.target.id,
+      selectorPath: diagnosis.target.selectorPath,
+    },
+    inventory: diagnosis.inventory,
+    gates: diagnosis.gates,
+    text: diagnosis.text,
+    segmentation: diagnosis.segmentation,
+    requestFeasibility: diagnosis.requestFeasibility,
+    failedSentences: diagnosis.session.sentences
+      .filter(({ failureMessage }) => failureMessage !== undefined)
+      .map(({ phase, failureMessage }) => ({ phase, failureMessage })),
+    sessionState: diagnosis.session.state,
+    ...(diagnosis.selectionText === undefined ? {} : { selectionText: diagnosis.selectionText }),
+  };
+  return [
+    "Diagnose why the extension did not translate the page block described by the gate evidence below.",
+    "You are given gate-by-gate evidence from a local gating pipeline (gate name, pass/fail, the measured value). " +
+      "The first failing gate with an out-of-range value is the most likely cause; say which one and why in Chinese. " +
+      "If every gate passes, the block should be analyzable — then explain what else (session state, sentence length limits, request limits) could have prevented translation.",
+    "Output exactly one JSON object of this shape:",
+    '{"likelyCause": string, "explanation": string, "suggestions": string[]}',
+    "likelyCause is a short English label; explanation and suggestions are in Chinese; suggestions are actionable fixes.",
+    MINIFIED_OUTPUT,
+    "Gate evidence:",
+    serialize(evidence),
   ].join("\n\n");
 }

@@ -3,10 +3,11 @@ import { GrammarRole } from "../shared/grammar";
 import { CORE_SCHEMA_VERSION } from "../shared/versions";
 import type { CoreAnalysis } from "../shared/grammar";
 import { tokenize } from "../language/segmenter";
-import type { SentenceInput } from "../shared/protocol";
+import type { BlockDiagnosis, SentenceInput } from "../shared/protocol";
 import {
   buildCorePrompt,
   buildDetailPrompt,
+  buildDiagnosisPrompt,
   buildRepairPrompt,
   buildSentenceDetailsPrompt,
 } from "./prompts";
@@ -530,5 +531,88 @@ describe("页面句型教学(版本 13 重写)", () => {
     const ruleTextLength = prompt.slice(0, payloadStart).length;
 
     expect(ruleTextLength).toBeLessThanOrEqual(Math.ceil(8207 * 1.42));
+  });
+});
+
+describe("buildDiagnosisPrompt", () => {
+  // 照 Task 3 protocol.test.ts 的 baseDiagnosis 抄并补全:带页面 URL、outerHTML、
+  // selectionText 与一句失败会话句——前两者是白名单外字段,必须只留在本地报告里。
+  function sampleDiagnosis(): BlockDiagnosis {
+    return {
+      target: {
+        tagName: "P",
+        className: "content",
+        id: "p1",
+        selectorPath: "main > p#p1",
+        outerHtml: '<p id="p1">',
+      },
+      targetSource: "contextmenu",
+      selectionText: "hello world",
+      inventory: {
+        isUnit: true,
+        kind: "paragraph",
+        automatic: false,
+        exclusionReason: "non-english",
+      },
+      explicit: { resolvable: false },
+      gates: [{ gate: "english-dominant", ok: false, value: 0.2 }],
+      text: { length: 40, letterWords: 8, englishRatio: 0.2, minAutoTextLength: 20 },
+      segmentation: { sentenceCount: 1, sentenceLengths: [40], tokenCount: 9, emptyText: false },
+      requestFeasibility: {
+        maxSentenceLength: 40,
+        sentenceLengthLimit: 2000,
+        maxSentencesPerRequest: 6,
+        cloudSentencesPerRequest: 2,
+      },
+      session: {
+        state: "stopped",
+        registered: false,
+        sentences: [
+          { text: "Learners read.", phase: "failed", failureMessage: "AUTH_FAILED" },
+          { text: "Writers revise.", phase: "ready" },
+        ],
+      },
+      page: { url: "https://example.com/a", readyState: "complete" },
+      capturedAt: "2026-10-11T00:00:00.000Z",
+    };
+  }
+
+  it("首行钉死且证据白名单序列化紧凑", () => {
+    const diagnosis = sampleDiagnosis();
+    const prompt = buildDiagnosisPrompt(diagnosis);
+
+    expect(prompt.split("\n")[0]).toBe(
+      "Diagnose why the extension did not translate the page block described by the gate evidence below.",
+    );
+    // 隐私边界：URL 与 outerHTML 绝不进 prompt
+    expect(prompt).not.toContain("https://example.com");
+    expect(prompt).not.toContain("<p");
+    // 白名单字段在场
+    expect(prompt).toContain("english-dominant");
+    expect(prompt).toContain('"exclusionReason":"non-english"');
+    // serialize 紧凑：证据 JSON 不得美化缩进
+    expect(prompt).not.toMatch(/\n {2}"/u);
+  });
+
+  it("输出形状要求三字段", () => {
+    const prompt = buildDiagnosisPrompt(sampleDiagnosis());
+    expect(prompt).toContain('"likelyCause"');
+    expect(prompt).toContain('"suggestions"');
+  });
+
+  it("白名单字段在场而会话句文本留在本地", () => {
+    const prompt = buildDiagnosisPrompt(sampleDiagnosis());
+
+    // target 四件套 + sessionState + selectionText 都在
+    expect(prompt).toContain('"tagName":"P"');
+    expect(prompt).toContain('"className":"content"');
+    expect(prompt).toContain('"id":"p1"');
+    expect(prompt).toContain('"selectorPath":"main > p#p1"');
+    expect(prompt).toContain('"sessionState":"stopped"');
+    expect(prompt).toContain('"selectionText":"hello world"');
+    // 失败句只带 phase 与 failureMessage,不带句文本;无失败句的整条不出现
+    expect(prompt).toContain('"failureMessage":"AUTH_FAILED"');
+    expect(prompt).not.toContain("Learners read.");
+    expect(prompt).not.toContain("Writers revise.");
   });
 });

@@ -9,7 +9,7 @@ import type {
 } from "../shared/grammar";
 import { MAX_SENTENCES_PER_REQUEST } from "../shared/protocol";
 import { isLoopbackBaseUrl } from "./base-url";
-import type { SentenceInput } from "../shared/protocol";
+import type { DiagnosisExplanation, SentenceInput } from "../shared/protocol";
 import {
   CORE_PROMPT_VERSION,
   CORE_SCHEMA_VERSION,
@@ -300,6 +300,20 @@ const SENTENCE_DETAILS_SCHEMA: JsonSchemaSpec = {
   },
 };
 
+export const DIAGNOSIS_SCHEMA: JsonSchemaSpec = {
+  name: "diagnosis_explanation",
+  schema: {
+    type: "object",
+    properties: {
+      likelyCause: { type: "string" },
+      explanation: { type: "string" },
+      suggestions: { type: "array", items: { type: "string" } },
+    },
+    required: ["likelyCause", "explanation", "suggestions"],
+    additionalProperties: false,
+  },
+};
+
 const GRAMMAR_ROLES: ReadonlySet<string> = new Set(Object.values(GrammarRole));
 
 /**
@@ -507,6 +521,41 @@ function validateCachedDetail(
     modelProfileId,
   );
   return validation.ok ? validation.value : undefined;
+}
+
+/** 形状门的数组分支:≤10 条、每条非空且 ≤500 字符;类型谓词让返回值免于 any[]。 */
+function isSuggestionList(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.length <= 10 &&
+    value.every((item) => typeof item === "string" && item.trim().length > 0 && item.length <= 500)
+  );
+}
+
+/** 只做形状校验（spec D4）：不进 grammar/译文门、不占 repair 配额、无第二轮。 */
+export function validateDiagnosisExplanation(raw: unknown): DiagnosisExplanation {
+  if (!isRecord(raw)) throw new Error("diagnosis explanation must be an object");
+  const { likelyCause, explanation, suggestions } = raw;
+  if (
+    typeof likelyCause !== "string" ||
+    likelyCause.trim().length === 0 ||
+    likelyCause.length > 500
+  ) {
+    throw new Error("diagnosis likelyCause must be a non-empty string (≤500 chars)");
+  }
+  if (
+    typeof explanation !== "string" ||
+    explanation.trim().length === 0 ||
+    explanation.length > 4000
+  ) {
+    throw new Error("diagnosis explanation must be a non-empty string (≤4000 chars)");
+  }
+  if (!isSuggestionList(suggestions)) {
+    throw new Error(
+      "diagnosis suggestions must be an array of non-empty strings (≤10 items, ≤500 chars each)",
+    );
+  }
+  return { likelyCause, explanation, suggestions };
 }
 
 function correctionPrompt(input: CorrectionInput): string {

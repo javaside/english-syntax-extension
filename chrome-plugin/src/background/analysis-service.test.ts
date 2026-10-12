@@ -12,6 +12,7 @@ import { buildCorePrompt } from "./prompts";
 import type { ModelProfile } from "./config-repository";
 import {
   CachedAnalysisService,
+  validateDiagnosisExplanation,
   type AnalysisCachePort,
   type AnalysisModelWork,
   type AnalysisScheduledRequest,
@@ -1859,5 +1860,56 @@ describe("英文回显译文被拒并走修复", () => {
     expect(outcome.failures[0]!.error).toMatchObject({ code: "INVALID_MODEL_OUTPUT" });
     expect(adapter.completeJson).toHaveBeenCalledTimes(3);
     expect(cache.core.size).toBe(0);
+  });
+});
+
+describe("validateDiagnosisExplanation", () => {
+  it("接受合法形状并拒绝缺字段/空串/非字符串数组", () => {
+    const valid = {
+      likelyCause: "english ratio below threshold",
+      explanation: "该块英文占比不足",
+      suggestions: ["检查语言"],
+    };
+    expect(validateDiagnosisExplanation(valid)).toEqual(valid);
+    expect(() =>
+      validateDiagnosisExplanation({ likelyCause: "", explanation: "x", suggestions: [] }),
+    ).toThrow();
+    expect(() =>
+      validateDiagnosisExplanation({ likelyCause: "a", explanation: "x", suggestions: "no" }),
+    ).toThrow();
+    expect(() => validateDiagnosisExplanation({ likelyCause: "a" })).toThrow();
+    expect(() => validateDiagnosisExplanation("not an object")).toThrow();
+  });
+
+  it("长度上限 500/4000/10×500 逐字段拒绝且边界值合法", () => {
+    const base = { likelyCause: "gate failed", explanation: "说明", suggestions: ["建议"] };
+    expect(() => validateDiagnosisExplanation({ ...base, likelyCause: "x".repeat(501) })).toThrow();
+    expect(() =>
+      validateDiagnosisExplanation({ ...base, explanation: "x".repeat(4001) }),
+    ).toThrow();
+    expect(() =>
+      validateDiagnosisExplanation({ ...base, suggestions: Array.from({ length: 11 }, () => "s") }),
+    ).toThrow();
+    expect(() =>
+      validateDiagnosisExplanation({ ...base, suggestions: ["x".repeat(501)] }),
+    ).toThrow();
+    expect(() => validateDiagnosisExplanation({ ...base, suggestions: [""] })).toThrow();
+
+    const atLimit = validateDiagnosisExplanation({
+      likelyCause: "x".repeat(500),
+      explanation: "x".repeat(4000),
+      suggestions: Array.from({ length: 10 }, () => "y".repeat(500)),
+    });
+    expect(atLimit.likelyCause).toHaveLength(500);
+    expect(atLimit.suggestions).toHaveLength(10);
+  });
+
+  it("只做形状校验:纯英文输出不进 grammar/译文门", () => {
+    const englishOnly = {
+      likelyCause: "english ratio below threshold",
+      explanation: "the measured english ratio is below the configured gate",
+      suggestions: ["open the options page and check the language gate"],
+    };
+    expect(validateDiagnosisExplanation(englishOnly)).toEqual(englishOnly);
   });
 });
