@@ -1,6 +1,11 @@
 // @vitest-environment happy-dom
 import { describe, expect, it, beforeEach } from "vitest";
-import { diagnoseElement, recordDiagnosisTarget, resolveDiagnosisTarget } from "./block-diagnosis";
+import {
+  diagnoseElement,
+  formatDiagnosisReport,
+  recordDiagnosisTarget,
+  resolveDiagnosisTarget,
+} from "./block-diagnosis";
 
 const baseInput = {
   document,
@@ -174,5 +179,73 @@ describe("diagnoseElement", () => {
     });
     expect(diagnosis.session).toEqual(snapshot);
     expect(diagnosis.targetSource).toBe("contextmenu");
+  });
+});
+
+describe("formatDiagnosisReport", () => {
+  const diagnosisOf = (target: string) =>
+    diagnoseElement({
+      ...baseInput,
+      target: document.querySelector(target),
+      targetSource: "contextmenu",
+    });
+
+  it("七个小节齐全且顺序固定", () => {
+    document.body.innerHTML = '<main><p id="p">Hello world from the test page.</p></main>';
+    const report = formatDiagnosisReport(diagnosisOf("#p"), {});
+    const sections = [
+      "## 概述",
+      "## 页面与落点",
+      "## 本地判定证据",
+      "## 分句与请求可行性",
+      "## 会话状态",
+      "## 模型解释",
+      "## 环境",
+    ];
+    const positions = sections.map((s) => report.indexOf(s));
+    expect(positions.every((p) => p >= 0)).toBe(true);
+    expect([...positions].sort((a, b) => a - b)).toEqual(positions);
+  });
+
+  it("概述点名第一个失败门", () => {
+    document.body.innerHTML = '<main><p id="mixed">Hello 你好世界测试</p></main>';
+    const report = formatDiagnosisReport(diagnosisOf("#mixed"), {});
+    expect(report).toContain("english-dominant");
+  });
+
+  it("证据表逐门列出结果与取值", () => {
+    document.body.innerHTML = '<main><p id="p">Some English words in the paragraph.</p></main>';
+    const report = formatDiagnosisReport(diagnosisOf("#p"), {});
+    expect(report).toMatch(/\| *english-dominant *\|/u);
+    expect(report).toMatch(/\| *门 *\|/u);
+  });
+
+  it("模型解释段呈现三字段；无模型时呈现 modelError", () => {
+    document.body.innerHTML = '<main><p id="p">Another English sentence here.</p></main>';
+    const base = diagnosisOf("#p");
+    const withModel = formatDiagnosisReport(base, {
+      model: {
+        likelyCause: "english ratio below threshold",
+        explanation: "占比不足。",
+        suggestions: ["检查语言"],
+      },
+      profileModel: "deepseek-flash",
+      extensionVersion: "1.4.2",
+      generatedAt: "2026-10-11T00:00:00Z",
+    });
+    expect(withModel).toContain("likelyCause: english ratio below threshold");
+    expect(withModel).toContain("- 检查语言");
+    expect(withModel).toContain("deepseek-flash");
+    const withError = formatDiagnosisReport(base, {
+      modelError: { code: "CONFIG_MISSING", message: "尚未配置", retryable: false },
+    });
+    expect(withError).toContain("CONFIG_MISSING");
+  });
+
+  it("URL 已去 query（进报告的是净化后 URL）", () => {
+    document.body.innerHTML = '<main><p id="p">English words for the url check.</p></main>';
+    const report = formatDiagnosisReport(diagnosisOf("#p"), {});
+    expect(report).toContain("https://example.com/docs");
+    expect(report).not.toContain("page=3");
   });
 });
