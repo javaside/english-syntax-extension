@@ -1111,6 +1111,8 @@ function defaultDependencies(): ServiceWorkerDependencies {
         (await getRuntime()).analysisService.lookupDetail(...arguments_),
       analyzeSentenceDetails: async (...arguments_) =>
         (await getRuntime()).analysisService.analyzeSentenceDetails(...arguments_),
+      explainDiagnosis: async (...arguments_) =>
+        (await getRuntime()).analysisService.explainDiagnosis(...arguments_),
     },
     scheduler: {
       cancelDocument: (documentId) => {

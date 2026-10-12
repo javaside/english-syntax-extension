@@ -135,6 +135,7 @@ function dependencies(
     analyzeSentenceDetails: vi.fn<AnalysisService["analyzeSentenceDetails"]>(() =>
       Promise.resolve({ succeeded: 0, failed: 0 }),
     ),
+    explainDiagnosis: vi.fn<AnalysisService["explainDiagnosis"]>(),
     ...analysisOverrides,
   };
   const deps: ServiceWorkerDependencies = {

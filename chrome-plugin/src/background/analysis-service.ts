@@ -9,7 +9,7 @@ import type {
 } from "../shared/grammar";
 import { MAX_SENTENCES_PER_REQUEST } from "../shared/protocol";
 import { isLoopbackBaseUrl } from "./base-url";
-import type { DiagnosisExplanation, SentenceInput } from "../shared/protocol";
+import type { BlockDiagnosis, DiagnosisExplanation, SentenceInput } from "../shared/protocol";
 import {
   CORE_PROMPT_VERSION,
   CORE_SCHEMA_VERSION,
@@ -25,6 +25,7 @@ import type { ChatMessage, JsonSchemaSpec } from "./openai-compatible-adapter";
 import {
   buildCorePrompt,
   buildDetailPrompt,
+  buildDiagnosisPrompt,
   buildRepairPrompt,
   buildSentenceDetailsPrompt,
   CORE_OUTPUT_SHAPE,
@@ -157,6 +158,10 @@ export interface CorrectionInput extends AnalysisInputBase {
   feedback: string;
 }
 
+export interface DiagnosisInput extends AnalysisInputBase {
+  diagnosis: BlockDiagnosis;
+}
+
 export interface AnalysisFailure {
   sentenceId: string;
   error: ModelRequestError;
@@ -190,6 +195,11 @@ export interface AnalysisService {
     input: SentenceDetailsInput,
     signal: AbortSignal,
   ): Promise<SentenceDetailsOutcome>;
+  /**
+   * 段落诊断解释:detail-click 档、调度命名空间用 `:diagnosis` 后缀隔离 abort,
+   * 结果不写任何缓存(诊断解释随目标与时间变化,缓存意义为零)。
+   */
+  explainDiagnosis(input: DiagnosisInput, signal: AbortSignal): Promise<DiagnosisExplanation>;
 }
 
 export interface CachedAnalysisServiceOptions {
@@ -1047,6 +1057,27 @@ export class CachedAnalysisService implements AnalysisService {
     const result = validation.value[0]!;
     await this.options.cache.putCorrection(key, input.profile.id, result);
     return { result, cacheHit: false };
+  }
+
+  async explainDiagnosis(
+    input: DiagnosisInput,
+    signal: AbortSignal,
+  ): Promise<DiagnosisExplanation> {
+    if (signal.aborted) throw cancellationError();
+    const raw = await this.requestModel(
+      input.profile,
+      // abort 隔离后缀：requestModel 的 abort 监听会 cancelDocument(documentId)，
+      // 诊断绝不能连坐取消该页正在跑的 core 请求（spec D3/重要7）。
+      `${input.documentId}:diagnosis`,
+      "detail-click",
+      `diagnosis:${input.diagnosis.target.selectorPath}:${input.diagnosis.capturedAt}`,
+      1,
+      [{ role: "user", content: buildDiagnosisPrompt(input.diagnosis) }],
+      DIAGNOSIS_SCHEMA,
+      signal,
+    );
+    // 单轮、不修复、不写任何缓存:诊断解释只做形状校验(spec D4)。
+    return validateDiagnosisExplanation(raw);
   }
 
   private async validateAndCacheCore(
