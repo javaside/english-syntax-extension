@@ -14,6 +14,7 @@ import type {
   RequestMessage,
   ResponseMessage,
   SentenceInput,
+  SessionState,
   SessionStatus,
 } from "../shared/protocol";
 import { CORE_SCHEMA_VERSION, MESSAGE_VERSION } from "../shared/versions";
@@ -99,6 +100,8 @@ interface SentenceRecord {
   phase: SentencePhase;
   core?: CoreAnalysis;
   blockId: string;
+  /** 诊断用：最近一次失败的原因文案（含错误码前缀）；成功重试后不清除，以最新为准。 */
+  failureMessage?: string;
 }
 
 interface BlockRecord {
@@ -303,6 +306,39 @@ export class SessionController {
               detailFailed: counts.failed,
             };
           })()),
+    };
+  }
+
+  /** 诊断只读快照：目标元素所在块的登记状态与逐句相位。不触发任何状态迁移。 */
+  diagnosisSnapshot(element: Element | null): {
+    state: SessionState;
+    registered: boolean;
+    blockId?: string;
+    sentences: Array<{ text: string; phase: SentencePhase; failureMessage?: string }>;
+  } {
+    let matched: BlockRecord | undefined;
+    if (element !== null) {
+      for (const block of this.blocks.values()) {
+        if (block.candidate.element === element || block.candidate.element.contains(element)) {
+          matched = block;
+          break;
+        }
+      }
+    }
+    if (matched === undefined) {
+      return { state: this.state, registered: false, sentences: [] };
+    }
+    return {
+      state: this.state,
+      registered: true,
+      blockId: matched.candidate.id,
+      sentences: matched.sentences.map((sentence) => ({
+        text: sentence.input.text,
+        phase: sentence.phase,
+        ...(sentence.failureMessage === undefined
+          ? {}
+          : { failureMessage: sentence.failureMessage }),
+      })),
     };
   }
 
@@ -858,6 +894,7 @@ export class SessionController {
             sentence: sentence.input.text,
             message: TOO_LONG_MESSAGE,
           });
+          sentence.failureMessage = TOO_LONG_MESSAGE;
           this.transition(sentence, "failed");
         } else {
           this.transition(sentence, "queued");
@@ -919,6 +956,7 @@ export class SessionController {
             sentence: sentence.input.text,
             message: responseErrorMessage(response),
           });
+          sentence.failureMessage = responseErrorMessage(response);
           this.transition(sentence, "failed");
           continue;
         }
@@ -933,6 +971,7 @@ export class SessionController {
             sentence: sentence.input.text,
             message: MISSING_RESULT_MESSAGE,
           });
+          sentence.failureMessage = MISSING_RESULT_MESSAGE;
           this.transition(sentence, "failed");
         }
       }
@@ -1106,6 +1145,7 @@ export class SessionController {
         return;
       }
       this.transition(sentence, "failed");
+      sentence.failureMessage = responseErrorMessage(response);
       this.finishBlock(block, [
         { sentenceId, sentence: sentence.input.text, message: responseErrorMessage(response) },
       ]);

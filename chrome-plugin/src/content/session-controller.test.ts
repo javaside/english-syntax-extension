@@ -1557,6 +1557,47 @@ describe("SessionController", () => {
   });
 });
 
+describe("diagnosisSnapshot 只读快照", () => {
+  beforeEach(() => {
+    document.body.replaceChildren();
+    vi.restoreAllMocks();
+  });
+
+  it("stopped 会话返回未注册与空句列表", () => {
+    const { controller } = harness();
+    document.body.innerHTML = '<p id="target">Some English sentence here.</p>';
+    const snapshot = controller.diagnosisSnapshot(document.getElementById("target"));
+    expect(snapshot.state).toBe("stopped");
+    expect(snapshot.registered).toBe(false);
+    expect(snapshot.sentences).toEqual([]);
+  });
+
+  it("已登记块返回句相位与失败文案", async () => {
+    const transport = new FakeTransport((message) =>
+      Promise.resolve({
+        version: 1,
+        requestId: message.requestId,
+        type: "CORE_RESULT",
+        analyses: [],
+      }),
+    );
+    const subject = harness(undefined, transport);
+    await subject.controller.start();
+    subject.viewport.emit();
+    await vi.waitFor(() => expect(subject.controller.status.failed).toBe(1));
+
+    const snapshot = subject.controller.diagnosisSnapshot(document.querySelector("p"));
+    expect(snapshot.registered).toBe(true);
+    expect(snapshot.state).toBe("running");
+    expect(snapshot.sentences).toEqual(
+      expect.arrayContaining([expect.objectContaining({ phase: "failed" })]),
+    );
+    expect(snapshot.sentences.find(({ phase }) => phase === "failed")!.failureMessage).toEqual(
+      expect.any(String),
+    );
+  });
+});
+
 describe("detail prefetch integration", () => {
   beforeEach(() => {
     document.body.replaceChildren();
