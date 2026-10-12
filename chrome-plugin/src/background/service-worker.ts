@@ -5,6 +5,7 @@ import type {
   CacheStats,
   CoreStreamPush,
   DetailStreamPush,
+  DiagnosisExplanation,
   RequestMessage,
   ResponseMessage,
   SessionStatus,
@@ -27,6 +28,7 @@ import type { RunTask } from "./request-scheduler";
 
 const SELECTION_MENU_ID = "syntax-parse-selection";
 const CONTEXT_BLOCK_MENU_ID = "syntax-parse-context-block";
+const DIAGNOSE_MENU_ID = "syntax-diagnose-block";
 const CONTENT_SCRIPT_FILE = "content-script.js";
 const CONTEXT_INSTRUCTION = "请先启动学习模式，或选中文字后解析";
 const HOVERED_BLOCK_COMMAND = "parse-hovered-block";
@@ -171,6 +173,21 @@ function sanitizeDetail(analysis: DetailAnalysis, profile: ModelProfile): Detail
     grammarPoints: analysis.grammarPoints.map((point) => redactProfileSecrets(point, profile)),
     explanation: redactProfileSecrets(analysis.explanation, profile),
     modelProfileId: analysis.modelProfileId,
+  };
+}
+
+/**
+ * 诊断解释的模型回文本出站前逐字段脱敏(spec D3):解释文本是模型自由输出,
+ * 与 core/detail 的 translation/explanation 同等可能混入凭据。
+ */
+function redactDiagnosisExplanation(
+  model: DiagnosisExplanation,
+  profile: ModelProfile,
+): DiagnosisExplanation {
+  return {
+    likelyCause: redactProfileSecrets(model.likelyCause, profile),
+    explanation: redactProfileSecrets(model.explanation, profile),
+    suggestions: model.suggestions.map((item) => redactProfileSecrets(item, profile)),
   };
 }
 
@@ -356,7 +373,8 @@ export function registerServiceWorker(
       | { type: "START_SESSION"; prefetchDetail?: true }
       | { type: "PARSE_SELECTION"; selectionText: string }
       | { type: "PARSE_CONTEXT_BLOCK" }
-      | { type: "PARSE_HOVERED_BLOCK" },
+      | { type: "PARSE_HOVERED_BLOCK" }
+      | { type: "DIAGNOSE_BLOCK"; selectionText?: string },
   ): Promise<unknown> => {
     const message: RequestMessage = {
       ...body,
@@ -833,6 +851,49 @@ export function registerServiceWorker(
             };
           }
         }
+        case "EXPLAIN_DIAGNOSIS": {
+          const profile = await profileFor(request.tabId);
+          // 错误嵌在 modelError 里而不是整包 ERROR:本地采集的诊断证据始终可用,
+          // 模型解释只是渐进增强(spec D4)。
+          const base = {
+            version: MESSAGE_VERSION,
+            requestId: request.requestId,
+            type: "DIAGNOSIS_RESULT",
+            diagnosis: request.diagnosis,
+          } as const;
+          if (profile === undefined) {
+            return {
+              ...base,
+              modelError: errorResponse(request.requestId, "CONFIG_MISSING").error,
+            };
+          }
+          if (isProfilePaused(profile)) {
+            return { ...base, modelError: errorResponse(request.requestId, "AUTH_FAILED").error };
+          }
+          try {
+            const model = await dependencies.analysisService.explainDiagnosis(
+              { profile, documentId: request.documentId, diagnosis: request.diagnosis },
+              new AbortController().signal,
+            );
+            return {
+              ...base,
+              model: redactDiagnosisExplanation(model, profile),
+              profile: { model: profile.model },
+            };
+          } catch (error) {
+            // validateDiagnosisExplanation 抛的是普通 Error(形状不符=模型输出非法),
+            // 只有真正的模型请求错误才携带可映射的错误码;旧写法会把形状不符错报成
+            // NETWORK_ERROR,违反 spec D4「不符就丢 modelError: INVALID_MODEL_OUTPUT」。
+            const code =
+              error instanceof ModelRequestError ? errorCode(error) : "INVALID_MODEL_OUTPUT";
+            if (code === "AUTH_FAILED") pauseProfile(profile);
+            return { ...base, modelError: errorResponse(request.requestId, code).error };
+          }
+        }
+        case "DIAGNOSE_BLOCK":
+          // 没有合法入站来源(SW 只发不收,右键菜单是唯一下发方);case 仅为满足
+          // assertNever 穷尽性。页面侧伪造的入站一律按协议不合规拒绝。
+          return errorResponse(request.requestId, "MALFORMED_MESSAGE");
         case "GET_CACHE_STATS":
           return {
             version: MESSAGE_VERSION,
@@ -868,6 +929,11 @@ export function registerServiceWorker(
         id: CONTEXT_BLOCK_MENU_ID,
         title: "解析此区域",
         contexts: ["page"],
+      });
+      chromeApi.contextMenus.create({
+        id: DIAGNOSE_MENU_ID,
+        title: "诊断：这段为什么没解析",
+        contexts: ["page", "selection"],
       });
     })();
   });
@@ -943,6 +1009,25 @@ export function registerServiceWorker(
         return errorResponse(`background:${tabId}:${++commandCounter}`, "UNSAFE_CONTENT_BLOCK");
       }
       void sendPageCommand(tabId, active.documentId, { type: "PARSE_CONTEXT_BLOCK" });
+      return;
+    }
+    if (info.menuItemId === DIAGNOSE_MENU_ID) {
+      void (async () => {
+        await hydrated;
+        const documentId = activeTabs.get(tabId)?.documentId ?? generatedDocumentId(tabId);
+        await inject(tabId);
+        // 诊断是只读手势，刻意不写 activeTabs：记账会把未启动会话的 tab 伪造成
+        // running，popup 随即显示不存在的进行中会话，还绕过「解析此区域」的 stopped
+        // 门（spec D1）。一致性门无账时放行、有账时此处已复用账上 documentId。
+        await sendPageCommand(tabId, documentId, {
+          type: "DIAGNOSE_BLOCK",
+          ...(typeof info.selectionText === "string" && info.selectionText.trim().length > 0
+            ? { selectionText: info.selectionText }
+            : {}),
+        });
+      })().catch(() => {
+        // chrome:// 等不可注入页面：静默忽略（与 commands 分支同款）。
+      });
     }
   });
 

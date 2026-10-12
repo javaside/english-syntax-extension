@@ -36,7 +36,7 @@
 | `PARSE_SELECTION`           | 受信任 UI;或 SW 自发 | `selectionText`                             | 转发页面:解析选中文本                                    | ✅    | ❌       |
 | `PARSE_CONTEXT_BLOCK`       | 受信任 UI;或 SW 自发 | —                                           | 转发页面:解析右键处的块(会话须非 stopped)                | ✅    | ❌       |
 | `PARSE_HOVERED_BLOCK`       | 受信任 UI;或 SW 自发 | —                                           | 转发页面:解析鼠标悬停的块                                | ✅    | ❌       |
-| `DIAGNOSE_BLOCK`            | 受信任 UI;或 SW 自发 | `selectionText?`                            | 转发页面:诊断落点段落为什么没解析(纯触发)                | ✅    | ❌       |
+| `DIAGNOSE_BLOCK`            | SW 自发(右键菜单)    | `selectionText?`                            | 菜单监听器经 `sendPageCommand` 下发;`route()` 里穷尽性拒绝 | ❌    | ❌       |
 | `EXPLAIN_DIAGNOSIS`         | 页面(有 tabId)       | `diagnosis`                                 | 诊断模型解释请求;回 `DIAGNOSIS_RESULT`                   | ❌    | ✅       |
 | `TEST_PROFILE`              | options              | `profileId`                                 | 探测端点能力;**成功即解除鉴权暂停**                      | —     | —        |
 | `GET_CACHE_STATS`           | options              | —                                           | 缓存统计                                                 | —     | —        |
@@ -44,7 +44,7 @@
 
 后三条不带 `tabId` / `documentId`,两道页面级门都不适用(表中记 `—`)。
 
-三个 `PARSE_*` 有两条入口:SW 自己的右键菜单 / 快捷键监听器用 `sendPageCommand()` **直接** `tabs.sendMessage` 给页面(不经 `route()`);而 `route()` 里的同名分支是留给受信任 UI 调用的。
+三个 `PARSE_*` 有两条入口:SW 自己的右键菜单 / 快捷键监听器用 `sendPageCommand()` **直接** `tabs.sendMessage` 给页面(不经 `route()`);而 `route()` 里的同名分支是留给受信任 UI 调用的。`DIAGNOSE_BLOCK` 不同:合法下发方只有 SW 自己的「诊断」菜单监听器(同样走 `sendPageCommand`,且**不写 `activeTabs`**),`route()` 里的 case 仅为满足 `assertNever` 穷尽性——页面侧伪造的入站一律回 `MALFORMED_MESSAGE`。
 
 > **注意 `STOP_SESSION` 的一条死路径。** `ChromeRuntimeTransport.cancelDocument()` 也会从 content 发这条消息,但该分支要求受信任 UI,所以它必然被回成 `UNSUPPORTED_PAGE`(调用处 fire-and-forget 吞掉了响应)。真正的取消依赖端口断开与 `tabs.onRemoved` / `onUpdated` 触发的 `cancelTab()`。
 
@@ -95,6 +95,8 @@ trustedPageControl = trustedExtensionUi && type ∈ {START_SESSION, PAUSE_SESSIO
 | `ERROR`                   | `error: ExtensionError`                                              | 任何失败                                        |
 
 `CORE_RESULT` 上的 **`error` 是批级的**:鉴权失败或 profile 被暂停时,缓存命中照常返回(键与模型无关),只有未命中句由 content 按该错误标失败——换 / 修模型前译文不消失。
+
+`DIAGNOSIS_RESULT` 同理**从不整包 ERROR**:模型解释只是渐进增强,页面本地采集的诊断证据(`diagnosis` 回显)始终可用,失败一律嵌在 `modelError` 里——无 profile → `CONFIG_MISSING`,profile 被暂停 → `AUTH_FAILED`(命中同时 `pauseProfile`),模型请求失败(`ModelRequestError`)→ 原错误码,其余一切异常(含 `validateDiagnosisExplanation` 形状不符)→ `INVALID_MODEL_OUTPUT`。成功路径的 `model` 三字段逐一过 `redactProfileSecrets`,`profile` 只回 `{ model }`(不下发 profile id 或凭据指纹);`explainDiagnosis` 本身不写任何缓存。
 
 ## 4. 端口推送(不是响应)
 
