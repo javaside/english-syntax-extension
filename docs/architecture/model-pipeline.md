@@ -29,7 +29,7 @@ CachedAnalysisService.analyzeCore(input, signal)
 
 ## 2. 提示词(`prompts.ts`)
 
-三类主提示词 + 四类修复提示词:
+四类主提示词 + 四类修复提示词:
 
 | 构造函数                                       | 首行前缀(**E2E 假服务器靠它识别请求类型,改了会炸**)              |
 | ---------------------------------------------- | ---------------------------------------------------------------- |
@@ -41,6 +41,7 @@ CachedAnalysisService.analyzeCore(input, signal)
 | `sentenceDetailsRepairPrompt`                  | `Repair only the structure of the invalid sentence-details JSON` |
 | `correctionPrompt`                             | `Reanalyze the supplied sentence`                                |
 | `correctionRepairPrompt`                       | `Repair only the structure of the invalid correction analysis`   |
+| `buildDiagnosisPrompt`                         | `Diagnose why the extension did not translate the page block`    |
 
 ### 两条省 token 的硬规则
 
