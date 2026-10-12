@@ -61,6 +61,7 @@
 | `block-diagnosis.ts`       | 段落诊断**证据采集**:`resolveDiagnosisTarget()` 按 spec D1 三优先级定落点(选区锚点 → 右键落点 → `body`,扩展自身元素上溯并排除 `<html>` 上的 ready 标记),`diagnoseElement()` 汇集 inventory/explicit/逐门判定/文本度量/分句分词/请求可行性/会话快照成 `BlockDiagnosis`(URL 去 query/fragment、outerHTML 截断 200 + 脱敏表单值属性);判定全部调生产函数,不复制判据 |
 | `detail-prefetcher.ts`     | 详解预载队列:按句去重、并发 2、暂停 / 恢复、块失效时丢弃、成分级计数(total / ready / failed)                                                                 |
 | `progress-pill.ts`         | 页面右下角进度胶囊。纯展示,从不发命令                                                                                                                        |
+| `diagnosis-panel.ts`       | 段落诊断面板(host + open shadow root,结构照 progress-pill,但面板本身可交互):本地证据(逐门表格)立即渲染,模型解释段按 requestId 防过期(`updateModel` 对不匹配的 requestId 直接忽略),隐私两句常驻;`report()` 点击复制时才经 `formatDiagnosisReport` 组装 markdown,剪贴板被拒时降级为已全选的只读 textarea |
 
 ## chrome-plugin/src/popup / src/options —— 扩展 UI
 
