@@ -927,7 +927,14 @@ export function registerServiceWorker(
     }
   };
 
-  chromeApi.runtime.onInstalled?.addListener(() => {
+  // 右键菜单注册不能只挂在 onInstalled 上：--load-extension 首次加载（E2E 探针实测）
+  // 与部分真机场景下该事件不触发，三个菜单全部缺失，右键永远看不到入口。改为
+  // SW 每次启动都兜底确保一次（守卫去重，同一生命周期内 onInstalled 再到为 no-op；
+  // 扩展升级会换新的 SW 生命周期，自然重建）。
+  let contextMenusEnsured = false;
+  const ensureContextMenus = (): void => {
+    if (contextMenusEnsured) return;
+    contextMenusEnsured = true;
     void (async () => {
       await chromeApi.contextMenus.removeAll();
       chromeApi.contextMenus.create({
@@ -946,7 +953,10 @@ export function registerServiceWorker(
         contexts: ["page", "selection"],
       });
     })();
-  });
+  };
+
+  chromeApi.runtime.onInstalled?.addListener(ensureContextMenus);
+  ensureContextMenus();
 
   chromeApi.action?.onClicked.addListener((tab) => {
     if (tab.id === undefined) return;

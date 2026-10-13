@@ -241,6 +241,33 @@ describe("service worker orchestration", () => {
     ]);
   });
 
+  it("SW 启动本身就要注册三个右键菜单，不依赖 onInstalled 事件", async () => {
+    // 2026-10-13 真机探针：--load-extension 首次加载（及部分真机场景）下 onInstalled
+    // 不触发，三个菜单全部缺失——右键永远看不到入口。注册必须由 SW 启动兜底保证。
+    const subject = chromeMock();
+    registerServiceWorker(dependencies(), subject.api);
+
+    await vi.waitFor(() => expect(subject.events.contextMenus.create).toHaveBeenCalledTimes(3));
+    expect(subject.events.contextMenus.removeAll).toHaveBeenCalledOnce();
+    expect(subject.events.contextMenus.create.mock.calls).toEqual([
+      [{ id: "syntax-parse-selection", title: "解析选中文本", contexts: ["selection"] }],
+      [{ id: "syntax-parse-context-block", title: "解析此区域", contexts: ["page"] }],
+      [
+        {
+          id: "syntax-diagnose-block",
+          title: "诊断：这段为什么没解析",
+          contexts: ["page", "selection"],
+        },
+      ],
+    ]);
+
+    // 同一 SW 生命周期内 onInstalled 再到也不重复注册
+    subject.events.runtime.onInstalled.listeners[0]!({ reason: "install" });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(subject.events.contextMenus.create).toHaveBeenCalledTimes(3);
+    expect(subject.events.contextMenus.removeAll).toHaveBeenCalledOnce();
+  });
+
   it("injects only after an explicit action command and then starts the page", async () => {
     const subject = chromeMock();
     registerServiceWorker(dependencies(), subject.api);
