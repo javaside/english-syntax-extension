@@ -348,6 +348,16 @@
 
 **守护测试** `chrome-plugin/src/content/page-inventory.test.ts` 的「explainElement 只读诊断出口」组(两份冻结 fixture 的集合包含式一致性 + english-dominant 词级占比数值 + min-auto-text-length 条件门与 classifyExclusion 同款);`chrome-plugin/src/content/block-diagnosis.test.ts`(resolveDiagnosisTarget 三优先级、diagnoseElement 证据字段、URL 净化、requestFeasibility 两档批上限、formatDiagnosisReport 小节)。
 
+### I-21.6 右键菜单注册必须由 SW 启动兜底
+
+**规则** `chrome.contextMenus` 的注册不能只挂在 `runtime.onInstalled` 监听器里——必须在 SW 每次启动时兜底确保一次(守卫去重,同一生命周期内 `onInstalled` 再到为 no-op;扩展升级换新 SW 生命周期自然重建)。`service-worker.ts` 的 `ensureContextMenus()` 同时挂事件与顶层调用。
+
+**为什么** `--load-extension` 首次加载(E2E harness 与开发者装包复测的路径)以及部分真机场景下 `onInstalled` 不触发;事件不来,菜单就永远不建——三个入口(解析选中文本/解析此区域/诊断)全部消失,而单测的 chromeApi mock 层永远会替你触发监听器,测试全绿掩盖了它。2026-10-13 用户真机报告「右键看不到诊断菜单」,真浏览器探针(`contextMenus.update` 探测不存在的 id 会回 lastError)复现三项全缺失。
+
+**症状** 装包后右键菜单里没有扩展的任何入口(或旧版本升级后新入口缺失),但单测里菜单注册断言全绿。
+
+**守护测试** `chrome-plugin/src/background/service-worker.test.ts` 的「SW 启动本身就要注册三个右键菜单,不依赖 onInstalled 事件」(不触发任何事件,断言三项注册且 `onInstalled` 再到不重复);`chrome-plugin/tests/e2e/diagnose.spec.ts` 的「SW 启动即注册三个菜单」(真浏览器 + update 探针,可自动化的唯一真机形态)。
+
 ### I-22 合批分桶与定时器顺序
 
 **规则** 待发块按 `${是否屏外}:${是否跳缓存}` 分桶;`enqueueForBatch` 里**先把条目写进 `pendingBatches` 再起定时器**。

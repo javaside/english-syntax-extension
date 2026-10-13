@@ -111,3 +111,26 @@ test.describe("段落诊断", () => {
     expect(clip).toContain("模型解释不可用：CONFIG_MISSING");
   });
 });
+
+test.describe("右键菜单注册（真浏览器回归）", () => {
+  // 2026-10-13 真机探针曾复现：菜单只挂在 onInstalled 上，--load-extension 首次
+  // 加载时事件不触发，三个菜单全部缺失。Playwright 点不开原生菜单，但可以用
+  // contextMenus.update 的 lastError 探测注册结果（update 不存在的 id 会回
+  // "Cannot find menu item"，存在则成功）——这是该 bug 唯一可自动化的真浏览器断言。
+  test("SW 启动即注册三个菜单，不依赖 onInstalled", async ({ harness }) => {
+    const probe = (id: string) =>
+      harness.serviceWorker.evaluate(async (menuId: string) => {
+        const exists = await new Promise<boolean>((resolve) => {
+          chrome.contextMenus.update(menuId, { title: "probe" }, () => {
+            resolve(!chrome.runtime.lastError);
+          });
+        });
+        return exists;
+      }, id);
+
+    // 注册是 SW 启动后的异步序列，探针轮询至多 5 秒
+    await expect.poll(() => probe("syntax-parse-selection")).toBe(true);
+    await expect.poll(() => probe("syntax-parse-context-block")).toBe(true);
+    await expect.poll(() => probe("syntax-diagnose-block")).toBe(true);
+  });
+});
