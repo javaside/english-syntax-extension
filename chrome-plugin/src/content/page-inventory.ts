@@ -351,6 +351,32 @@ function analyzableDescendants(element: Element): Element[] {
 }
 
 /**
+ * 诊断落点收敛：把选区/右键解析出的原始元素收敛到「值得诊断」的语义单元。
+ * ① start 自身是清单枚举的语义单元 → 原样返回；
+ * ② start 的祖先里有语义单元（落点在内联深层，如 <strong>/<span data-as>）→ 最近单元；
+ * ③ start 是被可分析子单元覆盖的容器（header/section 一类；选区锚点常是容器的
+ *    直接子元素，`anchorNode.parentElement` 于是落在容器上）→ 取与锚点节点互相
+ *    包含的子单元，无匹配取第一个。诊断报告要回答「这段为什么没翻译」，诊断一个
+ *    容器只会得到 covered-by-child 的正确废话——2026-11-02 HyperFrames 页头报告
+ *    即此形态：用户指着引导段落的 "The"，报告却在解释 header 容器。
+ * ④ 都不满足（无单元也无子单元）→ 原样返回，逐门失败信息仍有价值。
+ * 单一语义单元判据与清单枚举共用 ENUMERATION_SELECTOR——诊断与生产判定不分叉。
+ */
+export function nearestDiagnosableUnit(start: Element, anchorNode?: Node | null): Element {
+  if (start.matches(ENUMERATION_SELECTOR)) return start;
+  const ancestorUnit = start.parentElement?.closest(ENUMERATION_SELECTOR) ?? null;
+  if (ancestorUnit !== null) return ancestorUnit;
+  const candidates = analyzableDescendants(start);
+  if (candidates.length === 0) return start;
+  const containing = candidates.find(
+    (candidate) =>
+      (anchorNode !== null && anchorNode !== undefined && candidate.contains(anchorNode)) ||
+      (anchorNode instanceof Element && anchorNode.contains(candidate)),
+  );
+  return containing ?? candidates[0]!;
+}
+
+/**
  * 父元素自己的直接文本:不属于任何子元素的文本节点与内联公式。存在则整体替换父
  * 会把这段文本连坐——父要么与子单元并存(记 unsafe-partial-replacement),要么
  * 文本完全由子单元组成(记 covered-by-child)。

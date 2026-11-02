@@ -10,6 +10,7 @@ import {
   explainElement,
   inventoryReadableUnits,
   MINIMUM_AUTO_TEXT_LENGTH,
+  nearestDiagnosableUnit,
   type ReadableUnit,
 } from "./page-inventory";
 import { nearestSafeBlock } from "./document-scanner";
@@ -42,18 +43,35 @@ export function recordDiagnosisTarget(event: Event): void {
   lastTarget = target instanceof Element ? target : null;
 }
 
-/** spec D1 落点优先级：选区锚点 → 右键落点 → body；扩展自身元素上溯。 */
+/**
+ * spec D1 落点优先级：选区锚点 → 右键落点 → body；扩展自身元素上溯。
+ * 选区与右键落点都经 nearestDiagnosableUnit 收敛到语义单元——锚点/落点可能是
+ * 容器（anchorNode.parentElement 恰为 header 的直接子元素）或内联深层节点，
+ * 直接诊断它们只会得到 covered-by-child 一类「容器判定」的正确废话。
+ * body 兜底刻意不收敛：那一支表达的是「页面上没有可指认的落点」。
+ */
 export function resolveDiagnosisTarget(doc: Document = document): ResolvedDiagnosisTarget {
   // ① 选区锚点（getSelection().anchorNode 的 parentElement——真实选区的锚点是文本
   //    节点，parentElement 即所选段落）。锚点已不在文档里的陈旧选区（SPA 换内容、
   //    innerHTML 重设）不算数，落到下一优先级。
-  const anchor = doc.getSelection()?.anchorNode?.parentElement ?? null;
-  if (anchor !== null && doc.contains(anchor)) return { element: anchor, source: "selection" };
+  const selection = doc.getSelection();
+  const anchor = selection?.anchorNode?.parentElement ?? null;
+  if (anchor !== null && doc.contains(anchor)) {
+    return {
+      element: nearestDiagnosableUnit(anchor, selection?.anchorNode ?? null),
+      source: "selection",
+    };
+  }
   // ② 右键落点；落点在扩展自身元素（卡片/胶囊/面板 host）上时上溯到其父元素
   if (lastTarget !== null) {
     const own = lastTarget.closest(EXTENSION_OWN_SELECTOR);
-    if (own === null) return { element: lastTarget, source: "contextmenu" };
-    return { element: own.parentElement, source: "extension-ascended" };
+    if (own === null) {
+      return { element: nearestDiagnosableUnit(lastTarget), source: "contextmenu" };
+    }
+    return {
+      element: own.parentElement !== null ? nearestDiagnosableUnit(own.parentElement) : null,
+      source: "extension-ascended",
+    };
   }
   // ③ 兜底
   return { element: doc.body, source: "body" };
