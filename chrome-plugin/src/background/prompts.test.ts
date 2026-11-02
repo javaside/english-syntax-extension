@@ -242,7 +242,7 @@ describe("model-facing sentence payload", () => {
 
     for (const prompt of [core, repair]) {
       expect(prompt).toContain(
-        'Conjuncts joined without a coordinating conjunction never get one FRAGMENT_HEAD each',
+        "Conjuncts joined without a coordinating conjunction never get one FRAGMENT_HEAD each",
       );
       expect(prompt).toContain(
         '"Same request, two agents" and "HyperFrames vs Remotion" are each ONE FRAGMENT_HEAD',

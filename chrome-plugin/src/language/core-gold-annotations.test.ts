@@ -122,14 +122,8 @@ describe("core gold annotations", () => {
       "fragment-vs-heading",
       [{ startToken: 0, endToken: 2, role: GrammarRole.FRAGMENT_HEAD }],
     ],
-    [
-      "fragment-comma-conjuncts",
-      [{ startToken: 0, endToken: 4, role: GrammarRole.FRAGMENT_HEAD }],
-    ],
-    [
-      "fragment-comma-quantity",
-      [{ startToken: 0, endToken: 5, role: GrammarRole.FRAGMENT_HEAD }],
-    ],
+    ["fragment-comma-conjuncts", [{ startToken: 0, endToken: 4, role: GrammarRole.FRAGMENT_HEAD }]],
+    ["fragment-comma-quantity", [{ startToken: 0, endToken: 5, role: GrammarRole.FRAGMENT_HEAD }]],
   ] as const)("keeps the human-reviewed component contract for %s", (id, components) => {
     expect(
       fixture.sentences

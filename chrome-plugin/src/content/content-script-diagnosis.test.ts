@@ -92,10 +92,8 @@ describe("isRuntimeResponse CORE_RESULT case", () => {
         "r1",
       ),
     ).toBe(false);
-    expect(
-      isRuntimeResponse({ ...base, failures: [{ broken: true }] }, "r1"),
-    ).toBe(false);
-    expect(isRuntimeResponse({ ...base, failures: "not-an-array" }, "r1"), ).toBe(false);
+    expect(isRuntimeResponse({ ...base, failures: [{ broken: true }] }, "r1")).toBe(false);
+    expect(isRuntimeResponse({ ...base, failures: "not-an-array" }, "r1")).toBe(false);
   });
 });
 

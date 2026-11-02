@@ -10,7 +10,7 @@
 | ----------------------- | ------ | ------------------------------------------------------------ | ------------------------------------------------------ |
 | `MESSAGE_VERSION`       | `1`    | 消息信封版本;收发两侧都校验                                  | 改了会让旧页面上残留的 content script 与新 SW 互不认账 |
 | `CORE_SCHEMA_VERSION`   | `3`    | core / detail 结果的语义契约版本;**参与缓存键**              | 改了等于全量作废缓存;缓存导入也会因版本不符整体拒绝    |
-| `CORE_PROMPT_VERSION`   | `18`   | core 提示词/Token 坐标版本;**参与 core / correction 缓存键** | 改了作废全部 core 缓存                                 |
+| `CORE_PROMPT_VERSION`   | `19`   | core 提示词/Token 坐标版本;**参与 core / correction 缓存键** | 改了作废全部 core 缓存                                 |
 | `DETAIL_PROMPT_VERSION` | `10`   | detail 提示词/focus Token 坐标版本;**参与 detail 缓存键**    | 改了作废全部详解缓存                                   |
 
 > 缓存键**刻意不含** profile / 模型维度——换模型不该让已有译文全部作废;但**含提示词版本**,因为同一句在不同规则下会被切成不同粒度的成分,旧结果继续复用只会让新旧质量混在一屏。版本 8 彻底删除了要求输出 `COORDINATE_CLAUSE` 的残留旧指令；版本 9 强化 repair prompt 的限定词切分与逐条自检，并配套 core 至多两轮修复；版本 10 补齐从句右边界、后置介词短语和系表结构口径，并要求译文覆盖整段成分；版本 11 在分句角色前先判输入是否成句，无谓语标题/名词短语等使用唯一 `FRAGMENT_HEAD`，祈使句仍按完整分句处理；版本 12 把 `etc.` 合并为单个非标点 Token，并按可收句缩写处理；当前 `CORE_PROMPT_VERSION = 13` 面向页面级英文覆盖重写了双端规则（fragment 内嵌定语从句、arXiv 冒号长标题四段口径、VP/NP 并列对照、finite/non-finite when 对照、allow/force/let 宾语控制、零关系词定语从句、非限定补足成分整体 COMPLEMENT、PP 依附四类映射、中文释义与专名中文类型要求），并删除与黄金集 conventions 重复的旧条目。detail 修复轮同步补输出模板与完整中文角色词表，因此 `DETAIL_PROMPT_VERSION = 7` 同步提升；结果 JSON 形状未变，`CORE_SCHEMA_VERSION` 保持 `3`。
@@ -88,7 +88,7 @@ trustedPageControl = trustedExtensionUi && type ∈ {START_SESSION, PAUSE_SESSIO
 | ------------------------- | -------------------------------------------------------------------- | ----------------------------------------------- |
 | `ACK`                     | `acknowledgedType`                                                   | 无返回值的命令                                  |
 | `SESSION_STATUS`          | `status: SessionStatus`                                              | 启停 / 查询状态;**也被 content 复用为状态上报** |
-| `CORE_RESULT`             | `analyses[]`、`cacheOnly?`、`error?`                                 | core 解析与带反馈重解析                         |
+| `CORE_RESULT`             | `analyses[]`、`failures[]?`、`cacheOnly?`、`error?`                  | core 解析与带反馈重解析                         |
 | `DETAIL_RESULT`           | `analysis: DetailAnalysis`                                           | 详解                                            |
 | `SENTENCE_DETAILS_RESULT` | `succeeded`、`failed`                                                | 整句预载                                        |
 | `CACHE_STATS`             | `stats`                                                              | 缓存统计                                        |
@@ -97,6 +97,8 @@ trustedPageControl = trustedExtensionUi && type ∈ {START_SESSION, PAUSE_SESSIO
 | `ERROR`                   | `error: ExtensionError`                                              | 任何失败                                        |
 
 `CORE_RESULT` 上的 **`error` 是批级的**:鉴权失败或 profile 被暂停时,缓存命中照常返回(键与模型无关),只有未命中句由 content 按该错误标失败——换 / 修模型前译文不消失。
+
+`failures` 是**逐句**的(2026-11-02 起):SW 侧两轮修复仍不合格或请求级失败的句子,以 `{ sentenceId, error }`(消息经 `redactProfileSecrets` 脱敏)随批下发;content 侧逐句优先采用真实原因(如 `CONJUNCTION must cover a coordinating conjunction`),未携带时才退回批级 `error` / 通用兜底文案「模型未返回此句的解析结果」。此前失败清单只留在 SW 内存里,页面排查只能看到笼统文案。
 
 `DIAGNOSIS_RESULT` 同理**从不整包 ERROR**:模型解释只是渐进增强,页面本地采集的诊断证据(`diagnosis` 回显)始终可用,失败一律嵌在 `modelError` 里——无 profile → `CONFIG_MISSING`,profile 已被暂停(早退分支)→ `AUTH_FAILED`,模型请求失败(`ModelRequestError`)→ 原错误码(命中 `AUTH_FAILED` 时同时 `pauseProfile`),其余一切异常(含 `validateDiagnosisExplanation` 形状不符)→ `INVALID_MODEL_OUTPUT`。成功路径的 `model` 三字段逐一过 `redactProfileSecrets`,`profile` 只回 `{ model }`(不下发 profile id 或凭据指纹);`explainDiagnosis` 本身不写任何缓存。
 

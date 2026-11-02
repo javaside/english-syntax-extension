@@ -95,7 +95,7 @@ const COMPLETENESS_FIRST_RULE =
   // 「至多一个 FRAGMENT_HEAD」门拒绝;合并成一个 head、或长并列首项 head + 后续项
   // APPOSITIVE,才是 validator 认可的出路(2026-11-02 HyperFrames vs Remotion 页
   // 7/49 句两轮修复仍失败的死锁即旧 repair 指令封死了这条出路)。
-  'Conjuncts joined without a coordinating conjunction never get one FRAGMENT_HEAD each: ' +
+  "Conjuncts joined without a coordinating conjunction never get one FRAGMENT_HEAD each: " +
   'a short comma, semicolon, or "vs" coordination is ONE FRAGMENT_HEAD including the joining punctuation ' +
   '("Same request, two agents" and "HyperFrames vs Remotion" are each ONE FRAGMENT_HEAD); ' +
   "in a long one the first conjunct stays FRAGMENT_HEAD and later conjuncts become APPOSITIVE; " +
@@ -276,9 +276,9 @@ export function buildRepairPrompt(
     // 连词的并列里把 validator 的两条合法出路全封死,模型只能虚构 CONJUNCTION,两轮
     // 修复必然失败(与上方 COMPLETENESS_FIRST_RULE 版本 19 注释同一真机案例)。
     "For each FRAGMENT_HEAD error caused by more than one fragment head, look at what joins the conjuncts: " +
-    "with a coordinating conjunction (for, and, nor, but, or, yet, so) between them, keep one FRAGMENT_HEAD per conjunct and tag that conjunction as its own CONJUNCTION component directly in front of each conjunct after the first; " +
-    'with only punctuation or a connector like "vs" joining them, merge the conjuncts into ONE FRAGMENT_HEAD, or keep the first as FRAGMENT_HEAD and retag the later conjuncts APPOSITIVE when merging would wrap a whole long fragment into one component; ' +
-    'never tag punctuation or "vs" as CONJUNCTION and never leave a real conjunction inside a FRAGMENT_HEAD.',
+      "with a coordinating conjunction (for, and, nor, but, or, yet, so) between them, keep one FRAGMENT_HEAD per conjunct and tag that conjunction as its own CONJUNCTION component directly in front of each conjunct after the first; " +
+      'with only punctuation or a connector like "vs" joining them, merge the conjuncts into ONE FRAGMENT_HEAD, or keep the first as FRAGMENT_HEAD and retag the later conjuncts APPOSITIVE when merging would wrap a whole long fragment into one component; ' +
+      'never tag punctuation or "vs" as CONJUNCTION and never leave a real conjunction inside a FRAGMENT_HEAD.',
     "Check the repaired JSON against every listed validation error before returning it; do not return until each listed error has been addressed.",
     "Return the repaired JSON only, without a Markdown fence or prose.",
     ...CORE_ANALYSIS_RULES,

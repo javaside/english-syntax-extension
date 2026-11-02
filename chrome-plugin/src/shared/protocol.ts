@@ -259,7 +259,9 @@ function isExtensionErrorValue(value: unknown): value is ExtensionError {
 }
 
 export function isCoreSentenceFailure(value: unknown): value is CoreSentenceFailure {
-  return isRecord(value) && isNonBlankString(value.sentenceId) && isExtensionErrorValue(value.error);
+  return (
+    isRecord(value) && isNonBlankString(value.sentenceId) && isExtensionErrorValue(value.error)
+  );
 }
 
 export type ResponseMessage =
