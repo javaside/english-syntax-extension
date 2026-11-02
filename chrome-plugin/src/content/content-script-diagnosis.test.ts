@@ -52,6 +52,53 @@ const pageCommandBase = {
   documentId: "document-1",
 } as const;
 
+describe("isRuntimeResponse CORE_RESULT case", () => {
+  const base = {
+    version: 1,
+    requestId: "r1",
+    type: "CORE_RESULT",
+    analyses: [],
+  } as const;
+
+  it("携带合法逐句 failures 的 CORE_RESULT 通过守卫", () => {
+    expect(
+      isRuntimeResponse(
+        {
+          ...base,
+          failures: [
+            {
+              sentenceId: "sentence-2",
+              error: {
+                code: "INVALID_MODEL_OUTPUT",
+                message: "模型输出经两轮修复后仍不合格：at most one FRAGMENT_HEAD",
+                retryable: false,
+              },
+            },
+          ],
+        },
+        "r1",
+      ),
+    ).toBe(true);
+    expect(isRuntimeResponse({ ...base }, "r1")).toBe(true);
+  });
+
+  it("failures 形状非法被拒（三层校验的 content 层一环）", () => {
+    expect(
+      isRuntimeResponse(
+        {
+          ...base,
+          failures: [{ sentenceId: "sentence-2", error: { code: "INVALID_MODEL_OUTPUT" } }],
+        },
+        "r1",
+      ),
+    ).toBe(false);
+    expect(
+      isRuntimeResponse({ ...base, failures: [{ broken: true }] }, "r1"),
+    ).toBe(false);
+    expect(isRuntimeResponse({ ...base, failures: "not-an-array" }, "r1"), ).toBe(false);
+  });
+});
+
 describe("isRuntimeResponse 诊断 case", () => {
   it("合法 DIAGNOSIS_RESULT 通过守卫（case 缺了它必红——防三层漏一层的断言形态）", () => {
     expect(isRuntimeResponse(validResult, "r1")).toBe(true);

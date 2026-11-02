@@ -922,6 +922,48 @@ describe("service worker orchestration", () => {
     });
   });
 
+  // 2026-11-02:两轮修复仍失败的句子,失败原因(含具体校验错误)必须随 CORE_RESULT
+  // 下发,否则 content 只能给「模型未返回此句的解析结果」的笼统文案。
+  it("非鉴权失败的 outcome.failures 逐句随 CORE_RESULT 下发且消息脱敏", async () => {
+    const analyzeCore = vi.fn(({ sentences }: Parameters<AnalysisService["analyzeCore"]>[0]) =>
+      Promise.resolve({
+        result: [],
+        failures: [
+          {
+            sentenceId: sentences[0]!.sentenceId,
+            error: new ModelRequestError(
+              "INVALID_MODEL_OUTPUT",
+              "模型输出经两轮修复后仍不合格：SECRET-A 泄漏检查",
+              false,
+            ),
+          },
+        ],
+        cacheHit: false,
+      }),
+    );
+    const subject = chromeMock();
+    registerServiceWorker(dependencies({ analyzeCore }), subject.api);
+
+    const response = await dispatch(
+      subject.events.runtime.onMessage.listeners[0]!,
+      pageRequest({ type: "ANALYZE_CORE", sentences: [sentence] }),
+    );
+
+    expect(response.type).toBe("CORE_RESULT");
+    const coreResult = response as Extract<ResponseMessage, { type: "CORE_RESULT" }>;
+    expect(coreResult.failures).toEqual([
+      {
+        sentenceId: sentence.sentenceId,
+        error: {
+          code: "INVALID_MODEL_OUTPUT",
+          message: "模型输出经两轮修复后仍不合格：[redacted] 泄漏检查",
+          retryable: false,
+        },
+      },
+    ]);
+    expect(JSON.stringify(coreResult)).not.toContain("SECRET-A");
+  });
+
   it("暂停期间 ANALYZE_CORE 仍查缓存返回命中，不再无脑整批鉴权失败", async () => {
     const cachedAnalysis = {
       schemaVersion: CORE_SCHEMA_VERSION,
