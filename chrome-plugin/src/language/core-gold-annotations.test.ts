@@ -42,6 +42,12 @@ describe("core gold annotations", () => {
     // CONJUNCTION;未被隔断的并列短语仍是一个成分。
     expect(conventions).toMatch(/有并列时.*每个并列项各一个 FRAGMENT_HEAD/);
     expect(conventions).toMatch(/未被隔断的并列短语仍保持一个成分/);
+    // 2026-11-02(core 19):并列的连接方式决定形态——只有 FANBOYS 连词连接才逐项
+    // 各一个 head;逗号/分号/vs 连接的短并列整体一个 head(连接标点随之覆盖),
+    // 长并列首项 head + 后续项 APPOSITIVE;标点与 vs 永不标 CONJUNCTION。
+    expect(conventions).toMatch(/只有 FANBOYS 连词连接的并列才逐项各一个 head/);
+    expect(conventions).toMatch(/逗号、分号或 vs 连接的并列不逐项各标/);
+    expect(conventions).toMatch(/标点与 vs 永不标 CONJUNCTION/);
     expect(conventions).toMatch(/不得.*SUBJECT.*PREDICATE.*OBJECT/);
     expect(conventions).toMatch(/祈使句.*PREDICATE/);
     expect(conventions).toMatch(/总体.*不覆盖标点/);
@@ -109,6 +115,20 @@ describe("core gold annotations", () => {
         { startToken: 0, endToken: 0, role: GrammarRole.PREDICATE },
         { startToken: 1, endToken: 2, role: GrammarRole.OBJECT },
       ],
+    ],
+    [
+      // 2026-11-02(core 19):非 FANBOYS 并列片段——vs/逗号连接的短并列整体一个
+      // FRAGMENT_HEAD,连接标点随之覆盖,绝不出现 CONJUNCTION。
+      "fragment-vs-heading",
+      [{ startToken: 0, endToken: 2, role: GrammarRole.FRAGMENT_HEAD }],
+    ],
+    [
+      "fragment-comma-conjuncts",
+      [{ startToken: 0, endToken: 4, role: GrammarRole.FRAGMENT_HEAD }],
+    ],
+    [
+      "fragment-comma-quantity",
+      [{ startToken: 0, endToken: 5, role: GrammarRole.FRAGMENT_HEAD }],
     ],
   ] as const)("keeps the human-reviewed component contract for %s", (id, components) => {
     expect(

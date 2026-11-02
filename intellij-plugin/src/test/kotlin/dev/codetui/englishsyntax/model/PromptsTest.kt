@@ -169,6 +169,8 @@ class PromptsTest {
   /**
    * 2026-10-11 真机：并列名词片段里第二项被同位语隔开，既不能被并进同一个
    * FRAGMENT_HEAD，也不该被改标成修饰语。与 TS `prompts.test.ts` 同一清单。
+   * 2026-11-02（core 19）：repair 指令改为按连接方式分流——有 FANBOYS 连词才逐项
+   * head + 连词单列；无连词（逗号/分号/vs）合并成一个 head 或 retag APPOSITIVE。
    */
   @Test
   fun `teaches coordinated fragment heads and tells repair to split the conjunction out`() {
@@ -187,8 +189,27 @@ class PromptsTest {
       )
       assertTrue(prompt.contains("a conjunction inside one uninterrupted phrase stays inside that single component"))
     }
-    assertTrue(repair.contains("never retag a coordinated conjunct as APPOSITIVE or ATTRIBUTE"))
-    assertTrue(repair.contains("never leave the conjunction inside a FRAGMENT_HEAD"))
+    assertTrue(repair.contains("keep one FRAGMENT_HEAD per conjunct and tag that conjunction as its own CONJUNCTION component"))
+    assertTrue(repair.contains("never leave a real conjunction inside a FRAGMENT_HEAD"))
+  }
+
+  /** 2026-11-02 真机（HyperFrames vs Remotion 页 7/49 句两轮修复仍失败）：与 TS 同一死锁。 */
+  @Test
+  fun `teaches non-FANBOYS coordination as one merged head and forbids punctuation conjunctions`() {
+    val core = buildCorePrompt(listOf(sentence("Classify the request.")))
+    val repair = buildRepairPrompt(
+      listOf(sentence("Classify the request.")),
+      listOf(RepairErrorGroup("s1", 0, "invalid", listOf(ValidationError("components[0]", "bad")))),
+      buildJsonObject { put("sentences", buildJsonArray { }) },
+    )
+
+    listOf(core, repair).forEach { prompt ->
+      assertTrue(prompt.contains("Conjuncts joined without a coordinating conjunction never get one FRAGMENT_HEAD each"))
+      assertTrue(prompt.contains("\"Same request, two agents\" and \"HyperFrames vs Remotion\" are each ONE FRAGMENT_HEAD"))
+      assertTrue(prompt.contains("punctuation, semicolons, and \"vs\" are never tagged CONJUNCTION"))
+    }
+    assertTrue(repair.contains("with only punctuation or a connector like \"vs\" joining them, merge the conjuncts into ONE FRAGMENT_HEAD"))
+    assertTrue(repair.contains("keep the first as FRAGMENT_HEAD and retag the later conjuncts APPOSITIVE"))
   }
 
   @Test
@@ -444,6 +465,9 @@ class PromptsTest {
    * 单句)实测 8207 字符；重写删除 SUPPLEMENT_RULE 与内联 Compound/Simple 重复条目,
    * 同时为页面语料新增约 10 组「正例 + 反例」对照,净增 +33%。2026-09-12 批次
    * (spec D4/D5)新增 Trailing-citation 与 Heading-number 两条规则,系数 1.35 → 1.42。
+   * 2026-11-02(core 19)新增非 FANBOYS 并列片段一组正反例(实测 12038),系数
+   * 1.42 → 1.48——v17/v18 的既定增长已把旧信封用到 99.6%,这次是带真机失败依据
+   * 的定向教学。与 TS prompts.test.ts 同一系数。
    */
   @Test
   fun `core prompt rule text stays within the measured budget envelope`() {
@@ -451,6 +475,6 @@ class PromptsTest {
     val payloadStart = prompt.indexOf("Numbered sentence requests:")
     val ruleTextLength = prompt.slice(0 until payloadStart).length
 
-    assertTrue(ruleTextLength <= 8207 * 1.42, "rule text grew beyond budget: $ruleTextLength")
+    assertTrue(ruleTextLength <= 8207 * 1.48, "rule text grew beyond budget: $ruleTextLength")
   }
 }
