@@ -425,6 +425,41 @@ describe("SessionController", () => {
     expect(block.failures[0]!.message).toContain("AUTH_FAILED");
   });
 
+  // 2026-11-02:SW 侧两轮修复仍失败的句子此前在页面只能看到「模型未返回此句的解析
+  // 结果」,真实校验错误到不了页面。CORE_RESULT.failures 下发后,失败句带真实原因。
+  it("带逐句 failures 的部分结果：未命中句优先用 SW 下发的真实失败原因", async () => {
+    const transport = new FakeTransport((message) =>
+      Promise.resolve({
+        version: 1,
+        requestId: message.requestId,
+        type: "CORE_RESULT",
+        analyses: message.type === "ANALYZE_CORE" ? [core(message.sentences[0]!.sentenceId)] : [],
+        failures: [
+          {
+            sentenceId: message.type === "ANALYZE_CORE" ? message.sentences[1]!.sentenceId : "",
+            error: {
+              code: "INVALID_MODEL_OUTPUT",
+              message:
+                "模型输出经两轮修复后仍不合格：sentences[0].components: a non-clausal fragment must contain at most one FRAGMENT_HEAD",
+              retryable: false,
+            },
+          },
+        ],
+      }),
+    );
+    const subject = harness("Readers learn. Writers practice daily.", transport);
+
+    await subject.controller.start();
+    subject.viewport.emit();
+    await vi.waitFor(() => expect(subject.controller.status.failed).toBe(1));
+
+    const failure = subject.learningBlocks[0]!.failures[0]!;
+    expect(failure).toMatchObject({ sentenceId: "sentence-2" });
+    expect(failure.message).toContain("INVALID_MODEL_OUTPUT");
+    expect(failure.message).toContain("at most one FRAGMENT_HEAD");
+    expect(failure.message).not.toContain("模型未返回此句的解析结果");
+  });
+
   it("renders hits, keeps misses as plain skipped text, and reports skipped in status", async () => {
     const transport = new FakeTransport((message) =>
       Promise.resolve({

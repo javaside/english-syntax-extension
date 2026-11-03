@@ -205,6 +205,29 @@ function responseErrorMessage(response: ResponseMessage): string {
   return error === undefined ? MISSING_RESULT_MESSAGE : `${error.code}：${error.message}`;
 }
 
+/**
+ * 逐句失败文案：优先用 CORE_RESULT.failures 里 SW 下发的真实原因（两轮修复仍
+ * 不合格的校验错误、请求级错误），未携带时退回批级 error / 通用兜底——旧协议的
+ * SW 响应不带失败清单，兼容旧缓存会话/测试桩。
+ */
+function sentenceFailureMessage(
+  response: ResponseMessage,
+  sentenceId: string,
+  messagesById: ReadonlyMap<string, string>,
+): string {
+  return messagesById.get(sentenceId) ?? responseErrorMessage(response);
+}
+
+function sentenceFailureMessages(response: ResponseMessage): ReadonlyMap<string, string> {
+  if (response.type !== "CORE_RESULT" || response.failures === undefined) return new Map();
+  return new Map(
+    response.failures.map(({ sentenceId, error }) => [
+      sentenceId,
+      `${error.code}：${error.message}`,
+    ]),
+  );
+}
+
 export class SessionController {
   readonly documentId: string;
 
@@ -941,6 +964,7 @@ export class SessionController {
     const analyses = response.type === "CORE_RESULT" ? response.analyses : [];
     const cacheOnly = response.type === "CORE_RESULT" && response.cacheOnly === true;
     if (cacheOnly) this.cacheOnly = true;
+    const failureMessages = sentenceFailureMessages(response);
 
     for (const block of blocks) {
       // 逐块校验版本:合批期间某个块被失效(如内容变动)时只跳过它，不连累同批。
@@ -960,12 +984,17 @@ export class SessionController {
             this.transition(sentence, "skipped");
             continue;
           }
+          const failureMessage = sentenceFailureMessage(
+            response,
+            sentence.input.sentenceId,
+            failureMessages,
+          );
           failures.push({
             sentenceId: sentence.input.sentenceId,
             sentence: sentence.input.text,
-            message: responseErrorMessage(response),
+            message: failureMessage,
           });
-          sentence.failureMessage = responseErrorMessage(response);
+          sentence.failureMessage = failureMessage;
           this.transition(sentence, "failed");
           continue;
         }

@@ -14,10 +14,12 @@ import {
   MESSAGE_VERSION,
 } from "./versions";
 
-it("pins the shared analysis versions after the coordinated-fragment fix", () => {
-  // core 18 在 17 的 of-phrase 局部译文口径上补「并列片段各并列项各为一个 FRAGMENT_HEAD、
-  // 连词单列 CONJUNCTION」，旧的 core 缓存按新版本键作废；detail 提示词未动，保持 10。
-  expect(CORE_PROMPT_VERSION).toBe(18);
+it("pins the shared analysis versions after the non-FANBOYS-coordination fix", () => {
+  // core 19 在 18 的并列片段口径上补「无 FANBOYS 连词的并列(逗号/分号/vs)不逐项各标
+  // FRAGMENT_HEAD:短并列合并成一个 head,长并列首项 head + 后续项 APPOSITIVE」,并把
+  // 修复轮封死合法出路的旧指令改为按连接方式分流;旧的 core 缓存按新版本键作废;
+  // detail 提示词未动,保持 10。
+  expect(CORE_PROMPT_VERSION).toBe(19);
   expect(DETAIL_PROMPT_VERSION).toBe(10);
   expect(CORE_SCHEMA_VERSION).toBe(3);
 });

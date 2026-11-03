@@ -98,6 +98,46 @@ describe("resolveDiagnosisTarget（spec D1 落点优先级：选区锚点 → �
     expect(resolved.element).toBe(document.getElementById("wrap"));
     expect(resolved.source).toBe("extension-ascended");
   });
+
+  // 2026-11-02 真机（HyperFrames vs Remotion 页头报告）：选区锚点的
+  // parentElement 是 header 的直接子元素，报告于是诊断容器，只会得到
+  // covered-by-child 的正确废话。落点必须收敛到用户实际指认的语义单元。
+  it("选区锚点落在容器上时收敛到与锚点互相包含的子单元（页头引导段落）", () => {
+    document.body.innerHTML =
+      '<main><header id="header"><div id="top"><h1 id="title">HyperFrames vs Remotion</h1></div>' +
+      '<div id="lead-wrap"><p id="lead">The same launch video made by an agent.</p></div></header></main>';
+    const selection = document.getSelection();
+    const range = document.createRange();
+    // 锚点是元素节点（拖选从元素边界起头时的形态）：anchorNode = #lead-wrap，
+    // 其 parentElement 即 header——正是真机报告的落点形态。
+    range.selectNodeContents(document.getElementById("lead-wrap")!);
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    const resolved = resolveDiagnosisTarget();
+    if (selection?.anchorNode != null) {
+      expect(resolved.source).toBe("selection");
+      expect(resolved.element).toBe(document.getElementById("lead"));
+    }
+  });
+
+  it("右键落在 header 容器上时收敛到第一个可分析子单元（标题）", () => {
+    document.body.innerHTML =
+      '<main><header id="header"><div id="top"><h1 id="title">HyperFrames vs Remotion</h1></div>' +
+      '<p id="lead">The same launch video made by an agent.</p></header></main>';
+    recordDiagnosisTarget({ target: document.getElementById("header")! } as unknown as Event);
+    const resolved = resolveDiagnosisTarget();
+    expect(resolved.source).toBe("contextmenu");
+    expect(resolved.element).toBe(document.getElementById("title"));
+  });
+
+  it("右键落在内联深层节点时上浮到最近语义单元", () => {
+    document.body.innerHTML =
+      '<main><p id="p"><strong id="deep">Readers</strong> learn syntax daily.</p></main>';
+    recordDiagnosisTarget({ target: document.getElementById("deep")! } as unknown as Event);
+    const resolved = resolveDiagnosisTarget();
+    expect(resolved.source).toBe("contextmenu");
+    expect(resolved.element).toBe(document.getElementById("p"));
+  });
 });
 
 describe("diagnoseElement", () => {

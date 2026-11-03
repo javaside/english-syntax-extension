@@ -236,13 +236,43 @@ export function isDetailStreamPush(value: unknown): value is DetailStreamPush {
   );
 }
 
+/**
+ * CORE_RESULT 携带的逐句失败原因：SW 侧两轮修复仍不合格、或请求级失败(超时/限流)
+ * 的句子。此前失败清单只留在 SW 的 outcome 里不下发，content 只能给每句挂「模型未
+ * 返回此句的解析结果」的笼统文案——真机排查时真实校验错误(如 CONJUNCTION must
+ * cover a coordinating conjunction)到不了页面(2026-11-02 HyperFrames vs Remotion
+ * 页 7/49 句失败时用户只能看到笼统文案)。
+ */
+export interface CoreSentenceFailure {
+  sentenceId: string;
+  error: ExtensionError;
+}
+
+function isExtensionErrorValue(value: unknown): value is ExtensionError {
+  return (
+    isRecord(value) &&
+    typeof value.code === "string" &&
+    typeof value.message === "string" &&
+    typeof value.retryable === "boolean" &&
+    (value.details === undefined || isRecord(value.details))
+  );
+}
+
+export function isCoreSentenceFailure(value: unknown): value is CoreSentenceFailure {
+  return (
+    isRecord(value) && isNonBlankString(value.sentenceId) && isExtensionErrorValue(value.error)
+  );
+}
+
 export type ResponseMessage =
   | (MessageBase & { type: "ACK"; acknowledgedType: RequestMessage["type"] })
   | (MessageBase & { type: "SESSION_STATUS"; status: SessionStatus })
   // error：批级失败（如鉴权失败）时仍携带已取得的缓存命中；未命中句由 content 按该错误标失败。
+  // failures：逐句失败原因，未携带时 content 沿用通用兜底文案。
   | (MessageBase & {
       type: "CORE_RESULT";
       analyses: CoreAnalysis[];
+      failures?: CoreSentenceFailure[];
       cacheOnly?: true;
       error?: ExtensionError;
     })

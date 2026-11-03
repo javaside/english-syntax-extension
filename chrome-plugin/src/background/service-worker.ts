@@ -526,6 +526,20 @@ export function registerServiceWorker(
               requestId: request.requestId,
               type: "CORE_RESULT",
               analyses: outcome.result.map((analysis) => sanitizeCore(analysis, profile)),
+              // 逐句失败原因随批下发（消息经 redactProfileSecrets 脱敏）：content 侧
+              // 不再只能给「模型未返回此句的解析结果」的笼统文案。
+              ...(outcome.failures.length === 0
+                ? {}
+                : {
+                    failures: outcome.failures.map(({ sentenceId, error }) => ({
+                      sentenceId,
+                      error: {
+                        code: errorCode(error),
+                        message: redactProfileSecrets(error.message, profile),
+                        retryable: error.retryable,
+                      },
+                    })),
+                  }),
             };
           } catch (error) {
             const code = errorCode(error);
@@ -935,6 +949,9 @@ export function registerServiceWorker(
   const ensureContextMenus = (): void => {
     if (contextMenusEnsured) return;
     contextMenusEnsured = true;
+    // 部分测试桩/受限宿主没有 contextMenus API：跳过注册而不是让异步 IIFE 抛
+    // 未捕获拒绝——npm test 的 exit code 曾被这两个 unhandled rejection 顶成 1。
+    if (chromeApi.contextMenus === undefined) return;
     void (async () => {
       await chromeApi.contextMenus.removeAll();
       chromeApi.contextMenus.create({

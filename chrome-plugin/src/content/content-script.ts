@@ -3,6 +3,7 @@ import { ERROR_CODES } from "../shared/errors";
 import { GrammarRole } from "../shared/grammar";
 import {
   isBlockDiagnosis,
+  isCoreSentenceFailure,
   isCoreStreamPush,
   isDetailStreamPush,
   isRequestMessage,
@@ -205,6 +206,10 @@ export function isRuntimeResponse(value: unknown, requestId: string): value is R
       return (
         Array.isArray(value.analyses) &&
         value.analyses.every(isCoreAnalysis) &&
+        // 三层校验的 content 层一环：逐句失败清单形状由协议层守卫把关，
+        // 漏了会把 SW 的真实失败原因静默替换成 ERROR。
+        (value.failures === undefined ||
+          (Array.isArray(value.failures) && value.failures.every(isCoreSentenceFailure))) &&
         (value.error === undefined || isExtensionError(value.error))
       );
     case "DETAIL_RESULT":

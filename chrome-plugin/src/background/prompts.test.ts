@@ -211,7 +211,7 @@ describe("model-facing sentence payload", () => {
 
   // 2026-10-11 真机:并列名词片段(`A DESIGN.md — a note — and a FRAME.md`)里第二项被
   // 同位语隔开,不能被并进同一个 FRAGMENT_HEAD,也不该被改标成修饰语——core 教「各项各
-  // 自成一个 head、连词单列 CONJUNCTION」,repair 明确禁止把并列项改标 APPOSITIVE。
+  // 自成一个 head、连词单列 CONJUNCTION」,repair 在**有 FANBOYS 连词**时维持该拆法。
   it("teaches coordinated fragment heads and tells repair to split the conjunction out", () => {
     const core = buildCorePrompt([sentence]);
     const repair = buildRepairPrompt([sentence], [repairGroup], {});
@@ -224,8 +224,37 @@ describe("model-facing sentence payload", () => {
         "a conjunction inside one uninterrupted phrase stays inside that single component",
       );
     }
-    expect(repair).toContain("never retag a coordinated conjunct as APPOSITIVE or ATTRIBUTE");
-    expect(repair).toContain("never leave the conjunction inside a FRAGMENT_HEAD");
+    expect(repair).toContain(
+      "keep one FRAGMENT_HEAD per conjunct and tag that conjunction as its own CONJUNCTION component",
+    );
+    expect(repair).toContain("never leave a real conjunction inside a FRAGMENT_HEAD");
+  });
+
+  // 2026-11-02 真机（HyperFrames vs Remotion 对比页,7/49 句两轮修复后仍失败）:逗号/
+  // 分号/vs 连接的并列片段里没有 FANBOYS 连词,旧的 repair 指令「never retag a
+  // coordinated conjunct as APPOSITIVE or ATTRIBUTE」把 validator 给出的唯一合法出路
+  // (合并成一个 head 或 retag APPOSITIVE)封死,模型只能把 ","/"；"/"vs" 虚构成
+  // CONJUNCTION——被 FANBOYS 门拒,确定性死锁。core 与 repair 都要教非 FANBOYS 并列的
+  // 合法形态,且明确禁止把标点/vs 标成 CONJUNCTION。
+  it("teaches non-FANBOYS coordination as one merged head and forbids punctuation conjunctions", () => {
+    const core = buildCorePrompt([sentence]);
+    const repair = buildRepairPrompt([sentence], [repairGroup], {});
+
+    for (const prompt of [core, repair]) {
+      expect(prompt).toContain(
+        "Conjuncts joined without a coordinating conjunction never get one FRAGMENT_HEAD each",
+      );
+      expect(prompt).toContain(
+        '"Same request, two agents" and "HyperFrames vs Remotion" are each ONE FRAGMENT_HEAD',
+      );
+      expect(prompt).toContain('punctuation, semicolons, and "vs" are never tagged CONJUNCTION');
+    }
+    expect(repair).toContain(
+      'with only punctuation or a connector like "vs" joining them, merge the conjuncts into ONE FRAGMENT_HEAD',
+    );
+    expect(repair).toContain(
+      "keep the first as FRAGMENT_HEAD and retag the later conjuncts APPOSITIVE",
+    );
   });
 
   it("treats dash supplements as explanations instead of coordination", () => {
@@ -516,7 +545,10 @@ describe("页面句型教学(版本 13 重写)", () => {
   // 同时为页面语料新增约 10 组「正例 + 反例」教学对照,净增量 +33%(
   // 实测 10903 字符)。2026-09-12 批次(spec D4/D5)新增 Trailing-citation 与
   // Heading-number 两条规则(含最小正反例),系数 1.35 → 1.42;两例都压缩到
-  // 最短可教形式后再计入,超出说明又在机械追加。
+  // 最短可教形式后再计入,超出说明又在机械追加。2026-11-02(core 19)新增
+  // 非 FANBOYS 并列片段一组正反例(压缩后 +390 字符,实测 11998),系数
+  // 1.42 → 1.48——v17/v18 的既定增长已把旧信封用到 99.6%,这次是带真机失败
+  // 依据的定向教学,不是机械追加。
   it("teaches field-label + complete question as clause, not fragment", () => {
     const prompt = buildCorePrompt([sentence]);
 
@@ -530,7 +562,7 @@ describe("页面句型教学(版本 13 重写)", () => {
     const payloadStart = prompt.indexOf("Numbered sentence requests:");
     const ruleTextLength = prompt.slice(0, payloadStart).length;
 
-    expect(ruleTextLength).toBeLessThanOrEqual(Math.ceil(8207 * 1.42));
+    expect(ruleTextLength).toBeLessThanOrEqual(Math.ceil(8207 * 1.48));
   });
 });
 
