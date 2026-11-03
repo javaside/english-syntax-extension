@@ -101,7 +101,7 @@ const COMPLETENESS_FIRST_RULE =
   "Conjuncts joined without a coordinating conjunction never get one FRAGMENT_HEAD each: " +
   'a short comma, semicolon, or "vs" coordination is ONE FRAGMENT_HEAD including the joining punctuation ' +
   '("Same request, two agents" and "HyperFrames vs Remotion" are each ONE FRAGMENT_HEAD); ' +
-  "in a long one the first conjunct stays FRAGMENT_HEAD and every later conjunct separated from the previous by list punctuation — even one right before a final \"and\" — becomes APPOSITIVE; " +
+  'in a long one the first conjunct stays FRAGMENT_HEAD and every later conjunct separated from the previous by list punctuation — even one right before a final "and" — becomes APPOSITIVE; ' +
   'punctuation, semicolons, and "vs" are never tagged CONJUNCTION. ' +
   "A noun-phrase fragment may contain one embedded relative clause: " +
   '"An API that returns JSON responses" is FRAGMENT_HEAD "An API" plus ATTRIBUTIVE_CLAUSE "that returns JSON responses", and the finite verb inside that embedded clause does not turn the whole input into a main clause. ' +
@@ -277,7 +277,7 @@ export function buildRepairPrompt(
     // 末项前的 and 就维持逐项 head,分号隔开的中间项永远非法;判定口径与 validator
     // 硬门逐字同源(额外 head 只看紧邻前一个语义成分是不是 FANBOYS 连词)。
     "For each FRAGMENT_HEAD error caused by more than one fragment head, judge EVERY extra FRAGMENT_HEAD by the semantic component directly in front of it: keep that head only when the component directly in front of it is a separate FANBOYS CONJUNCTION component (for, and, nor, but, or, yet, so); " +
-      "when only punctuation (comma, semicolon, dash) or a connector like \"vs\" separates it from the previous conjunct — including an item of a list that merely ends with \"; and\" — retag it APPOSITIVE, or merge it into the previous head when the whole coordination is short enough to stay one fragment; " +
+      'when only punctuation (comma, semicolon, dash) or a connector like "vs" separates it from the previous conjunct — including an item of a list that merely ends with "; and" — retag it APPOSITIVE, or merge it into the previous head when the whole coordination is short enough to stay one fragment; ' +
       'never tag punctuation or "vs" as CONJUNCTION and never leave a real conjunction inside a FRAGMENT_HEAD.',
     "Check the repaired JSON against every listed validation error before returning it; do not return until each listed error has been addressed.",
     "Return the repaired JSON only, without a Markdown fence or prose.",
