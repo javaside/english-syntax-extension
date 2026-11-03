@@ -189,7 +189,7 @@ class PromptsTest {
       )
       assertTrue(prompt.contains("a conjunction inside one uninterrupted phrase stays inside that single component"))
     }
-    assertTrue(repair.contains("keep one FRAGMENT_HEAD per conjunct and tag that conjunction as its own CONJUNCTION component"))
+    assertTrue(repair.contains("keep that head only when the component directly in front of it is a separate FANBOYS CONJUNCTION component"))
     assertTrue(repair.contains("never leave a real conjunction inside a FRAGMENT_HEAD"))
   }
 
@@ -208,8 +208,8 @@ class PromptsTest {
       assertTrue(prompt.contains("\"Same request, two agents\" and \"HyperFrames vs Remotion\" are each ONE FRAGMENT_HEAD"))
       assertTrue(prompt.contains("punctuation, semicolons, and \"vs\" are never tagged CONJUNCTION"))
     }
-    assertTrue(repair.contains("with only punctuation or a connector like \"vs\" joining them, merge the conjuncts into ONE FRAGMENT_HEAD"))
-    assertTrue(repair.contains("keep the first as FRAGMENT_HEAD and retag the later conjuncts APPOSITIVE"))
+    assertTrue(repair.contains("judge EVERY extra FRAGMENT_HEAD by the semantic component directly in front of it"))
+    assertTrue(repair.contains("including an item of a list that merely ends with \"; and\" — retag it APPOSITIVE"))
   }
 
   @Test

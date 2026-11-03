@@ -1009,7 +1009,7 @@ Token ID 已变时，旧 span 数字没有语义。必须用生产 tokenizer 重
 截至当前实现：
 
 - `CORE_SCHEMA_VERSION = 3`；
-- `CORE_PROMPT_VERSION = 19`；
+- `CORE_PROMPT_VERSION = 20`；
 - `DETAIL_PROMPT_VERSION = 10`；
 - 单请求最多 6 句，云端默认每块 2 句、本地 loopback 每块 6 句；
 - core 首轮失败后最多两轮逐轮收窄 repair；

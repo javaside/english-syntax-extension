@@ -13,7 +13,7 @@
     "作为独立成分的名词短语后面紧跟的介词短语一律单独标 ATTRIBUTE，没有量词或部分结构的例外（`Four` + `of the biggest US technology companies`、`a lot` + `of context`、`No amount` + `of firewalls or patches`）。但介词短语或从句内部的介词短语不再拆，`without looking at any of the code` 保持一个 ADVERBIAL。",
     "非限定动词短语（动名词、不定式、分词）与它管辖的宾语同属一个成分（`avoiding blind adoption`、`building a software application`、`performing near the frontier of what AI can do`），不拆成两个同级宾语，也不让介词悬在成分末尾。作表语性补足成分的非限定短语同理：`is steered to produce text` 里 `to produce text` 整体标 COMPLEMENT（不定式 + 它的宾语），不得把 `text` 拆成同级 OBJECT。",
     "含 `It's` 这类「主语 + 系动词」缩写的句子不纳入：分词刻意不拆缩写，整个 `It's` 是一个 Token，主语与系动词无法分到两个成分里。`isn't` / `aren't` 这类「系动词 + 否定」是一个词，不受影响。",
-    "不成句的标题、列表项、名词短语、形容词短语或非限定动词短语没有并列时恰好一个 FRAGMENT_HEAD；有并列时**每个并列项各一个 FRAGMENT_HEAD**——同位语、破折号插入语或定语从句把并列项隔开时，连接它们的 and / or 单列 CONJUNCTION（`A DESIGN.md` + APPOSITIVE + CONJUNCTION `and` + `a FRAME.md`），未被隔断的并列短语仍保持一个成分（其中的 and 不标 CONJUNCTION）。并列的连接方式决定形态：只有 FANBOYS 连词连接的并列才逐项各一个 head；逗号、分号或 vs 连接的并列不逐项各标——短并列整体一个 FRAGMENT_HEAD（连接标点随之覆盖，`Same request, two agents`、`HyperFrames vs Remotion`、`10 TypeScript files, 1,037 lines` 均为一个 head），长并列（整块超过片段实词上限）首项作 FRAGMENT_HEAD、后续项标 APPOSITIVE；标点与 vs 永不标 CONJUNCTION。不得虚构 SUBJECT / PREDICATE / OBJECT 强套句型。唯一例外：完整定语从句（ATTRIBUTIVE_CLAUSE，从引导词或零关系词位置起、一直覆盖到从句自己的宾语与状语）可以紧跟在 FRAGMENT_HEAD 之后，如 `An API` + `that returns JSON responses`；其余分句级角色与其余四类从句仍不得与 FRAGMENT_HEAD 混用。单一 FRAGMENT_HEAD 可以合法覆盖没有可分离同层修饰语的多词片段。祈使句仍是完整分句，必须以 PREDICATE 起始并按需标出 OBJECT。`Building production-ready AI applications at scale.` 按名词性活动采用扁平核心：活动整体为 FRAGMENT_HEAD，修饰该活动的 `at scale` 为 ATTRIBUTE。",
+    "不成句的标题、列表项、名词短语、形容词短语或非限定动词短语没有并列时恰好一个 FRAGMENT_HEAD；有并列时**每个并列项各一个 FRAGMENT_HEAD**——同位语、破折号插入语或定语从句把并列项隔开时，连接它们的 and / or 单列 CONJUNCTION（`A DESIGN.md` + APPOSITIVE + CONJUNCTION `and` + `a FRAME.md`），未被隔断的并列短语仍保持一个成分（其中的 and 不标 CONJUNCTION）。并列的连接方式决定形态：只有 FANBOYS 连词连接的并列才逐项各一个 head；逗号、分号或 vs 连接的并列不逐项各标——短并列整体一个 FRAGMENT_HEAD（连接标点随之覆盖，`Same request, two agents`、`HyperFrames vs Remotion`、`10 TypeScript files, 1,037 lines` 均为一个 head），长并列（整块超过片段实词上限）首项作 FRAGMENT_HEAD、后续项标 APPOSITIVE；标点与 vs 永不标 CONJUNCTION。混合列表(`A; B; and C`)逐项判定:任何以列表标点(逗号/分号)与前一项分隔的项标 APPOSITIVE,即使末项前还有 and(该 and 仍单列 CONJUNCTION);只有紧邻前一个语义成分是 FANBOYS 连词的项才可再带 FRAGMENT_HEAD——与 validator 硬门逐字同口径。不得虚构 SUBJECT / PREDICATE / OBJECT 强套句型。唯一例外：完整定语从句（ATTRIBUTIVE_CLAUSE，从引导词或零关系词位置起、一直覆盖到从句自己的宾语与状语）可以紧跟在 FRAGMENT_HEAD 之后，如 `An API` + `that returns JSON responses`；其余分句级角色与其余四类从句仍不得与 FRAGMENT_HEAD 混用。单一 FRAGMENT_HEAD 可以合法覆盖没有可分离同层修饰语的多词片段。祈使句仍是完整分句，必须以 PREDICATE 起始并按需标出 OBJECT。`Building production-ready AI applications at scale.` 按名词性活动采用扁平核心：活动整体为 FRAGMENT_HEAD，修饰该活动的 `at scale` 为 ATTRIBUTE。",
     "名词中心词后的零关系词完整从句一律整块标 ATTRIBUTIVE_CLAUSE，不并入它修饰的名词短语：`The way we build software` = SUBJECT(`The way`) + ATTRIBUTIVE_CLAUSE(`we build software`)，与显式引导词从句（`that she recommended`）同一口径；但缩减定语（过去分词/介词短语，无主谓结构，如 `documents signed yesterday`、`time spent performing the invocation`）仍是 ATTRIBUTE——有没有自己的主语和限定谓语是两者的分界。冒号或破折号后若为完整独立分句（自带主语与限定谓语），按其内部同层角色展开，不标 APPOSITIVE；只有不可拆的说明性补语才用 APPOSITIVE / INDEPENDENT_ELEMENT。",
     "句末紧贴的书目引用(如 [61] / [5, 6])并入前一成分一起译,不单独成分;仅指真实书目引用——向量/数组/编号字面量(如 The vector is [1, 2]. 的 [1, 2])不适用,字符串层面无法高把握区分,故不设 validator 硬门,由 prompt 与黄金集约束。",
     "章节编号(如 IV.2 / II.2.2)不得单独作为 FRAGMENT_HEAD,须与标题中心词同属一个 FRAGMENT_HEAD;可分离的后置修饰(如 for the future)仍按后置修饰规则单列 ATTRIBUTE。",
@@ -3023,6 +3023,49 @@
         }
       ],
       "rationale": "对比表格单元里的数量名词短语列表,逗号连接、无连词。`1,037` 是单个数字 token(千分位逗号不切分);短并列整体一个 FRAGMENT_HEAD。2026-11-02 真机失败句,同 fragment-comma-conjuncts 的死锁形态。"
+    },
+    {
+      "id": "fragment-semicolon-list",
+      "text": "The same launch video made by an agent with Remotion and with HyperFrames, side by side; the same title card in both codes; and an honest read on which fits your project.",
+      "components": [
+        {
+          "startToken": 0,
+          "endToken": 3,
+          "role": "FRAGMENT_HEAD",
+          "translation": "同一段发布视频"
+        },
+        {
+          "startToken": 4,
+          "endToken": 12,
+          "role": "ATTRIBUTE",
+          "translation": "由智能体分别用 Remotion 和 HyperFrames 制作"
+        },
+        {
+          "startToken": 14,
+          "endToken": 16,
+          "role": "ATTRIBUTE",
+          "translation": "并排呈现"
+        },
+        {
+          "startToken": 18,
+          "endToken": 24,
+          "role": "APPOSITIVE",
+          "translation": "两份代码里相同的标题卡"
+        },
+        {
+          "startToken": 26,
+          "endToken": 26,
+          "role": "CONJUNCTION",
+          "translation": "以及"
+        },
+        {
+          "startToken": 27,
+          "endToken": 34,
+          "role": "APPOSITIVE",
+          "translation": "关于哪个更适合你项目的诚实评估"
+        }
+      ],
+      "rationale": "分号引导的混合列表(`A; B; and C`),2026-11-02/11-03 HyperFrames vs Remotion 页引导段的真机失败句,11-03 实测 6/6 试验全败(模型给 A/B/C 各标一个 FRAGMENT_HEAD,B 前面只有分号被硬门拒)。口径:首个分句的名词短语作唯一 FRAGMENT_HEAD,分词后置修饰与其并列 PP(`made by an agent with Remotion and with HyperFrames`)与 `side by side` 标 ATTRIBUTE;两个分号隔开的列表项标 APPOSITIVE——末项前的 and 单列 CONJUNCTION,但末项本身因前面是分号(列表标点)仍标 APPOSITIVE。分号与句末标点不覆盖。"
     }
   ]
 }
