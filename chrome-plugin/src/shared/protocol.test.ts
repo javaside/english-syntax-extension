@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { GrammarRole } from "./grammar";
 import { CORE_SCHEMA_VERSION } from "./versions";
 import {
+  isChatStreamPush,
   isCoreStreamPush,
   isRequestMessage,
   isSessionComplete,
@@ -329,6 +330,53 @@ describe("isCoreStreamPush", () => {
   });
 });
 
+describe("isChatStreamPush", () => {
+  const push = {
+    version: 1,
+    type: "CHAT_STREAM",
+    documentId: "document-1",
+    conversationId: "document-1:chat:1",
+    text: "这句的主语是 Learners。",
+  };
+
+  it("accepts a well-formed chat stream push", () => {
+    expect(isChatStreamPush(push)).toBe(true);
+  });
+
+  it("rejects a version it does not speak", () => {
+    expect(isChatStreamPush({ ...push, version: 2 })).toBe(false);
+  });
+
+  it("rejects a push missing conversationId", () => {
+    expect(isChatStreamPush({ ...push, conversationId: " " })).toBe(false);
+    expect(
+      isChatStreamPush({
+        version: 1,
+        type: "CHAT_STREAM",
+        documentId: "document-1",
+        text: "缺 conversationId 的推送",
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects non-string text", () => {
+    expect(isChatStreamPush({ ...push, text: 42 })).toBe(false);
+    expect(
+      isChatStreamPush({
+        version: 1,
+        type: "CHAT_STREAM",
+        documentId: "document-1",
+        conversationId: "document-1:chat:1",
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects anything that is not this message", () => {
+    expect(isChatStreamPush({ ...push, type: "CHAT_RESULT" })).toBe(false);
+    expect(isChatStreamPush(null)).toBe(false);
+  });
+});
+
 /**
  * discovered 含屏外尚未触发的句子(它们要滚动到可见才解析)。原判定要求所有
  * discovered 都达终态,于是长页面永远"未完成":主按钮一直停在「解析中…」,
@@ -424,5 +472,74 @@ describe("diagnosis 消息守卫", () => {
         diagnosis: { ...baseDiagnosis, gates: "x" },
       }),
     ).toBe(false);
+  });
+});
+
+describe("chat 追问消息守卫", () => {
+  const chatAsk = {
+    ...page,
+    type: "CHAT_ASK",
+    conversationId: "document-1:chat:1",
+    context: { kind: "sentence" as const, sentence, core },
+    history: [
+      { role: "user" as const, content: "为什么这么译？" },
+      { role: "assistant" as const, content: "因为主语是复数。" },
+    ],
+    question: "这里的 side by side 修饰谁？",
+  };
+
+  it("接受合法 CHAT_ASK（首轮 history 为空数组也合法）", () => {
+    expect(isRequestMessage(chatAsk)).toBe(true);
+    expect(isRequestMessage({ ...chatAsk, history: [] })).toBe(true);
+  });
+
+  it("拒绝缺 question 或空白 question（长度上限留给 SW 侧兜底）", () => {
+    expect(
+      isRequestMessage({
+        version: 1,
+        requestId: "request-1",
+        tabId: 7,
+        documentId: "document-1",
+        type: "CHAT_ASK",
+        conversationId: "document-1:chat:1",
+        context: chatAsk.context,
+        history: chatAsk.history,
+      }),
+    ).toBe(false);
+    expect(isRequestMessage({ ...chatAsk, question: "   " })).toBe(false);
+  });
+
+  it("拒绝 history 非数组或成员形状非法", () => {
+    expect(isRequestMessage({ ...chatAsk, history: "not-an-array" })).toBe(false);
+    expect(isRequestMessage({ ...chatAsk, history: [{ role: "system", content: "x" }] })).toBe(
+      false,
+    );
+    expect(isRequestMessage({ ...chatAsk, history: [{ role: "user", content: "  " }] })).toBe(
+      false,
+    );
+    expect(
+      isRequestMessage({ ...chatAsk, history: [{ role: "user", content: "为什么？" }, "turn"] }),
+    ).toBe(false);
+  });
+
+  it("拒绝 context 形状非法（kind / sentence / core 逐项把关）", () => {
+    expect(isRequestMessage({ ...chatAsk, context: { kind: "paragraph", sentence, core } })).toBe(
+      false,
+    );
+    expect(isRequestMessage({ ...chatAsk, context: { kind: "sentence" } })).toBe(false);
+    expect(
+      isRequestMessage({ ...chatAsk, context: { kind: "sentence", core, sentence: null } }),
+    ).toBe(false);
+    expect(
+      isRequestMessage({
+        ...chatAsk,
+        context: { kind: "sentence", sentence, core: { ...core, components: "x" } },
+      }),
+    ).toBe(false);
+  });
+
+  it("拒绝空白 conversationId 与多余字段", () => {
+    expect(isRequestMessage({ ...chatAsk, conversationId: " " })).toBe(false);
+    expect(isRequestMessage({ ...chatAsk, extra: true })).toBe(false);
   });
 });

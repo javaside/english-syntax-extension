@@ -19,7 +19,7 @@
 
 共同字段:`version`、`requestId`;带页面上下文的另有 `tabId`、`documentId`。
 
-共 18 条。「UI 门」「文档豁免」两列的含义见下一节。
+共 19 条。「UI 门」「文档豁免」两列的含义见下一节。
 
 | type                        | 发送方               | 额外字段                                    | SW 侧行为                                                | UI 门 | 文档豁免 |
 | --------------------------- | -------------------- | ------------------------------------------- | -------------------------------------------------------- | ----- | -------- |
@@ -38,6 +38,7 @@
 | `PARSE_HOVERED_BLOCK`       | 受信任 UI;或 SW 自发 | —                                           | 转发页面:解析鼠标悬停的块                                | ✅    | ❌       |
 | `DIAGNOSE_BLOCK`            | SW 自发(右键菜单)    | `selectionText?`                            | 菜单监听器经 `sendPageCommand` 下发;`route()` 里穷尽性拒绝 | ❌    | ❌       |
 | `EXPLAIN_DIAGNOSIS`         | 页面(有 tabId)       | `diagnosis`                                 | 诊断模型解释请求;回 `DIAGNOSIS_RESULT`                   | ❌    | ❌       |
+| `CHAT_ASK`                  | content              | `conversationId`、`context`、`history[]`、`question` | 追问对话一轮提问:无缓存、无修复轮,流式推 `CHAT_STREAM`,回 `CHAT_RESULT` | ❌ | ❌ |
 | `TEST_PROFILE`              | options              | `profileId`                                 | 探测端点能力;**成功即解除鉴权暂停**                      | —     | —        |
 | `GET_CACHE_STATS`           | options              | —                                           | 缓存统计                                                 | —     | —        |
 | `CLEAR_CACHE`               | options              | —                                           | 清空三个 store                                           | —     | —        |
@@ -46,7 +47,7 @@
 
 三个 `PARSE_*` 有两条入口:SW 自己的右键菜单 / 快捷键监听器用 `sendPageCommand()` **直接** `tabs.sendMessage` 给页面(不经 `route()`);而 `route()` 里的同名分支是留给受信任 UI 调用的。`DIAGNOSE_BLOCK` 不同:合法下发方只有 SW 自己的「诊断」菜单监听器(同样走 `sendPageCommand`,**不写 `activeTabs`**,但把无账 tab 的诊断 `documentId` 记在模块级 `diagnosisDocumentIds` 里按 tab 复用——每次现生成新 id 会让 content 侧按 id 再建一个 controller + watchdog 端口且永不回收;有账时优先账上 id 并清掉记忆),`route()` 里的 case 仅为满足 `assertNever` 穷尽性——页面侧伪造的入站一律回 `MALFORMED_MESSAGE`。
 
-`DIAGNOSE_BLOCK` 落到**页面路由**(`content-script.ts`)后是一条 fire-and-forget 分支:立即回 `ACK`(页面命令只承诺"已受理"),诊断编排异步执行——本地证据先上 `DiagnosisPanel`,再经 `EXPLAIN_DIAGNOSIS` 请求模型解释。两个配套的 content 侧守卫:①页面路由开头的入站拒绝列表(`ANALYZE_CORE` / `ANALYZE_DETAIL` / `REANALYZE_WITH_FEEDBACK` / `EXPLAIN_DIAGNOSIS`)把页面伪造的 `EXPLAIN_DIAGNOSIS` 拒成 `MALFORMED_MESSAGE`——这条只有 content 自己会发;②`isRuntimeResponse()` 有 `DIAGNOSIS_RESULT` case(`isBlockDiagnosis` 查 `diagnosis` 回显,`model` 三字段 / `modelError` / `profile.model` 逐项把关),这是三层校验的第 3 层。`EXPLAIN_DIAGNOSIS` **不豁免②**:content 用 `DIAGNOSE_BLOCK` 命令里 SW 已解析出的真实 `documentId` 发请求,凭与账上一致**合规通过**;文档换代后旧 controller 攥着旧 id 再发,照旧被判 `REQUEST_CANCELLED`——这正是想要的。
+`DIAGNOSE_BLOCK` 落到**页面路由**(`content-script.ts`)后是一条 fire-and-forget 分支:立即回 `ACK`(页面命令只承诺"已受理"),诊断编排异步执行——本地证据先上 `DiagnosisPanel`,再经 `EXPLAIN_DIAGNOSIS` 请求模型解释。两个配套的 content 侧守卫:①页面路由开头的入站拒绝列表(`ANALYZE_CORE` / `ANALYZE_DETAIL` / `REANALYZE_WITH_FEEDBACK` / `EXPLAIN_DIAGNOSIS` / `CHAT_ASK`)把页面伪造的 `EXPLAIN_DIAGNOSIS` / `CHAT_ASK` 拒成 `MALFORMED_MESSAGE`——这两条只有 content 自己会发;②`isRuntimeResponse()` 有 `DIAGNOSIS_RESULT` case(`isBlockDiagnosis` 查 `diagnosis` 回显,`model` 三字段 / `modelError` / `profile.model` 逐项把关),这是三层校验的第 3 层。`EXPLAIN_DIAGNOSIS` **不豁免②**:content 用 `DIAGNOSE_BLOCK` 命令里 SW 已解析出的真实 `documentId` 发请求,凭与账上一致**合规通过**;文档换代后旧 controller 攥着旧 id 再发,照旧被判 `REQUEST_CANCELLED`——这正是想要的。
 
 > **注意 `STOP_SESSION` 的一条死路径。** `ChromeRuntimeTransport.cancelDocument()` 也会从 content 发这条消息,但该分支要求受信任 UI,所以它必然被回成 `UNSUPPORTED_PAGE`(调用处 fire-and-forget 吞掉了响应)。真正的取消依赖端口断开与 `tabs.onRemoved` / `onUpdated` 触发的 `cancelTab()`。
 
@@ -94,7 +95,8 @@ trustedPageControl = trustedExtensionUi && type ∈ {START_SESSION, PAUSE_SESSIO
 | `CACHE_STATS`             | `stats`                                                              | 缓存统计                                        |
 | `PROFILE_TEST_RESULT`     | `profileId`、`success`、`latencyMs?`、`jsonSchemaSupport?`、`error?` | 测试连接                                        |
 | `DIAGNOSIS_RESULT`        | `diagnosis`、`model?`、`modelError?`、`profile?`                     | 诊断解释请求的回包(诊断回显 + 模型解释或失败)   |
-| `ERROR`                   | `error: ExtensionError`                                              | 任何失败                                        |
+| `CHAT_RESULT`              | `conversationId`、`answer`                                           | 追问对话的完整回答(缓冲兜底;流式已渲染时用于校平) |
+| `ERROR`                    | `error: ExtensionError`                                              | 任何失败                                        |
 
 `CORE_RESULT` 上的 **`error` 是批级的**:鉴权失败或 profile 被暂停时,缓存命中照常返回(键与模型无关),只有未命中句由 content 按该错误标失败——换 / 修模型前译文不消失。
 
@@ -104,14 +106,15 @@ trustedPageControl = trustedExtensionUi && type ∈ {START_SESSION, PAUSE_SESSIO
 
 ## 4. 端口推送(不是响应)
 
-流式分片走 content 已建立的 `syntax-learning:<documentId>` 端口,由 SW `postMessage`。**它们不经 `isRuntimeResponse` 的 switch**,content 侧用 `isCoreStreamPush` / `isDetailStreamPush` 单独把关。
+流式分片走 content 已建立的 `syntax-learning:<documentId>` 端口,由 SW `postMessage`。**它们不经 `isRuntimeResponse` 的 switch**,content 侧用 `isCoreStreamPush` / `isDetailStreamPush` / `isChatStreamPush` 单独把关。
 
 ```ts
 CoreStreamPush   = { version, type: "CORE_STREAM",   documentId, sentenceId, components[] }
 DetailStreamPush = { version, type: "DETAIL_STREAM", documentId, sentenceId, focus, structures[] }
+ChatStreamPush   = { version, type: "CHAT_STREAM",   documentId, conversationId, text }
 ```
 
-两者承载的都是**未经整句校验**的模型输出:只用于渲染,**不写缓存、不改相位**。
+前两者承载的都是**未经整句校验**的模型输出:只用于渲染,**不写缓存、不改相位**。`ChatStreamPush` 是追问对话回答的同类展示态文本,同样不写缓存;`text` 是「截至目前的完整回答」而非增量(调度器对可重试错误会静默重跑,追加式 delta 重试后会拼成乱序文本),面板按 `conversationId` 对账后整段重画,`CHAT_RESULT` 到达时以缓冲答案校平收尾。
 
 ## 5. `SessionStatus`
 
