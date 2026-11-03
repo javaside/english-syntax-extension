@@ -14,12 +14,12 @@ import {
   MESSAGE_VERSION,
 } from "./versions";
 
-it("pins the shared analysis versions after the non-FANBOYS-coordination fix", () => {
-  // core 19 在 18 的并列片段口径上补「无 FANBOYS 连词的并列(逗号/分号/vs)不逐项各标
-  // FRAGMENT_HEAD:短并列合并成一个 head,长并列首项 head + 后续项 APPOSITIVE」,并把
-  // 修复轮封死合法出路的旧指令改为按连接方式分流;旧的 core 缓存按新版本键作废;
-  // detail 提示词未动,保持 10。
-  expect(CORE_PROMPT_VERSION).toBe(19);
+it("pins the shared analysis versions after the mixed-coordination fix", () => {
+  // core 20 在 19 的非 FANBOYS 并列口径上把判定改为逐项——混合列表(`A; B; and C`)
+  // 里分号隔开的中间项一律 APPOSITIVE,即使末项前有 and;修复轮指令同步改逐项
+  // 判定(额外 head 只看紧邻前一个语义成分是不是 FANBOYS 连词)。旧的 core 缓存按
+  // 新版本键作废;detail 提示词未动,保持 10。
+  expect(CORE_PROMPT_VERSION).toBe(20);
   expect(DETAIL_PROMPT_VERSION).toBe(10);
   expect(CORE_SCHEMA_VERSION).toBe(3);
 });

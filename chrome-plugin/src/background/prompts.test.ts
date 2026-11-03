@@ -225,7 +225,7 @@ describe("model-facing sentence payload", () => {
       );
     }
     expect(repair).toContain(
-      "keep one FRAGMENT_HEAD per conjunct and tag that conjunction as its own CONJUNCTION component",
+      "keep that head only when the component directly in front of it is a separate FANBOYS CONJUNCTION component",
     );
     expect(repair).toContain("never leave a real conjunction inside a FRAGMENT_HEAD");
   });
@@ -250,10 +250,16 @@ describe("model-facing sentence payload", () => {
       expect(prompt).toContain('punctuation, semicolons, and "vs" are never tagged CONJUNCTION');
     }
     expect(repair).toContain(
-      'with only punctuation or a connector like "vs" joining them, merge the conjuncts into ONE FRAGMENT_HEAD',
+      "judge EVERY extra FRAGMENT_HEAD by the semantic component directly in front of it",
+    );
+    // 2026-11-03 真机:混合列表(`A; B; and C`)里末项前的 and 让模型套 FANBOYS
+    // 分支,分号隔开的中间项仍多标 head,三轮输出逐字相同(该句 6/6 试验全败)——
+    // core 教「列表标点分隔的项一律 APPOSITIVE,即使末项前有 and」,修复轮逐项判定。
+    expect(core).toContain(
+      'every later conjunct separated from the previous by list punctuation — even one right before a final "and" — becomes APPOSITIVE',
     );
     expect(repair).toContain(
-      "keep the first as FRAGMENT_HEAD and retag the later conjuncts APPOSITIVE",
+      'including an item of a list that merely ends with "; and" — retag it APPOSITIVE',
     );
   });
 

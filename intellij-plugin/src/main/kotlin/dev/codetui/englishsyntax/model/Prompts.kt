@@ -90,7 +90,7 @@ private const val COMPLETENESS_FIRST_RULE =
     "Conjuncts joined without a coordinating conjunction never get one FRAGMENT_HEAD each: " +
     "a short comma, semicolon, or \"vs\" coordination is ONE FRAGMENT_HEAD including the joining punctuation " +
     "(\"Same request, two agents\" and \"HyperFrames vs Remotion\" are each ONE FRAGMENT_HEAD); " +
-    "in a long one the first conjunct stays FRAGMENT_HEAD and later conjuncts become APPOSITIVE; " +
+    "in a long one the first conjunct stays FRAGMENT_HEAD and every later conjunct separated from the previous by list punctuation — even one right before a final \"and\" — becomes APPOSITIVE; " +
     "punctuation, semicolons, and \"vs\" are never tagged CONJUNCTION. " +
     "A noun-phrase fragment may contain one embedded relative clause: " +
     "\"An API that returns JSON responses\" is FRAGMENT_HEAD \"An API\" plus ATTRIBUTIVE_CLAUSE \"that returns JSON responses\", and the finite verb inside that embedded clause does not turn the whole input into a main clause. " +
@@ -266,14 +266,11 @@ fun buildRepairPrompt(
     "Each error group below carries one sentenceId: apply its errors to that sentence only, never to another sentence in the same payload. A group's components[k] refers to entry k of that sentence's components array in the Invalid JSON below.",
     "Ranges, roles and translations may be corrected, but sentence IDs and Tokens must not change.",
     "For each PREDICATE error caused by a determiner inside the component, split that component immediately before the determiner and emit the resulting noun phrase as its own OBJECT, PREDICATIVE, or COMPLEMENT component.",
-    // 版本 19:按「并列项靠什么连接」分流。有 FANBOYS 连词 → 维持 v18 的逐项 head +
-    // 连词单列;只有标点或 vs → 合并成一个 head,或长并列首项 head + 后续项 APPOSITIVE。
-    // 旧版无条件「never retag a coordinated conjunct as APPOSITIVE or ATTRIBUTE」在无
-    // 连词的并列里把 validator 的两条合法出路全封死,模型只能虚构 CONJUNCTION,两轮
-    // 修复必然失败(与上方 COMPLETENESS_FIRST_RULE 版本 19 注释同一真机案例)。
-    "For each FRAGMENT_HEAD error caused by more than one fragment head, look at what joins the conjuncts: " +
-    "with a coordinating conjunction (for, and, nor, but, or, yet, so) between them, keep one FRAGMENT_HEAD per conjunct and tag that conjunction as its own CONJUNCTION component directly in front of each conjunct after the first; " +
-    "with only punctuation or a connector like \"vs\" joining them, merge the conjuncts into ONE FRAGMENT_HEAD, or keep the first as FRAGMENT_HEAD and retag the later conjuncts APPOSITIVE when merging would wrap a whole long fragment into one component; " +
+    // 版本 20:逐项判定替换 v19 的按整表分流——混合列表(`A; B; and C`)里模型看到
+    // 末项前的 and 就维持逐项 head,分号隔开的中间项永远非法;判定口径与 validator
+    // 硬门逐字同源(额外 head 只看紧邻前一个语义成分是不是 FANBOYS 连词)。
+    "For each FRAGMENT_HEAD error caused by more than one fragment head, judge EVERY extra FRAGMENT_HEAD by the semantic component directly in front of it: keep that head only when the component directly in front of it is a separate FANBOYS CONJUNCTION component (for, and, nor, but, or, yet, so); " +
+    "when only punctuation (comma, semicolon, dash) or a connector like \"vs\" separates it from the previous conjunct — including an item of a list that merely ends with \"; and\" — retag it APPOSITIVE, or merge it into the previous head when the whole coordination is short enough to stay one fragment; " +
     "never tag punctuation or \"vs\" as CONJUNCTION and never leave a real conjunction inside a FRAGMENT_HEAD.",
     "Check the repaired JSON against every listed validation error before returning it; do not return until each listed error has been addressed.",
     "Return the repaired JSON only, without a Markdown fence or prose.",

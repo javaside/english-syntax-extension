@@ -48,6 +48,10 @@ describe("core gold annotations", () => {
     expect(conventions).toMatch(/只有 FANBOYS 连词连接的并列才逐项各一个 head/);
     expect(conventions).toMatch(/逗号、分号或 vs 连接的并列不逐项各标/);
     expect(conventions).toMatch(/标点与 vs 永不标 CONJUNCTION/);
+    // 2026-11-03(core 20):混合列表逐项判定——列表标点分隔的项一律 APPOSITIVE,
+    // 即使末项前还有 and(该 and 仍单列 CONJUNCTION)。
+    expect(conventions).toMatch(/混合列表.*逐项判定/);
+    expect(conventions).toMatch(/即使末项前还有 and.*仍单列 CONJUNCTION/);
     expect(conventions).toMatch(/不得.*SUBJECT.*PREDICATE.*OBJECT/);
     expect(conventions).toMatch(/祈使句.*PREDICATE/);
     expect(conventions).toMatch(/总体.*不覆盖标点/);
@@ -124,6 +128,19 @@ describe("core gold annotations", () => {
     ],
     ["fragment-comma-conjuncts", [{ startToken: 0, endToken: 4, role: GrammarRole.FRAGMENT_HEAD }]],
     ["fragment-comma-quantity", [{ startToken: 0, endToken: 5, role: GrammarRole.FRAGMENT_HEAD }]],
+    [
+      // 2026-11-03(core 20):混合列表(`A; B; and C`)——列表标点分隔的项一律
+      // APPOSITIVE,末项前的 and 单列 CONJUNCTION;分号/句末标点不覆盖。
+      "fragment-semicolon-list",
+      [
+        { startToken: 0, endToken: 3, role: GrammarRole.FRAGMENT_HEAD },
+        { startToken: 4, endToken: 12, role: GrammarRole.ATTRIBUTE },
+        { startToken: 14, endToken: 16, role: GrammarRole.ATTRIBUTE },
+        { startToken: 18, endToken: 24, role: GrammarRole.APPOSITIVE },
+        { startToken: 26, endToken: 26, role: GrammarRole.CONJUNCTION },
+        { startToken: 27, endToken: 34, role: GrammarRole.APPOSITIVE },
+      ],
+    ],
   ] as const)("keeps the human-reviewed component contract for %s", (id, components) => {
     expect(
       fixture.sentences
