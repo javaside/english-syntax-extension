@@ -93,6 +93,12 @@ content 入站拒绝列表加 `CHAT_ASK` ｜ 端口推送守卫 `isChatStreamPus
 - 请求 `stream: true`，**不带 response_format**（自由文本）；SSE delta 逐段回调并累积，
   返回完整文本。
 - 静默超时与读循环盯 abort 的语义与 `streamWithExtractor` 完全同款（每片重置 `timeoutMs`）。
+- **流式分支必须自带 `reasoning_effort` 降级探针**：现有 400/422 + `/reasoning[_ ]?effort/i`
+  → `UnsupportedReasoningControlError` 的嗅探只在缓冲路径 `request()` 里，`streamRequest`
+  没有——照抄会把 reasoning 拒绝映射成不可重试的 `NETWORK_ERROR`，流式默认开启的 chat
+  在 OpenAI 官方类端点上永久失败。`streamText` 的重试循环按 `streamWithExtractor` 同款
+  捕获该错误 → `persistReasoningControl("unsupported")` → 去掉字段重发（仓库约定
+  「缓冲与流式两条路径都要接」在 chat 上才算闭合）。
 - `ChatMessage.role` 扩为 `"system" | "user" | "assistant"`。
 
 ### AnalysisService（analysis-service.ts）
@@ -100,7 +106,10 @@ content 入站拒绝列表加 `CHAT_ASK` ｜ 端口推送守卫 `isChatStreamPus
 新增 `chat(input: ChatInput, signal): Promise<{ answer: string }>`：
 - prompt 构造（`prompts.ts` 新增 `buildChatPrompt`，**首行为固定英文指令行**
   `"Discuss the verified translation analysis with the reader."`——
-  假服务器 `detectKind` 按首行前缀识别请求类型，E2E 依赖此约定）：
+  假服务器 `detectKind` 按首行前缀识别请求类型，E2E 依赖此约定。**该首行是
+  `buildChatPrompt` 函数内字面量，绝不进 `PROMPT_FIRST_LINES` 表**——那张表被
+  `contracts.json` + Kotlin 双侧钉死，动了就破坏 Chrome-only 范围并触发 gradle 门禁
+  （`buildDiagnosisPrompt` 同款先例））：
   1. 系统指令：用中文回答；基于给定的已核实分析讲解，**不要重新划分成分**；
      分析若与问题冲突，以分析为准并说明；回答简洁分段。
   2. 上下文：`serializeSentence(sentence)` + `serialize(core)`（紧凑序列化，沿用既有 `serialize`）。
@@ -123,8 +132,12 @@ content 入站拒绝列表加 `CHAT_ASK` ｜ 端口推送守卫 `isChatStreamPus
 - 文本经 `redactProfileSecrets` 以防模型回显 profile 泄漏物（与 CORE_STREAM 同款）。
 - **调度命名空间用 `${documentId}:chat` 后缀**（diagnosis 的 `:diagnosis` 先例）：
   chat 请求的 abort 绝不连坐取消该页正在跑的 core/detail；反之亦然。
-  面板关闭/会话停止**不主动取消**在飞回答——上限即 `timeoutMs`，端口失效后
-  `postMessage` 抛错自动丢通道（既有行为）。
+  **该命名空间同时带来一个必须补的回收点**：`cancelDocument` 是精确匹配，现有的
+  STOP_SESSION / 标签页关闭 / 端口 `onDisconnect` 取消链全都够不到 `${documentId}:chat`，
+  而流式是静默超时（总时长不设限），页面关走后回答会无限期占住全局并发槽
+  （仅 4 个）。因此 SW 的端口 `onDisconnect` 与 `cancelTab` 处必须**追加**
+  `scheduler.cancelDocument(`${documentId}:chat`)`。面板收起/展开不触发取消——
+  只有消费方真正消失（端口断开/标签页关）才回收。
 - `cacheKey` 必须按轮次唯一（`conversationId + ":" + 本轮问题哈希`）：调度器按
   `documentId\0cacheKey` 合并在飞请求，同会话第二问若共用 key 会直接拿到第一问的
   在飞 promise（串答案 + fetch 计数错乱）。
