@@ -21,7 +21,7 @@
 - SW 端口 `onDisconnect` 与 `cancelTab` 处**追加** `scheduler.cancelDocument(`${documentId}:chat`)`（槽位回收；`cancelDocument` 精确匹配，既有取消链够不到后缀命名空间）。
 - 流式条件：`documentPorts.has(documentId) && getStreamRendering()` 且 adapter 有文本流式方法；否则缓冲路径整段随 `CHAT_RESULT` 下发。**两条路径都接 `reasoning_effort: "none"` 降级**（流式分支的 400/422 reasoning 嗅探要新加，`streamRequest` 现在没有）。
 - 入站校验失败（question trim 后空 / >2000 / history 非法）→ ERROR `MALFORMED_MESSAGE`；无 profile → ERROR `CONFIG_MISSING`。不新增错误码。
-- 历史裁剪：最近 6 轮且总字符 ≤ 8000（面板构造 history 时丢最旧轮）。
+- 历史裁剪：**`ChatTurn` 项 ≤ 6（即最近 3 组问答）**且总字符 ≤ 8000，从最旧项丢起（面板构造 history 时裁；SW 校验同单位兜底）。
 - 文本过 `redactProfileSecrets`。
 - 门禁（chrome-plugin 内）：`npm test && npx playwright test && npm run lint && npm run format:check && npm run build`；lint 基线**恰好 1 个错误**（options.test.ts 的 no-unnecessary-type-assertion，不许修）。不动 shared-fixtures/intellij → 无需 gradle。
 
@@ -61,7 +61,7 @@ export function isChatStreamPush(value: unknown): value is ChatStreamPush
 
 - [ ] **Step 1: 写失败测试** — protocol.test.ts：`isChatStreamPush` 合法形状通过、缺 `conversationId`/`text` 非串/`version` 错误被拒；`isRequestMessage` 接受合法 `CHAT_ASK`、拒绝缺 `question`/`history` 非数组。content-script-diagnosis.test.ts：`isRuntimeResponse` 接受合法 `CHAT_RESULT`、拒绝 `answer` 非串/`conversationId` 缺失；伪造 `CHAT_ASK` 入站被拒（`route()` 返回 `MALFORMED_MESSAGE`）。
 - [ ] **Step 2: 跑测试确认失败** — `cd <worktree>/chrome-plugin && npx vitest run src/shared/protocol.test.ts src/content/content-script-diagnosis.test.ts`，预期新断言 FAIL。
-- [ ] **Step 3: 实现** — protocol.ts 加类型与守卫（守卫风格照抄 `isCoreStreamPush`/`isDetailStreamPush`：`hasOnlyKeys` + 逐字段判型；`history` 逐项校验 role 枚举与 content 非空串、上限 6 项×8000 字符不在此判——SW 侧兜底判长度，守卫只判形状）。content-script：`isRuntimeResponse` 加 case；入站拒绝列表加 `"CHAT_ASK"`；端口分发链加 `isChatStreamPush` → 调 `controller.onChatStreamPush`（Task 6 才有该方法——本任务先在 `RoutedController` 接口加可选方法 `onChatStreamPush?(push: ChatStreamPush): void`，转发处可选调用，避免编译断链）。
+- [ ] **Step 3: 实现** — protocol.ts 加类型与守卫（守卫风格照抄 `isCoreStreamPush`/`isDetailStreamPush`：`hasOnlyKeys` + 逐字段判型；`history` 逐项校验 role 枚举与 content 非空串；长度上限不在此判——SW 侧兜底判，守卫只判形状）。content-script：`isRuntimeResponse` 加 case；入站拒绝列表加 `"CHAT_ASK"`；流式分发在 `ChromeRuntimeTransport.connectWatchdog` 的推送分派链（`isCoreStreamPush(message) ? … : isDetailStreamPush(message) ? …`，content-script.ts:356-364）加 `isChatStreamPush` 分支，并把本类自己的 `streamHandlers`/`onStream` 类型 widen 成 `CoreStreamPush | DetailStreamPush | ChatStreamPush`（对更窄的 `RuntimeTransport` 接口靠方法双变兼容，**不动 session-controller 的接口**——那是 Task 6 的文件）。同时在 `docs/architecture/protocol.md` 消息表加三行（`CHAT_ASK`/`CHAT_RESULT`/`CHAT_STREAM` 一句话各一）——architecture-docs 测试按 protocol.ts 源码抽 `type:` 全集对表覆盖，不加这三行本任务的 `npm test` 全量必红。
 - [ ] **Step 4: 跑测试确认通过** — 同 Step 2 命令，预期 PASS；再跑 `npm test` 全量确认无回归。
 - [ ] **Step 5: 提交** — `git add -A && git commit -m "协议层新增追问对话三条消息与 content 守卫"`
 
@@ -79,8 +79,11 @@ completeText(profile: ModelProfile, messages: readonly ChatMessage[], signal: Ab
 completeTextStreaming(profile: ModelProfile, messages: readonly ChatMessage[], signal: AbortSignal,
   onDelta: (chunk: string) => void): Promise<string>
 ```
-- 两条路径都带 `reasoningOverride(profile)`；`completeTextStreaming` 走 `streamRequest`（`stream: true`、无 response_format、SSE delta 逐段回调并累积为完整文本返回）；重试循环照 `streamWithExtractor`：`UnsupportedResponseFormatError` 不适用（无 schema），但 **`UnsupportedReasoningControlError` 必须可从流式分支抛出**——在 `streamRequest` 的 `!response.ok` 分支加：`(400|422) && /reasoning[_ ]?effort/i.test(text) → throw new UnsupportedReasoningControlError()`（照抄缓冲 `request()` 的既有嗅探；这是新增，别只引用 `streamWithExtractor`）。
-- [ ] **Step 1: 写失败测试** — ① 流式：mock fetch 返回 SSE 文本 delta 三片 → `completeTextStreaming` 逐片回调且返回值 === 拼接全文；② 流式 reasoning 降级：首响应 400（body 含 `reasoning_effort`）→ `persistReasoningControl` 收到 `"unsupported"`，重发请求体不含 `reasoning_effort` 且成功；③ 缓冲：`completeText` 返回全文且请求体带 `reasoning_effort:"none"`；④ assistant 角色可进 messages。
+- **不能直接复用 `streamRequest`/`request()`**：两者都以 `JsonSchemaSpec` 为必填参数且结尾 `parseModelContent`（JSON 解析）——自由文本会被判 `INVALID_MODEL_OUTPUT`。做法：把 SSE 读循环抽成共享私有方法（或给 `streamRequest` 加文本模式参数），文本模式返回原始累积字符串、不做 JSON 解析；`completeText` 是同体的非流式版本（`stream:false`，同样返回原始文本）。
+- 两条路径都带 `reasoningOverride(profile)`。
+- `completeTextStreaming` 的**前置短路**：`profile.streamSupport === "unsupported"` → 直接 `this.completeText(...)`（照 `streamWithExtractor` 开头的同款门）。
+- **`UnsupportedReasoningControlError` 必须能从流式分支抛出**——文本流式的 `!response.ok` 分支加：`(400|422) && /reasoning[_ ]?effort/i.test(text) → throw new UnsupportedReasoningControlError()`（照抄缓冲 `request()` 的既有嗅探；`streamRequest` 没有它，这是新增）。重试循环（照 `streamWithExtractor` 结构）捕获：① `UnsupportedReasoningControlError` → `persistReasoningControl("unsupported")` → 去掉字段重发；② `UnsupportedStreamError` → `persistStreamSupport("unsupported")` → **回落 `this.completeText`**（不是 `request()`——后者也要 JSON）。
+- [ ] **Step 1: 写失败测试** — ① 流式：mock fetch 返回 SSE 文本 delta 三片 → `completeTextStreaming` 逐片回调且返回值 === 拼接全文；② 流式 reasoning 降级：首响应 400（body 含 `reasoning_effort`）→ `persistReasoningControl` 收到 `"unsupported"`，重发请求体不含 `reasoning_effort` 且成功；③ **streamSupport=unsupported 前置短路**：直接走缓冲且不发 `stream:true`，`persistStreamSupport` 未被再调；④ 流式被端点拒（400 含 "stream"）→ `persistStreamSupport("unsupported")` + 回落 `completeText` 成功；⑤ 缓冲：`completeText` 返回全文且请求体带 `reasoning_effort:"none"`；⑥ assistant 角色可进 messages。
 - [ ] **Step 2: 跑测试确认失败** — `npx vitest run src/background/openai-compatible-adapter.test.ts`
 - [ ] **Step 3: 实现**（照上述接口与嗅探要求）。
 - [ ] **Step 4: 跑测试确认通过** — 同上，另跑 `npm test` 确认无回归。
@@ -118,12 +121,13 @@ export interface ChatOutcome { answer: string }
 ### Task 4: SW 路由 CHAT_ASK 与槽位回收
 
 **Files:**
-- Modify: `chrome-plugin/src/background/service-worker.ts`（`case "ANALYZE_DETAIL"` 之后加 `case "CHAT_ASK"`；端口 `onDisconnect` 处理器与 `cancelTab` 处各追加一行取消）
-- Test: `chrome-plugin/src/background/service-worker.test.ts`
+- Modify: `chrome-plugin/src/background/service-worker.ts`（`case "ANALYZE_DETAIL"` 之后加 `case "CHAT_ASK"`；端口 `onDisconnect` 处理器与 `cancelTab` 处各追加一行取消；**`defaultDependencies()` 的 AnalysisService 代理对象字面量（约 1228-1260 行）追加 `chat` 惰性代理方法**——Task 3 给接口加了 `chat`，不加这条 `tsc`（build 门禁）报 TS2739，而 vitest 不查类型、红灯会漏到 Task 8）
+- Test: `chrome-plugin/src/background/service-worker.test.ts`（既有 `const analysisService: AnalysisService = {...}` 桩（约 130 行）补 `chat: vi.fn()`——同理，不补则桩不满足接口）
 
 **Interfaces（Task 6 依赖 SW 行为契约，不依赖代码符号）:**
 - 合法 `CHAT_ASK` → `analysisService.chat`（`documentId` 原样、service 内部加后缀）→ 流式条件满足时经 `streamSink` 同款闭包按端口推 `CHAT_STREAM`（`text` 累积全量、`redactProfileSecrets`）→ 完成回 `{type:"CHAT_RESULT", conversationId, answer}`（answer 同样过 redact）。
-- question trim 后空 / >2000 / history 项非法（role 不在枚举、content 空、超 6 项或总超 8000）→ ERROR `MALFORMED_MESSAGE`。无 profile → ERROR `CONFIG_MISSING`。AUTH_FAILED → `pauseProfile` + ERROR（照既有语义）。
+- question trim 后空 / >2000 / history 项非法（role 不在枚举、content 空、**超过 6 个 `ChatTurn` 项**或总字符超 8000）→ ERROR `MALFORMED_MESSAGE`。无 profile → ERROR `CONFIG_MISSING`。AUTH_FAILED → `pauseProfile` + ERROR（照既有语义）。
+  （上限单位全局统一为 **`ChatTurn` 项数 ≤ 6**——即最近 3 组问答；不是 6 组问答。Task 5 的面板裁剪同单位。）
 - 端口 `onDisconnect` 与 `cancelTab`：在既有 `cancelDocument(documentId)` 旁追加 `cancelDocument(`${documentId}:chat`)`。
 - [ ] **Step 1: 写失败测试** — ① 合法请求：mock `chat` 返回流式回调序列 → 断言端口 postMessage 收到 2 条 `CHAT_STREAM`（text 依次为两段全量）且 `CHAT_RESULT.answer` === 完整文本、无 SECRET 泄漏；② 校验拒绝：空 question / 7 轮 history → `MALFORMED_MESSAGE`；③ 无 profile → `CONFIG_MISSING`；④ 槽位回收：注册端口后触发 `onDisconnect` → 断言 scheduler stub（或经依赖注入的 cancelDocument 记录）收到 `document-1:chat`。
 - [ ] **Step 2: 跑测试确认失败** — `npx vitest run src/background/service-worker.test.ts`
@@ -154,8 +158,10 @@ export class ChatPanel {
 }
 ```
 - Shadow DOM + fixed 右下 + 惰性挂载（`DiagnosisPanel` 工艺照搬）；气泡 = 纯文本 + `white-space: pre-wrap`（不引 markdown）；顶部锚定句摘要行。
+- 裁剪单位与 SW 校验一致：**`ChatTurn` 项 ≤ 6（最近 3 组问答）、总字符 ≤ 8000，从最旧项丢起**。
 - learning-block：每句头部「问」按钮（`data-syntax-chat-ask`，仅当该句已有 core 分析时可用——`renderCore` 后启用、失败句禁用），点击 `dispatchEvent(new CustomEvent("syntax-chat-request", { detail: { sentenceId } }))`（冒泡，`syntax-detail-request` 同款）。
-- [ ] **Step 1: 写失败测试** — chat-panel.test.ts（happy-dom）：open 后可见摘要行；appendUserTurn→beginAssistantTurn→renderStreamedText 两次全量→气泡文本等于第二次的 text（**替换而非追加**）；currentConversation 裁剪（构造 8 轮 → 返回最近 6 轮；构造超 8000 字符 → 丢最旧轮直到达标）；onSubmit 回调收到输入文本；dispose 移除 host。learning-block.test.ts：有 core 的句子出现「问」按钮且点击派发带 sentenceId 的 `syntax-chat-request`；失败句无可用按钮。
+- 本任务同时把 `src/content/chat-panel.ts` 加进 `docs/architecture/modules.md` 一行——architecture-docs 测试要求 `src/` 每个实现文件都在模块地图里，不加则本任务 `npm test` 全量必红。
+- [ ] **Step 1: 写失败测试** — chat-panel.test.ts（happy-dom）：open 后可见摘要行；appendUserTurn→beginAssistantTurn→renderStreamedText 两次全量→气泡文本等于第二次的 text（**替换而非追加**）；currentConversation 裁剪（构造 **8 个 ChatTurn 项** → 返回最近 **6 项**；构造总字符超 8000 → 丢最旧项直到达标）；onSubmit 回调收到输入文本；dispose 移除 host。learning-block.test.ts：有 core 的句子出现「问」按钮且点击派发带 sentenceId 的 `syntax-chat-request`；失败句无可用按钮。
 - [ ] **Step 2: 跑测试确认失败** — `npx vitest run src/content/chat-panel.test.ts src/content/learning-block.test.ts`
 - [ ] **Step 3: 实现**。
 - [ ] **Step 4: 跑测试确认通过** — 同上 + `npm test`。
@@ -164,16 +170,18 @@ export class ChatPanel {
 ### Task 6: SessionController 接线
 
 **Files:**
-- Modify: `chrome-plugin/src/content/session-controller.ts`（document 级事件监听区——`syntax-detail-request`/纠正事件一带；`RoutedController` 对应实现在本类）
-- Test: `chrome-plugin/src/content/session-controller.test.ts`
+- Modify: `chrome-plugin/src/content/session-controller.ts`（document 级事件监听区——`syntax-detail-request`/纠正事件一带；**`RuntimeTransport.onStream` 的联合类型（约 93 行）与 `handleStreamPush`（约 1291 行）**）
+- Test: `chrome-plugin/src/content/session-controller.test.ts`（**`FakeTransport` 的 streamHandler/onStream 联合类型同步 widen**，约 203/236 行）
 
 **Interfaces:**
 ```ts
-// SessionController 新增公共方法（Task 1 的转发点调用 onChatStreamPush）
+// SessionController 新增公共方法（流式推送经 transport.onStream 进来，不再经 RoutedController）
 openChat(sentenceId: string): void            // 惰性建 ChatPanel；换句重置会话并生成新 conversationId
 askChat(sentenceId: string, question: string): Promise<void>
 onChatStreamPush(push: ChatStreamPush): void  // 按 conversationId 转发面板；未知 id 丢弃
 ```
+- **流式分发改动**：`RuntimeTransport.onStream` 的 handler 参数联合类型 widen 为 `CoreStreamPush | DetailStreamPush | ChatStreamPush`（Task 1 已把 content-script 传输实现 widen，接口在此同步）；`handleStreamPush` 加 `push.type === "CHAT_STREAM"` 分支 → `this.onChatStreamPush(push)`。`FakeTransport` 的对应类型同步（否则测试文件 tsc/lint 报错）。
+- document 级监听新增 `"syntax-chat-request"` → `openChat(sentenceId)`（`syntax-detail-request` 同款挂法）。
 - `openChat`：从 `this.sentences` 取该句 `input`（SentenceInput）与 `sentence.core`（无 core 直接 return——按钮本应禁用）；`conversationId = `${documentId}:chat:${++chatCounter}``（实例字段）；面板 `open({sentenceId, summary: sentence.text.slice(0,40)})` + `setConversationId`；`panel.onSubmit = q => void this.askChat(sentenceId, q)`（重置会话时重绑）。
 - `askChat`：面板 `appendUserTurn(question)` + `beginAssistantTurn`；发 `CHAT_ASK`（history 取 `panel.currentConversation().history`，**不含本轮**；context = {kind:"sentence", sentence, core}）；响应 `CHAT_RESULT` → `completeAssistantTurn` 并把 {user,assistant} 两 turn 记回面板历史；ERROR → `failAssistantTurn(conversationId, `${code}：${message}`)`。
 - `onChatStreamPush`：会话匹配 → `renderStreamedText(push.conversationId, push.text)`；不匹配丢弃（旧会话流晚到无害）。
@@ -191,9 +199,9 @@ onChatStreamPush(push: ChatStreamPush): void  // 按 conversationId 转发面板
 - Modify: `chrome-plugin/tests/e2e/extension.spec.ts`（新增用例）
 - Test: E2E 本身
 
-**Interfaces:** 无代码接口；行为契约——`detectKind` 以 `"Discuss the verified translation analysis"` 前缀识别 chat，返回两段流式中文文本；服务器记录每次请求的完整 messages（供历史断言）。
-- [ ] **Step 1: 假服务器扩展** — chat kind 流式输出两段（`writeContent`，禁止裸 `response.end`）；把收到的请求体 push 进记录数组并暴露查询路由（既有 probe 模式照搬）。
-- [ ] **Step 2: 写 E2E 用例** — fixture 页解析就绪后：点某句「问」→ 面板出现且摘要行含该句文本 → 输入「这句为什么这么译」回车 → **探针式断言**：等待面板回答文本 === 服务器两段拼接全文（流式到齐，非只判「结束」）；fetch 计数 === 1。再输入第二轮 → 等待第二回答；断言第二次请求体（probe 查询）包含第一轮 question 与第一轮回答文本（多轮历史），fetch 计数 === 2。
+**Interfaces:** 无代码接口；行为契约——`detectKind` 以 `"Discuss the verified translation analysis"` 前缀识别 chat，返回两段流式中文文本；请求体记录复用既有 harness（`fakeModel.recorded()`/`recordedOfKind()`——spec 文件里既有断言模式，无 HTTP 查询路由）。
+- [ ] **Step 1: 假服务器扩展** — chat kind 流式输出两段（`writeContent`，禁止裸 `response.end`）；请求体进既有记录数组（`recorded()`/`recordedOfKind()` 消费）。
+- [ ] **Step 2: 写 E2E 用例** — fixture 页解析就绪后：点某句「问」→ 面板出现且摘要行含该句文本 → 输入「这句为什么这么译」回车 → **探针式断言**：等待面板回答文本 === 服务器两段拼接全文（流式到齐，非只判「结束」）；fetch 计数 === 1。再输入第二轮 → 等待第二回答；用 `recordedOfKind("chat")` 断言第二次请求体包含第一轮 question 与第一轮回答文本（多轮历史），fetch 计数 === 2。
 - [ ] **Step 3: 跑 E2E** — `npx playwright test -g "chat"`，预期通过。
 - [ ] **Step 4: 跑全量 E2E** — `npx playwright test`，确认无回归。
 - [ ] **Step 5: 提交** — `git commit -m "E2E：追问对话流式到齐与多轮历史探针断言"`
