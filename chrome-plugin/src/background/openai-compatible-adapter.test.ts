@@ -3,6 +3,7 @@ import type { ModelProfile } from "./config-repository";
 import {
   ModelRequestError,
   OpenAiCompatibleAdapter,
+  type ChatMessage,
   type JsonSchemaSpec,
 } from "./openai-compatible-adapter";
 import { buildCorePrompt, buildDetailPrompt, buildRepairPrompt } from "./prompts";
@@ -794,6 +795,182 @@ describe("默认关闭模型思考", () => {
 
     expect(fetch).toHaveBeenCalledTimes(2);
     expect(requestBody(fetch, 0)).toHaveProperty("reasoning_effort");
+    expect(requestBody(fetch, 1)).not.toHaveProperty("reasoning_effort");
+  });
+});
+
+/**
+ * 追问对话面板的纯文本两条路径：自由文本绝不能过 parseModelContent（会被整块
+ * 判成 INVALID_MODEL_OUTPUT），流式与缓冲都要带 reasoning_effort 降级接线。
+ */
+describe("plain-text completions for the chat panel", () => {
+  const chatAnswer = "这句话的谓语是不及物动词，所以没有宾语。";
+  const dialogue: readonly ChatMessage[] = [
+    { role: "system", content: "用中文回答读者的追问。" },
+    { role: "user", content: "这句为什么这么译？" },
+    { role: "assistant", content: "因为主语是集合名词。" },
+    { role: "user", content: "再讲一遍。" },
+  ];
+
+  it("streams each text delta and resolves to the accumulated answer", async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(
+        sseResponse([
+          deltaEvent("这句话的谓语"),
+          deltaEvent("是不及物动词，"),
+          deltaEvent("所以没有宾语。"),
+          "data: [DONE]\n\n",
+        ]),
+      );
+    const adapter = new OpenAiCompatibleAdapter({ fetch });
+    const deltas: string[] = [];
+
+    const answer = await adapter.completeTextStreaming(
+      profile,
+      dialogue,
+      new AbortController().signal,
+      (chunk) => deltas.push(chunk),
+    );
+
+    expect(deltas).toEqual(["这句话的谓语", "是不及物动词，", "所以没有宾语。"]);
+    expect(answer).toBe(chatAnswer);
+    expect(requestBody(fetch, 0)).toMatchObject({ stream: true, reasoning_effort: "none" });
+    // 自由文本没有 schema，请求绝不能带 response_format。
+    expect(requestBody(fetch, 0)).not.toHaveProperty("response_format");
+  });
+
+  it("downgrades reasoning_effort after a streamed 400 and resends without the field", async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValueOnce(
+        response("Invalid value for 'reasoning_effort': none is not supported", { status: 400 }),
+      )
+      .mockResolvedValueOnce(sseResponse([deltaEvent(chatAnswer), "data: [DONE]\n\n"]));
+    const persistReasoningControl = vi.fn().mockResolvedValue(undefined);
+    const adapter = new OpenAiCompatibleAdapter({ fetch, persistReasoningControl });
+
+    const answer = await adapter.completeTextStreaming(
+      profile,
+      dialogue,
+      new AbortController().signal,
+      () => undefined,
+    );
+
+    expect(answer).toBe(chatAnswer);
+    expect(persistReasoningControl).toHaveBeenCalledWith("profile-1", "unsupported");
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(requestBody(fetch, 0)).toHaveProperty("reasoning_effort");
+    // 降级重发仍然是流式请求，只是去掉了被拒的字段。
+    expect(requestBody(fetch, 1)).toMatchObject({ stream: true });
+    expect(requestBody(fetch, 1)).not.toHaveProperty("reasoning_effort");
+  });
+
+  it("short-circuits to a buffered text request when streaming is already known unsupported", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(completion(chatAnswer));
+    const persistStreamSupport = vi.fn().mockResolvedValue(undefined);
+    const adapter = new OpenAiCompatibleAdapter({ fetch, persistStreamSupport });
+
+    const answer = await adapter.completeTextStreaming(
+      { ...profile, streamSupport: "unsupported" as const },
+      dialogue,
+      new AbortController().signal,
+      () => undefined,
+    );
+
+    expect(answer).toBe(chatAnswer);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(requestBody(fetch, 0)).toMatchObject({ stream: false });
+    expect(persistStreamSupport).not.toHaveBeenCalled();
+  });
+
+  it("persists a stream rejection and falls back to the buffered text path", async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValueOnce(response("stream is not supported by this model", { status: 400 }))
+      .mockResolvedValueOnce(completion(chatAnswer));
+    const persistStreamSupport = vi.fn().mockResolvedValue(undefined);
+    const adapter = new OpenAiCompatibleAdapter({ fetch, persistStreamSupport });
+
+    const answer = await adapter.completeTextStreaming(
+      profile,
+      dialogue,
+      new AbortController().signal,
+      () => undefined,
+    );
+
+    expect(answer).toBe(chatAnswer);
+    expect(persistStreamSupport).toHaveBeenCalledWith("profile-1", "unsupported");
+    // 回落的是纯文本缓冲路径，不是带 JSON 解析的 request()。
+    expect(requestBody(fetch, 1)).toMatchObject({ stream: false });
+    expect(requestBody(fetch, 1)).not.toHaveProperty("response_format");
+  });
+
+  it("returns the raw buffered text with reasoning disabled by default", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(completion(chatAnswer));
+    const adapter = new OpenAiCompatibleAdapter({ fetch });
+
+    const answer = await adapter.completeText(profile, dialogue, new AbortController().signal);
+
+    expect(answer).toBe(chatAnswer);
+    expect(requestBody(fetch, 0)).toMatchObject({
+      stream: false,
+      reasoning_effort: "none",
+      temperature: 0,
+    });
+    expect(requestBody(fetch, 0)).not.toHaveProperty("response_format");
+  });
+
+  it("drops reasoning_effort on a buffered 4xx and retries once", async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValueOnce(
+        response("Invalid value for 'reasoning_effort': none", { status: 422 }),
+      )
+      .mockResolvedValueOnce(completion(chatAnswer));
+    const persistReasoningControl = vi.fn().mockResolvedValue(undefined);
+    const adapter = new OpenAiCompatibleAdapter({ fetch, persistReasoningControl });
+
+    const answer = await adapter.completeText(profile, dialogue, new AbortController().signal);
+
+    expect(persistReasoningControl).toHaveBeenCalledWith("profile-1", "unsupported");
+    expect(answer).toBe(chatAnswer);
+    expect(requestBody(fetch, 1)).not.toHaveProperty("reasoning_effort");
+  });
+
+  it("carries assistant turns through the request body unchanged", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(completion(chatAnswer));
+    const adapter = new OpenAiCompatibleAdapter({ fetch });
+
+    await adapter.completeText(profile, dialogue, new AbortController().signal);
+
+    expect(requestBody(fetch, 0)).toMatchObject({ messages: dialogue });
+    expect(dialogue.filter(({ role }) => role === "assistant")).toHaveLength(1);
+  });
+
+  it("downgrades reasoning_effort on the shared JSON streaming branch too", async () => {
+    // 嗅探加在共享的非 2xx 分支上：JSON 流式路径同样默认下发 reasoning_effort，
+    // 端点拒绝必须能降级重发，而不是被映射成不可重试的 NETWORK_ERROR。
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValueOnce(
+        response("Invalid value for 'reasoning_effort': none", { status: 400 }),
+      )
+      .mockResolvedValueOnce(sseResponse(envelopeEvents(streamEnvelope)));
+    const persistReasoningControl = vi.fn().mockResolvedValue(undefined);
+    const adapter = new OpenAiCompatibleAdapter({ fetch, persistReasoningControl });
+
+    const result = await adapter.completeJsonStreaming(
+      profile,
+      messages,
+      schema,
+      new AbortController().signal,
+      () => undefined,
+    );
+
+    expect(result).toEqual(JSON.parse(streamEnvelope));
+    expect(persistReasoningControl).toHaveBeenCalledWith("profile-1", "unsupported");
+    expect(requestBody(fetch, 1)).toMatchObject({ stream: true });
     expect(requestBody(fetch, 1)).not.toHaveProperty("reasoning_effort");
   });
 });
