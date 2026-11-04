@@ -763,7 +763,11 @@ export class SessionController {
     if (panel === undefined) return;
     const conversation = panel.currentConversation();
     const sentence = this.sentences.get(sentenceId);
-    if (conversation === null || sentence === undefined || sentence.core === undefined) {
+    if (conversation === null) return;
+    if (sentence === undefined || sentence.core === undefined) {
+      // 原句中途失效(core 被清,如块被还原重扫):给一句提示而不是静默吞掉这一问;
+      // failAssistantTurn 在无 pending 轮时只画错误气泡,不污染面板历史。
+      panel.failAssistantTurn(conversation.conversationId, "原句已失效：请重新解析后再提问");
       return;
     }
     const conversationId = conversation.conversationId;

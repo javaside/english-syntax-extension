@@ -2757,6 +2757,26 @@ describe("SessionController 追问对话接线", () => {
     expect(chatAsks(subject.transport)[1]!.history).toEqual([]);
   });
 
+  it("原句中途失效(core 被清)后再提问:错误气泡提示,不发 CHAT_ASK 也不动历史", async () => {
+    const subject = chatHarness();
+    await subject.controller.start();
+    subject.viewport.emit();
+    await vi.waitFor(() => expect(subject.controller.status.ready).toBe(1));
+    openChatFor(subject.page, "sentence-1");
+
+    // 块被还原重扫(invalidateBlock 清 core):锚定句的已核实划分不复存在
+    subject.controller.invalidateBlock("block-1");
+
+    await subject.controller.askChat("sentence-1", "问1");
+
+    expect(chatAsks(subject.transport)).toHaveLength(0);
+    const host = chatHost(subject.page)!;
+    expect(host.shadowRoot!.querySelector<HTMLElement>(".message.error")?.textContent).toBe(
+      "原句已失效：请重新解析后再提问",
+    );
+    expect(host.shadowRoot!.querySelector<HTMLTextAreaElement>("textarea")!.disabled).toBe(false);
+  });
+
   it("stop 后追问面板 host 已移除", async () => {
     const subject = chatHarness();
     await subject.controller.start();
