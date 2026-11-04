@@ -3,6 +3,8 @@ import { GrammarRole } from "../shared/grammar";
 import { CORE_SCHEMA_VERSION } from "../shared/versions";
 import type {
   BlockDiagnosis,
+  ChatStreamPush,
+  ChatTurn,
   RequestMessage,
   ResponseMessage,
   SentenceInput,
@@ -762,8 +764,12 @@ describe("service worker orchestration", () => {
     // The injected scheduler port is intentionally represented by a standalone mock function.
     // eslint-disable-next-line @typescript-eslint/unbound-method
     const cancelDocument = vi.mocked(deps.scheduler.cancelDocument);
+    // 每个记录在账的 documentId 都带一条 `:chat` 命名空间回收(chat 槽位追加点)。
     expect(cancelDocument).toHaveBeenNthCalledWith(1, "document-1");
-    expect(cancelDocument).toHaveBeenNthCalledWith(2, "document-2");
+    expect(cancelDocument).toHaveBeenNthCalledWith(2, "document-1:chat");
+    expect(cancelDocument).toHaveBeenNthCalledWith(3, "document-2");
+    expect(cancelDocument).toHaveBeenNthCalledWith(4, "document-2:chat");
+    expect(cancelDocument).toHaveBeenCalledTimes(4);
   });
 
   it("binds a content-script Port to its sender tab and cancels that document on disconnect", async () => {
@@ -1692,6 +1698,255 @@ describe("provisional core stream push", () => {
     );
 
     expect(postMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe("chat 路由", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const chatCore = {
+    schemaVersion: CORE_SCHEMA_VERSION,
+    sentenceId: sentence.sentenceId,
+    components: [{ startToken: 0, endToken: 0, role: GrammarRole.SUBJECT, translation: "学习者" }],
+    modelProfileId: "profile-a",
+  };
+
+  function chatAskRequest(
+    options: { history?: ChatTurn[]; question?: string; conversationId?: string } = {},
+  ): RequestMessage {
+    return pageRequest({
+      type: "CHAT_ASK",
+      conversationId: options.conversationId ?? "document-1:chat:1",
+      context: { kind: "sentence" as const, sentence, core: chatCore },
+      history: options.history ?? [
+        { role: "user" as const, content: "这句为什么这么译？" },
+        { role: "assistant" as const, content: "因为主语是复数。" },
+      ],
+      question: options.question ?? "side by side 修饰谁？",
+    });
+  }
+
+  function connectPort(subject: ReturnType<typeof chromeMock>): {
+    onDisconnect: ReturnType<typeof event<() => void>>;
+    postMessage: ReturnType<typeof vi.fn>;
+  } {
+    const onDisconnect = event<() => void>();
+    const postMessage = vi.fn();
+    subject.events.runtime.onConnect.listeners[0]!({
+      name: "syntax-learning:document-1",
+      sender: { tab: { id: 7 } as chrome.tabs.Tab },
+      onDisconnect,
+      postMessage,
+    } as unknown as chrome.runtime.Port);
+    return { onDisconnect, postMessage };
+  }
+
+  function chatPushes(postMessage: ReturnType<typeof vi.fn>): ChatStreamPush[] {
+    return postMessage.mock.calls.map((call) => call[0] as ChatStreamPush);
+  }
+
+  it("合法 CHAT_ASK：流式两段全量经端口推送，CHAT_RESULT 带脱敏后的完整回答", async () => {
+    const chat = vi.fn<AnalysisService["chat"]>((input) => {
+      input.onStreamedText?.("第一段，密钥 SECRET-A 与 HEADER-A 混入。");
+      input.onStreamedText?.("第一段，密钥 SECRET-A 与 HEADER-A 混入。第二段。");
+      return Promise.resolve({ answer: "第一段，密钥 SECRET-A 与 HEADER-A 混入。第二段。" });
+    });
+    const subject = chromeMock();
+    registerServiceWorker(dependencies({ chat }), subject.api);
+    const { postMessage } = connectPort(subject);
+
+    const response = await dispatch(
+      subject.events.runtime.onMessage.listeners[0]!,
+      chatAskRequest(),
+    );
+
+    // documentId 原样下发,:chat 命名空间后缀由 service 内部追加
+    expect(chat).toHaveBeenCalledTimes(1);
+    expect(chat.mock.calls[0]![0]).toMatchObject({
+      documentId: "document-1",
+      conversationId: "document-1:chat:1",
+      question: "side by side 修饰谁？",
+    });
+    expect(chat.mock.calls[0]![0].onStreamedText).toBeTypeOf("function");
+
+    const pushes = chatPushes(postMessage);
+    expect(pushes).toHaveLength(2);
+    expect(pushes[0]).toMatchObject({
+      type: "CHAT_STREAM",
+      documentId: "document-1",
+      conversationId: "document-1:chat:1",
+      text: "第一段，密钥 [redacted] 与 [redacted] 混入。",
+    });
+    expect(pushes[1]).toMatchObject({
+      type: "CHAT_STREAM",
+      text: "第一段，密钥 [redacted] 与 [redacted] 混入。第二段。",
+    });
+    expect(JSON.stringify(pushes)).not.toMatch(/SECRET-A|HEADER-A/);
+
+    expect(response.type).toBe("CHAT_RESULT");
+    if (response.type !== "CHAT_RESULT") return;
+    expect(response.conversationId).toBe("document-1:chat:1");
+    expect(response.answer).toBe("第一段，密钥 [redacted] 与 [redacted] 混入。第二段。");
+    expect(JSON.stringify(response)).not.toMatch(/SECRET-A|HEADER-A/);
+  });
+
+  it("question trim 后为空或超过 2000 字符 → MALFORMED_MESSAGE；恰 2000 放行", async () => {
+    const chat = vi.fn<AnalysisService["chat"]>().mockResolvedValue({ answer: "好的" });
+    const subject = chromeMock();
+    registerServiceWorker(dependencies({ chat }), subject.api);
+    const listener = subject.events.runtime.onMessage.listeners[0]!;
+
+    const blank = await dispatch(listener, chatAskRequest({ question: "   " }));
+    const overlong = await dispatch(listener, chatAskRequest({ question: "x".repeat(2001) }));
+    const boundary = await dispatch(listener, chatAskRequest({ question: "x".repeat(2000) }));
+
+    expect(blank).toMatchObject({ type: "ERROR", error: { code: "MALFORMED_MESSAGE" } });
+    expect(overlong).toMatchObject({ type: "ERROR", error: { code: "MALFORMED_MESSAGE" } });
+    expect(boundary.type).toBe("CHAT_RESULT");
+    expect(chat).toHaveBeenCalledTimes(1);
+  });
+
+  it("history 超过 6 个 ChatTurn 项或总字符超 8000 → MALFORMED_MESSAGE", async () => {
+    const chat = vi.fn<AnalysisService["chat"]>().mockResolvedValue({ answer: "好的" });
+    const subject = chromeMock();
+    registerServiceWorker(dependencies({ chat }), subject.api);
+    const listener = subject.events.runtime.onMessage.listeners[0]!;
+
+    const sevenTurns: ChatTurn[] = Array.from({ length: 7 }, (_, index) =>
+      index % 2 === 0
+        ? { role: "user" as const, content: `问 ${index}` }
+        : { role: "assistant" as const, content: `答 ${index}` },
+    );
+    const tooManyTurns = await dispatch(listener, chatAskRequest({ history: sevenTurns }));
+
+    const heavyHistory: ChatTurn[] = [
+      { role: "user", content: "x".repeat(8000) },
+      { role: "assistant", content: "y" },
+    ];
+    const tooManyCharacters = await dispatch(listener, chatAskRequest({ history: heavyHistory }));
+
+    // 边界：恰 6 项且总字符恰 8000 放行
+    const boundaryHistory: ChatTurn[] = [
+      { role: "user", content: "x".repeat(7999) },
+      { role: "assistant", content: "y" },
+    ];
+    const boundary = await dispatch(listener, chatAskRequest({ history: boundaryHistory }));
+
+    expect(tooManyTurns).toMatchObject({ type: "ERROR", error: { code: "MALFORMED_MESSAGE" } });
+    expect(tooManyCharacters).toMatchObject({
+      type: "ERROR",
+      error: { code: "MALFORMED_MESSAGE" },
+    });
+    expect(boundary.type).toBe("CHAT_RESULT");
+    expect(chat).toHaveBeenCalledTimes(1);
+  });
+
+  it("无 profile → CONFIG_MISSING（chat 无缓存兜底语义）", async () => {
+    const chat = vi.fn<AnalysisService["chat"]>();
+    const subject = chromeMock();
+    registerServiceWorker(dependencies({ chat }, []), subject.api);
+
+    const response = await dispatch(
+      subject.events.runtime.onMessage.listeners[0]!,
+      chatAskRequest(),
+    );
+
+    expect(response).toMatchObject({ type: "ERROR", error: { code: "CONFIG_MISSING" } });
+    expect(chat).not.toHaveBeenCalled();
+  });
+
+  it("chat 抛 AUTH_FAILED → pauseProfile 并回 ERROR；暂停期间不再打模型", async () => {
+    const chat = vi.fn<AnalysisService["chat"]>().mockRejectedValueOnce(
+      Object.assign(new Error("HTTP 401 SECRET-A"), {
+        code: "AUTH_FAILED",
+        retryable: false,
+        details: { status: 401 },
+      }),
+    );
+    const subject = chromeMock();
+    registerServiceWorker(dependencies({ chat }), subject.api);
+    const listener = subject.events.runtime.onMessage.listeners[0]!;
+
+    const first = await dispatch(listener, chatAskRequest({ conversationId: "document-1:chat:1" }));
+    const second = await dispatch(
+      listener,
+      chatAskRequest({ conversationId: "document-1:chat:2" }),
+    );
+
+    expect(first).toMatchObject({ type: "ERROR", error: { code: "AUTH_FAILED" } });
+    expect(second).toMatchObject({ type: "ERROR", error: { code: "AUTH_FAILED" } });
+    expect(chat).toHaveBeenCalledTimes(1);
+  });
+
+  it("端口未注册时不传 onStreamedText，回答随 CHAT_RESULT 整段下发", async () => {
+    const chat = vi.fn<AnalysisService["chat"]>().mockResolvedValue({ answer: "整段回答" });
+    const subject = chromeMock();
+    registerServiceWorker(dependencies({ chat }), subject.api);
+
+    const response = await dispatch(
+      subject.events.runtime.onMessage.listeners[0]!,
+      chatAskRequest(),
+    );
+
+    expect(response.type).toBe("CHAT_RESULT");
+    expect(chat.mock.calls[0]![0].onStreamedText).toBeUndefined();
+    if (response.type === "CHAT_RESULT") expect(response.answer).toBe("整段回答");
+  });
+
+  it("流式开关关闭时不传 onStreamedText，回答只随 CHAT_RESULT 下发", async () => {
+    const chat = vi.fn<AnalysisService["chat"]>().mockResolvedValue({ answer: "整段回答" });
+    const deps = dependencies({ chat });
+    // eslint-disable-next-line @typescript-eslint/unbound-method
+    vi.mocked(deps.configRepository.getStreamRendering).mockResolvedValue(false);
+    const subject = chromeMock();
+    registerServiceWorker(deps, subject.api);
+    const { postMessage } = connectPort(subject);
+
+    const response = await dispatch(
+      subject.events.runtime.onMessage.listeners[0]!,
+      chatAskRequest(),
+    );
+
+    expect(response.type).toBe("CHAT_RESULT");
+    expect(chat.mock.calls[0]![0].onStreamedText).toBeUndefined();
+    expect(postMessage).not.toHaveBeenCalled();
+  });
+
+  it("端口断开时同时回收 chat 命名空间的调度槽位（documentId:chat）", async () => {
+    const subject = chromeMock();
+    const deps = dependencies();
+    registerServiceWorker(deps, subject.api);
+    const { onDisconnect } = connectPort(subject);
+
+    onDisconnect.listeners[0]!();
+
+    await vi.waitFor(() =>
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      expect(deps.scheduler.cancelDocument).toHaveBeenCalledWith("document-1:chat"),
+    );
+  });
+
+  it("标签页关闭（cancelTab）同样回收 chat 命名空间槽位", async () => {
+    const subject = chromeMock();
+    const deps = dependencies();
+    registerServiceWorker(deps, subject.api);
+    const listener = subject.events.runtime.onMessage.listeners[0]!;
+    const status: SessionStatus = { ...emptyRunningStatus };
+    await dispatch(listener, {
+      version: 1,
+      requestId: "status-chat-1",
+      type: "SESSION_STATUS",
+      status,
+      tabId: 7,
+      documentId: "document-1",
+    });
+
+    subject.events.tabs.onRemoved.listeners[0]!(7);
+
+    // eslint-disable-next-line @typescript-eslint/unbound-method
+    const cancelDocument = vi.mocked(deps.scheduler.cancelDocument);
+    expect(cancelDocument).toHaveBeenCalledWith("document-1");
+    expect(cancelDocument).toHaveBeenCalledWith("document-1:chat");
   });
 });
 

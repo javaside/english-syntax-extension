@@ -29,7 +29,7 @@ MV3 把扩展拆成互不共享内存的几个世界。**每个模块能做什�
 
 1. **设置必须由 SW 下发。** content script 拿不到 `chrome.storage`,所以"是否预载详解"这类开关由 SW 在 `START_SESSION` 页面命令上快照传下去。
 2. **SW 的内存状态必须能熬过重启。** `activeTabs`(tabId → documentId + status)写进 `chrome.storage.session`;不写的话 SW 重启后会生成新 `documentId`,而页面上的卡片还攥着旧的,后续请求被判成过期文档拒掉,表现为"点成分报错、点重新解析没反应"。
-3. **流式分片走端口,不走 `sendMessage`。** content script 建一条名为 `syntax-learning:<documentId>` 的 `runtime.Port`,SW 通过它 `postMessage` 推送分片。这条端口同时兼任**页面存活探测**:断开即取消该文档的全部在飞请求。
+3. **流式分片走端口,不走 `sendMessage`。** content script 建一条名为 `syntax-learning:<documentId>` 的 `runtime.Port`,SW 通过它 `postMessage` 推送分片(`CORE_STREAM` / `DETAIL_STREAM` / `CHAT_STREAM` 三种)。这条端口同时兼任**页面存活探测**:断开即取消该文档的全部在飞请求——含追问对话的独立调度命名空间 `${documentId}:chat`(cancelDocument 精确匹配,不追加这条取消,静默超时的流式回答会在页面关走后无限期占住全局并发槽)。
 
 ## 2. 分层
 

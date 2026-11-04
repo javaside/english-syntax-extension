@@ -38,7 +38,7 @@
 | `PARSE_HOVERED_BLOCK`       | 受信任 UI;或 SW 自发 | —                                           | 转发页面:解析鼠标悬停的块                                | ✅    | ❌       |
 | `DIAGNOSE_BLOCK`            | SW 自发(右键菜单)    | `selectionText?`                            | 菜单监听器经 `sendPageCommand` 下发;`route()` 里穷尽性拒绝 | ❌    | ❌       |
 | `EXPLAIN_DIAGNOSIS`         | 页面(有 tabId)       | `diagnosis`                                 | 诊断模型解释请求;回 `DIAGNOSIS_RESULT`                   | ❌    | ❌       |
-| `CHAT_ASK`                  | content              | `conversationId`、`context`、`history[]`、`question` | 追问对话一轮提问:无缓存、无修复轮,流式推 `CHAT_STREAM`,回 `CHAT_RESULT` | ❌ | ❌ |
+| `CHAT_ASK`                  | content              | `conversationId`、`context`、`history[]`、`question` | 追问对话一轮提问:无缓存、无修复轮,流式推 `CHAT_STREAM`,回 `CHAT_RESULT`;SW 兜底校验 question trim 后 1..2000、history ≤6 项且总字符 ≤8000,违者 `MALFORMED_MESSAGE`,无 profile 回 `CONFIG_MISSING`(无缓存兜底) | ❌ | ❌ |
 | `TEST_PROFILE`              | options              | `profileId`                                 | 探测端点能力;**成功即解除鉴权暂停**                      | —     | —        |
 | `GET_CACHE_STATS`           | options              | —                                           | 缓存统计                                                 | —     | —        |
 | `CLEAR_CACHE`               | options              | —                                           | 清空三个 store                                           | —     | —        |
@@ -49,7 +49,7 @@
 
 `DIAGNOSE_BLOCK` 落到**页面路由**(`content-script.ts`)后是一条 fire-and-forget 分支:立即回 `ACK`(页面命令只承诺"已受理"),诊断编排异步执行——本地证据先上 `DiagnosisPanel`,再经 `EXPLAIN_DIAGNOSIS` 请求模型解释。两个配套的 content 侧守卫:①页面路由开头的入站拒绝列表(`ANALYZE_CORE` / `ANALYZE_DETAIL` / `REANALYZE_WITH_FEEDBACK` / `EXPLAIN_DIAGNOSIS` / `CHAT_ASK`)把页面伪造的 `EXPLAIN_DIAGNOSIS` / `CHAT_ASK` 拒成 `MALFORMED_MESSAGE`——这两条只有 content 自己会发;②`isRuntimeResponse()` 有 `DIAGNOSIS_RESULT` case(`isBlockDiagnosis` 查 `diagnosis` 回显,`model` 三字段 / `modelError` / `profile.model` 逐项把关),这是三层校验的第 3 层。`EXPLAIN_DIAGNOSIS` **不豁免②**:content 用 `DIAGNOSE_BLOCK` 命令里 SW 已解析出的真实 `documentId` 发请求,凭与账上一致**合规通过**;文档换代后旧 controller 攥着旧 id 再发,照旧被判 `REQUEST_CANCELLED`——这正是想要的。
 
-> **注意 `STOP_SESSION` 的一条死路径。** `ChromeRuntimeTransport.cancelDocument()` 也会从 content 发这条消息,但该分支要求受信任 UI,所以它必然被回成 `UNSUPPORTED_PAGE`(调用处 fire-and-forget 吞掉了响应)。真正的取消依赖端口断开与 `tabs.onRemoved` / `onUpdated` 触发的 `cancelTab()`。
+> **注意 `STOP_SESSION` 的一条死路径。** `ChromeRuntimeTransport.cancelDocument()` 也会从 content 发这条消息,但该分支要求受信任 UI,所以它必然被回成 `UNSUPPORTED_PAGE`(调用处 fire-and-forget 吞掉了响应)。真正的取消依赖端口断开与 `tabs.onRemoved` / `onUpdated` 触发的 `cancelTab()`。这两个回收点在既有 `cancelDocument(documentId)` 旁都**追加**一条对 `${documentId}:chat` 的 `cancelDocument`:追问对话的调度命名空间带 `:chat` 后缀,`cancelDocument` 精确匹配够不到它,而流式是静默超时(总时长不设限),漏回收会让页面关走后的回答无限期占住全局并发槽。
 
 关键语义:
 
