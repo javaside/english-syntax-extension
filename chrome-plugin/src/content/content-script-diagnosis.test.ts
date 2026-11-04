@@ -265,7 +265,7 @@ describe("chat 入站拒绝与端口分发", () => {
       sendMessage: () => Promise.resolve({}),
     });
     const pushes: unknown[] = [];
-    // 宽 handler（能接收全部三类推送）注入窄签名参数是合法逆变；chat 推送据此可达订阅者
+    // onStream 的注册签名已与分发集合同宽（三类推送的联合，窄签名已删除）；chat 推送据此直达订阅者
     transport.onStream((push: CoreStreamPush | DetailStreamPush | ChatStreamPush) => {
       pushes.push(push);
     });
