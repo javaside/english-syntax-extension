@@ -49,7 +49,7 @@
 | 文件                       | 职责                                                                                                                                                         |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `content-script.ts`        | 三件事:①`ContentScriptRouter` 路由 SW 下发的页面命令;②`ChromeRuntimeTransport` 传输层(sendMessage + 端口 + 重连);③`isRuntimeResponse()` **响应守卫**         |
-| `session-controller.ts`    | **最重的一个文件**:会话状态机、块与句的注册、相位流转、合批窗口、发请求与版本守卫、详解 / 纠正交互、MutationObserver、断线重连、状态上报                     |
+| `session-controller.ts`    | **最重的一个文件**:会话状态机、块与句的注册、相位流转、合批窗口、发请求与版本守卫、详解 / 纠正交互、追问对话接线(`syntax-chat-request` → `openChat`/`askChat`,`CHAT_STREAM` 分发)、MutationObserver、断线重连、状态上报                     |
 | `page-inventory.ts`        | **页面语义清单**:枚举安全可读的英文语义单元(标题/正文/列表/定义/表格/图注/脚注/文献题名),分类型门槛 + principal root + 父子去重,给每个单元「自动分析或稳定排除原因」的结局;`scanDocument` 只取其 `automatic` 投影。fixtures: `tests/fixtures/page-inventory/*.json` 全等钉住 |
 | `readable-dom-text.ts`     | 科学 DOM 文本归一化:普通文本按序、`<math>` 一律读**可见 MathML 文本**(alttext 是 TeX 源码,已弃用)、annotation/annotation-xml/mphantom/assistive 不重复、math 内隐藏子树阻断、Unicode 空白折叠;不解析 TeX、不翻译公式。输出是表示树的文本线性化,只保证线性化文本可逆,不保证源公式可逆            |
 | `document-scanner.ts`      | `scanDocument()` = `page-inventory` 的 **automatic 投影**;`nearestSafeBlock()` 走显式手势路径(不设长度/正文容器门槛,英文占比仍适用)。**两者的取舍刻意不同**                  |
@@ -62,6 +62,7 @@
 | `detail-prefetcher.ts`     | 详解预载队列:按句去重、并发 2、暂停 / 恢复、块失效时丢弃、成分级计数(total / ready / failed)                                                                 |
 | `progress-pill.ts`         | 页面右下角进度胶囊。纯展示,从不发命令                                                                                                                        |
 | `diagnosis-panel.ts`       | 段落诊断面板(host + open shadow root,结构照 progress-pill,但面板本身可交互):本地证据(逐门表格)立即渲染,模型解释段按 requestId 防过期(`updateModel` 对不匹配的 requestId 直接忽略),隐私两句常驻;`report()` 点击复制时才经 `formatDiagnosisReport` 组装 markdown,剪贴板被拒时降级为已全选的只读 textarea |
+| `chat-panel.ts`            | 追问对话浮层(host + open shadow root,工艺照 diagnosis-panel:固定右下 `bottom:84px`、与 diagnosis-panel 的 64px 错开、惰性挂载):顶部锚定句摘要行、纯文本气泡流(`pre-wrap`,不引 markdown)、Enter 发送 / Shift+Enter 换行 / 发送中禁用;`renderStreamedText` 按 conversationId **全量替换**当前回答气泡(与 SW 推送的「累积全量」形状配套,静默重试无害),无进行中轮次时忽略迟到分片(不建新泡);`currentConversation()` 按与 SW 兜底同单位裁剪历史(ChatTurn 项 ≤ 6、总字符 ≤ 8000,从最旧丢起)且不含已提交未回答的悬空用户轮 |
 
 ## chrome-plugin/src/popup / src/options —— 扩展 UI
 

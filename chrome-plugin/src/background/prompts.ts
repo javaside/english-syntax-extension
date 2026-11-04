@@ -1,6 +1,6 @@
 import { GrammarRole } from "../shared/grammar";
 import type { CoreAnalysis, TokenRange } from "../shared/grammar";
-import type { BlockDiagnosis, SentenceInput } from "../shared/protocol";
+import type { BlockDiagnosis, ChatContext, ChatTurn, SentenceInput } from "../shared/protocol";
 import type { RepairErrorGroup } from "./repair-errors";
 
 export interface ValidationErrorDescription {
@@ -368,5 +368,35 @@ export function buildDiagnosisPrompt(diagnosis: BlockDiagnosis): string {
     MINIFIED_OUTPUT,
     "Gate evidence:",
     serialize(evidence),
+  ].join("\n\n");
+}
+
+/**
+ * 追问对话提示词。首行刻意是函数内字面量、不进 PROMPT_FIRST_LINES——那张表被
+ * contracts.json + Kotlin 双侧钉死，动它就破坏 Chrome-only 范围（buildDiagnosisPrompt
+ * 先例）。假服务器 detectKind 按首行前缀识别请求类型，E2E 依赖此约定。
+ *
+ * 四段结构（spec §AnalysisService）全部拼在单条 user 消息里：系统指令 →
+ * `serializeSentence` 句载荷 + `serialize` 紧凑 core → 历史轮次 → 本轮问题。
+ */
+export function buildChatPrompt(input: {
+  context: ChatContext;
+  history: readonly ChatTurn[];
+  question: string;
+}): string {
+  return [
+    "Discuss the verified translation analysis with the reader.",
+    "Answer the reader's question in Chinese based on the verified core analysis below. " +
+      "Do not re-divide or re-tag the grammatical components: the verified analysis is fixed. " +
+      "If the analysis conflicts with the question, follow the analysis and say so. " +
+      "Keep the answer concise and split it into short paragraphs.",
+    "Selected sentence:",
+    serializeSentence(input.context.sentence),
+    "Verified core result:",
+    serialize(input.context.core),
+    "Conversation history (oldest first):",
+    serialize(input.history),
+    "Reader question:",
+    input.question,
   ].join("\n\n");
 }

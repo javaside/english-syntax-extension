@@ -8,6 +8,7 @@ import { GrammarRole } from "../shared/grammar";
 import { CORE_SCHEMA_VERSION } from "../shared/versions";
 import type { CoreAnalysis, DetailAnalysis, Token, TokenRange } from "../shared/grammar";
 import type {
+  ChatStreamPush,
   CoreStreamPush,
   DetailStreamPush,
   RequestMessage,
@@ -200,7 +201,7 @@ class FakeTransport implements RuntimeTransport {
   reconnectHandler?: () => void | Promise<void>;
   handler: (message: RequestMessage) => Promise<ResponseMessage>;
   private disconnectHandler?: () => void;
-  private streamHandler?: (push: CoreStreamPush | DetailStreamPush) => void;
+  private streamHandler?: (push: CoreStreamPush | DetailStreamPush | ChatStreamPush) => void;
 
   constructor(handler?: (message: RequestMessage) => Promise<ResponseMessage>) {
     this.handler =
@@ -233,14 +234,16 @@ class FakeTransport implements RuntimeTransport {
     };
   }
 
-  onStream(handler: (push: CoreStreamPush | DetailStreamPush) => void): () => void {
+  onStream(
+    handler: (push: CoreStreamPush | DetailStreamPush | ChatStreamPush) => void,
+  ): () => void {
     this.streamHandler = handler;
     return () => {
       this.streamHandler = undefined;
     };
   }
 
-  emitStream(push: CoreStreamPush | DetailStreamPush): void {
+  emitStream(push: CoreStreamPush | DetailStreamPush | ChatStreamPush): void {
     this.streamHandler?.(push);
   }
 
@@ -2559,6 +2562,294 @@ describe("SessionController 详解流式", () => {
     subject.transport.emitStream(push(subject));
 
     expect(subject.learningBlocks[0]!.streamedStructures).toEqual([]);
+  });
+});
+
+describe("SessionController 追问对话接线", () => {
+  /**
+   * 每例一份全新 Window 文档:句法事件监听挂在 document 上,共享全局 document 的
+   * 旧控制器(未 stop)会收到本例的事件并打开自己的浮层,污染 chatHost() 查询。
+   */
+  function chatHarness(
+    text = "Readers understand complex sentences.",
+    onAsk: (
+      message: Extract<RequestMessage, { type: "CHAT_ASK" }>,
+    ) => ResponseMessage | Promise<ResponseMessage> = (message) => chatResultMessage(message, "答"),
+  ) {
+    const transport = new FakeTransport((message: RequestMessage) =>
+      message.type === "CHAT_ASK"
+        ? Promise.resolve(onAsk(message))
+        : Promise.resolve({
+            version: 1,
+            requestId: message.requestId,
+            type: "CORE_RESULT",
+            analyses:
+              message.type === "ANALYZE_CORE"
+                ? message.sentences.map((sentence) => core(sentence.sentenceId))
+                : [],
+          }),
+    );
+    const page = new Window().document as unknown as Document;
+    page.body.innerHTML = `<main><p>${text}</p></main>`;
+    const candidate = { id: "block-1", element: page.querySelector("p")!, text };
+    let viewport!: FakeViewport;
+    const controller = new SessionController({
+      tabId: 9,
+      document: page,
+      transport,
+      scan: () => [candidate],
+      createSentenceId: ({ order }) => Promise.resolve(`sentence-${order + 1}`),
+      viewportFactory: (callback) => (viewport = new FakeViewport(callback)),
+      learningBlockFactory: () => new FakeLearningBlock(),
+      replacementFactory: () => new FakeReplacement(),
+    });
+    return { controller, transport, viewport, page };
+  }
+
+  const chatResultMessage = (
+    message: Extract<RequestMessage, { type: "CHAT_ASK" }>,
+    answer: string,
+  ): ResponseMessage => ({
+    version: 1,
+    requestId: message.requestId,
+    type: "CHAT_RESULT",
+    conversationId: message.conversationId,
+    answer,
+  });
+
+  type ChatAskRequest = Extract<RequestMessage, { type: "CHAT_ASK" }>;
+
+  function chatAsks(transport: FakeTransport): ChatAskRequest[] {
+    return transport.sent.filter(
+      (message): message is ChatAskRequest => message.type === "CHAT_ASK",
+    );
+  }
+
+  function chatHost(page: Document): HTMLElement | null {
+    return page.querySelector<HTMLElement>("[data-syntax-chat-panel]");
+  }
+
+  const openChatFor = (page: Document, sentenceId: string): void => {
+    page.dispatchEvent(new CustomEvent("syntax-chat-request", { detail: { sentenceId } }));
+  };
+
+  it("syntax-chat-request 惰性打开面板并绑定 onSubmit；首轮 CHAT_ASK history 为空且携带句子上下文", async () => {
+    const subject = chatHarness();
+    await subject.controller.start();
+    subject.viewport.emit();
+    await vi.waitFor(() => expect(subject.controller.status.ready).toBe(1));
+    expect(chatHost(subject.page)).toBeNull(); // 惰性:未点「问」前页面上没有浮层
+
+    openChatFor(subject.page, "sentence-1");
+
+    const host = chatHost(subject.page)!;
+    expect(host.isConnected).toBe(true);
+    expect(host.shadowRoot!.querySelector(".summary")?.textContent).toBe(
+      "Readers understand complex sentences.",
+    );
+
+    // onSubmit 已绑定:面板输入 Enter 即发问(问题文本经面板 trim)
+    const input = host.shadowRoot!.querySelector<HTMLTextAreaElement>("textarea")!;
+    input.value = "  这句为什么这么译  ";
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
+    );
+
+    await vi.waitFor(() => expect(chatAsks(subject.transport)).toHaveLength(1));
+    const ask = chatAsks(subject.transport)[0]!;
+    expect(ask.conversationId).toBe(`${subject.controller.documentId}:chat:1`);
+    expect(ask.question).toBe("这句为什么这么译");
+    expect(ask.history).toEqual([]); // 首轮无历史
+    expect(ask.context.sentence.sentenceId).toBe("sentence-1");
+    expect(ask.context.core.sentenceId).toBe("sentence-1");
+  });
+
+  it("CHAT_RESULT 后面板历史含本轮两 turn；第二轮 CHAT_ASK 携带第一轮问答（多轮接线）", async () => {
+    const answers = ["第一答", "第二答"];
+    let round = 0;
+    const subject = chatHarness(undefined, (message) =>
+      chatResultMessage(message, answers[round++]!),
+    );
+    await subject.controller.start();
+    subject.viewport.emit();
+    await vi.waitFor(() => expect(subject.controller.status.ready).toBe(1));
+    openChatFor(subject.page, "sentence-1");
+
+    await subject.controller.askChat("sentence-1", "问1");
+    await subject.controller.askChat("sentence-1", "问2");
+
+    const host = chatHost(subject.page)!;
+    expect(
+      [...host.shadowRoot!.querySelectorAll<HTMLElement>(".message")].map(
+        (bubble) => `${bubble.className}=${bubble.textContent}`,
+      ),
+    ).toEqual([
+      "message user=问1",
+      "message assistant=第一答",
+      "message user=问2",
+      "message assistant=第二答",
+    ]);
+    // 同一会话内 conversationId 不变
+    expect(chatAsks(subject.transport).map(({ conversationId }) => conversationId)).toEqual([
+      `${subject.controller.documentId}:chat:1`,
+      `${subject.controller.documentId}:chat:1`,
+    ]);
+    expect(chatAsks(subject.transport)[1]!.history).toEqual([
+      { role: "user", content: "问1" },
+      { role: "assistant", content: "第一答" },
+    ]);
+  });
+
+  it("CHAT_STREAM 推送按 conversationId 全量渲染当前气泡；未知会话的推送不炸不渲染", async () => {
+    const subject = chatHarness(undefined, () => new Promise<ResponseMessage>(() => undefined));
+    await subject.controller.start();
+    subject.viewport.emit();
+    await vi.waitFor(() => expect(subject.controller.status.ready).toBe(1));
+    openChatFor(subject.page, "sentence-1");
+    void subject.controller.askChat("sentence-1", "问1"); // CHAT_ASK 悬住,流式先到
+    await vi.waitFor(() => expect(chatAsks(subject.transport)).toHaveLength(1));
+    const conversationId = chatAsks(subject.transport)[0]!.conversationId;
+    const chatPush = (id: string, text: string): ChatStreamPush => ({
+      version: 1,
+      type: "CHAT_STREAM",
+      documentId: subject.controller.documentId,
+      conversationId: id,
+      text,
+    });
+
+    subject.transport.emitStream(chatPush(conversationId, "流式回答前半"));
+    subject.transport.emitStream(chatPush(conversationId, "流式回答前半流式回答后半"));
+
+    const host = chatHost(subject.page)!;
+    const bubbles = host.shadowRoot!.querySelectorAll<HTMLElement>(".message.assistant");
+    expect(bubbles).toHaveLength(1); // 全量替换,不是追加
+    expect(bubbles[0]!.textContent).toBe("流式回答前半流式回答后半");
+
+    // 未知 conversationId(旧会话迟到流):丢弃,不渲染也不炸
+    subject.transport.emitStream(
+      chatPush(`${subject.controller.documentId}:chat:999`, "旧会话的迟到流"),
+    );
+    expect(host.shadowRoot!.textContent).not.toContain("旧会话的迟到流");
+    expect(host.shadowRoot!.querySelectorAll(".message")).toHaveLength(2); // user + assistant
+  });
+
+  it("CHAT_ASK 的 ERROR 响应以 `${code}：${message}` 渲染错误气泡并恢复输入", async () => {
+    const subject = chatHarness(undefined, (message) => ({
+      version: 1,
+      requestId: message.requestId,
+      type: "ERROR",
+      error: { code: "CONFIG_MISSING", message: "未配置模型", retryable: false },
+    }));
+    await subject.controller.start();
+    subject.viewport.emit();
+    await vi.waitFor(() => expect(subject.controller.status.ready).toBe(1));
+    openChatFor(subject.page, "sentence-1");
+
+    await subject.controller.askChat("sentence-1", "问1");
+
+    const host = chatHost(subject.page)!;
+    expect(host.shadowRoot!.querySelector<HTMLElement>(".message.error")?.textContent).toBe(
+      "CONFIG_MISSING：未配置模型",
+    );
+    expect(host.shadowRoot!.querySelector<HTMLTextAreaElement>("textarea")!.disabled).toBe(false);
+    // 失败轮不入历史:失败后再问是新的一轮空历史
+    await subject.controller.askChat("sentence-1", "问2");
+    expect(chatAsks(subject.transport)[1]!.history).toEqual([]);
+  });
+
+  it("原句中途失效(core 被清)后再提问:错误气泡提示,不发 CHAT_ASK 也不动历史", async () => {
+    const subject = chatHarness();
+    await subject.controller.start();
+    subject.viewport.emit();
+    await vi.waitFor(() => expect(subject.controller.status.ready).toBe(1));
+    openChatFor(subject.page, "sentence-1");
+
+    // 块被还原重扫(invalidateBlock 清 core):锚定句的已核实划分不复存在
+    subject.controller.invalidateBlock("block-1");
+
+    await subject.controller.askChat("sentence-1", "问1");
+
+    expect(chatAsks(subject.transport)).toHaveLength(0);
+    const host = chatHost(subject.page)!;
+    expect(host.shadowRoot!.querySelector<HTMLElement>(".message.error")?.textContent).toBe(
+      "原句已失效：请重新解析后再提问",
+    );
+    expect(host.shadowRoot!.querySelector<HTMLTextAreaElement>("textarea")!.disabled).toBe(false);
+  });
+
+  it("stop 后追问面板 host 已移除", async () => {
+    const subject = chatHarness();
+    await subject.controller.start();
+    subject.viewport.emit();
+    await vi.waitFor(() => expect(subject.controller.status.ready).toBe(1));
+    openChatFor(subject.page, "sentence-1");
+    expect(chatHost(subject.page)?.isConnected).toBe(true);
+
+    subject.controller.stop();
+
+    expect(chatHost(subject.page) === null || chatHost(subject.page)!.isConnected === false).toBe(
+      true,
+    );
+  });
+
+  it("句子还没有 core 时 openChat 直接返回,不建浮层", async () => {
+    // 让 core 失败:ANALYZE_CORE 回空 analyses → 句子 failed、无 core
+    const transport = new FakeTransport((message) =>
+      Promise.resolve({
+        version: 1,
+        requestId: message.requestId,
+        type: "CORE_RESULT",
+        analyses: [],
+      }),
+    );
+    const page = new Window().document as unknown as Document;
+    page.body.innerHTML = "<main><p>Readers understand complex sentences.</p></main>";
+    const candidate = {
+      id: "block-1",
+      element: page.querySelector("p")!,
+      text: "Readers understand complex sentences.",
+    };
+    let viewport!: FakeViewport;
+    const controller = new SessionController({
+      tabId: 9,
+      document: page,
+      transport,
+      scan: () => [candidate],
+      createSentenceId: ({ order }) => Promise.resolve(`sentence-${order + 1}`),
+      viewportFactory: (callback) => (viewport = new FakeViewport(callback)),
+      learningBlockFactory: () => new FakeLearningBlock(),
+      replacementFactory: () => new FakeReplacement(),
+    });
+    await controller.start();
+    viewport.emit();
+    await vi.waitFor(() => expect(controller.status.failed).toBe(1));
+
+    openChatFor(page, "sentence-1");
+
+    expect(chatHost(page)).toBeNull();
+  });
+
+  it("换锚定句重置会话:conversationId 递增、摘要行换新、历史清空", async () => {
+    const subject = chatHarness("Readers learn. Writers practice daily.");
+    await subject.controller.start();
+    subject.viewport.emit();
+    await vi.waitFor(() => expect(subject.controller.status.ready).toBe(2));
+
+    openChatFor(subject.page, "sentence-1");
+    await subject.controller.askChat("sentence-1", "问1");
+    openChatFor(subject.page, "sentence-2");
+
+    expect(chatHost(subject.page)!.shadowRoot!.querySelector(".summary")?.textContent).toBe(
+      "Writers practice daily.",
+    );
+    await subject.controller.askChat("sentence-2", "新问");
+    const asks = chatAsks(subject.transport);
+    expect(asks.map(({ conversationId }) => conversationId)).toEqual([
+      `${subject.controller.documentId}:chat:1`,
+      `${subject.controller.documentId}:chat:2`,
+    ]);
+    expect(asks[1]!.history).toEqual([]); // 第一轮问答不跨句携带
+    expect(asks[1]!.context.sentence.sentenceId).toBe("sentence-2");
   });
 });
 

@@ -13,7 +13,8 @@ export interface JsonSchemaSpec {
 }
 
 export interface ChatMessage {
-  role: "system" | "user";
+  /** assistant 轮次只有追问对话（chat 面板）会用：多轮历史回传给模型。 */
+  role: "system" | "user" | "assistant";
   content: string;
 }
 
@@ -215,6 +216,62 @@ export class OpenAiCompatibleAdapter {
     });
   }
 
+  /**
+   * 追问对话面板的纯文本缓冲路径：与 completeJson 同体的非流式请求
+   * （stream:false、reasoningOverride 默认下发、被拒降级重发一次），但
+   * **不做 JSON 解析**——自由文本过 parseModelContent 会被整块判成
+   * INVALID_MODEL_OUTPUT。
+   */
+  async completeText(
+    profile: ModelProfile,
+    messages: readonly ChatMessage[],
+    signal: AbortSignal,
+  ): Promise<string> {
+    try {
+      return await this.requestContent(profile, messages, null, signal);
+    } catch (error) {
+      if (error instanceof UnsupportedReasoningControlError && !signal.aborted) {
+        await this.persistReasoningControl(profile.id, "unsupported");
+        const downgraded = { ...profile, reasoningControl: "unsupported" as const };
+        return this.requestContent(downgraded, messages, null, signal);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * 追问对话面板的纯文本流式路径：SSE delta 逐段回调 onDelta，返回完整回答。
+   * 降级链与 streamWithExtractor 同款——reasoning 被拒去掉字段重发（仍流式），
+   * stream 被拒记 unsupported 并回落 completeText（不是 request()，那要 JSON）。
+   */
+  async completeTextStreaming(
+    profile: ModelProfile,
+    messages: readonly ChatMessage[],
+    signal: AbortSignal,
+    onDelta: (chunk: string) => void,
+  ): Promise<string> {
+    if (profile.streamSupport === "unsupported") {
+      return this.completeText(profile, messages, signal);
+    }
+    for (;;) {
+      try {
+        return await this.readStream(profile, messages, null, signal, onDelta);
+      } catch (error) {
+        if (signal.aborted) throw error;
+        if (error instanceof UnsupportedReasoningControlError) {
+          await this.persistReasoningControl(profile.id, "unsupported");
+          profile = { ...profile, reasoningControl: "unsupported" as const };
+          continue;
+        }
+        if (error instanceof UnsupportedStreamError) {
+          await this.persistStreamSupport(profile.id, "unsupported");
+          return this.completeText(profile, messages, signal);
+        }
+        throw error;
+      }
+    }
+  }
+
   private async streamWithExtractor(
     profile: ModelProfile,
     messages: readonly ChatMessage[],
@@ -266,6 +323,29 @@ export class OpenAiCompatibleAdapter {
     useSchema: boolean,
     consume: (delta: string) => void,
   ): Promise<unknown> {
+    const content = await this.readStream(
+      profile,
+      messages,
+      useSchema ? schema : null,
+      callerSignal,
+      consume,
+    );
+    return parseModelContent(content, "模型流式返回的正文不是合法 JSON");
+  }
+
+  /**
+   * 共享的 SSE 读循环，返回**未解析的累积正文**。JSON 路径由 streamRequest
+   * 拿去 parseModelContent；追问对话（chat）的纯文本路径直接原样返回——
+   * 自由文本绝不能过 JSON 解析。schema 传 null 即文本模式：不带
+   * response_format，也不做 response_format 嗅探。
+   */
+  private async readStream(
+    profile: ModelProfile,
+    messages: readonly ChatMessage[],
+    schema: JsonSchemaSpec | null,
+    callerSignal: AbortSignal,
+    consume: (delta: string) => void,
+  ): Promise<string> {
     const controller = new AbortController();
     let abortCause: "caller" | "timeout" | undefined;
     const onCallerAbort = () => {
@@ -295,7 +375,7 @@ export class OpenAiCompatibleAdapter {
         stream: true,
         ...reasoningOverride(profile),
       };
-      if (useSchema) body.response_format = responseFormat(schema);
+      if (schema !== null) body.response_format = responseFormat(schema);
       const headers = new Headers(profile.headers);
       headers.set("Content-Type", "application/json");
       headers.set("Authorization", `Bearer ${profile.apiKey}`);
@@ -309,8 +389,22 @@ export class OpenAiCompatibleAdapter {
       if (!response.ok) {
         const text = await response.text();
         const validationRejection = response.status === 400 || response.status === 422;
-        if (useSchema && validationRejection && /response[_ ]?format|json[_ ]?schema/i.test(text)) {
+        if (
+          schema !== null &&
+          validationRejection &&
+          /response[_ ]?format|json[_ ]?schema/i.test(text)
+        ) {
           throw new UnsupportedResponseFormatError();
+        }
+        // 与缓冲 request() 同款嗅探：流式默认也下发 reasoning_effort，端点拒绝
+        // （OpenAI 官方只收 low/medium/high）必须能降级重发，否则被 mapHttpError
+        // 永久映射成不可重试的 NETWORK_ERROR。
+        if (
+          profile.reasoningControl !== "unsupported" &&
+          validationRejection &&
+          /reasoning[_ ]?effort/i.test(text)
+        ) {
+          throw new UnsupportedReasoningControlError();
         }
         if (validationRejection && /stream/i.test(text)) throw new UnsupportedStreamError();
         throw mapHttpError(response.status, response.headers.get("Retry-After"), text);
@@ -348,12 +442,13 @@ export class OpenAiCompatibleAdapter {
 
       // 连一个内容分片都没有:这个端点的流式没法用，回落非流式而不是报解析失败。
       if (content.length === 0) throw new UnsupportedStreamError();
-      return parseModelContent(content, "模型流式返回的正文不是合法 JSON");
+      return content;
     } catch (error) {
       if (
         error instanceof ModelRequestError ||
         error instanceof UnsupportedResponseFormatError ||
-        error instanceof UnsupportedStreamError
+        error instanceof UnsupportedStreamError ||
+        error instanceof UnsupportedReasoningControlError
       ) {
         throw error;
       }
@@ -447,6 +542,26 @@ export class OpenAiCompatibleAdapter {
     callerSignal: AbortSignal,
     useSchema: boolean,
   ): Promise<unknown> {
+    const content = await this.requestContent(
+      profile,
+      messages,
+      useSchema ? schema : null,
+      callerSignal,
+    );
+    return parseModelContent(content, "模型返回的正文不是合法 JSON");
+  }
+
+  /**
+   * 缓冲请求的共享体，返回**未解析的正文**。schema 传 null 即纯文本模式
+   * （completeText）：不带 response_format、不做 JSON 解析——追问对话的
+   * 自由文本过 parseModelContent 会被整块判成 INVALID_MODEL_OUTPUT。
+   */
+  private async requestContent(
+    profile: ModelProfile,
+    messages: readonly ChatMessage[],
+    schema: JsonSchemaSpec | null,
+    callerSignal: AbortSignal,
+  ): Promise<string> {
     const controller = new AbortController();
     let abortCause: "caller" | "timeout" | undefined;
     const onCallerAbort = () => {
@@ -468,7 +583,7 @@ export class OpenAiCompatibleAdapter {
         stream: false,
         ...reasoningOverride(profile),
       };
-      if (useSchema) body.response_format = responseFormat(schema);
+      if (schema !== null) body.response_format = responseFormat(schema);
       const headers = new Headers(profile.headers);
       headers.set("Content-Type", "application/json");
       headers.set("Authorization", `Bearer ${profile.apiKey}`);
@@ -486,7 +601,7 @@ export class OpenAiCompatibleAdapter {
         // is treated as a capability downgrade — the schema-free retry either
         // succeeds or surfaces the real error.
         if (
-          useSchema &&
+          schema !== null &&
           (response.status === 400 || response.status === 422) &&
           /response[_ ]?format|json[_ ]?schema/i.test(text)
         ) {
@@ -512,7 +627,7 @@ export class OpenAiCompatibleAdapter {
       if (typeof content !== "string") {
         throw invalidOutput("模型响应缺少 choices[0].message.content");
       }
-      return parseModelContent(content, "模型返回的正文不是合法 JSON");
+      return content;
     } catch (error) {
       if (
         error instanceof ModelRequestError ||

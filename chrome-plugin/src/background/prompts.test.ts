@@ -3,13 +3,15 @@ import { GrammarRole } from "../shared/grammar";
 import { CORE_SCHEMA_VERSION } from "../shared/versions";
 import type { CoreAnalysis } from "../shared/grammar";
 import { tokenize } from "../language/segmenter";
-import type { BlockDiagnosis, SentenceInput } from "../shared/protocol";
+import type { BlockDiagnosis, ChatContext, ChatTurn, SentenceInput } from "../shared/protocol";
 import {
+  buildChatPrompt,
   buildCorePrompt,
   buildDetailPrompt,
   buildDiagnosisPrompt,
   buildRepairPrompt,
   buildSentenceDetailsPrompt,
+  PROMPT_FIRST_LINES,
 } from "./prompts";
 
 /** 与生产 repair-errors.ts 同构的单组错误,供 repair prompt 测试使用。 */
@@ -652,5 +654,57 @@ describe("buildDiagnosisPrompt", () => {
     expect(prompt).toContain('"failureMessage":"AUTH_FAILED"');
     expect(prompt).not.toContain("Learners read.");
     expect(prompt).not.toContain("Writers revise.");
+  });
+});
+
+describe("buildChatPrompt", () => {
+  const history: ChatTurn[] = [
+    { role: "user", content: "为什么 read 是谓语？" },
+    { role: "assistant", content: "因为它是动作中心。" },
+  ];
+  const question = "整句再讲一遍是什么意思？";
+
+  function prompt(): string {
+    const context: ChatContext = { kind: "sentence", sentence, core };
+    return buildChatPrompt({ context, history, question });
+  }
+
+  it("首行钉死为固定英文指令行，绝不进 PROMPT_FIRST_LINES", () => {
+    const text = prompt();
+
+    expect(text.split("\n")[0]).toBe("Discuss the verified translation analysis with the reader.");
+    // contracts.json + Kotlin 双侧钉死了那张表——chat 首行进表就破坏 Chrome-only 范围。
+    expect(PROMPT_FIRST_LINES).not.toHaveProperty("chat");
+  });
+
+  it("系统指令要求中文回答且不得重新划分成分", () => {
+    const text = prompt();
+
+    expect(text).toContain("Answer the reader's question in Chinese");
+    expect(text).toContain("Do not re-divide or re-tag the grammatical components");
+    expect(text).toContain("If the analysis conflicts with the question, follow the analysis");
+  });
+
+  it("上下文段复用 serializeSentence 的 token 载荷与紧凑 core", () => {
+    const text = prompt();
+
+    expect(text).toContain('{"id":0,"text":"Learners"}');
+    expect(text).not.toContain("leadingWhitespace");
+    expect(text).toContain('"role":"SUBJECT"');
+  });
+
+  it("历史两轮按序出现在本轮问题之前", () => {
+    const text = prompt();
+    const userTurn = text.indexOf(history[0]!.content);
+    const assistantTurn = text.indexOf(history[1]!.content);
+    const questionIndex = text.indexOf(question);
+
+    expect(userTurn).toBeGreaterThan(-1);
+    expect(assistantTurn).toBeGreaterThan(userTurn);
+    expect(questionIndex).toBeGreaterThan(assistantTurn);
+  });
+
+  it("内嵌 JSON（core、历史轮次）紧凑序列化", () => {
+    expect(prompt()).not.toMatch(/\n {2}"/u);
   });
 });

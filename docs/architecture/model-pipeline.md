@@ -25,11 +25,11 @@ CachedAnalysisService.analyzeCore(input, signal)
         failures 里的 AUTH_FAILED 会让 SW 暂停该 profile
 ```
 
-`analyzeDetail` / `analyzeSentenceDetails` / `reanalyzeWithFeedback` 是同一套骨架的变体:**查缓存 → 请求 → 校验 → 至多一次修复 → 写缓存**。`explainDiagnosis`(段落诊断的模型解释)是骨架外的**只读旁路**:单轮、无修复、不读写任何缓存,abort 走 `${documentId}:diagnosis` 隔离后缀(见 §2)。
+`analyzeDetail` / `analyzeSentenceDetails` / `reanalyzeWithFeedback` 是同一套骨架的变体:**查缓存 → 请求 → 校验 → 至多一次修复 → 写缓存**。`explainDiagnosis`(段落诊断的模型解释)与 `chat`(追问对话)是骨架外的**只读旁路**:单轮、无修复、不读写任何缓存;abort 分别走 `${documentId}:diagnosis` / `${documentId}:chat` 隔离后缀(见 §2)。
 
 ## 2. 提示词(`prompts.ts`)
 
-五类主提示词 + 四类修复提示词(诊断提示词没有修复轮):
+五类主提示词 + 四类修复提示词(诊断与追问对话提示词没有修复轮):
 
 | 构造函数                                       | 首行前缀(**E2E 假服务器靠它识别请求类型,改了会炸**)              |
 | ---------------------------------------------- | ---------------------------------------------------------------- |
@@ -42,12 +42,19 @@ CachedAnalysisService.analyzeCore(input, signal)
 | `correctionPrompt`                             | `Reanalyze the supplied sentence`                                |
 | `correctionRepairPrompt`                       | `Repair only the structure of the invalid correction analysis`   |
 | `buildDiagnosisPrompt`                         | `Diagnose why the extension did not translate the page block`    |
+| `buildChatPrompt`                              | `Discuss the verified translation analysis with the reader`     |
 
 ### 2.1 诊断提示词(`buildDiagnosisPrompt`)的三条特殊约定
 
 1. **首行刻意是函数内字面量,不进 `PROMPT_FIRST_LINES`**——那张表被 `cross-platform-contract` 的 contracts.json 与 Kotlin 侧双侧钉死,扩它就破坏 Chrome-only 改动范围;假服务器对 diagnosis 首行的识别独立写在 `detectKind` 里。
 2. **证据走隐私白名单**:只发门结果(`gates`)、目标标签与选择器路径、`inventory`(含 `exclusionReason`)、文本度量、分句/分词、请求可行性、失败句的 phase 与 `failureMessage`(含 code)、会话状态与(可选)选中文本;**URL 与 `outerHTML` 原文绝不进 prompt**——它们只留在页面本地报告里供用户自查。
 3. **单轮、无修复、不缓存、不升版本**:形状校验(`validateDiagnosisExplanation`,配 `DIAGNOSIS_SCHEMA`)不符直接 `INVALID_MODEL_OUTPUT`,诊断报告是一次性证据,没有任何版本常量参与缓存键。调度走 `detail-click` 档(用户显式手势),去重键 `diagnosis:<selectorPath>:<capturedAt>`;`requestModel` 的 abort 监听会 `cancelDocument(documentId)`,所以诊断请求的 documentId 带 **`${documentId}:diagnosis` 隔离后缀**——不加后缀,诊断的中止会连坐取消该页正在跑的 core 请求。
+
+### 2.2 追问对话(`buildChatPrompt` + `chat()`)的约定
+
+1. **首行同样是函数内字面量,不进 `PROMPT_FIRST_LINES`**(`buildDiagnosisPrompt` 同款先例);假服务器 `detectKind` 按前缀 `Discuss the verified translation analysis` 识别 `chat`。prompt 四段拼在**单条 user 消息**里:中文回答的系统指令(不重新划分成分,分析冲突以分析为准)→ `serializeSentence` 句载荷 + `serialize(core)` 紧凑已核实结果 → 历史轮次(user/assistant 交替,原样 `serialize`)→ 本轮问题。自由文本,**无 JSON schema、无 `MINIFIED_OUTPUT`**。
+2. **单轮、无修复、不缓存、无版本常量**:回答是探索性内容而非分析结果,任何路径都不读写 analysis-cache;形状上没有可校验的 schema,模型错误原样上抛(`AUTH_FAILED` 照既有 pauseProfile 语义由 SW 处理)。调度走 `detail-click` 档(用户显式手势),去重键 = `conversationId + ":" + 本轮问题的 SHA-256 前 16 个十六进制字符`——**必须按轮次唯一**,调度器按 `documentId\0cacheKey` 合并在飞请求,同会话第二问共用 key 会直接拿到第一问的在飞 promise(串答案 + fetch 计数错乱)。SW 侧另有入站兜底(question trim 后 1..2000、history ≤ 6 项且总字符 ≤ 8000,违者 `MALFORMED_MESSAGE`;无 profile 回 `CONFIG_MISSING`——chat 没有缓存兜底语义)。
+3. **`${documentId}:chat` 调度命名空间**(`:diagnosis` 先例):chat 的 abort 绝不连坐该页在跑的 core/detail,反之亦然。它同时带来一个必补的回收点:`cancelDocument` 是精确匹配,SW 的端口 `onDisconnect` 与 `cancelTab` 处都**追加** `cancelDocument(\`${documentId}:chat\`)`——流式是静默超时(总时长不设限),不追加,页面关走后的回答会无限期占住全局并发槽(仅 4 个)。
 
 ### 两条省 token 的硬规则
 
@@ -140,6 +147,15 @@ sentencesPerRequest(baseUrl) = isLoopbackBaseUrl(baseUrl) ? 6 : 2;
 | `reasoningControl: "unsupported"`  | 400/422 且响应体提到 `reasoning_effort`                                            | 写回 profile | 去掉该字段重发                            |
 
 三者都**只持久化否定态**,`undefined` 表示值得一试。写回由 `createProfileCapabilityWriters()` 装配——**三个写入器都必须接线**,漏掉任一个就会在每次请求上重复交同一笔学费(一趟白费的 4xx)。
+
+### 纯文本两路径(chat 专用)
+
+`completeText`(缓冲)与 `completeTextStreaming`(流式)是追问对话的自由文本路径:`readStream`/`request` 的 schema 参数传 `null` 即文本模式——**不带 `response_format`、也不做 response_format 嗅探**,返回原文且**绝不过 `parseModelContent`**(自由文本过 JSON 解析会整块判成 `INVALID_MODEL_OUTPUT`)。降级链两条路径都接齐:
+
+- **`completeText`**:缓冲 `request()` 自带的 `reasoning_effort` 400/422 嗅探照常生效,被拒即 `persistReasoningControl("unsupported")` 去字段重发一次。
+- **`completeTextStreaming`**:`reasoning` 降级探针**必须自带**——现有嗅探只在缓冲路径的 `request()` 里,照抄会把 reasoning 拒绝映射成不可重试的 `NETWORK_ERROR`,流式默认开启的 chat 在 OpenAI 官方类端点上永久失败;`stream` 被拒照旧记 `unsupported` 并**回落 `completeText`**(不是 `request()`,那要 JSON)。
+
+`requestModel` 里 `schema === undefined` 即走文本路径:有 `onText` sink 且适配器带流式端口时走 `completeTextStreaming`(内部累积增量后回调**全量**),否则整段缓冲。
 
 ### 为什么默认关模型思考
 
@@ -269,7 +285,7 @@ raw → validateCoreBatch（解析前预丢弃纯标点成分）
 一旦某 profile 返回 `AUTH_FAILED`,SW 用 `pausedProfiles`(id → 凭据指纹)把它挂起:
 
 - 指纹 = `[baseUrl, apiKey, model, 排序后的 headers]` 的 JSON。**用户改了凭据,指纹变化即自动解除暂停。**
-- 暂停期间:`ANALYZE_CORE` 仍返回缓存命中 + 批级 `AUTH_FAILED`;`ANALYZE_DETAIL` 先查缓存,未命中才报错;预载与纠正直接报错。
+- 暂停期间:`ANALYZE_CORE` 仍返回缓存命中 + 批级 `AUTH_FAILED`;`ANALYZE_DETAIL` 先查缓存,未命中才报错;预载与纠正直接报错;chat 直接 `AUTH_FAILED`。
 - 「测试连接」**不受暂停门拦截**(这是用户显式自检),成功即解除——修好服务端后无需重载扩展。
 
 ## 11. 脱敏
@@ -279,6 +295,7 @@ raw → validateCoreBatch（解析前预丢弃纯标点成分）
 - `sanitizeCore()` —— 所有 `CORE_RESULT`;
 - `sanitizeDetail()` —— 所有 `DETAIL_RESULT`;
 - `CORE_STREAM` / `DETAIL_STREAM` 的每一片;
+- `CHAT_STREAM` 的每一片与 `CHAT_RESULT` 的 `answer`(chat 全程纯文本,同样不能因"只是对话"跳过);
 - `PROFILE_TEST_RESULT` 里回带的 provider 错误详情截断到 300 字符。
 
 纯缓存模式没有 profile,也就没有可脱敏的密钥,直接返回。

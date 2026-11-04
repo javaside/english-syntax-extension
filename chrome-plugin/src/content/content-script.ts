@@ -3,12 +3,14 @@ import { ERROR_CODES } from "../shared/errors";
 import { GrammarRole } from "../shared/grammar";
 import {
   isBlockDiagnosis,
+  isChatStreamPush,
   isCoreSentenceFailure,
   isCoreStreamPush,
   isDetailStreamPush,
   isRequestMessage,
 } from "../shared/protocol";
 import type {
+  ChatStreamPush,
   DiagnosisExplanation,
   CoreStreamPush,
   DetailStreamPush,
@@ -212,6 +214,14 @@ export function isRuntimeResponse(value: unknown, requestId: string): value is R
           (Array.isArray(value.failures) && value.failures.every(isCoreSentenceFailure))) &&
         (value.error === undefined || isExtensionError(value.error))
       );
+    case "CHAT_RESULT":
+      // 三层校验的 content 层一环：追问对话回包按会话 id 对账，answer 只要求是串
+      // （空回答由面板按错误路径呈现，不算协议形状问题）。
+      return (
+        typeof value.conversationId === "string" &&
+        value.conversationId.length > 0 &&
+        typeof value.answer === "string"
+      );
     case "DETAIL_RESULT":
       return isDetailAnalysis(value.analysis);
     case "SENTENCE_DETAILS_RESULT":
@@ -286,7 +296,9 @@ function chromeRuntimeApi(): ContentRuntimeApi {
 export class ChromeRuntimeTransport implements RuntimeTransport {
   private requestCounter = 0;
   private readonly disconnectHandlers = new Set<() => void>();
-  private readonly streamHandlers = new Set<(push: CoreStreamPush | DetailStreamPush) => void>();
+  private readonly streamHandlers = new Set<
+    (push: CoreStreamPush | DetailStreamPush | ChatStreamPush) => void
+  >();
   private watchdog?: RuntimeWatchdogPort;
 
   constructor(
@@ -331,9 +343,13 @@ export class ChromeRuntimeTransport implements RuntimeTransport {
 
   /**
    * 流式分片走的是端口推送，不是 sendMessage 的响应，所以 isRuntimeResponse 那套
-   * switch 不适用——这里用 isCoreStreamPush 单独把关。
+   * switch 不适用——这里用 isCoreStreamPush / isDetailStreamPush / isChatStreamPush
+   * 单独把关。注册签名与分发集合同为三种推送的联合类型（RuntimeTransport.onStream
+   * 已同步 widen）。
    */
-  onStream(handler: (push: CoreStreamPush | DetailStreamPush) => void): () => void {
+  onStream(
+    handler: (push: CoreStreamPush | DetailStreamPush | ChatStreamPush) => void,
+  ): () => void {
     this.streamHandlers.add(handler);
     return () => this.streamHandlers.delete(handler);
   }
@@ -358,7 +374,9 @@ export class ChromeRuntimeTransport implements RuntimeTransport {
         ? message
         : isDetailStreamPush(message)
           ? message
-          : undefined;
+          : isChatStreamPush(message)
+            ? message
+            : undefined;
       if (push === undefined || push.documentId !== this.documentId) return;
       for (const handler of this.streamHandlers) handler(push);
     });
@@ -454,7 +472,8 @@ export class ContentScriptRouter {
       request.type === "ANALYZE_CORE" ||
       request.type === "ANALYZE_DETAIL" ||
       request.type === "REANALYZE_WITH_FEEDBACK" ||
-      request.type === "EXPLAIN_DIAGNOSIS"
+      request.type === "EXPLAIN_DIAGNOSIS" ||
+      request.type === "CHAT_ASK"
     ) {
       return invalidMessage(request.requestId);
     }

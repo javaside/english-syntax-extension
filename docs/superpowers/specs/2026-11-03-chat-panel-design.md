@@ -89,14 +89,16 @@ content 入站拒绝列表加 `CHAT_ASK` ｜ 端口推送守卫 `isChatStreamPus
 
 ### Adapter（openai-compatible-adapter.ts）
 
-新增 `streamText(profile, messages, signal, onDelta): Promise<string>`：
-- 请求 `stream: true`，**不带 response_format**（自由文本）；SSE delta 逐段回调并累积，
+新增 `completeText(profile, messages, signal): Promise<string>`(缓冲)与
+`completeTextStreaming(profile, messages, signal, onDelta): Promise<string>`(流式;
+起草时的单名 `streamText` 按实现落成这对命名):
+- 流式请求 `stream: true`，**不带 response_format**（自由文本）；SSE delta 逐段回调并累积，
   返回完整文本。
 - 静默超时与读循环盯 abort 的语义与 `streamWithExtractor` 完全同款（每片重置 `timeoutMs`）。
 - **流式分支必须自带 `reasoning_effort` 降级探针**：现有 400/422 + `/reasoning[_ ]?effort/i`
   → `UnsupportedReasoningControlError` 的嗅探只在缓冲路径 `request()` 里，`streamRequest`
   没有——照抄会把 reasoning 拒绝映射成不可重试的 `NETWORK_ERROR`，流式默认开启的 chat
-  在 OpenAI 官方类端点上永久失败。`streamText` 的重试循环按 `streamWithExtractor` 同款
+  在 OpenAI 官方类端点上永久失败。`completeTextStreaming` 的重试循环按 `streamWithExtractor` 同款
   捕获该错误 → `persistReasoningControl("unsupported")` → 去掉字段重发（仓库约定
   「缓冲与流式两条路径都要接」在 chat 上才算闭合）。
 - `ChatMessage.role` 扩为 `"system" | "user" | "assistant"`。
@@ -154,7 +156,7 @@ content 入站拒绝列表加 `CHAT_ASK` ｜ 端口推送守卫 `isChatStreamPus
   `onStreamText(conversationId, text)` 以**全量替换**渲染当前回答气泡
   （与推送形状配套，重试安全）；
   `onResult(conversationId, answer)` 收尾（以缓冲答案为准渲染，防流式尾片丢失）。
-- **历史裁剪**：面板构造 `history` 时只带**最近 6 轮**且总字符 ≤ 8000
+- **历史裁剪**：面板构造 `history` 时只带**6 个 ChatTurn 项（最近 3 组问答）**且总字符 ≤ 8000
   （超出丢最旧轮；`CHAT_ASK` 的 SW 校验同步拒绝超限）——无界增长会在多轮后撞
   provider 上下文上限。
 - `learning-block.ts`：每个句子区头部加「问」按钮（`data-syntax-chat-ask`），

@@ -70,7 +70,15 @@ export type RequestMessage =
   | (PageRequestBase & { type: "PARSE_CONTEXT_BLOCK" })
   | (PageRequestBase & { type: "PARSE_HOVERED_BLOCK" })
   | (PageRequestBase & { type: "DIAGNOSE_BLOCK"; selectionText?: string })
-  | (PageRequestBase & { type: "EXPLAIN_DIAGNOSIS"; diagnosis: BlockDiagnosis });
+  | (PageRequestBase & { type: "EXPLAIN_DIAGNOSIS"; diagnosis: BlockDiagnosis })
+  | (PageRequestBase & {
+      /** 追问对话一轮提问。只有 content 自己会发——页面路由开头按类型拒绝入站。 */
+      type: "CHAT_ASK";
+      conversationId: string;
+      context: ChatContext;
+      history: ChatTurn[];
+      question: string;
+    });
 
 export type SessionState = "stopped" | "running" | "paused";
 
@@ -264,6 +272,45 @@ export function isCoreSentenceFailure(value: unknown): value is CoreSentenceFail
   );
 }
 
+/** 追问对话的一轮历史:用户提问或模型回答(不含 system——系统指令由 SW 侧拼)。 */
+export interface ChatTurn {
+  role: "user" | "assistant";
+  content: string;
+}
+
+/** 追问对话的上下文锚点。v1 只有句子级:原文 + tokens + 已核实的成分划分(含译文)。 */
+export interface ChatContext {
+  kind: "sentence";
+  sentence: SentenceInput;
+  core: CoreAnalysis;
+}
+
+/**
+ * 追问对话回答的流式分片,走 content 已建立的 syntax-learning 端口(与
+ * CoreStreamPush / DetailStreamPush 同通道)。同样承载未经校验的展示态文本:
+ * 只用于渲染,不写缓存。text 是「截至目前的完整回答」而非增量——调度器对可重试
+ * 错误会静默重跑,追加式 delta 在重试后会把两段流拼成乱序文本,全量重画则重试无害。
+ */
+export interface ChatStreamPush {
+  version: typeof MESSAGE_VERSION;
+  type: "CHAT_STREAM";
+  documentId: string;
+  conversationId: string;
+  text: string;
+}
+
+export function isChatStreamPush(value: unknown): value is ChatStreamPush {
+  return (
+    isRecord(value) &&
+    hasOnlyKeys(value, ["version", "type", "documentId", "conversationId", "text"]) &&
+    value.version === MESSAGE_VERSION &&
+    value.type === "CHAT_STREAM" &&
+    isNonBlankString(value.documentId) &&
+    isNonBlankString(value.conversationId) &&
+    typeof value.text === "string"
+  );
+}
+
 export type ResponseMessage =
   | (MessageBase & { type: "ACK"; acknowledgedType: RequestMessage["type"] })
   | (MessageBase & { type: "SESSION_STATUS"; status: SessionStatus })
@@ -293,6 +340,12 @@ export type ResponseMessage =
       model?: DiagnosisExplanation;
       modelError?: ExtensionError;
       profile?: { model: string };
+    })
+  | (MessageBase & {
+      /** 追问对话的完整回答:缓冲兜底;流式已渲染时以它为准校平(防尾片丢失)。 */
+      type: "CHAT_RESULT";
+      conversationId: string;
+      answer: string;
     })
   | (MessageBase & { type: "ERROR"; error: ExtensionError });
 
@@ -377,6 +430,25 @@ function isCoreAnalysis(value: unknown): value is CoreAnalysis {
     Array.isArray(value.components) &&
     value.components.every(isCoreComponent) &&
     isNonBlankString(value.modelProfileId)
+  );
+}
+
+function isChatTurn(value: unknown): value is ChatTurn {
+  return (
+    isRecord(value) &&
+    hasOnlyKeys(value, ["role", "content"]) &&
+    (value.role === "user" || value.role === "assistant") &&
+    isNonBlankString(value.content)
+  );
+}
+
+function isChatContext(value: unknown): value is ChatContext {
+  return (
+    isRecord(value) &&
+    hasOnlyKeys(value, ["kind", "sentence", "core"]) &&
+    value.kind === "sentence" &&
+    isSentenceInput(value.sentence) &&
+    isCoreAnalysis(value.core)
   );
 }
 
@@ -504,6 +576,18 @@ export function isRequestMessage(value: unknown): value is RequestMessage {
         hasOnlyKeys(value, [...pageOnlyKeys, "diagnosis"]) &&
         hasPageContext(value) &&
         isBlockDiagnosis(value.diagnosis)
+      );
+    case "CHAT_ASK":
+      // 形状守卫:history 逐项查 role 枚举与 content 非空串;question 的 1..2000
+      // 长度上限留给 SW 侧兜底判,这里只判非空。
+      return (
+        hasOnlyKeys(value, [...pageOnlyKeys, "conversationId", "context", "history", "question"]) &&
+        hasPageContext(value) &&
+        isNonBlankString(value.conversationId) &&
+        isChatContext(value.context) &&
+        Array.isArray(value.history) &&
+        value.history.every(isChatTurn) &&
+        isNonBlankString(value.question)
       );
     default:
       return false;

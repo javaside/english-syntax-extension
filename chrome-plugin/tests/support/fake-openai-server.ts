@@ -21,6 +21,7 @@ export type RequestKind =
   | "correction"
   | "correction-repair"
   | "diagnosis"
+  | "chat"
   | "unknown";
 
 export type ScriptedOutcome =
@@ -73,6 +74,19 @@ function completion(content: string): string {
   return jsonBody({ choices: [{ message: { content } }] });
 }
 
+/**
+ * 追问对话（chat）的确定性回答：两段中文文本，以空行分段——面板气泡是 pre-wrap，
+ * 段落换行的渲染路径一并覆盖。E2E 断言气泡最终文本 === 两段拼接全文（流式分片到
+ * 齐），并断言第二轮请求体携带该全文的 JSON 转义形（history 经紧凑 serialize 进
+ * prompt，换行被转义成字面 `\n`）。文本刻意不含引号与反斜杠：除换行外的字符在
+ * JSON.stringify 后原样可见，断言保持简单。
+ */
+export const CHAT_REPLY_PARAGRAPHS: readonly string[] = [
+  "这句的划分以已核实的分析为准：主语与谓语的边界在卡片里已经标出，不会重新划分。",
+  "译文按各成分覆盖的局部短语展开；若问题与分析冲突，以分析为准并说明理由。",
+];
+export const CHAT_REPLY_TEXT: string = CHAT_REPLY_PARAGRAPHS.join("\n\n");
+
 function detectKind(text: string): RequestKind {
   if (text.includes('Return exactly {"ok":true}')) return "probe";
   if (text.startsWith("Analyze the numbered English sentences")) return "core";
@@ -94,6 +108,7 @@ function detectKind(text: string): RequestKind {
   if (text.startsWith("Diagnose why the extension did not translate the page block")) {
     return "diagnosis";
   }
+  if (text.startsWith("Discuss the verified translation analysis")) return "chat";
   return "unknown";
 }
 
@@ -641,6 +656,12 @@ export class FakeOpenAiServer {
           }),
           streaming,
         );
+        return;
+      case "chat":
+        // 追问回答是自由文本:无 schema、无修复轮、不经 parseModelContent。
+        // 红线同上:模型内容必须经 writeContent,不许 response.end 直发——流式请求
+        // 拿到 JSON 体会误判端点不支持流式而回落重发,fetch 计数随之错乱。
+        await this.writeContent(response, CHAT_REPLY_TEXT, streaming);
         return;
       case "sentence-details":
       case "sentence-details-repair": {

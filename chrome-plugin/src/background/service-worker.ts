@@ -3,6 +3,7 @@ import type { CoreAnalysis, DetailAnalysis } from "../shared/grammar";
 import { assertNever, isRequestMessage, MAX_SENTENCES_PER_REQUEST } from "../shared/protocol";
 import type {
   CacheStats,
+  ChatStreamPush,
   CoreStreamPush,
   DetailStreamPush,
   DiagnosisExplanation,
@@ -32,6 +33,15 @@ const DIAGNOSE_MENU_ID = "syntax-diagnose-block";
 const CONTENT_SCRIPT_FILE = "content-script.js";
 const CONTEXT_INSTRUCTION = "请先启动学习模式，或选中文字后解析";
 const HOVERED_BLOCK_COMMAND = "parse-hovered-block";
+
+/**
+ * 追问对话的入站兜底上限。协议守卫(isRequestMessage 的 CHAT_ASK case)只判形状,
+ * 数量上限在这里把关:空问题在 UI 侧本就发不出去,SW 校验只作兜底;history 的
+ * 上限单位是 ChatTurn 项数(最近 3 组问答),与 content 面板裁剪同单位。
+ */
+const CHAT_QUESTION_MAX_CHARACTERS = 2000;
+const CHAT_HISTORY_MAX_TURNS = 6;
+const CHAT_HISTORY_MAX_CHARACTERS = 8000;
 
 interface ConfigPort {
   getProfile(profileId: string): Promise<ModelProfile | undefined>;
@@ -364,6 +374,10 @@ export function registerServiceWorker(
     const active = activeTabs.get(tabId);
     if (active === undefined) return;
     dependencies.scheduler.cancelDocument(active.documentId);
+    // chat 的调度命名空间是 `${documentId}:chat`(:diagnosis 先例),cancelDocument 精确
+    // 匹配够不到它;流式是静默超时、总时长不设限,不追加这条,页面关走后回答会无限期
+    // 占住全局并发槽(仅 4 个)。
+    dependencies.scheduler.cancelDocument(`${active.documentId}:chat`);
     activeTabs.delete(tabId);
     persistActiveTabs();
     if (notifyPage) notifyPageStopped(tabId, active.documentId);
@@ -627,6 +641,80 @@ export function registerServiceWorker(
               requestId: request.requestId,
               type: "DETAIL_RESULT",
               analysis: sanitizeDetail(outcome.result, profile),
+            };
+          } catch (error) {
+            const code = errorCode(error);
+            if (code === "AUTH_FAILED") pauseProfile(profile);
+            return errorResponse(request.requestId, code);
+          }
+        }
+        case "CHAT_ASK": {
+          // 协议守卫已拦掉形状不对的入站(role 枚举/content 非空/上下文形状都在
+          // isRequestMessage 的 CHAT_ASK case 里),这里兜底判它刻意不查的数量上限。
+          const question = request.question.trim();
+          const historyTurnsValid = request.history.every(
+            (turn) =>
+              (turn.role === "user" || turn.role === "assistant") && turn.content.length > 0,
+          );
+          const historyCharacters = request.history.reduce(
+            (total, turn) => total + turn.content.length,
+            0,
+          );
+          if (
+            question.length === 0 ||
+            question.length > CHAT_QUESTION_MAX_CHARACTERS ||
+            !historyTurnsValid ||
+            request.history.length > CHAT_HISTORY_MAX_TURNS ||
+            historyCharacters > CHAT_HISTORY_MAX_CHARACTERS
+          ) {
+            return errorResponse(request.requestId, "MALFORMED_MESSAGE");
+          }
+          const profile = await profileFor(request.tabId);
+          // chat 没有缓存兜底语义:无 profile 即配置缺失,不回落任何本地数据。
+          if (profile === undefined) return errorResponse(request.requestId, "CONFIG_MISSING");
+          if (isProfilePaused(profile)) return errorResponse(request.requestId, "AUTH_FAILED");
+          const chatSink = (text: string): void => {
+            const port = documentPorts.get(request.documentId);
+            if (port === undefined) return;
+            const push: ChatStreamPush = {
+              version: MESSAGE_VERSION,
+              type: "CHAT_STREAM",
+              documentId: request.documentId,
+              conversationId: request.conversationId,
+              // 分片同样是模型输出,脱敏不能因为"只是预览"就跳过(CORE_STREAM 同款)。
+              text: redactProfileSecrets(text, profile),
+            };
+            try {
+              port.postMessage(push);
+            } catch {
+              // 页面已走:丢掉这条端口,别把后续分片继续往死通道里塞。
+              documentPorts.delete(request.documentId);
+            }
+          };
+          const chatStreaming =
+            documentPorts.has(request.documentId) &&
+            (await dependencies.configRepository.getStreamRendering());
+          try {
+            const outcome = await dependencies.analysisService.chat(
+              {
+                profile,
+                // documentId 原样下发:`${documentId}:chat` 调度命名空间由 service
+                // 内部追加(:diagnosis 先例),chat 的取消绝不连坐该页在跑的 core/detail。
+                documentId: request.documentId,
+                conversationId: request.conversationId,
+                context: request.context,
+                history: request.history,
+                question,
+                ...(chatStreaming ? { onStreamedText: chatSink } : {}),
+              },
+              new AbortController().signal,
+            );
+            return {
+              version: MESSAGE_VERSION,
+              requestId: request.requestId,
+              type: "CHAT_RESULT",
+              conversationId: request.conversationId,
+              answer: redactProfileSecrets(outcome.answer, profile),
             };
           } catch (error) {
             const code = errorCode(error);
@@ -1131,6 +1219,9 @@ export function registerServiceWorker(
         await hydrated;
         if (activeTabs.get(tabId)?.documentId !== documentId) return;
         dependencies.scheduler.cancelDocument(documentId);
+        // 端口断开=消费方真正消失(面板收起不触发取消):chat 命名空间的流式回答
+        // 静默超时、总时长不设限,不在这里回收就会无限期占住全局并发槽。
+        dependencies.scheduler.cancelDocument(`${documentId}:chat`);
         activeTabs.delete(tabId);
         persistActiveTabs();
       })();
@@ -1246,6 +1337,7 @@ function defaultDependencies(): ServiceWorkerDependencies {
         (await getRuntime()).analysisService.analyzeSentenceDetails(...arguments_),
       explainDiagnosis: async (...arguments_) =>
         (await getRuntime()).analysisService.explainDiagnosis(...arguments_),
+      chat: async (...arguments_) => (await getRuntime()).analysisService.chat(...arguments_),
     },
     scheduler: {
       cancelDocument: (documentId) => {

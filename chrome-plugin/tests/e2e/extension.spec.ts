@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import type { ExtensionHarness } from "./fixtures";
+import { CHAT_REPLY_TEXT } from "../support/fake-openai-server";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -145,7 +146,8 @@ test("starting on an article analyzes only viewport-adjacent blocks into three-r
       expect(component).toEqual(["role", "english", "translation"]);
     }
     for (const rowKind of sentence.rowKinds) {
-      expect(["component", "punctuation"]).toContain(rowKind);
+      // chat-ask:句头「问」按钮(追问对话入口,Task 5 起 core 成功句必有)
+      expect(["component", "punctuation", "chat-ask"]).toContain(rowKind);
     }
   }
 });
@@ -1034,4 +1036,49 @@ test("端点拒绝流式时自动改走整段返回并照常渲染", async ({ ha
   // 先试流式被拒，再以整段返回成功;失败那次不算 core 请求以外的副作用。
   expect(core.some(({ streamed }) => streamed)).toBe(true);
   expect(core.some(({ streamed }) => !streamed)).toBe(true);
+});
+
+// 追问对话链路:句头「问」开浮层 → Enter 发问 → 流式分片到齐(探针式:气泡最终文本
+// === 服务器两段拼接全文 + fetch 计数恰为 1,而非只判「结束」)→ 第二问的请求体必须
+// 携带第一轮 question 与回答全文(多轮历史)。卡片与浮层都是 open shadow root,
+// Playwright 的 CSS 引擎直接穿透,选择器无需 pierce 语法。
+test("追问对话 chat 面板：两段流式回答拼齐且第二轮携带多轮历史", async ({ harness }) => {
+  await seedLocalProfile(harness, "chat-model");
+  const { page } = await startSession(harness, "error-single.html");
+  await expect(learningBlocks(page)).toHaveCount(1, { timeout: 20_000 });
+  // 「问」按钮只在有 core 的句头出现,等第一个成分可见再点。
+  await expect(page.locator(".component").first()).toBeVisible({ timeout: 15_000 });
+  harness.fakeModel.clearRecorded();
+
+  await page.locator("[data-syntax-chat-ask]").first().click();
+  const panel = page.locator("[data-syntax-chat-panel]");
+  await expect(panel.locator(".panel")).toBeVisible();
+  // 摘要行 = 锚定句前 40 字符(openChat 的 slice(0, 40))。
+  await expect(panel.locator(".summary")).toContainText(SINGLE_SENTENCE.slice(0, 40));
+
+  // 第一轮:输入问题回车 → 回答文本 === 服务器两段拼接全文(流式到齐)。
+  const composer = panel.locator(".composer textarea");
+  await composer.fill("这句为什么这么译");
+  await composer.press("Enter");
+  await expect(panel.locator(".message.assistant").first()).toHaveText(CHAT_REPLY_TEXT, {
+    timeout: 15_000,
+  });
+  // fetch 计数 === 1:一次流式请求拿到完整回答,没有缓冲回落造成的重发。
+  const firstRound = harness.fakeModel.recordedOfKind("chat");
+  expect(firstRound).toHaveLength(1);
+  expect(firstRound[0]!.streamed).toBe(true);
+
+  // 第二轮:先探输入框恢复可用(上一轮 CHAT_RESULT 已收尾),再发第二问。
+  await expect(composer).toBeEnabled();
+  await composer.fill("主语为什么这样划分");
+  await composer.press("Enter");
+  await expect(panel.locator(".message.assistant").nth(1)).toHaveText(CHAT_REPLY_TEXT, {
+    timeout: 15_000,
+  });
+  const chatRequests = harness.fakeModel.recordedOfKind("chat");
+  expect(chatRequests).toHaveLength(2);
+  // history 经 serialize(紧凑 JSON.stringify)拼进 prompt:回答里的空行在请求体中是
+  // 字面 \n 转义,所以断言全文的 JSON 字符串内文(去首尾引号),而不是含真实换行的原文。
+  expect(chatRequests[1]!.promptText).toContain("这句为什么这么译");
+  expect(chatRequests[1]!.promptText).toContain(JSON.stringify(CHAT_REPLY_TEXT).slice(1, -1));
 });

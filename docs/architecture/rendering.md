@@ -281,6 +281,14 @@ host + open shadow root,结构照 progress-pill,但**面板本身可交互**(刻
 
 端口断开 → `reconnectAndResume()`:按 `[0, 250, 500, 1000]` ms 重试连接;成功后把所有未达终态的块重新入队(paused 时放进 `pausedBlocks`)。全部失败则清掉所有块的活动标记。
 
+## 12. 追问对话浮层与接线(`chat-panel.ts` + `session-controller.ts`)
+
+- **打开**:`SessionController` 在 document 级监听 `syntax-chat-request`(句头「问」按钮派发,`syntax-detail-request` 同款挂法)→ `openChat(sentenceId)`。句子没有 `core` 直接返回(没有已核实的划分可作上下文,按钮本应禁用)。面板是控制器持有的**惰性单例**,首次点「问」才建 host(挂 `documentElement`);`conversationId = ${documentId}:chat:${++实例计数}`,换(或重按)锚定句即重置会话:摘要行换新、历史清空、`onSubmit` 重绑——旧会话的迟到流/结果由面板按 conversationId 把关丢弃。
+- **提问**:面板 Enter 提交 → `askChat(sentenceId, question)`:面板先落用户轮与 pending 回答轮,再发 `CHAT_ASK`(history 取 `currentConversation()`——已按 SW 兜底同单位裁剪且**不含本轮的悬空用户轮**;context = 句子 input + 已核实 core)。两 turn 的落账由面板自身完成(`appendUserTurn` / `completeAssistantTurn` 直接写面板历史)。`CHAT_RESULT` 以缓冲答案校平气泡;ERROR 渲染 `${code}：${message}` 并撤销悬空用户轮(失败轮不入历史)。**原句中途失效**(锚定句的 core 被清,如块被还原重扫)后再提交:错误气泡提示「原句已失效：请重新解析后再提问」——不发 `CHAT_ASK`、用户轮不落历史(此时还没 `appendUserTurn`,`failAssistantTurn` 在无 pending 轮时只画气泡)。
+- **流式**:`CHAT_STREAM` 经既有端口推送,`handleStreamPush` 的 `CHAT_STREAM` 分支转发 `onChatStreamPush` → 面板 `renderStreamedText` **全量替换**当前气泡。**无进行中轮次的迟到分片直接忽略**(`completeAssistantTurn` 已清当前气泡,再建泡会画出重复气泡);`beginAssistantTurn` 恒先于请求发出,正常时序不存在「先流后 begin」。
+- **收摊**:`stop()` 时 `panel.dispose()` 移除 host 并作废会话;在飞 `CHAT_ASK` 不主动取消——SW 侧端口回收(`${documentId}:chat` 命名空间)负责。
+- **锚点**:`bottom: 84px`,与 diagnosis-panel(同右下 `bottom: 64px`)**上下错开**,两浮层不同位精确重叠(刻意不做互斥,错位即可)。
+
 ## IntelliJ 插件的渲染链路(预览页)
 
 Chrome 端在真实网页里替换 DOM;IntelliJ 端在 **IDEA 默认的官方 Markdown 预览**(`MarkdownJCEFHtmlPanel`,官方 JCEF 渲染)里做同样的事,但取舍不同:

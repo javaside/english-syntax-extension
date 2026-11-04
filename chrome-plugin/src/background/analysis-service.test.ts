@@ -6,7 +6,7 @@ import { GrammarRole } from "../shared/grammar";
 import { CORE_SCHEMA_VERSION } from "../shared/versions";
 import type { CoreAnalysis, TokenRange } from "../shared/grammar";
 import { MAX_SENTENCES_PER_REQUEST } from "../shared/protocol";
-import type { BlockDiagnosis, SentenceInput } from "../shared/protocol";
+import type { BlockDiagnosis, ChatContext, SentenceInput } from "../shared/protocol";
 import { ModelRequestError } from "./openai-compatible-adapter";
 import { buildCorePrompt } from "./prompts";
 import type { ModelProfile } from "./config-repository";
@@ -17,6 +17,7 @@ import {
   type AnalysisModelWork,
   type AnalysisScheduledRequest,
   type AnalysisScheduler,
+  type ChatInput,
 } from "./analysis-service";
 
 const profile: ModelProfile = {
@@ -1995,5 +1996,150 @@ describe("explainDiagnosis", () => {
     // MemoryCache 是普通类（putCore/putDetail 非 mock）——断言 store 为空，不是 toHaveBeenCalled。
     expect(cache.core.size).toBe(0);
     expect(cache.detail.size).toBe(0);
+  });
+});
+
+describe("chat", () => {
+  const chatContext: ChatContext = {
+    kind: "sentence",
+    sentence: sentenceOne,
+    core: coreAnalysis(sentenceOne),
+  };
+
+  function chatInput(overrides: Partial<ChatInput> = {}): ChatInput {
+    return {
+      profile,
+      documentId: "doc-1",
+      conversationId: "doc-1:chat:1",
+      context: chatContext,
+      history: [
+        { role: "user", content: "上一问" },
+        { role: "assistant", content: "上一答" },
+      ],
+      question: "为什么这么译？",
+      ...overrides,
+    };
+  }
+
+  /** completeText 返回固定文本;textStreamingAdapter 额外带 completeTextStreaming,分两片回调。 */
+  function chatHarness(textStreamingAdapter: boolean) {
+    const cache = new MemoryCache();
+    const completeText = vi.fn<
+      (
+        profile: ModelProfile,
+        messages: readonly { role: string; content: string }[],
+        signal: AbortSignal,
+      ) => Promise<string>
+    >(() => Promise.resolve("这是回答。"));
+    const completeTextStreaming = vi.fn(
+      (
+        _profile: ModelProfile,
+        _messages: unknown,
+        _signal: AbortSignal,
+        onDelta: (chunk: string) => void,
+      ) => {
+        onDelta("这是");
+        onDelta("回答。");
+        return Promise.resolve("这是回答。");
+      },
+    );
+    const scheduler = new DedupeScheduler();
+    const service = new CachedAnalysisService({
+      cache,
+      adapter: textStreamingAdapter
+        ? { completeJson: vi.fn(), completeText, completeTextStreaming }
+        : { completeJson: vi.fn(), completeText },
+      scheduler,
+      now: () => 42,
+    });
+    return { cache, completeText, completeTextStreaming, scheduler, service };
+  }
+
+  it("经 detail-click 优先级调度，documentId 带 :chat 命名空间，单条 user 消息", async () => {
+    const h = chatHarness(false);
+    const scheduleSpy = vi.spyOn(h.scheduler, "schedule");
+
+    const outcome = await h.service.chat(chatInput(), new AbortController().signal);
+
+    expect(outcome).toEqual({ answer: "这是回答。" });
+    expect(h.completeText).toHaveBeenCalledTimes(1);
+    const [, messages] = h.completeText.mock.calls[0]!;
+    expect(messages).toHaveLength(1);
+    expect(messages[0]!.role).toBe("user");
+    // 假服务器 detectKind 按首行前缀识别请求类型——chat 首行必须逐字钉死。
+    expect(messages[0]!.content.split("\n")[0]).toBe(
+      "Discuss the verified translation analysis with the reader.",
+    );
+    const scheduled = scheduleSpy.mock.calls[0]![0] as {
+      priority: string;
+      documentId: string;
+      cacheKey: string;
+      sentenceCount: number;
+    };
+    expect(scheduled.priority).toBe("detail-click");
+    expect(scheduled.documentId).toBe("doc-1:chat"); // abort 连坐隔离（:diagnosis 先例）
+    expect(scheduled.sentenceCount).toBe(1); // 1 请求 = 1 槽位
+    expect(scheduled.cacheKey).toMatch(/^doc-1:chat:1:[a-f0-9]{16}$/u); // conversationId + 问题哈希
+  });
+
+  it("同 conversation 两问在飞：cacheKey 不同、两次模型调用、答案不串", async () => {
+    const h = chatHarness(false);
+    // 按问题内容作答，与调度完成顺序解耦。
+    h.completeText.mockImplementation((_profile, messages) =>
+      Promise.resolve(messages[0]!.content.includes("第一问") ? "第一问的答案" : "第二问的答案"),
+    );
+    const scheduleSpy = vi.spyOn(h.scheduler, "schedule");
+
+    const [first, second] = await Promise.all([
+      h.service.chat(chatInput({ question: "第一问" }), new AbortController().signal),
+      h.service.chat(chatInput({ question: "第二问" }), new AbortController().signal),
+    ]);
+
+    // DedupeScheduler 按 documentId\0cacheKey 合并在飞请求——共用 key 会只发一次并串答案。
+    expect(h.completeText).toHaveBeenCalledTimes(2);
+    expect(first.answer).toBe("第一问的答案");
+    expect(second.answer).toBe("第二问的答案");
+    const keys = scheduleSpy.mock.calls.map(([request]) => request.cacheKey);
+    expect(keys[0]).not.toBe(keys[1]);
+  });
+
+  it("有 onStreamedText 且适配器支持时走流式并回传累积全量", async () => {
+    const h = chatHarness(true);
+    const streamed: string[] = [];
+
+    const outcome = await h.service.chat(
+      chatInput({ onStreamedText: (text) => streamed.push(text) }),
+      new AbortController().signal,
+    );
+
+    expect(h.completeTextStreaming).toHaveBeenCalledTimes(1);
+    expect(h.completeText).not.toHaveBeenCalled();
+    // 每次回调都是截至目前的完整回答，不是增量——与 CORE_STREAM 整段重画约定一致。
+    expect(streamed).toEqual(["这是", "这是回答。"]);
+    expect(outcome).toEqual({ answer: "这是回答。" });
+  });
+
+  it("适配器不带文本流式端口时回落缓冲 completeText", async () => {
+    const h = chatHarness(false);
+    const streamed: string[] = [];
+
+    await h.service.chat(
+      chatInput({ onStreamedText: (text) => streamed.push(text) }),
+      new AbortController().signal,
+    );
+
+    expect(h.completeText).toHaveBeenCalledTimes(1);
+    expect(h.completeTextStreaming).not.toHaveBeenCalled();
+    expect(streamed).toEqual([]);
+  });
+
+  it("不写任何缓存", async () => {
+    const h = chatHarness(false);
+
+    await h.service.chat(chatInput(), new AbortController().signal);
+
+    expect(h.cache.core.size).toBe(0);
+    expect(h.cache.detail.size).toBe(0);
+    expect(h.cache.correction.size).toBe(0);
   });
 });
