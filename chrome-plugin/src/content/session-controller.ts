@@ -9,6 +9,7 @@ import type {
 } from "../shared/grammar";
 import { MAX_SENTENCES_PER_REQUEST } from "../shared/protocol";
 import type {
+  ChatStreamPush,
   CoreStreamPush,
   DetailStreamPush,
   RequestMessage,
@@ -22,6 +23,8 @@ import { createSentenceId, segmentBlock, tokenize } from "../language/segmenter"
 import { BlockActivityMarker } from "./block-activity-marker";
 import { BlockReplacement } from "./block-replacement";
 import type { SentenceFailure } from "./block-replacement";
+import { ChatPanel } from "./chat-panel";
+import type { SyntaxChatRequestEventDetail } from "./chat-panel";
 import { nearestSafeBlock, scanDocument } from "./document-scanner";
 import type { CandidateBlock } from "./document-scanner";
 import { DetailPrefetcher } from "./detail-prefetcher";
@@ -90,7 +93,9 @@ export interface RuntimeTransport {
   send(message: RequestMessage): Promise<ResponseMessage>;
   cancelDocument(documentId: string): void;
   onDisconnect?(handler: () => void): () => void;
-  onStream?(handler: (push: CoreStreamPush | DetailStreamPush) => void): () => void;
+  onStream?(
+    handler: (push: CoreStreamPush | DetailStreamPush | ChatStreamPush) => void,
+  ): () => void;
   reconnect?(): void | Promise<void>;
   dispose?(): void;
 }
@@ -264,6 +269,10 @@ export class SessionController {
   private removeDisconnectListener?: () => void;
   private removeStreamListener?: () => void;
   private selectedProfileId?: string;
+  /** 追问对话浮层:首次点「问」才建(惰性单例),随 stop() 一并 dispose。 */
+  private chatPanel?: ChatPanel;
+  /** openChat 递增的会话计数,conversationId 的 `${documentId}:chat:` 后缀。 */
+  private chatCounter = 0;
   private scanned = false;
   private cacheOnly = false;
   private readonly batchWindowMs: number;
@@ -400,6 +409,7 @@ export class SessionController {
     this.document.addEventListener("syntax-detail-request", this.handleDetailEvent);
     this.document.addEventListener("syntax-reanalyze-request", this.handleCorrectionEvent);
     this.document.addEventListener("syntax-correction-request", this.handleExplicitCorrectionEvent);
+    this.document.addEventListener("syntax-chat-request", this.handleChatEvent);
     this.installMutationObserver();
     this.removeDisconnectListener = this.options.transport.onDisconnect?.(
       this.handleTransportDisconnect,
@@ -470,6 +480,10 @@ export class SessionController {
       "syntax-correction-request",
       this.handleExplicitCorrectionEvent,
     );
+    this.document.removeEventListener("syntax-chat-request", this.handleChatEvent);
+    // 面板随控制器一起收摊;在飞的 CHAT_ASK 不主动取消——SW 侧端口回收负责
+    // (stop 已发 STOP_SESSION,`${documentId}:chat` 命名空间随之回收)。
+    this.chatPanel?.dispose();
     for (const timer of this.reconnectTimers) this.cancelTimeout(timer);
     this.reconnectTimers.clear();
     // 挂起的合批窗口必须取消，否则会话停掉之后还会冒出一条请求。
@@ -720,6 +734,64 @@ export class SessionController {
         located.sentence.core = corrected;
       }
     }
+  }
+
+  /**
+   * 打开追问对话浮层(惰性单例)。换(或重按)锚定句 = 重置会话:新 conversationId、
+   * 摘要行换新、onSubmit 重绑,旧会话的迟到流/结果由面板按 conversationId 把关丢弃。
+   * 句子没有 core 时直接返回——没有已核实的划分可作上下文(按钮本应禁用)。
+   */
+  openChat(sentenceId: string): void {
+    const sentence = this.sentences.get(sentenceId);
+    if (sentence === undefined || sentence.core === undefined) return;
+    if (this.chatPanel === undefined) this.chatPanel = new ChatPanel(this.document);
+    const panel = this.chatPanel;
+    const conversationId = `${this.documentId}:chat:${++this.chatCounter}`;
+    panel.open({ sentenceId, summary: sentence.input.text.slice(0, 40) });
+    panel.setConversationId(conversationId);
+    panel.onSubmit = (question) => void this.askChat(sentenceId, question);
+  }
+
+  /**
+   * 追问一轮:面板先落用户轮与 pending 回答轮,再发 CHAT_ASK。history 取自面板
+   * 当前会话(currentConversation 已裁剪且不含本轮的悬空用户轮);两 turn 的落账
+   * 由面板自身完成(appendUserTurn/completeAssistantTurn 直接写面板历史)。
+   */
+  async askChat(sentenceId: string, question: string): Promise<void> {
+    const panel = this.chatPanel;
+    // 无打开的会话(从未点「问」):没有可发的上下文,直接返回。
+    if (panel === undefined) return;
+    const conversation = panel.currentConversation();
+    const sentence = this.sentences.get(sentenceId);
+    if (conversation === null || sentence === undefined || sentence.core === undefined) {
+      return;
+    }
+    const conversationId = conversation.conversationId;
+    panel.appendUserTurn(question);
+    panel.beginAssistantTurn(conversationId);
+    const request = this.pageRequest({
+      type: "CHAT_ASK",
+      conversationId,
+      context: { kind: "sentence", sentence: sentence.input, core: sentence.core },
+      history: conversation.history,
+      question,
+    });
+    // 不占用 operationVersion:无关的 core/detail 轮转不得作废在飞的对话;换会话后的
+    // 迟到响应由面板 conversationId 把关。stop() 清空 pendingRequestIds,响应自然落地即弃。
+    const response = await this.send(request, this.operationVersion);
+    if (response === undefined) return;
+    if (response.type === "CHAT_RESULT") {
+      panel.completeAssistantTurn(conversationId, response.answer);
+      return;
+    }
+    // ERROR(及协议外不该出现的响应形态)统一进失败气泡;responseErrorMessage 对
+    // ERROR 恰为 `${code}：${message}`。
+    panel.failAssistantTurn(conversationId, responseErrorMessage(response));
+  }
+
+  /** CHAT_STREAM 分发:转发面板按 conversationId 渲染,未知 id(旧会话迟到流)由面板丢弃。 */
+  onChatStreamPush(push: ChatStreamPush): void {
+    this.chatPanel?.renderStreamedText(push.conversationId, push.text);
   }
 
   invalidateBlock(blockId: string): void {
@@ -1122,6 +1194,14 @@ export class SessionController {
     void this.requestDetail(event.detail as SyntaxFocusEventDetail);
   };
 
+  /** 句头「问」按钮的追问请求(syntax-detail-request 同款挂法,detail 带 sentenceId)。 */
+  private readonly handleChatEvent = (event: Event): void => {
+    if (!(event instanceof CustomEvent)) return;
+    const detail = event.detail as Partial<SyntaxChatRequestEventDetail>;
+    if (typeof detail.sentenceId !== "string") return;
+    this.openChat(detail.sentenceId);
+  };
+
   private readonly handleCorrectionEvent = (event: Event): void => {
     if (!(event instanceof CustomEvent)) return;
     const detail = event.detail as SyntaxFocusEventDetail;
@@ -1288,10 +1368,16 @@ export class SessionController {
     }
   }
 
-  private readonly handleStreamPush = (push: CoreStreamPush | DetailStreamPush): void => {
+  private readonly handleStreamPush = (
+    push: CoreStreamPush | DetailStreamPush | ChatStreamPush,
+  ): void => {
     if (push.documentId !== this.documentId) return;
     if (push.type === "CORE_STREAM") {
       this.applyStreamedCore(push.sentenceId, push.components);
+      return;
+    }
+    if (push.type === "CHAT_STREAM") {
+      this.onChatStreamPush(push);
       return;
     }
     this.applyStreamedDetail(push.sentenceId, push.focus, push.structures);

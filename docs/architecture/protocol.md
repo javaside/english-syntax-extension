@@ -116,6 +116,8 @@ ChatStreamPush   = { version, type: "CHAT_STREAM",   documentId, conversationId,
 
 前两者承载的都是**未经整句校验**的模型输出:只用于渲染,**不写缓存、不改相位**。`ChatStreamPush` 是追问对话回答的同类展示态文本,同样不写缓存;`text` 是「截至目前的完整回答」而非增量(调度器对可重试错误会静默重跑,追加式 delta 重试后会拼成乱序文本),面板按 `conversationId` 对账后整段重画,`CHAT_RESULT` 到达时以缓冲答案校平收尾。
 
+content 侧的分发契约与此同宽:`RuntimeTransport.onStream` 的 handler 参数就是三种推送的联合类型(`ChromeRuntimeTransport.onStream` 直接入册,不做任何桥接断言),`SessionController.handleStreamPush` 按 `type` 三分支分发(`CHAT_STREAM` → `onChatStreamPush`,按 conversationId 转发面板)。
+
 ## 5. `SessionStatus`
 
 | 字段                                              | 含义                                                  |

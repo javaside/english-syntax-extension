@@ -157,6 +157,22 @@ MV3 把扩展拆成互不共享内存的几个世界。**每个模块能做什�
 
 > 缓存键 = 规范化句文本 + schema 版本 + 提示词版本(core 用 `CORE_PROMPT_VERSION`,详解用 `DETAIL_PROMPT_VERSION`)+ focus 区间,**与 profile / 模型无关**。改任一侧的键构造必须两侧同步,并用对方路径读回验证。当前契约为 core `20` / detail `10`(core 17 在 16 的冒号/点分标识符口径上补充名词中心的自然局部译文;core 18 让 FANBOYS 并列片段的各并列项各成一个 `FRAGMENT_HEAD`、连词单列 `CONJUNCTION`;core 19 补非 FANBOYS 并列(逗号/分号/vs)的合并口径——短并列整体一个 head、长并列首项 head + 后续项 APPOSITIVE,把修复轮封死合法出路的旧指令改为按连接方式分流,core 20 再把判定改为逐项(混合列表 `A; B; and C` 的分号项一律 `APPOSITIVE`,修复轮逐项判定);detail 10 新增名词中心与后置 `of` 短语的自然局部译文教学;core 与 detail 旧缓存均按新提示词版本键作废),版本四文件(`versions.ts` / `Domain.kt` / `contracts.json` / `core-prompt-parity.json`)必须一次同步。
 
+### 追问对话链路(chat,无缓存)
+
+```
+用户点句头「问」按钮
+  ├─ learning-block 派发 CustomEvent syntax-chat-request {sentenceId}
+  ├─ SessionController.openChat(): 惰性建 ChatPanel;无 core 的句子直接忽略
+  │     换(或重按)锚定句 = 重置会话并生成新 conversationId(`${documentId}:chat:${n}`)
+  ├─ 面板 Enter 提交 → askChat(): 面板先落用户轮 + pending 回答轮,再发 CHAT_ASK
+  │     {context: {sentence, core}, history(面板已裁剪、不含本轮悬空用户轮), question}
+  ├─ SW → chat(): 不查/不写缓存、无修复轮;流式经同一端口推 CHAT_STREAM(累积全量),
+  │     handleStreamPush 的 CHAT_STREAM 分支按 conversationId 转发面板整段重画
+  └─ SW → content: CHAT_RESULT 以缓冲答案校平收尾;ERROR 渲染 `${code}：${message}` 并撤销悬空用户轮
+```
+
+面板历史由 ChatPanel 自持(最近 6 项 / ≤8000 字符,与 SW 入站兜底同边界);`stop()` 时面板随控制器 dispose,在飞请求不取消(端口回收负责)。
+
 ## 6. 两个状态机
 
 ### 会话状态(`SessionStatus.state`)

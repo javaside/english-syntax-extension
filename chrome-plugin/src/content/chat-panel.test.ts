@@ -217,4 +217,24 @@ describe("ChatPanel", () => {
     expect(panel.host.isConnected).toBe(false);
     expect(panel.currentConversation()).toBeNull();
   });
+
+  it("收尾后的迟到流式分片不建新泡:无进行中轮次则忽略流文本", () => {
+    const panel = openPanel();
+    completeRound(panel, "问1", "答1"); // completeAssistantTurn 已清 #assistantBubble
+
+    panel.renderStreamedText(CONVERSATION, "迟到的流式分片");
+
+    const bubbles = assistantBubbles(panel);
+    expect(bubbles).toHaveLength(1);
+    expect(bubbles[0]!.textContent).toBe("答1");
+    expect(panel.host.shadowRoot!.textContent).not.toContain("迟到的流式分片");
+  });
+
+  it("锚点与 diagnosis-panel(bottom 64px)错开,不与其同位精确重叠", () => {
+    const panel = new ChatPanel();
+    const style = panel.host.shadowRoot!.querySelector("style")!.textContent ?? "";
+
+    expect(style).toContain("bottom: 84px");
+    expect(style).not.toContain("bottom: 64px");
+  });
 });

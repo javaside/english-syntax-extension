@@ -344,18 +344,14 @@ export class ChromeRuntimeTransport implements RuntimeTransport {
   /**
    * 流式分片走的是端口推送，不是 sendMessage 的响应，所以 isRuntimeResponse 那套
    * switch 不适用——这里用 isCoreStreamPush / isDetailStreamPush / isChatStreamPush
-   * 单独把关。分发集合已 widen 到含 ChatStreamPush；注册签名暂按 RuntimeTransport
-   * 的窄契约（接口归 session-controller 所有，Task 6 统一放宽——直接 widen 方法参数
-   * 会因函数参数逆变被 tsc 拒绝，重载也救不回），故入册时做一次桥接断言。会接收
-   * chat 推送的订阅者以宽 handler 注入即可（窄 handler 接到 chat 推送的过渡窗口
-   * 到 Task 6 的 handleStreamPush 分支为止）。
+   * 单独把关。注册签名与分发集合同为三种推送的联合类型（RuntimeTransport.onStream
+   * 已同步 widen）。
    */
-  onStream(handler: (push: CoreStreamPush | DetailStreamPush) => void): () => void {
-    const wideHandler = handler as (
-      push: CoreStreamPush | DetailStreamPush | ChatStreamPush,
-    ) => void;
-    this.streamHandlers.add(wideHandler);
-    return () => this.streamHandlers.delete(wideHandler);
+  onStream(
+    handler: (push: CoreStreamPush | DetailStreamPush | ChatStreamPush) => void,
+  ): () => void {
+    this.streamHandlers.add(handler);
+    return () => this.streamHandlers.delete(handler);
   }
 
   reconnect(): void {

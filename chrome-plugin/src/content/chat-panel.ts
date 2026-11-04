@@ -15,7 +15,8 @@ const STYLES = `
   :host { all: initial; }
   .panel {
     all: initial;
-    position: fixed; right: 16px; bottom: 64px; z-index: 2147483647;
+    /* 与 diagnosis-panel(同右下 bottom 64px)上下错开,不与其同位精确重叠。 */
+    position: fixed; right: 16px; bottom: 84px; z-index: 2147483647;
     display: flex; flex-direction: column;
     width: min(400px, calc(100vw - 32px)); max-height: min(560px, 70vh);
     font: 13px/1.6 system-ui, sans-serif; color: #111;
@@ -217,14 +218,14 @@ export class ChatPanel {
     this.#scrollToEnd();
   }
 
-  /** 流式分片 = 截至目前的完整回答:全量替换当前气泡文本,不是追加。 */
+  /**
+   * 流式分片 = 截至目前的完整回答:全量替换当前气泡文本,不是追加。
+   * 无进行中轮次(completeAssistantTurn/failAssistantTurn 已收尾)的迟到分片
+   * 直接忽略——此时再建泡会把已结束的一轮又画出一个重复气泡。
+   */
   renderStreamedText(conversationId: string, text: string): void {
     if (conversationId !== this.#conversationId) return;
-    if (this.#assistantBubble === undefined) {
-      // 正常时序不可达(begin 先于请求发出);兜底建泡避免静默丢字。
-      this.#assistantBubble = this.#bubble("assistant", text);
-      this.#messages.append(this.#assistantBubble);
-    }
+    if (this.#assistantBubble === undefined) return;
     const bubble = this.#assistantBubble;
     bubble.classList.remove("pending");
     bubble.textContent = text;
