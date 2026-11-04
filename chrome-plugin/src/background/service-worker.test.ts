@@ -137,6 +137,8 @@ function dependencies(
       Promise.resolve({ succeeded: 0, failed: 0 }),
     ),
     explainDiagnosis: vi.fn<AnalysisService["explainDiagnosis"]>(),
+    // Task 3 接口新增后的编译占位:SW 路由与 chat 行为断言是 Task 4 的范围。
+    chat: vi.fn<AnalysisService["chat"]>(),
     ...analysisOverrides,
   };
   const deps: ServiceWorkerDependencies = {

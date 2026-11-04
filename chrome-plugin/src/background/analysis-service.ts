@@ -9,7 +9,13 @@ import type {
 } from "../shared/grammar";
 import { MAX_SENTENCES_PER_REQUEST } from "../shared/protocol";
 import { isLoopbackBaseUrl } from "./base-url";
-import type { BlockDiagnosis, DiagnosisExplanation, SentenceInput } from "../shared/protocol";
+import type {
+  BlockDiagnosis,
+  ChatContext,
+  ChatTurn,
+  DiagnosisExplanation,
+  SentenceInput,
+} from "../shared/protocol";
 import {
   CORE_PROMPT_VERSION,
   CORE_SCHEMA_VERSION,
@@ -23,6 +29,7 @@ import type { ModelProfile } from "./config-repository";
 import { ModelRequestError } from "./openai-compatible-adapter";
 import type { ChatMessage, JsonSchemaSpec } from "./openai-compatible-adapter";
 import {
+  buildChatPrompt,
   buildCorePrompt,
   buildDetailPrompt,
   buildDiagnosisPrompt,
@@ -51,6 +58,18 @@ const CLOUD_SENTENCES_PER_REQUEST = CLOUD_SENTENCES_PER_REQUEST_FOR_CONTRACT;
 
 function sentencesPerRequest(baseUrl: string): number {
   return isLoopbackBaseUrl(baseUrl) ? MAX_SENTENCES_PER_REQUEST : CLOUD_SENTENCES_PER_REQUEST;
+}
+
+/**
+ * 追问对话的按轮 cacheKey 后缀:调度器按 `documentId\0cacheKey` 合并在飞请求,
+ * 同一会话两问在飞时共用 key 会直接拿到第一问的 promise(串答案)。取问题
+ * SHA-256 的前 16 个十六进制字符,`crypto.subtle` 用法与 createSentenceId 同款。
+ */
+async function cacheKeyOf(question: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(question));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0"))
+    .join("")
+    .slice(0, 16);
 }
 
 export interface AnalysisCachePort {
@@ -83,6 +102,19 @@ export interface AnalysisAdapter {
     signal: AbortSignal,
     onStructure: (structure: Record<string, unknown>) => void,
   ): Promise<unknown>;
+  /** 追问对话的纯文本缓冲路径：无 response_format、不做 JSON 解析。 */
+  completeText?(
+    profile: ModelProfile,
+    messages: readonly ChatMessage[],
+    signal: AbortSignal,
+  ): Promise<string>;
+  /** 追问对话的纯文本流式路径：SSE 增量回调 onDelta，返回完整回答。 */
+  completeTextStreaming?(
+    profile: ModelProfile,
+    messages: readonly ChatMessage[],
+    signal: AbortSignal,
+    onDelta: (chunk: string) => void,
+  ): Promise<string>;
 }
 
 /** 累积上报某次详解已完成的结构;每次给的都是完整列表，渲染端整块重画即可。 */
@@ -101,7 +133,8 @@ export type StreamedComponentSink = (
 export interface AnalysisModelWork {
   profile: ModelProfile;
   messages: readonly ChatMessage[];
-  schema: JsonSchemaSpec;
+  /** chat 是自由文本请求，无 JSON schema——类型层如实可选。 */
+  schema?: JsonSchemaSpec;
   requestedAt: number;
   run(signal: AbortSignal): Promise<unknown>;
 }
@@ -162,6 +195,19 @@ export interface DiagnosisInput extends AnalysisInputBase {
   diagnosis: BlockDiagnosis;
 }
 
+export interface ChatInput extends AnalysisInputBase {
+  conversationId: string;
+  context: ChatContext;
+  history: readonly ChatTurn[];
+  question: string;
+  /** 给出即走流式:每次回调给截至目前的完整回答（累积全量），渲染端整段重画。 */
+  onStreamedText?: (text: string) => void;
+}
+
+export interface ChatOutcome {
+  answer: string;
+}
+
 export interface AnalysisFailure {
   sentenceId: string;
   error: ModelRequestError;
@@ -200,6 +246,11 @@ export interface AnalysisService {
    * 结果不写任何缓存(诊断解释随目标与时间变化,缓存意义为零)。
    */
   explainDiagnosis(input: DiagnosisInput, signal: AbortSignal): Promise<DiagnosisExplanation>;
+  /**
+   * 追问对话一轮:detail-click 档、调度命名空间用 `${documentId}:chat` 后缀隔离
+   * abort,不查/不写缓存、无修复轮(自由文本,无 schema 校验),模型错误原样上抛。
+   */
+  chat(input: ChatInput, signal: AbortSignal): Promise<ChatOutcome>;
 }
 
 export interface CachedAnalysisServiceOptions {
@@ -1080,6 +1131,41 @@ export class CachedAnalysisService implements AnalysisService {
     return validateDiagnosisExplanation(raw);
   }
 
+  /**
+   * 追问对话:不查/不写缓存、无修复轮(自由文本,无 schema 校验);错误原样上抛
+   * (AUTH_FAILED 等照既有 pauseProfile 语义由 SW 处理)。onStreamedText 每次回调
+   * 给的都是截至目前的完整回答——与 CORE_STREAM/DETAIL_STREAM 的整段重画约定一致,
+   * 调度器对可重试错误静默重跑后重试天然无害。
+   */
+  async chat(input: ChatInput, signal: AbortSignal): Promise<ChatOutcome> {
+    if (signal.aborted) throw cancellationError();
+    const answer = await this.requestModel(
+      input.profile,
+      // abort 隔离后缀(:diagnosis 先例):chat 的取消绝不连坐该页在跑的 core/detail。
+      `${input.documentId}:chat`,
+      "detail-click",
+      `${input.conversationId}:${await cacheKeyOf(input.question)}`,
+      1,
+      [
+        {
+          role: "user",
+          content: buildChatPrompt({
+            context: input.context,
+            history: input.history,
+            question: input.question,
+          }),
+        },
+      ],
+      undefined,
+      signal,
+      false,
+      undefined,
+      undefined,
+      input.onStreamedText,
+    );
+    return { answer: answer as string };
+  }
+
   private async validateAndCacheCore(
     profile: ModelProfile,
     entries: readonly { sentence: SentenceInput; key: string }[],
@@ -1111,11 +1197,13 @@ export class CachedAnalysisService implements AnalysisService {
     cacheKey: string,
     sentenceCount: number,
     messages: readonly ChatMessage[],
-    schema: JsonSchemaSpec,
+    // schema 默认 undefined 即纯文本请求(chat):自由文本不进 JSON 路径。
+    schema: JsonSchemaSpec | undefined = undefined,
     signal: AbortSignal,
     jumpQueue = false,
     onComponent?: (streamed: StreamedComponent) => void,
     onStructure?: (structure: Record<string, unknown>) => void,
+    onText?: (text: string) => void,
   ): Promise<unknown> {
     if (signal.aborted) throw cancellationError();
     const work: AnalysisModelWork = {
@@ -1128,7 +1216,7 @@ export class CachedAnalysisService implements AnalysisService {
           return this.options.adapter.completeJsonStreaming!(
             profile,
             messages,
-            schema,
+            schema!,
             schedulerSignal,
             onComponent,
           );
@@ -1137,10 +1225,27 @@ export class CachedAnalysisService implements AnalysisService {
           return this.options.adapter.completeDetailStreaming!(
             profile,
             messages,
-            schema,
+            schema!,
             schedulerSignal,
             onStructure,
           );
+        }
+        if (schema === undefined) {
+          // 纯文本请求(chat):有 sink 且适配器带文本流式端口时走流式——内部累积
+          // 增量后回调全量;否则整段缓冲。
+          if (onText !== undefined && this.options.adapter.completeTextStreaming !== undefined) {
+            let accumulated = "";
+            return this.options.adapter.completeTextStreaming(
+              profile,
+              messages,
+              schedulerSignal,
+              (chunk) => {
+                accumulated += chunk;
+                onText(accumulated);
+              },
+            );
+          }
+          return this.options.adapter.completeText!(profile, messages, schedulerSignal);
         }
         return this.options.adapter.completeJson(profile, messages, schema, schedulerSignal);
       },
