@@ -145,7 +145,8 @@ test("starting on an article analyzes only viewport-adjacent blocks into three-r
       expect(component).toEqual(["role", "english", "translation"]);
     }
     for (const rowKind of sentence.rowKinds) {
-      expect(["component", "punctuation"]).toContain(rowKind);
+      // chat-ask:句头「问」按钮(追问对话入口,Task 5 起 core 成功句必有)
+      expect(["component", "punctuation", "chat-ask"]).toContain(rowKind);
     }
   }
 });

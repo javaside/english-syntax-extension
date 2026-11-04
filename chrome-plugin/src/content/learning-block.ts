@@ -229,6 +229,30 @@ const STYLES = `
   opacity: 0.6;
 }
 
+/* 句头「问」按钮:进入追问对话的入口,只出现在有 core 分析的句区头部。 */
+.chat-ask {
+  appearance: none;
+  border: 1px solid color-mix(in srgb, currentColor 45%, transparent);
+  border-radius: 0.375em;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: max(11px, 0.68em);
+  line-height: 1;
+  padding: 0.15em 0.5em;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+
+.chat-ask:hover:enabled {
+  background: color-mix(in srgb, currentColor 10%, transparent);
+}
+
+.chat-ask:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .component,
   .retry {
@@ -252,6 +276,11 @@ const STYLES = `
 export interface SyntaxFocusEventDetail {
   sentenceId: string;
   focus: TokenRange;
+}
+
+/** 「问」按钮派发的追问请求 detail(syntax-detail-request 同款事件模式)。 */
+export interface SyntaxChatRequestEventDetail {
+  sentenceId: string;
 }
 
 function createElement<K extends keyof HTMLElementTagNameMap>(
@@ -440,6 +469,8 @@ export class SyntaxLearningBlock {
     const sentenceElement = createElement("section", "sentence");
     sentenceElement.dataset.sentenceId = analysis.sentenceId;
     sentenceElement.setAttribute("aria-label", sentence);
+    // 句头「问」按钮:该句已有 core 分析(renderCore 已跑)才存在,失败/跳过句不渲染。
+    sentenceElement.append(this.#createChatAsk(analysis.sentenceId));
 
     const coordinateClauseTotal = analysis.components.filter(
       (component) => component.role === GrammarRole.COORDINATE_CLAUSE,
@@ -664,6 +695,24 @@ export class SyntaxLearningBlock {
       );
     }
     detail.append(createElement("div", "detail-summary", detailAnalysis.explanation));
+  }
+
+  /** 句头「问」按钮:点击派发 syntax-chat-request(冒泡 + composed,详情请求同款)。 */
+  #createChatAsk(sentenceId: string): HTMLButtonElement {
+    const ask = createElement("button", "chat-ask", "问");
+    ask.type = "button";
+    ask.dataset.syntaxChatAsk = "";
+    ask.setAttribute("aria-label", "追问这句");
+    ask.addEventListener("click", () => {
+      this.dispatchEvent(
+        new CustomEvent<SyntaxChatRequestEventDetail>("syntax-chat-request", {
+          bubbles: true,
+          composed: true,
+          detail: { sentenceId },
+        }),
+      );
+    });
+    return ask;
   }
 
   #createRetry(sentenceId: string, focus: TokenRange): HTMLButtonElement {

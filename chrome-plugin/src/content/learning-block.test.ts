@@ -222,8 +222,10 @@ describe("SyntaxLearningBlock", () => {
     element.renderCore("«Yes, learners read.", gapTokens, gapAnalysis);
     const sentenceElement = element.host.shadowRoot!.querySelector(".sentence")!;
 
-    // 句首 « 无前置成分，保持独立子节点
-    expect(sentenceElement.firstElementChild!.className).toBe("punctuation");
+    // 句首 « 无前置成分，保持独立子节点（句头的「问」按钮在最前，但不吞并标点）
+    const leading = sentenceElement.querySelector(":scope > .punctuation");
+    expect(leading).not.toBeNull();
+    expect(leading!.previousElementSibling?.hasAttribute("data-syntax-chat-ask")).toBe(true);
     // 逗号（成分间隙）并入第一个成分的英文行
     const englishSpans = sentenceElement.querySelectorAll(".component .english");
     expect(englishSpans[0]!.textContent).toBe("Yes,");
@@ -376,8 +378,9 @@ describe("SyntaxLearningBlock", () => {
     });
 
     const sentenceRow = element.host.shadowRoot!.querySelector(".sentence")!;
-    // 句首 " 无前置成分独立成子节点；成分间隙逗号并入前一成分英文行、句尾句号并入谓语英文行。
+    // 句头是「问」按钮；句首 " 无前置成分独立成子节点；成分间隙逗号并入前一成分英文行、句尾句号并入谓语英文行。
     expect([...sentenceRow.children].map((child) => child.className)).toEqual([
+      "chat-ask",
       "punctuation",
       "component",
       "component",
@@ -445,6 +448,53 @@ describe("SyntaxLearningBlock", () => {
       sentenceId: "sentence-1",
       focus: { startToken: 0, endToken: 0 },
     });
+  });
+
+  it("有 core 分析的句子头部出现可用的「问」按钮，点击派发带 sentenceId 的 syntax-chat-request", () => {
+    const element = block();
+    document.body.append(element.host);
+    element.setExpectedSentenceIds(["sentence-1", "sentence-2"]);
+    element.renderCore(sentence, tokens, analysisFor("sentence-1"));
+    element.renderCore(sentence, tokens, analysisFor("sentence-2"));
+    const listener = vi.fn();
+    document.addEventListener("syntax-chat-request", listener);
+
+    const buttons =
+      element.host.shadowRoot!.querySelectorAll<HTMLButtonElement>("[data-syntax-chat-ask]");
+    expect(buttons).toHaveLength(2); // 每句头部各一个
+    const ask = buttons[1]!; // 第二句的按钮必须带上第二句的 sentenceId
+    expect(ask.tagName).toBe("BUTTON");
+    expect(ask.disabled).toBe(false);
+    expect(ask.textContent).toBe("问");
+    ask.focus(); // 键盘可达（与成分按钮同款）
+    ask.click();
+
+    expect(listener).toHaveBeenCalledOnce();
+    const event = listener.mock.calls[0]![0] as CustomEvent;
+    expect(event.bubbles).toBe(true);
+    expect(event.composed).toBe(true);
+    expect(event.detail).toEqual({ sentenceId: "sentence-2" });
+    document.removeEventListener("syntax-chat-request", listener);
+  });
+
+  it("失败句与跳过句没有可用的「问」按钮；core 成功句重渲染为失败后按钮随之消失", () => {
+    const element = block();
+    element.setExpectedSentenceIds(["sentence-1", "sentence-2", "sentence-3"]);
+    element.renderFailure("sentence-1", sentence, "解析失败");
+    element.renderSkipped("sentence-2", "A cache-missed original sentence.");
+    element.renderCore(sentence, tokens, analysisFor("sentence-3"));
+
+    const root = element.host.shadowRoot!;
+    // 只有带 core 分析的句子有按钮
+    expect(root.querySelector('[data-sentence-id="sentence-1"] [data-syntax-chat-ask]')).toBeNull();
+    expect(root.querySelector('[data-sentence-id="sentence-2"] [data-syntax-chat-ask]')).toBeNull();
+    expect(
+      root.querySelector<HTMLElement>('[data-sentence-id="sentence-3"] [data-syntax-chat-ask]'),
+    ).not.toBeNull();
+
+    // 整句重解析失败后，旧句区（连同按钮）被替换，无处可点
+    element.renderFailure("sentence-3", sentence, "解析失败");
+    expect(root.querySelector("[data-syntax-chat-ask]")).toBeNull();
   });
 
   it("shows lazy detail loading, detail text, and a retryable error without creating markup", () => {

@@ -62,6 +62,7 @@
 | `detail-prefetcher.ts`     | 详解预载队列:按句去重、并发 2、暂停 / 恢复、块失效时丢弃、成分级计数(total / ready / failed)                                                                 |
 | `progress-pill.ts`         | 页面右下角进度胶囊。纯展示,从不发命令                                                                                                                        |
 | `diagnosis-panel.ts`       | 段落诊断面板(host + open shadow root,结构照 progress-pill,但面板本身可交互):本地证据(逐门表格)立即渲染,模型解释段按 requestId 防过期(`updateModel` 对不匹配的 requestId 直接忽略),隐私两句常驻;`report()` 点击复制时才经 `formatDiagnosisReport` 组装 markdown,剪贴板被拒时降级为已全选的只读 textarea |
+| `chat-panel.ts`            | 追问对话浮层(host + open shadow root,工艺照 diagnosis-panel:固定右下、惰性挂载):顶部锚定句摘要行、纯文本气泡流(`pre-wrap`,不引 markdown)、Enter 发送 / Shift+Enter 换行 / 发送中禁用;`renderStreamedText` 按 conversationId **全量替换**当前回答气泡(与 SW 推送的「累积全量」形状配套,静默重试无害);`currentConversation()` 按与 SW 兜底同单位裁剪历史(ChatTurn 项 ≤ 6、总字符 ≤ 8000,从最旧丢起)且不含已提交未回答的悬空用户轮 |
 
 ## chrome-plugin/src/popup / src/options —— 扩展 UI
 
