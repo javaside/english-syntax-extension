@@ -156,7 +156,7 @@ content 入站拒绝列表加 `CHAT_ASK` ｜ 端口推送守卫 `isChatStreamPus
   `onStreamText(conversationId, text)` 以**全量替换**渲染当前回答气泡
   （与推送形状配套，重试安全）；
   `onResult(conversationId, answer)` 收尾（以缓冲答案为准渲染，防流式尾片丢失）。
-- **历史裁剪**：面板构造 `history` 时只带**最近 6 轮**且总字符 ≤ 8000
+- **历史裁剪**：面板构造 `history` 时只带**6 个 ChatTurn 项（最近 3 组问答）**且总字符 ≤ 8000
   （超出丢最旧轮；`CHAT_ASK` 的 SW 校验同步拒绝超限）——无界增长会在多轮后撞
   provider 上下文上限。
 - `learning-block.ts`：每个句子区头部加「问」按钮（`data-syntax-chat-ask`），

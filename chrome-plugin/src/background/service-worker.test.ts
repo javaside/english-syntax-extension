@@ -1825,12 +1825,19 @@ describe("chat 路由", () => {
     ];
     const tooManyCharacters = await dispatch(listener, chatAskRequest({ history: heavyHistory }));
 
-    // 边界：恰 6 项且总字符恰 8000 放行
+    // 边界两条各测一侧：总字符恰 8000（2 项）放行；恰 6 项（3 组问答、总字符 ≤ 8000）放行
     const boundaryHistory: ChatTurn[] = [
       { role: "user", content: "x".repeat(7999) },
       { role: "assistant", content: "y" },
     ];
     const boundary = await dispatch(listener, chatAskRequest({ history: boundaryHistory }));
+
+    const sixTurnsHistory: ChatTurn[] = Array.from({ length: 6 }, (_, index) =>
+      index % 2 === 0
+        ? { role: "user" as const, content: `问 ${index}` }
+        : { role: "assistant" as const, content: `答 ${index}` },
+    );
+    const sixTurnsBoundary = await dispatch(listener, chatAskRequest({ history: sixTurnsHistory }));
 
     expect(tooManyTurns).toMatchObject({ type: "ERROR", error: { code: "MALFORMED_MESSAGE" } });
     expect(tooManyCharacters).toMatchObject({
@@ -1838,7 +1845,8 @@ describe("chat 路由", () => {
       error: { code: "MALFORMED_MESSAGE" },
     });
     expect(boundary.type).toBe("CHAT_RESULT");
-    expect(chat).toHaveBeenCalledTimes(1);
+    expect(sixTurnsBoundary.type).toBe("CHAT_RESULT");
+    expect(chat).toHaveBeenCalledTimes(2);
   });
 
   it("无 profile → CONFIG_MISSING（chat 无缓存兜底语义）", async () => {

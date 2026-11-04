@@ -285,7 +285,7 @@ raw → validateCoreBatch（解析前预丢弃纯标点成分）
 一旦某 profile 返回 `AUTH_FAILED`,SW 用 `pausedProfiles`(id → 凭据指纹)把它挂起:
 
 - 指纹 = `[baseUrl, apiKey, model, 排序后的 headers]` 的 JSON。**用户改了凭据,指纹变化即自动解除暂停。**
-- 暂停期间:`ANALYZE_CORE` 仍返回缓存命中 + 批级 `AUTH_FAILED`;`ANALYZE_DETAIL` 先查缓存,未命中才报错;预载与纠正直接报错。
+- 暂停期间:`ANALYZE_CORE` 仍返回缓存命中 + 批级 `AUTH_FAILED`;`ANALYZE_DETAIL` 先查缓存,未命中才报错;预载与纠正直接报错;chat 直接 `AUTH_FAILED`。
 - 「测试连接」**不受暂停门拦截**(这是用户显式自检),成功即解除——修好服务端后无需重载扩展。
 
 ## 11. 脱敏
