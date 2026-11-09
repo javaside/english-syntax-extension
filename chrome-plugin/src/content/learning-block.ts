@@ -31,6 +31,20 @@ const ROLE_COLORS: Readonly<Record<GrammarRole, string>> = {
 
 const RETRY_HINT_DURATION_MS = 2000;
 
+/**
+ * 句头追问入口的聊天气泡图标(描边 + 三个点,输入指示语义)。内联 SVG、
+ * currentColor 描边——跟随句子文字颜色,明暗主题零适配;aria-hidden 让
+ * 屏幕阅读器只念按钮的 aria-label「追问这句」。
+ */
+const CHAT_ASK_ICON =
+  '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false">' +
+  '<path d="M2.5 3h11a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H8.4l-3.2 2.6a.5.5 0 0 1-.8-.4V11h-1.9a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" ' +
+  'fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>' +
+  '<circle cx="5.4" cy="7" r="0.95" fill="currentColor"/>' +
+  '<circle cx="8" cy="7" r="0.95" fill="currentColor"/>' +
+  '<circle cx="10.6" cy="7" r="0.95" fill="currentColor"/>' +
+  "</svg>";
+
 const STYLES = `
 :host {
   display: block;
@@ -229,23 +243,35 @@ const STYLES = `
   opacity: 0.6;
 }
 
-/* 句头「问」按钮:进入追问对话的入口,只出现在有 core 分析的句区头部。 */
+/* 句头追问入口:聊天气泡图标按钮,只出现在有 core 分析的句区头部。
+   2026-11-09 真机反馈:文字「问」太扎眼——换成无文字的小图标,平时半透明,
+   悬停句区(或键盘聚焦)才完全显现,悬停有「追问这句」提示。 */
 .chat-ask {
   appearance: none;
-  border: 1px solid color-mix(in srgb, currentColor 45%, transparent);
-  border-radius: 0.375em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.55em;
+  height: 1.55em;
+  min-width: 20px;
+  min-height: 20px;
+  border: none;
+  border-radius: 50%;
   background: transparent;
   color: inherit;
-  font: inherit;
-  font-size: max(11px, 0.68em);
-  line-height: 1;
-  padding: 0.15em 0.5em;
+  padding: 0;
   cursor: pointer;
-  transition: background-color 120ms ease;
+  opacity: 0.45;
+  transition: opacity 120ms ease, background-color 120ms ease;
+}
+
+.sentence:hover .chat-ask,
+.chat-ask:focus-visible {
+  opacity: 1;
 }
 
 .chat-ask:hover:enabled {
-  background: color-mix(in srgb, currentColor 10%, transparent);
+  background: color-mix(in srgb, currentColor 12%, transparent);
 }
 
 .chat-ask:focus-visible {
@@ -253,9 +279,14 @@ const STYLES = `
   outline-offset: 2px;
 }
 
+.chat-ask svg {
+  display: block;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .component,
-  .retry {
+  .retry,
+  .chat-ask {
     transition: none;
   }
 }
@@ -697,12 +728,14 @@ export class SyntaxLearningBlock {
     detail.append(createElement("div", "detail-summary", detailAnalysis.explanation));
   }
 
-  /** 句头「问」按钮:点击派发 syntax-chat-request(冒泡 + composed,详情请求同款)。 */
+  /** 句头追问入口按钮:点击派发 syntax-chat-request(冒泡 + composed,详情请求同款)。 */
   #createChatAsk(sentenceId: string): HTMLButtonElement {
-    const ask = createElement("button", "chat-ask", "问");
+    const ask = createElement("button", "chat-ask");
     ask.type = "button";
     ask.dataset.syntaxChatAsk = "";
     ask.setAttribute("aria-label", "追问这句");
+    ask.title = "追问这句"; // 图标无文字,悬停提示承载可发现性
+    ask.innerHTML = CHAT_ASK_ICON;
     ask.addEventListener("click", () => {
       this.dispatchEvent(
         new CustomEvent<SyntaxChatRequestEventDetail>("syntax-chat-request", {
