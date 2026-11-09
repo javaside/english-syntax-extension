@@ -1081,4 +1081,18 @@ test("追问对话 chat 面板：两段流式回答拼齐且第二轮携带多�
   // 字面 \n 转义,所以断言全文的 JSON 字符串内文(去首尾引号),而不是含真实换行的原文。
   expect(chatRequests[1]!.promptText).toContain("这句为什么这么译");
   expect(chatRequests[1]!.promptText).toContain(JSON.stringify(CHAT_REPLY_TEXT).slice(1, -1));
+
+  // 面板可拖(真机反馈:固定右下读左上段落时视线往返):抓标题栏拖动,浮层跟着走。
+  // host 是 0×0 的壳,量 shadow 内的 .panel 才有真实几何。
+  const surface = page.locator("[data-syntax-chat-panel] .panel");
+  const before = await surface.boundingBox();
+  const header = page.locator("[data-syntax-chat-panel] .header");
+  const headerBox = await header.boundingBox();
+  await page.mouse.move(headerBox!.x + headerBox!.width / 2, headerBox!.y + 4);
+  await page.mouse.down();
+  await page.mouse.move(before!.x - 180, Math.max(before!.y - 120, 20), { steps: 5 });
+  await page.mouse.up();
+  const after = await surface.boundingBox();
+  expect(after!.x).toBeLessThan(before!.x - 100);
+  expect(after!.y).toBeLessThan(before!.y - 60);
 });
