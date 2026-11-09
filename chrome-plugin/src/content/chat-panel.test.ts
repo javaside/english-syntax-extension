@@ -237,4 +237,55 @@ describe("ChatPanel", () => {
     expect(style).toContain("bottom: 84px");
     expect(style).not.toContain("bottom: 64px");
   });
+
+  // 2026-11-08 真机反馈:面板固定右下且不可拖,读左上段落时视线往返很远。
+  // 标题栏(pointerdown/move/up)拖动,位置落在 .panel(fixed 元素;host 是 0×0 壳)
+  // 的内联样式上,钳制在视口内,重开后保持。
+  it("拖动标题栏移动面板:left/top 跟随、解除右下锚定、并钳制在视口内", () => {
+    const panel = openPanel();
+    const header = panel.host.shadowRoot!.querySelector(".header")!;
+    const surface = panel.host.shadowRoot!.querySelector<HTMLElement>(".panel")!;
+
+    header.dispatchEvent(
+      new MouseEvent("pointerdown", { bubbles: true, clientX: 100, clientY: 100 }),
+    );
+    document.dispatchEvent(new MouseEvent("pointermove", { clientX: 220, clientY: 160 }));
+    document.dispatchEvent(new MouseEvent("pointerup", { clientX: 220, clientY: 160 }));
+
+    expect(surface.style.left).toBe("120px");
+    expect(surface.style.top).toBe("60px");
+    expect(surface.style.right).toBe("auto");
+    expect(surface.style.bottom).toBe("auto");
+
+    // 拖出视口右下:钳制到「至少留一个可抓取的角」的边界内。
+    header.dispatchEvent(
+      new MouseEvent("pointerdown", { bubbles: true, clientX: 220, clientY: 160 }),
+    );
+    document.dispatchEvent(new MouseEvent("pointermove", { clientX: 9000, clientY: 9000 }));
+    document.dispatchEvent(new MouseEvent("pointerup", { clientX: 9000, clientY: 9000 }));
+
+    expect(surface.style.left).toBe(`${window.innerWidth - 120}px`);
+    expect(surface.style.top).toBe(`${window.innerHeight - 80}px`);
+
+    // 关闭后重开:面板回到用户拖到的位置,而不是回到默认右下。
+    panel.dispose();
+    panel.open({ sentenceId: "sentence-2", summary: "另一句" });
+    expect(surface.style.left).toBe(`${window.innerWidth - 120}px`);
+    expect(surface.style.top).toBe(`${window.innerHeight - 80}px`);
+  });
+
+  it("拖动从按钮上起手时不生效(收起/关闭仍可点),未按住时 move 无副作用", () => {
+    const panel = openPanel();
+    const close = panel.host.shadowRoot!.querySelector(".header button:last-child")!;
+    const surface = panel.host.shadowRoot!.querySelector<HTMLElement>(".panel")!;
+
+    close.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, clientX: 10, clientY: 10 }));
+    document.dispatchEvent(new MouseEvent("pointermove", { clientX: 300, clientY: 300 }));
+    document.dispatchEvent(new MouseEvent("pointerup", { clientX: 300, clientY: 300 }));
+    expect(surface.style.left).toBe("");
+
+    // 没有按住标题栏的裸 move 不改位置。
+    document.dispatchEvent(new MouseEvent("pointermove", { clientX: 400, clientY: 400 }));
+    expect(surface.style.left).toBe("");
+  });
 });

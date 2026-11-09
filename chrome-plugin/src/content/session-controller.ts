@@ -507,7 +507,9 @@ export class SessionController {
   async parseSelection(selectionText: string): Promise<ExtensionError | undefined> {
     const text = selectionText.trim().replace(/\s+/gu, " ");
     if (text.length === 0) return CONTEXT_ERROR;
-    if (this.state === "stopped") await this.start();
+    // 与悬停快捷键(parseHoveredBlock)同为显式冷启动入口:轻量启动,不做全页扫描——
+    // 本意是「翻我选中的这段」,不是开始整页伴读(2026-11-08 真机反馈整页被翻)。
+    if (this.state === "stopped") await this.start({ scan: false });
     const target = this.selectionTarget() ?? this.contextTarget;
     const candidate = nearestSafeBlock(target);
     if (candidate === null) {

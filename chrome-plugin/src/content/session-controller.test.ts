@@ -1346,6 +1346,28 @@ describe("SessionController", () => {
     subject.controller.stop();
   });
 
+  // 2026-11-08 真机反馈:选中文本右键「解析选中文本」在无会话时把整页都翻了。
+  // 该手势与悬停快捷键同为显式冷启动入口,必须同样轻量启动(start({scan:false})),
+  // 只解析选中段——本意就是「翻我选的这段」,不是开始整页伴读。
+  it("选区冷启动：轻量启动只解析选中段落，不做全页扫描", async () => {
+    const scan = vi.fn(() => {
+      throw new Error("selection cold start must not scan the document");
+    });
+    const subject = harness("Readers understand complex sentences.", new FakeTransport(), {
+      scan,
+    });
+    document.querySelector("p")!.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+
+    const error = await subject.controller.parseSelection("Readers understand complex sentences.");
+
+    expect(error).toBeUndefined();
+    expect(scan).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(subject.controller.status.ready).toBe(1));
+    expect(subject.controller.status.state).toBe("running");
+    expect(subject.replacements).toHaveLength(1);
+    subject.controller.stop();
+  });
+
   it("轻量会话后完整 start() 补做全页扫描，且只补一次（升级路径）", async () => {
     const scan = vi.fn(() => [
       {

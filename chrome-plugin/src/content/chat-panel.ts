@@ -11,6 +11,15 @@ const MAX_HISTORY_CHARS = 8000;
 /** SW 兜底对 question 的上限(trim 后 1..2000);UI 侧用 maxlength 先挡一道。 */
 const QUESTION_MAX_CHARACTERS = 2000;
 
+/**
+ * 拖动钳制边界:不依赖布局就能算的「至少留一个可抓取的角」——left/top 各自
+ * 距视口边 ≥8px,且 left ≤ innerWidth-120 / top ≤ innerHeight-80(面板宽 400、
+ * 高 560 以内,保证标题栏总有一截在视口里,拖丢了也拽得回来)。
+ */
+const DRAG_MARGIN = 8;
+const DRAG_MAX_LEFT_RESERVE = 120;
+const DRAG_MAX_TOP_RESERVE = 80;
+
 const STYLES = `
   :host { all: initial; }
   .panel {
@@ -27,6 +36,8 @@ const STYLES = `
   .header {
     display: flex; align-items: baseline; gap: 8px;
     padding: 10px 12px 8px; border-bottom: 1px solid #e4e4e7;
+    /* 标题栏是拖动把手:抓着它把面板拖到正在读的段落旁。 */
+    cursor: grab; touch-action: none; user-select: none;
   }
   .summary {
     flex: 1; min-inline-size: 0; font-weight: 600; font-size: 12px; color: #52525b;
@@ -114,6 +125,11 @@ export class ChatPanel {
   #conversationId: string | undefined;
   #history: ChatTurn[] = [];
   #assistantBubble: HTMLElement | undefined;
+  /** 拖动状态;pointerup/pointercancel 清空。null = 未在拖。 */
+  #drag: { startX: number; startY: number; baseLeft: number; baseTop: number } | null = null;
+  /** 用户拖过之后的位置(像素);重开面板时沿用,没拖过则保持 CSS 默认右下。 */
+  #placedLeft: number | undefined;
+  #placedTop: number | undefined;
 
   constructor(ownerDocument: Document = document) {
     this.#doc = ownerDocument;
@@ -143,6 +159,35 @@ export class ChatPanel {
     const header = ownerDocument.createElement("div");
     header.className = "header";
     header.append(this.#summary, collapse, close);
+    // 标题栏拖动把手:move/up 挂在 document 上,指针甩出标题栏也能继续拖。
+    // 从按钮上起手不算拖(收起/关闭仍可点);抓取以 pointerdown 的 target 判定。
+    header.addEventListener("pointerdown", (event) => {
+      if (event.target instanceof Element && event.target.closest("button")) return;
+      // 基准取 .panel(真正 fixed 定位的元素)的 rect;host 是 0×0 的静态壳。
+      const rect = this.#root.getBoundingClientRect();
+      this.#drag = {
+        startX: event.clientX,
+        startY: event.clientY,
+        baseLeft: rect.left,
+        baseTop: rect.top,
+      };
+      header.style.cursor = "grabbing";
+      event.preventDefault(); // 别让浏览器把标题栏文本选进拖动
+    });
+    ownerDocument.addEventListener("pointermove", (event) => {
+      if (this.#drag === null) return;
+      this.#applyPosition(
+        this.#drag.baseLeft + event.clientX - this.#drag.startX,
+        this.#drag.baseTop + event.clientY - this.#drag.startY,
+      );
+    });
+    const endDrag = (): void => {
+      if (this.#drag === null) return;
+      this.#drag = null;
+      header.style.cursor = "";
+    };
+    ownerDocument.addEventListener("pointerup", endDrag);
+    ownerDocument.addEventListener("pointercancel", endDrag);
 
     this.#messages = ownerDocument.createElement("div");
     this.#messages.className = "messages";
@@ -176,6 +221,11 @@ export class ChatPanel {
     this.#conversationId = undefined;
     this.#history = [];
     this.#assistantBubble = undefined;
+    // 用户拖过的位置跨会话沿用(host 元素常驻,样式本就还在;显式重贴一次,
+    // 防御未来 dispose 重建 host 的实现变化)。
+    if (this.#placedLeft !== undefined && this.#placedTop !== undefined) {
+      this.#applyPosition(this.#placedLeft, this.#placedTop);
+    }
     this.#messages.replaceChildren();
     this.#summary.textContent = context.summary;
     this.#summary.title = context.summary; // 摘要行省略号截断,悬停看全文
@@ -267,6 +317,25 @@ export class ChatPanel {
     this.#assistantBubble = undefined;
     this.#setSending(false);
     this.#scrollToEnd();
+  }
+
+  /**
+   * 钳制到视口内并落到 .panel 的内联样式——.panel 才是 position:fixed 的元素,
+   * host 只是 0×0 的挂载壳,写 host 不动面板。拖动后改用 left/top 定位(清掉
+   * right/bottom 的 CSS 默认右下锚定)。记下落点供重开沿用。
+   */
+  #applyPosition(left: number, top: number): void {
+    const view = this.#doc.defaultView;
+    const maxLeft = Math.max(DRAG_MARGIN, (view?.innerWidth ?? 0) - DRAG_MAX_LEFT_RESERVE);
+    const maxTop = Math.max(DRAG_MARGIN, (view?.innerHeight ?? 0) - DRAG_MAX_TOP_RESERVE);
+    const clampedLeft = Math.min(Math.max(left, DRAG_MARGIN), maxLeft);
+    const clampedTop = Math.min(Math.max(top, DRAG_MARGIN), maxTop);
+    this.#root.style.left = `${clampedLeft}px`;
+    this.#root.style.top = `${clampedTop}px`;
+    this.#root.style.right = "auto";
+    this.#root.style.bottom = "auto";
+    this.#placedLeft = clampedLeft;
+    this.#placedTop = clampedTop;
   }
 
   /** 关闭浮层并作废会话(对话不持久化:面板关闭即丢)。 */
