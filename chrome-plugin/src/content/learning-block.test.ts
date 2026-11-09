@@ -465,7 +465,12 @@ describe("SyntaxLearningBlock", () => {
     const ask = buttons[1]!; // 第二句的按钮必须带上第二句的 sentenceId
     expect(ask.tagName).toBe("BUTTON");
     expect(ask.disabled).toBe(false);
-    expect(ask.textContent).toBe("问");
+    // 2026-11-09 真机反馈:文字「问」太扎眼。入口是聊天气泡图标按钮:
+    // 无文字、内联 SVG、悬停有提示文案(aria-label/title 同文案)。
+    expect(ask.textContent?.trim()).toBe("");
+    expect(ask.querySelector("svg")).not.toBeNull();
+    expect(ask.getAttribute("aria-label")).toBe("追问这句");
+    expect(ask.title).toBe("追问这句");
     ask.focus(); // 键盘可达（与成分按钮同款）
     ask.click();
 
