@@ -743,13 +743,17 @@ export class SessionController {
    * 摘要行换新、onSubmit 重绑,旧会话的迟到流/结果由面板按 conversationId 把关丢弃。
    * 句子没有 core 时直接返回——没有已核实的划分可作上下文(按钮本应禁用)。
    */
-  openChat(sentenceId: string): void {
+  openChat(sentenceId: string, anchor?: { x: number; y: number }): void {
     const sentence = this.sentences.get(sentenceId);
     if (sentence === undefined || sentence.core === undefined) return;
     if (this.chatPanel === undefined) this.chatPanel = new ChatPanel(this.document);
     const panel = this.chatPanel;
     const conversationId = `${this.documentId}:chat:${++this.chatCounter}`;
-    panel.open({ sentenceId, summary: sentence.input.text.slice(0, 40) });
+    panel.open({
+      sentenceId,
+      summary: sentence.input.text.slice(0, 40),
+      ...(anchor !== undefined ? { anchor } : {}),
+    });
     panel.setConversationId(conversationId);
     panel.onSubmit = (question) => void this.askChat(sentenceId, question);
   }
@@ -1205,7 +1209,12 @@ export class SessionController {
     if (!(event instanceof CustomEvent)) return;
     const detail = event.detail as Partial<SyntaxChatRequestEventDetail>;
     if (typeof detail.sentenceId !== "string") return;
-    this.openChat(detail.sentenceId);
+    // anchor(点击坐标)形状校验后透传;键盘/桩不带或形状不对则不带,面板保持原位。
+    const anchor =
+      typeof detail.anchor?.x === "number" && typeof detail.anchor?.y === "number"
+        ? { x: detail.anchor.x, y: detail.anchor.y }
+        : undefined;
+    this.openChat(detail.sentenceId, anchor);
   };
 
   private readonly handleCorrectionEvent = (event: Event): void => {

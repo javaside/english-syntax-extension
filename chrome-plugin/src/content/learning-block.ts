@@ -1,4 +1,5 @@
 import { GRAMMAR_LABELS, GrammarRole } from "../shared/grammar";
+import type { SyntaxChatRequestEventDetail } from "./chat-panel";
 import type {
   CoreAnalysis,
   DetailAnalysis,
@@ -309,10 +310,9 @@ export interface SyntaxFocusEventDetail {
   focus: TokenRange;
 }
 
-/** 「问」按钮派发的追问请求 detail(syntax-detail-request 同款事件模式)。 */
-export interface SyntaxChatRequestEventDetail {
-  sentenceId: string;
-}
+// 「问」按钮派发的追问请求 detail 由 chat-panel 单一定义(含 anchor);
+// 这里 re-export 维持既有导入路径兼容。
+export type { SyntaxChatRequestEventDetail };
 
 function createElement<K extends keyof HTMLElementTagNameMap>(
   name: K,
@@ -736,12 +736,21 @@ export class SyntaxLearningBlock {
     ask.setAttribute("aria-label", "追问这句");
     ask.title = "追问这句"; // 图标无文字,悬停提示承载可发现性
     ask.innerHTML = CHAT_ASK_ICON;
-    ask.addEventListener("click", () => {
+    ask.addEventListener("click", (event) => {
+      // 面板在点击处旁弹出:鼠标点击取真实坐标;键盘激活(Enter/Space)的 click
+      // 坐标是 0,回落到按钮 rect 右下角——键盘用户同样得到按钮旁的面板。
+      const rect = ask.getBoundingClientRect();
       this.dispatchEvent(
         new CustomEvent<SyntaxChatRequestEventDetail>("syntax-chat-request", {
           bubbles: true,
           composed: true,
-          detail: { sentenceId },
+          detail: {
+            sentenceId,
+            anchor: {
+              x: event.clientX || rect.right,
+              y: event.clientY || rect.bottom,
+            },
+          },
         }),
       );
     });

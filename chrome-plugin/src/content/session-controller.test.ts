@@ -2686,6 +2686,25 @@ describe("SessionController 追问对话接线", () => {
     expect(ask.context.core.sentenceId).toBe("sentence-1");
   });
 
+  // 2026-11-09 真机反馈:面板总在右下角。syntax-chat-request 带 anchor(点击
+  // 坐标)时,面板应弹在锚点右下 14px;不带 anchor 保持既有位置。
+  it("syntax-chat-request 带 anchor:面板弹在锚点右下方", async () => {
+    const subject = chatHarness();
+    await subject.controller.start();
+    subject.viewport.emit();
+    await vi.waitFor(() => expect(subject.controller.status.ready).toBe(1));
+
+    subject.page.dispatchEvent(
+      new CustomEvent("syntax-chat-request", {
+        detail: { sentenceId: "sentence-1", anchor: { x: 90, y: 50 } },
+      }),
+    );
+
+    const surface = chatHost(subject.page)!.shadowRoot!.querySelector<HTMLElement>(".panel")!;
+    expect(surface.style.left).toBe("104px");
+    expect(surface.style.top).toBe("64px");
+  });
+
   it("CHAT_RESULT 后面板历史含本轮两 turn；第二轮 CHAT_ASK 携带第一轮问答（多轮接线）", async () => {
     const answers = ["第一答", "第二答"];
     let round = 0;

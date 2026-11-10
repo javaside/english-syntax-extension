@@ -288,4 +288,35 @@ describe("ChatPanel", () => {
     document.dispatchEvent(new MouseEvent("pointermove", { clientX: 400, clientY: 400 }));
     expect(surface.style.left).toBe("");
   });
+
+  // 2026-11-09 真机反馈:面板总在右下角,离正在读的句子太远。open 带 anchor
+  // (点击「问」图标的视口坐标)时,面板弹在锚点右下方 14px,视口钳制照旧;
+  // 不带 anchor(测试桩/无锚点打开)保持既有位置语义。
+  it("open 带 anchor:面板弹在锚点右下方,且覆盖此前的拖动落点", () => {
+    const panel = openPanel();
+    const surface = panel.host.shadowRoot!.querySelector<HTMLElement>(".panel")!;
+
+    // 先拖到别处,再带 anchor 换句——应跳到锚点处,不是留在拖动落点。
+    const header = panel.host.shadowRoot!.querySelector(".header")!;
+    header.dispatchEvent(
+      new MouseEvent("pointerdown", { bubbles: true, clientX: 100, clientY: 100 }),
+    );
+    document.dispatchEvent(new MouseEvent("pointermove", { clientX: 500, clientY: 400 }));
+    document.dispatchEvent(new MouseEvent("pointerup", { clientX: 500, clientY: 400 }));
+    expect(surface.style.left).toBe("400px");
+
+    panel.open({ sentenceId: "sentence-9", summary: "锚点句", anchor: { x: 60, y: 30 } });
+
+    expect(surface.style.left).toBe("74px");
+    expect(surface.style.top).toBe("44px");
+  });
+
+  it("open 不带 anchor:位置不动(沿用拖动落点或默认右下)", () => {
+    const panel = openPanel();
+    const surface = panel.host.shadowRoot!.querySelector<HTMLElement>(".panel")!;
+    expect(surface.style.left).toBe(""); // 默认 CSS 右下,无内联定位
+
+    panel.open({ sentenceId: "sentence-9", summary: "无锚点" });
+    expect(surface.style.left).toBe("");
+  });
 });
