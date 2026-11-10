@@ -1050,9 +1050,18 @@ test("追问对话 chat 面板：两段流式回答拼齐且第二轮携带多�
   await expect(page.locator(".component").first()).toBeVisible({ timeout: 15_000 });
   harness.fakeModel.clearRecorded();
 
-  await page.locator("[data-syntax-chat-ask]").first().click();
+  // 面板弹在点击「问」的锚点旁(2026-11-09 真机反馈:总在右下角离句子太远)。
+  // 用带坐标的鼠标点击拿到真实 anchor,断言面板出现在锚点右下 14px 附近。
+  const askButton = page.locator("[data-syntax-chat-ask]").first();
+  const askBox = (await askButton.boundingBox())!;
+  const clickX = askBox.x + askBox.width / 2;
+  const clickY = askBox.y + askBox.height / 2;
+  await page.mouse.click(clickX, clickY);
   const panel = page.locator("[data-syntax-chat-panel]");
   await expect(panel.locator(".panel")).toBeVisible();
+  const popupBox = (await panel.locator(".panel").boundingBox())!;
+  expect(Math.abs(popupBox.x - (clickX + 14))).toBeLessThan(3);
+  expect(Math.abs(popupBox.y - (clickY + 14))).toBeLessThan(3);
   // 摘要行 = 锚定句前 40 字符(openChat 的 slice(0, 40))。
   await expect(panel.locator(".summary")).toContainText(SINGLE_SENTENCE.slice(0, 40));
 
@@ -1082,17 +1091,20 @@ test("追问对话 chat 面板：两段流式回答拼齐且第二轮携带多�
   expect(chatRequests[1]!.promptText).toContain("这句为什么这么译");
   expect(chatRequests[1]!.promptText).toContain(JSON.stringify(CHAT_REPLY_TEXT).slice(1, -1));
 
-  // 面板可拖(真机反馈:固定右下读左上段落时视线往返):抓标题栏拖动,浮层跟着走。
-  // host 是 0×0 的壳,量 shadow 内的 .panel 才有真实几何。
+  // 面板可拖:抓标题栏拖动,浮层跟着走。面板现在弹在锚点(页面左上)旁,向右下
+  // 拖——左上方向会被视口钳制挡住。host 是 0×0 的壳,量 shadow 内的 .panel。
   const surface = page.locator("[data-syntax-chat-panel] .panel");
   const before = await surface.boundingBox();
   const header = page.locator("[data-syntax-chat-panel] .header");
   const headerBox = await header.boundingBox();
-  await page.mouse.move(headerBox!.x + headerBox!.width / 2, headerBox!.y + 4);
+  // 指针位移 = 面板位移:从标题栏中心向右下移 260/180。
+  const grabX = headerBox!.x + headerBox!.width / 2;
+  const grabY = headerBox!.y + 4;
+  await page.mouse.move(grabX, grabY);
   await page.mouse.down();
-  await page.mouse.move(before!.x - 180, Math.max(before!.y - 120, 20), { steps: 5 });
+  await page.mouse.move(grabX + 260, grabY + 180, { steps: 5 });
   await page.mouse.up();
   const after = await surface.boundingBox();
-  expect(after!.x).toBeLessThan(before!.x - 100);
-  expect(after!.y).toBeLessThan(before!.y - 60);
+  expect(after!.x).toBeGreaterThan(before!.x + 100);
+  expect(after!.y).toBeGreaterThan(before!.y + 60);
 });

@@ -20,6 +20,9 @@ const DRAG_MARGIN = 8;
 const DRAG_MAX_LEFT_RESERVE = 120;
 const DRAG_MAX_TOP_RESERVE = 80;
 
+/** 锚点弹出的右下偏移:面板左上角落在点击位置右下方 14px(阅读顺序自然)。 */
+const CHAT_POPUP_OFFSET = 14;
+
 const STYLES = `
   :host { all: initial; }
   .panel {
@@ -96,11 +99,18 @@ const STYLES = `
 export interface ChatPanelContext {
   sentenceId: string;
   summary: string;
+  /**
+   * 弹出锚点(点击「问」图标的视口坐标):面板弹在锚点右下方 14px(视口钳制照旧)。
+   * 换句追问带新锚点 = 面板跟着句子走;不传则保持当前位置(默认右下/拖动落点)。
+   */
+  anchor?: { x: number; y: number };
 }
 
 /** 「问」按钮派发的追问请求事件 detail(syntax-detail-request 同款模式)。 */
 export interface SyntaxChatRequestEventDetail {
   sentenceId: string;
+  /** 点击「问」的视口坐标(键盘激活时是按钮 rect 右下角),面板在锚点旁弹出。 */
+  anchor: { x: number; y: number };
 }
 
 /**
@@ -221,9 +231,14 @@ export class ChatPanel {
     this.#conversationId = undefined;
     this.#history = [];
     this.#assistantBubble = undefined;
-    // 用户拖过的位置跨会话沿用(host 元素常驻,样式本就还在;显式重贴一次,
-    // 防御未来 dispose 重建 host 的实现变化)。
-    if (this.#placedLeft !== undefined && this.#placedTop !== undefined) {
+    // 带锚点(点「问」处)弹出:面板跟着句子走,覆盖此前的拖动落点。不带锚点
+    // 则保持既有位置(默认右下/上次拖动落点——用户拖过的位置显式重贴一次)。
+    if (context.anchor !== undefined) {
+      this.#applyPosition(
+        context.anchor.x + CHAT_POPUP_OFFSET,
+        context.anchor.y + CHAT_POPUP_OFFSET,
+      );
+    } else if (this.#placedLeft !== undefined && this.#placedTop !== undefined) {
       this.#applyPosition(this.#placedLeft, this.#placedTop);
     }
     this.#messages.replaceChildren();

@@ -478,8 +478,40 @@ describe("SyntaxLearningBlock", () => {
     const event = listener.mock.calls[0]![0] as CustomEvent;
     expect(event.bubbles).toBe(true);
     expect(event.composed).toBe(true);
-    expect(event.detail).toEqual({ sentenceId: "sentence-2" });
+    // ask.click() 是键盘式激活(clientX/Y=0),happy-dom 的 rect 也全 0 → anchor {0,0}。
+    // 鼠标/rect 回落路径由下面的 anchor 专项用例钉死。
+    expect(event.detail).toEqual({ sentenceId: "sentence-2", anchor: { x: 0, y: 0 } });
     document.removeEventListener("syntax-chat-request", listener);
+  });
+
+  // 2026-11-09:detail 携带 anchor(点击的视口坐标,面板在锚点旁弹出)。鼠标点击取
+  // clientX/clientY;键盘激活的 click 坐标是 0,回落到按钮 rect 的右下角。
+  it("问按钮点击携带 anchor:鼠标取点击坐标,键盘激活回落按钮 rect 右下角", () => {
+    const element = block();
+    document.body.append(element.host);
+    element.setExpectedSentenceIds(["sentence-1", "sentence-2"]);
+    element.renderCore(sentence, tokens, analysisFor("sentence-1"));
+    element.renderCore(sentence, tokens, analysisFor("sentence-2"));
+    const details: unknown[] = [];
+    document.addEventListener("syntax-chat-request", (event) => {
+      details.push((event as CustomEvent).detail);
+    });
+
+    const buttons =
+      element.host.shadowRoot!.querySelectorAll<HTMLButtonElement>("[data-syntax-chat-ask]");
+    const ask = buttons[1]!;
+    vi.spyOn(ask, "getBoundingClientRect").mockReturnValue(new DOMRect(100, 40, 20, 20));
+
+    // 键盘激活:ask.click() 的 clientX/clientY 是 0 → 回落 rect 右下角。
+    ask.click();
+    // 鼠标点击:合成 click 带真实坐标。
+    ask.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 8, clientY: 9 }));
+
+    expect(details).toEqual([
+      { sentenceId: "sentence-2", anchor: { x: 120, y: 60 } },
+      { sentenceId: "sentence-2", anchor: { x: 8, y: 9 } },
+    ]);
+    document.removeEventListener("syntax-chat-request", () => {});
   });
 
   it("失败句与跳过句没有可用的「问」按钮；core 成功句重渲染为失败后按钮随之消失", () => {
