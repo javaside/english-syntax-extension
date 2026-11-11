@@ -219,4 +219,6 @@ Chrome 扩展之外,本仓库还交付一个 IntelliJ IDEA Markdown 预览插件
 
 快捷键支线(只翻悬停那一段):用户按 `Alt+T`(IDEA Action,或焦点在预览里时由页面 keydown 兼底)→ `ParseHoveredBlockAction` 经 `findPanel` 定位官方面板 → `PreviewSessionConnector.parseHovered` 接线并调 `panel.requestParseHoveredBlock()`(bundle 尚未注入时只记标记,延迟到注入末尾补发)→ 页面 `parseHoveredBlock()` 查 `:is(:hover)` + `nearestPreviewBlock` 定位段落 → 回传 `PARSE_BLOCK` → `PreviewSession.parseExplicitBlock` 在 STOPPED 时轻量启动(置 RUNNING 但不做全文扫描)并以 `ACTIVE_VISIBLE_CORE` 单块派发 → 其余(分句分词、查缓存、调度、校验、`CORE_RESULT` 回推、卡片替换)与整篇路径完全相同。
 
+追问对话支线(与 Chrome 端 §5 的 chat 链路同构):句头聊天气泡图标(core 成功句才有)打开锚点弹出的浮层面板(`web/chat-panel.ts`,可拖动、多轮流式),面板 submit 才发 `CHAT_ASK`——Kotlin `AnalysisService.chat` 是无缓存、无修复的旁路(`DETAIL_CLICK` 档、`${documentId}:chat` 调度命名空间、按轮 cacheKey),流式 `CHAT_STREAM` 推**全量**文本、`CHAT_RESULT` 校平;stop/换代/面板关闭(`Disposer` → `disposePreview`)三处都回收 chat 命名空间的在飞请求。
+
 生命周期:每个预览一个 `PreviewSession`(child Job),面板 dispose 时随项目 scope 取消;Profile 是 start 时刻的快照,设置变更后由 Manager 刷新。JCEF 不可用时 Action 不可用并提示切换 JetBrains Runtime。

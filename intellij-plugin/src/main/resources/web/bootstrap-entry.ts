@@ -454,9 +454,10 @@ document.addEventListener("click", (event) => {
   });
 });
 
-// —— 追问对话接线缝：Task 5 的 chat-panel 经 setChatPanel 插进来（图标按钮由 render.ts
+// —— 追问对话接线缝：chat-panel 经 setChatPanel 注册（图标按钮由 render.ts
 //    派发 CHAT_ASK_REQUEST_EVENT，这里在 document 级接住；照 DETAIL_REQUEST 走构造回调
-//    的既有模式，只是面板对象晚于 bootstrap 存在，所以是可后注册的 seam）。 ——
+//    的既有模式。生产由下方 installChatPanel() 在模块载入时自动注册，seam 保留是为了
+//    可后替换——测试在 setChatPanel(null) 后能验证「无面板时点击无害」一类边界）。 ——
 
 /** CHAT_* 三条 host 消息（generation 已在 parseHostMessage 过滤）；面板按 conversationId 二次把关。 */
 export type ChatHostMessage = ChatStreamHostMessage | ChatResultHostMessage | ChatErrorHostMessage;
@@ -490,7 +491,7 @@ export interface ChatAskInput {
   history: ChatTurn[];
 }
 
-/** Task 5 的追问面板要实现的最小接口（图标点击与 CHAT_* host 消息到达时被调用）。 */
+/** 追问面板要实现的最小接口（图标点击与 CHAT_* host 消息到达时被调用）。 */
 export interface ChatPanelSeam {
   open(request: ChatOpenRequest): void;
   handleHostMessage(message: ChatHostMessage): void;
@@ -498,7 +499,10 @@ export interface ChatPanelSeam {
 
 let chatPanel: ChatPanelSeam | null = null;
 
-/** 注册/注销追问面板（Task 5 实例化 ChatPanel 后调用；null = 拆除）。 */
+/**
+ * 注册/注销追问面板。生产由 installChatPanel() 在模块载入时自动注册（面板随 bootstrap
+ * 常驻）；null = 拆除，供测试隔离，拆除后可再调 installChatPanel() 恢复。
+ */
 export function setChatPanel(panel: ChatPanelSeam | null): void {
   chatPanel = panel;
 }
@@ -506,7 +510,7 @@ export function setChatPanel(panel: ChatPanelSeam | null): void {
 /** conversationId 计数器：模块级持有、单调递增，跨代次不重置（id 含 previewId 仍唯一）。 */
 let chatConversationCounter = 0;
 
-// —— Task 5 实装：面板单例 + submit 接线（Chrome 端 session-controller.openChat/askChat
+// —— 面板实装：单例 + submit 接线（Chrome 端 session-controller.openChat/askChat
 //    的 web 侧对应物;面板对象常驻、host 惰性挂载,换句 open 重置会话）。 ——
 
 /** 面板单例（构造不挂载,首次 open 才上 DOM）;installChatPanel 里接线并注册 seam。 */
