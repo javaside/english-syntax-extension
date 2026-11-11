@@ -58,6 +58,9 @@ object PreviewSessionConnector {
         is PageMessage.DetailRequest ->
           session.launchDetailRequest(message.sentenceId, message.focusStart, message.focusEnd)
         is PageMessage.RetrySentence -> session.retrySentence(message.sentenceId)
+        // CHAT_ASK 的真实派发（chat 流式/收尾/失败接线）在追问对话面板任务里补上，
+        // 此处先占位保住 sealed when 的穷尽性——消息在 BridgeProtocol 层已过防伪造门。
+        is PageMessage.ChatAsk -> Unit
         is PageMessage.PreviewReady, is PageMessage.PreviewRendered -> Unit
       }
     }
