@@ -25,6 +25,7 @@ import {
 } from "./preview";
 import { CHAT_ASK_REQUEST_EVENT, PreviewRenderer } from "./render";
 import { setDarkMode } from "./roles";
+import { ChatPanel } from "./chat-panel";
 
 interface RuntimeState {
   renderer: PreviewRenderer;
@@ -336,6 +337,11 @@ function initialize(previewId: string, generation: number, autoScan = true): voi
   returnedCount = 0;
   lastVisibleFingerprint = ""; // 新代次重新上报可见块
   clearAllActive();
+  // 换代重初始化（PREVIEW_RENDERED → Kotlin initialize / 停止后重开）时旧会话的锚定句
+  // 已随 DOM 作废,追问面板一并收走（stale conversation）;面板对象常驻,下次点图标重开。
+  // 在飞的 CHAT_ASK 不主动取消——Kotlin 侧 onGenerationChanged/cancelDocument 负责回收。
+  chatPanelInstance?.dispose();
+  chatSentenceId = null;
   resetScanRegistry(); // 重新扫描全文：清空防重扫描注册表，否则二次 scan 返回空、失败句无法重派
   ensureStatusElement(); // 官方 updateDom 重写 body 会清掉浮层，换代后重建。
   if (s.observer !== null) s.observer.disconnect();
@@ -464,11 +470,12 @@ export interface ChatAnchor {
 /**
  * 打开面板的请求：conversationId 由本模块铸好（`${previewId}:chat:${n}`，n 为模块级计数器，
  * 与面板解耦、open 时传入）。面板存下它即可路由迟到的 CHAT_* 消息（generation 过滤之后的
- * 第二道防线）。
+ * 第二道防线）。summary 为锚定句摘要（renderer.sentenceText 截断），面板标题栏显示。
  */
 export interface ChatOpenRequest {
   conversationId: string;
   sentenceId: string;
+  summary: string;
   anchor: ChatAnchor;
 }
 
@@ -499,6 +506,53 @@ export function setChatPanel(panel: ChatPanelSeam | null): void {
 /** conversationId 计数器：模块级持有、单调递增，跨代次不重置（id 含 previewId 仍唯一）。 */
 let chatConversationCounter = 0;
 
+// —— Task 5 实装：面板单例 + submit 接线（Chrome 端 session-controller.openChat/askChat
+//    的 web 侧对应物;面板对象常驻、host 惰性挂载,换句 open 重置会话）。 ——
+
+/** 面板单例（构造不挂载,首次 open 才上 DOM）;installChatPanel 里接线并注册 seam。 */
+let chatPanelInstance: ChatPanel | null = null;
+
+/** 当前锚定句（open 时记下,submit 时作 CHAT_ASK 的 sentenceId）;换代随面板一起作废。 */
+let chatSentenceId: string | null = null;
+
+/**
+ * 面板 submit → 先落用户轮与 pending 回答轮，再经 sendChatAsk 构造发送 CHAT_ASK。
+ * history 取面板 currentConversation()（已裁剪、不含本轮悬空 user 轮）；两 turn 的
+ * 落账时序与 Chrome 端 askChat 一致。sendChatAsk 拒发（无状态/超限）时给面板终态，
+ * 别让输入框永久卡在禁用态。
+ */
+function submitChatQuestion(question: string): void {
+  const panel = chatPanelInstance;
+  if (panel === null) return;
+  const conversation = panel.currentConversation();
+  if (conversation === null || chatSentenceId === null) return;
+  panel.appendUserTurn(question);
+  panel.beginAssistantTurn(conversation.conversationId);
+  const sent = sendChatAsk({
+    conversationId: conversation.conversationId,
+    sentenceId: chatSentenceId,
+    question,
+    history: conversation.history,
+  });
+  if (!sent) {
+    panel.failAssistantTurn(conversation.conversationId, "发送失败：预览会话尚未就绪，请重新打开追问面板");
+  }
+}
+
+/**
+ * 实例化并注册追问面板（幂等：单例只建一次，重复调用只重新注册 seam）。模块载入时
+ * 自调一次——生产上面板随 bootstrap 常驻;测试在 setChatPanel(null) 后可再调恢复。
+ */
+export function installChatPanel(): ChatPanel {
+  if (chatPanelInstance === null) {
+    chatPanelInstance = new ChatPanel();
+    chatPanelInstance.onSubmit = submitChatQuestion;
+  }
+  setChatPanel(chatPanelInstance);
+  return chatPanelInstance;
+}
+installChatPanel();
+
 /**
  * 面板 submit → 构造并发送 CHAT_ASK。图标点击时**绝不下发**这条消息——那时还没有合法
  * question，Kotlin 侧 parseChatAsk（trim 后 1..2000 + 白名单键集）会直接拒收。history 只做
@@ -524,7 +578,7 @@ export function sendChatAsk(input: ChatAskInput): boolean {
   return true;
 }
 
-// 图标点击：只开面板（锚点 + 新铸的 conversationId），不发任何桥消息。
+// 图标点击：只开面板（锚点 + 锚定句摘要 + 新铸的 conversationId），不发任何桥消息。
 document.addEventListener(CHAT_ASK_REQUEST_EVENT, (event) => {
   if (state === null || state.previewId === "") return;
   // 事件可能被页面脚本伪造：载荷按 unknown 复核形状，锚点只收两个数字。
@@ -536,9 +590,13 @@ document.addEventListener(CHAT_ASK_REQUEST_EVENT, (event) => {
   const panel = chatPanel;
   if (panel === null) return;
   chatConversationCounter += 1;
+  // 摘要取 renderer 按 token 重建的句原文（面板标题栏显示,Chrome 端 controller 同款
+  // slice(0, 40)）——图标只在 core 成功句上渲染,句子必然已注册。
+  chatSentenceId = sentenceId;
   panel.open({
     conversationId: `${state.previewId}:chat:${chatConversationCounter}`,
     sentenceId,
+    summary: state.renderer.sentenceText(sentenceId).slice(0, 40),
     anchor: { x: anchor.x, y: anchor.y },
   });
 });

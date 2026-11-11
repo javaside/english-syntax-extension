@@ -758,6 +758,14 @@ export class PreviewRenderer {
     return this.currentElement(blockId);
   }
 
+  /**
+   * 句子原文（按 token 的 leadingWhitespace + text 重建,失败句原文行同口径）。
+   * 供 bootstrap 在追问面板 open 时取锚定句摘要;未注册句返回空串。
+   */
+  sentenceText(sentenceId: string): string {
+    return this.#originalText(sentenceId);
+  }
+
   restoreAll(): void {
     for (const record of this.#blocks.values()) this.#restoreBlock(record);
   }

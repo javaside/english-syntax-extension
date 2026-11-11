@@ -265,6 +265,220 @@ button.english-syntax-component * {
   display: block;
 }
 
+/* —— 追问对话浮层（chat-panel.ts，Chrome 端 ChatPanel 平移）：host 挂
+   document.documentElement（官方 updateDom 重写 body 带不走浮层），面板本体 fixed
+   默认右下、与右下状态浮层（right 12/bottom 12）上下错开；拖动/锚点弹出的
+   left/top 由 JS 内联写进面板元素。cursor 一律 JS 内联 !important（官方主题压
+   stylesheet cursor，成分按钮同款坑）。 —— */
+
+.english-syntax-chat-panel {
+  position: fixed;
+  right: 16px;
+  bottom: 84px;
+  z-index: 2147483647;
+  display: flex;
+  flex-direction: column;
+  width: min(400px, calc(100vw - 32px));
+  max-height: min(560px, 70vh);
+  font: 13px/1.6 system-ui, sans-serif;
+  color: #111;
+  background: #fff;
+  border: 1px solid #d4d4d8;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+
+/* 标题栏 = 拖动把手（touch-action/user-select 拖动语义；cursor 走 JS 内联）。 */
+.english-syntax-chat-header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 10px 12px 8px;
+  border-bottom: 1px solid #e4e4e7;
+  touch-action: none;
+  user-select: none;
+}
+
+.english-syntax-chat-summary {
+  flex: 1;
+  min-inline-size: 0;
+  font-weight: 600;
+  font-size: 12px;
+  color: #52525b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.english-syntax-chat-header button,
+.english-syntax-chat-send {
+  appearance: none;
+  font: 11px/1.4 system-ui, sans-serif;
+  color: #52525b;
+  padding: 2px 8px;
+  border: 1px solid #d4d4d8;
+  border-radius: 6px;
+  background: transparent;
+}
+
+.english-syntax-chat-header button:focus-visible,
+.english-syntax-chat-send:focus-visible,
+.english-syntax-chat-input:focus-visible {
+  outline: 2px solid #18181b;
+  outline-offset: 1px;
+}
+
+.english-syntax-chat-messages {
+  flex: 1;
+  min-height: 72px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+}
+
+/* 气泡是纯文本：不引 markdown，换行交给 pre-wrap，XSS 面只有 textContent。 */
+.english-syntax-chat-message {
+  max-width: 85%;
+  padding: 6px 10px;
+  border-radius: 10px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.english-syntax-chat-message--user {
+  align-self: flex-end;
+  background: #18181b;
+  color: #fff;
+  border-end-end-radius: 3px;
+}
+
+.english-syntax-chat-message--assistant {
+  align-self: flex-start;
+  background: #f4f4f5;
+  color: #111;
+  border-end-start-radius: 3px;
+}
+
+.english-syntax-chat-message--pending {
+  color: #71717a;
+}
+
+.english-syntax-chat-message--error {
+  align-self: flex-start;
+  color: #b91c1c;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+}
+
+/* REQUEST_CANCELLED 等中性通知（Task 3 移交）：用户主动取消的正常终态，
+   灰底虚线边，不带红色错误语义。 */
+.english-syntax-chat-message--notice {
+  align-self: flex-start;
+  color: #57606a;
+  background: #f6f8fa;
+  border: 1px dashed #d4d4d8;
+}
+
+.english-syntax-chat-composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 8px 12px 10px;
+  border-top: 1px solid #e4e4e7;
+}
+
+.english-syntax-chat-input {
+  flex: 1;
+  resize: vertical;
+  min-height: 44px;
+  max-height: 120px;
+  font: inherit;
+  color: inherit;
+  padding: 6px 8px;
+  border: 1px solid #d4d4d8;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.english-syntax-chat-input:disabled {
+  background: #f4f4f5;
+}
+
+.english-syntax-chat-send {
+  align-self: flex-end;
+  background: #18181b;
+  color: #fff;
+  border-color: #18181b;
+  padding: 6px 14px;
+  font-size: 12px;
+}
+
+.english-syntax-chat-send:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+/* 收起态：标题栏留着当把手，消息区与输入区隐藏。 */
+.english-syntax-chat-panel[data-collapsed] .english-syntax-chat-messages,
+.english-syntax-chat-panel[data-collapsed] .english-syntax-chat-composer {
+  display: none;
+}
+
+/* 深色主题（Kotlin 注入根 data 属性）：面板自带浅色底，不随主题换会成暗页白补丁。 */
+:root[data-english-syntax-dark="true"] .english-syntax-chat-panel {
+  background: #1f2937;
+  border-color: #374151;
+  color: #e5e7eb;
+}
+
+:root[data-english-syntax-dark="true"] .english-syntax-chat-header,
+:root[data-english-syntax-dark="true"] .english-syntax-chat-composer {
+  border-color: #374151;
+}
+
+:root[data-english-syntax-dark="true"] .english-syntax-chat-summary,
+:root[data-english-syntax-dark="true"] .english-syntax-chat-header button {
+  color: #9ca3af;
+}
+
+:root[data-english-syntax-dark="true"] .english-syntax-chat-header button {
+  border-color: #4b5563;
+}
+
+:root[data-english-syntax-dark="true"] .english-syntax-chat-message--assistant,
+:root[data-english-syntax-dark="true"] .english-syntax-chat-input:disabled {
+  background: #374151;
+}
+
+:root[data-english-syntax-dark="true"] .english-syntax-chat-message--pending {
+  color: #9ca3af;
+}
+
+:root[data-english-syntax-dark="true"] .english-syntax-chat-message--error {
+  color: #fca5a5;
+  background: #3f1d1d;
+  border-color: #7f2d2d;
+}
+
+:root[data-english-syntax-dark="true"] .english-syntax-chat-message--notice {
+  color: #9ca3af;
+  background: #111827;
+  border-color: #4b5563;
+}
+
+:root[data-english-syntax-dark="true"] .english-syntax-chat-input {
+  background: #111827;
+  border-color: #4b5563;
+}
+
+:root[data-english-syntax-dark="true"] .english-syntax-chat-send {
+  background: #e5e7eb;
+  border-color: #e5e7eb;
+  color: #111827;
+}
+
 .english-syntax-provisional {
   opacity: 0.75;
 }
