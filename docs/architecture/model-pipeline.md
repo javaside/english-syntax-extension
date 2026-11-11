@@ -170,7 +170,7 @@ DeepSeek 现存的两个模型全是思考模型,靠用户自己发现并勾选�
 | 路径                  | 策略                                                   |
 | --------------------- | ------------------------------------------------------ |
 | 缓冲(`request`)       | 单次 `setTimeout(profile.timeoutMs)` 覆盖整个请求      |
-| 流式(`streamRequest`) | **静默超时**:每收到一片就重置 `timeoutMs`,总时长不设限 |
+| 流式(Chrome `readStream` / Kotlin `streamRawContent`) | **静默超时**:每收到一片就重置 `timeoutMs`,总时长不设限 |
 
 流式下总时长没有意义——一段长响应本来就会超过单次超时值。另外**读循环自己 `Promise.race` 盯着 abort 信号**,不依赖 fetch 把中止传播进 body 流,卡死的流才会真的被掐断。
 
@@ -309,4 +309,5 @@ raw → validateCoreBatch（解析前预丢弃纯标点成分）
 - **缓存**:SQLite(`analysis_cache` 表,跨 core/detail store 的 LRU,键与 Chrome 扩展逐字节一致),导入导出格式与 Chrome 选项页互通(`english-syntax-cache` v1)。设置页显示当前条目数/估算占用,经二次确认可清空 core 与 detail 全部缓存;只删除持久缓存,不停止在途请求、不移除预览页已渲染卡片。连接经 `SQLiteDataSource` 直接实例化,**不用 `DriverManager.getConnection`**——后者依赖 sqlite-jdbc 的 ServiceLoader 自动注册,在 IDEA 插件 classloader 下不可靠,曾抛 `No suitable driver found for jdbc:sqlite:` 导致 Action 点击静默失败;`SQLiteDataSource` 不碰全局驱动注册表,动态卸载也无类加载器泄漏。
 - **降级**:`JsonSchemaSupport`/`streamSupport`/reasoningControl 三块与 Chrome 端对称,只持久化否定态。设置页「测试连接」按钮(ConnectionProbe)会先保存 profile、再经 `probeJsonCapability` 打一次真模型探测,把 JSON schema 支持态写回 profile 并在状态栏反馈——与 Chrome 选项页「测试连接」同套路。
 - **修复 pass**:整块校验失败只把非法句送修复(`jumpQueue` 同优先级插队),修复后仍失败记 `INVALID_MODEL_OUTPUT`,兄弟句不受连坐。
+- **追问对话(`AnalysisService.chat`)**:骨架外只读旁路,与 Chrome 端 §2.2 同款约定——**不查/不写缓存、无修复轮**(自由文本无 schema 可校验,模型错误原样上抛,`chatFailureText` 加错误码名前缀后经 `CHAT_ERROR` 明示)。`buildChatPrompt`(`Prompts.kt`)首行 `Discuss the verified translation analysis with the reader.` 是**函数内字面量,不进 contracts.json 的 `promptFirstLines`**——那张表被双端 contracts 钉死,与 Chrome 端「不进 `PROMPT_FIRST_LINES`」同约定;四段结构(中文回答系统指令 → `serializeSentence` + 紧凑 core → 历史 → 问题)与 Chrome 端逐字相同。调度走 `DETAIL_CLICK` 档(用户显式手势),documentId 带 **`"${documentId}:chat"` 隔离后缀**——`stop()`/`onGenerationChanged`/面板关闭(`Disposer` → `disposePreview`,走 manager 长命 scope 避免与 session job cancel 竞速)三处都追加 `cancelDocument`,chat 的取消不连坐该预览在跑的 core/detail,反之亦然;漏回收会让静默超时的流式回答在预览关走后无限期占住并发槽。**cacheKey 按轮唯一**(conversationId + 问题 SHA-256 前 16 个十六进制字符)——调度器按 `documentId\0cacheKey` 合并在飞请求,同会话两问共用 key 会直接拿到第一问的答案(串答案)。**文本双路径** `completeText`(缓冲)/`completeTextStreaming`(流式):schema 为 null 的文本模式——不带 `response_format`、不做 response_format 嗅探,返回原文**绝不过 JSON 解析**;reasoning 降级两条路径都接线(缓冲走 `request()` 自带嗅探;流式自带探针,被拒去掉 `reasoning_effort` 字段重发仍流式,`stream` 被拒记 `unsupported` 并回落 `completeText` 而不是 JSON 路径)。流式**累积器声明在调度 run 块内部**(可重试错误静默重跑时从零累积,否则两次尝试的流拼成「AB…AB…」),`onStreamedText` 每次回调的都是**截至目前的全量回答**且先过 `redactSecrets`——与 `CHAT_STREAM` 的整段重画约定配套。
 - **流式**:分片先经 `ProvisionalComponents`/`ProvisionalStructures` 安全过滤(角色枚举、区间界内、有序不重叠)再作为 `CORE_STREAM` 推给页面;分片不写缓存、不改相位——与 Chrome 端约定一致。

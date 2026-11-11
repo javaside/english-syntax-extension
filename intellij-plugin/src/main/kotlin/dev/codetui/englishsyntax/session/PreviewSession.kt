@@ -5,6 +5,7 @@ import dev.codetui.englishsyntax.analysis.AnalysisServicePort
 import dev.codetui.englishsyntax.analysis.CoreBatchOutcome
 import dev.codetui.englishsyntax.analysis.StreamedComponentSink
 import dev.codetui.englishsyntax.analysis.StreamedStructureSink
+import dev.codetui.englishsyntax.analysis.StreamedTextSink
 import dev.codetui.englishsyntax.domain.CoreAnalysis
 import dev.codetui.englishsyntax.domain.CoreComponent
 import dev.codetui.englishsyntax.domain.DetailStructure
@@ -14,6 +15,7 @@ import dev.codetui.englishsyntax.domain.SentenceInput
 import dev.codetui.englishsyntax.domain.TokenRange
 import dev.codetui.englishsyntax.language.segmentBlock
 import dev.codetui.englishsyntax.language.tokenize
+import dev.codetui.englishsyntax.model.ChatTurn
 import dev.codetui.englishsyntax.scheduler.SchedulerPriority
 import dev.codetui.englishsyntax.settings.ModelProfile
 import kotlinx.coroutines.CoroutineScope
@@ -117,7 +119,13 @@ class PreviewSession(
     sentences.clear()
     pendingBatch.clear()
     pausedBlocks.clear()
-    scope.launch { analysis.cancelDocument(documentId) }
+    scope.launch {
+      analysis.cancelDocument(documentId)
+      // chat 走「<documentId>:chat」独立命名空间（cancelDocument 精确匹配）：不追加这行，
+      // stop 后在飞的流式回答会占住并发槽直到静默超时（Chrome 端 port onDisconnect /
+      // cancelTab 追加同款取消的教训）。
+      analysis.cancelDocument("${documentId}:chat")
+    }
     sender.send(buildJsonObject {
       put("version", 1)
       put("type", "RESTORE_ALL")
@@ -130,8 +138,11 @@ class PreviewSession(
     if (newGeneration <= generation) return
     generation = newGeneration
     operationVersion += 1
-    // 旧代次作废：取消在飞、清空记录；防抖后由下一次 VISIBLE_BLOCKS 重新驱动。
-    scope.launch { analysis.cancelDocument(documentId) }
+    // 旧代次作废：取消在飞（含 chat 命名空间）、清空记录；防抖后由下一次 VISIBLE_BLOCKS 重新驱动。
+    scope.launch {
+      analysis.cancelDocument(documentId)
+      analysis.cancelDocument("${documentId}:chat")
+    }
     sentences.clear()
     pendingBatch.clear()
     scope.launch {
@@ -466,6 +477,102 @@ class PreviewSession(
           })
         }
     }
+  }
+
+  /**
+   * 桥接层入口：追问对话经 session scope 派发（onPageMessage 在 JCEF 线程回调）。
+   *
+   * **刻意不设 SessionState 静默门**（不照抄 [launchDetailRequest] 的
+   * `if state == STOPPED return`）：面板在 stop/RESTORE_ALL 后仍然开着，静默丢弃会把
+   * 输入框永久卡在禁用态；chat 是用户手势，与 Chrome 端同款只判数据可用性——
+   * 记录/core 缺失或无 profile 都用 CHAT_ERROR 明示，绝不静默。
+   */
+  fun launchChatAsk(conversationId: String, sentenceId: String, history: List<ChatTurn>, question: String) {
+    scope.launch {
+      runCatching { onChatAsk(conversationId, sentenceId, history, question) }
+        .onFailure { error ->
+          if (error is kotlinx.coroutines.CancellationException) throw error
+          // dispose 竞速下 panel.send 可能已抛错（面板关走时的在飞回答）——回收路径不得再炸 scope。
+          runCatching { sendChatError(conversationId, chatFailureText(error)) }
+            .onFailure { LOGGER.warn("launchChatAsk: failed to deliver CHAT_ERROR: ${it.message}") }
+        }
+    }
+  }
+
+  private suspend fun onChatAsk(
+    conversationId: String,
+    sentenceId: String,
+    history: List<ChatTurn>,
+    question: String,
+  ) {
+    val record = sentences[sentenceId]
+    val core = record?.core
+    if (record == null || core == null) {
+      // stop()/onGenerationChanged() 都会清空 sentences——「stop 后再问」也走这条，不静默。
+      sendChatError(conversationId, "原句已失效：请重新解析后再提问")
+      return
+    }
+    val profile = currentProfile ?: run {
+      sendChatError(conversationId, "尚未配置可用的模型档案，请先在设置中配置")
+      return
+    }
+    val capturedVersion = operationVersion
+    val answer = analysis.chat(
+      profile = profile,
+      documentId = documentId,
+      conversationId = conversationId,
+      input = record.input,
+      core = core,
+      history = history,
+      question = question,
+      onStreamedText = StreamedTextSink { textSoFar ->
+        // text 是「截至目前的完整回答」（全量替换渲染，重试安全）。generation 读 send 时点，
+        // 与 CORE_STREAM 同款；stop/换代升 operationVersion 压住旧会话分片，JS 侧 generation
+        // 过滤 + conversationId 把关是第二、三道防线。
+        if (capturedVersion == operationVersion) {
+          sender.send(buildJsonObject {
+            put("version", 1)
+            put("type", "CHAT_STREAM")
+            put("previewId", previewId)
+            put("generation", generation)
+            put("conversationId", conversationId)
+            put("text", textSoFar)
+          })
+        }
+      },
+    )
+    sender.send(buildJsonObject {
+      put("version", 1)
+      put("type", "CHAT_RESULT")
+      put("previewId", previewId)
+      put("generation", generation)
+      put("conversationId", conversationId)
+      put("answer", answer)
+    })
+  }
+
+  private fun sendChatError(conversationId: String, message: String) {
+    sender.send(buildJsonObject {
+      put("version", 1)
+      put("type", "CHAT_ERROR")
+      put("previewId", previewId)
+      put("generation", generation)
+      put("conversationId", conversationId)
+      put("message", message)
+    })
+  }
+
+  /**
+   * 请求失败文案：「<既有错误码名>：<脱敏 message>」。message 已在服务边界脱敏
+   * （AnalysisService.chat 的流式与收尾文本都过 redactSecrets），这里不重复脱敏；
+   * 未知异常兜底 NETWORK_ERROR 前缀。CHAT_ERROR 无 code 字段（ErrorCode 枚举被
+   * contracts 钉死不加值），错误码只作为人类可读前缀。
+   */
+  private fun chatFailureText(error: Throwable): String {
+    val failure = error as? ExtensionFailure
+    val code = failure?.code?.name ?: ErrorCode.NETWORK_ERROR.name
+    val detail = (failure?.message ?: error.message)?.takeUnless { it.isNullOrBlank() } ?: "chat request failed"
+    return "$code：$detail"
   }
 
   /** 重试：FAILED 句以 USER_RETRY 最高优先级重新请求（用户显式手势，绕过缓存）。 */

@@ -9,6 +9,10 @@ export const BRIDGE_VERSION = 1;
 // 整页翻译一次上报全文所有段，长文档可达上百段；与 Kotlin BridgeProtocol.MAX_BLOCKS 同步。
 export const MAX_BLOCKS = 2000;
 export const MAX_BLOCK_TEXT = 20_000;
+// 追问对话入站上限（与 Kotlin BridgeProtocol 同步；Chrome 版面板/SW 同值）。
+export const MAX_CHAT_HISTORY_TURNS = 6;
+export const MAX_CHAT_HISTORY_CHARACTERS = 8000;
+export const MAX_CHAT_QUESTION_CHARACTERS = 2000;
 
 export interface PageMessageBase {
   version: number;
@@ -56,13 +60,56 @@ export interface ParseBlock extends PageMessageBase {
   text: string;
 }
 
+/** 追问对话的一轮历史：用户提问或模型回答（不含 system——系统指令由 Kotlin 侧拼）。 */
+export interface ChatTurn {
+  role: "user" | "assistant";
+  content: string;
+}
+
+/**
+ * 追问对话（JS→Kotlin）：基于该句已核实分析继续多轮提问。上下文不过桥——
+ * Kotlin 侧从 SentenceRecord 重建，桥上只有定位与对话载荷。question 为 trim 后
+ * 1..2000、history ≤6 项/≤8000 字符的上限在 parse 里结构化校验（防伪造门）。
+ */
+export interface ChatAskPageMessage extends PageMessageBase {
+  type: "CHAT_ASK";
+  conversationId: string;
+  sentenceId: string;
+  history: ChatTurn[];
+  question: string;
+}
+
+// CHAT_* 三条 host 消息均带 generation（parseHostMessage 顶部的等值门槛自动过滤
+// 旧代次）与 conversationId（面板侧第二道防线按它丢弃非本会话的迟到消息）。
+// CHAT_STREAM.text 是「截至目前的完整回答」而非增量——全量替换渲染，重试安全。
+export interface ChatStreamHostMessage extends PageMessageBase {
+  type: "CHAT_STREAM";
+  conversationId: string;
+  text: string;
+}
+
+/** 追问对话的最终全文（以缓冲答案为准收尾，防流式尾片丢失）。 */
+export interface ChatResultHostMessage extends PageMessageBase {
+  type: "CHAT_RESULT";
+  conversationId: string;
+  answer: string;
+}
+
+/** 追问对话失败（无 profile / 请求失败 / 原句失效）：人类可读文案，无 code 字段。 */
+export interface ChatErrorHostMessage extends PageMessageBase {
+  type: "CHAT_ERROR";
+  conversationId: string;
+  message: string;
+}
+
 export type PageMessage =
   | PreviewReady
   | VisibleBlocks
   | DetailRequest
   | RetrySentence
   | PreviewRendered
-  | ParseBlock;
+  | ParseBlock
+  | ChatAskPageMessage;
 
 export type HostMessage =
   | ({ type: "SESSION_STATE"; state: string; ready: number; discovered: number; failed: number } & PageMessageBase)
@@ -71,7 +118,10 @@ export type HostMessage =
   | ({ type: "CORE_ERROR"; sentenceId: string; blockId: string; code: string; message: string; tokensJson: string } & PageMessageBase)
   | ({ type: "DETAIL_STREAM"; sentenceId: string; focusStart: number; focusEnd: number; structuresJson: string } & PageMessageBase)
   | ({ type: "DETAIL_RESULT"; sentenceId: string; analysisJson: string } & PageMessageBase)
-  | ({ type: "RESTORE_ALL" } & PageMessageBase);
+  | ({ type: "RESTORE_ALL" } & PageMessageBase)
+  | ChatStreamHostMessage
+  | ChatResultHostMessage
+  | ChatErrorHostMessage;
 
 const FORBIDDEN_KEYS = new Set(["apiKey", "headers", "baseUrl"]);
 
@@ -98,6 +148,7 @@ const PAGE_KEYS_BY_TYPE: Readonly<Record<string, readonly string[]>> = {
   RETRY_SENTENCE: ["version", "type", "previewId", "generation", "sentenceId"],
   PREVIEW_RENDERED: ["version", "type", "previewId", "generation"],
   PARSE_BLOCK: ["version", "type", "previewId", "generation", "blockId", "text"],
+  CHAT_ASK: ["version", "type", "previewId", "generation", "conversationId", "sentenceId", "history", "question"],
 };
 
 /** JS → Kotlin 方向：白名单校验后返回封闭联合，或 null 表示拒绝。 */
@@ -192,6 +243,39 @@ export function parsePageMessage(value: unknown): PageMessage | null {
         text: value.text,
       };
     }
+    case "CHAT_ASK": {
+      // 防伪造门（与 Kotlin parseChatAsk 镜像）：形状 + 数量上限都在这里判。
+      if (!hasOnlyKeys(value, PAGE_KEYS_BY_TYPE.CHAT_ASK!)) return null;
+      if (!isNonEmptyString(value.conversationId)) return null;
+      if (!isNonEmptyString(value.sentenceId)) return null;
+      if (typeof value.question !== "string") return null;
+      // trim 在门里做掉（Chrome SW 同款）：1..2000 按 trim 后计。
+      const question = value.question.trim();
+      if (question.length === 0 || question.length > MAX_CHAT_QUESTION_CHARACTERS) return null;
+      if (!Array.isArray(value.history)) return null;
+      if (value.history.length > MAX_CHAT_HISTORY_TURNS) return null;
+      const history: ChatTurn[] = [];
+      let historyCharacters = 0;
+      for (const turn of value.history) {
+        if (!isRecord(turn)) return null;
+        if (!hasOnlyKeys(turn, ["role", "content"])) return null;
+        if (turn.role !== "user" && turn.role !== "assistant") return null;
+        if (typeof turn.content !== "string" || turn.content.trim().length === 0) return null;
+        historyCharacters += turn.content.length;
+        if (historyCharacters > MAX_CHAT_HISTORY_CHARACTERS) return null;
+        history.push({ role: turn.role, content: turn.content });
+      }
+      return {
+        version: BRIDGE_VERSION,
+        type: "CHAT_ASK",
+        previewId: value.previewId,
+        generation: value.generation,
+        conversationId: value.conversationId,
+        sentenceId: value.sentenceId,
+        history,
+        question,
+      };
+    }
     default:
       return null;
   }
@@ -205,6 +289,9 @@ const HOST_KEYS_BY_TYPE: Readonly<Record<string, readonly string[]>> = {
   DETAIL_STREAM: ["version", "type", "previewId", "generation", "sentenceId", "focusStart", "focusEnd", "structuresJson"],
   DETAIL_RESULT: ["version", "type", "previewId", "generation", "sentenceId", "analysisJson"],
   RESTORE_ALL: ["version", "type", "previewId", "generation"],
+  CHAT_STREAM: ["version", "type", "previewId", "generation", "conversationId", "text"],
+  CHAT_RESULT: ["version", "type", "previewId", "generation", "conversationId", "answer"],
+  CHAT_ERROR: ["version", "type", "previewId", "generation", "conversationId", "message"],
 };
 
 /** Kotlin → JS 方向：同款白名单 + generation 复检。 */
@@ -314,6 +401,40 @@ export function parseHostMessage(value: unknown, currentGeneration: number): Hos
         type: "RESTORE_ALL",
         previewId: value.previewId,
         generation: value.generation,
+      };
+    // CHAT_* 三条：generation 等值门槛已在函数顶部统一生效，这里只补各自字段守卫。
+    case "CHAT_STREAM":
+      if (!isNonEmptyString(value.conversationId)) return null;
+      if (typeof value.text !== "string") return null;
+      return {
+        version: BRIDGE_VERSION,
+        type: "CHAT_STREAM",
+        previewId: value.previewId,
+        generation: value.generation,
+        conversationId: value.conversationId,
+        text: value.text,
+      };
+    case "CHAT_RESULT":
+      if (!isNonEmptyString(value.conversationId)) return null;
+      if (typeof value.answer !== "string") return null;
+      return {
+        version: BRIDGE_VERSION,
+        type: "CHAT_RESULT",
+        previewId: value.previewId,
+        generation: value.generation,
+        conversationId: value.conversationId,
+        answer: value.answer,
+      };
+    case "CHAT_ERROR":
+      if (!isNonEmptyString(value.conversationId)) return null;
+      if (typeof value.message !== "string") return null;
+      return {
+        version: BRIDGE_VERSION,
+        type: "CHAT_ERROR",
+        previewId: value.previewId,
+        generation: value.generation,
+        conversationId: value.conversationId,
+        message: value.message,
       };
     default:
       return null;

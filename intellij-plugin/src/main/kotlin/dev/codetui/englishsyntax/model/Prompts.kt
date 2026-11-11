@@ -319,3 +319,42 @@ fun buildDetailPrompt(
   "Focus range:",
   serialize(promptJson.encodeToJsonElement(focus)),
 ).joinToString("\n\n")
+
+/** 追问对话的一轮历史:用户提问或模型回答(不含 system——系统指令由 chat prompt 首段给出)。 */
+data class ChatTurn(val role: String, val content: String)
+
+/**
+ * 追问对话提示词:基于该句已核实的分析继续问答。首行是函数内字面量,**绝不进
+ * contracts.json 的 promptFirstLines**——那张表被双端 contracts 钉死且只有五个键,
+ * 与 Chrome 端 buildChatPrompt 的「函数内字面量、不进 PROMPT_FIRST_LINES」约定一致。
+ * 四段结构与 Chrome 端逐字相同:系统指令 → serializeSentence + 紧凑 core JSON → 历史 → 问题。
+ */
+fun buildChatPrompt(
+  input: SentenceInput,
+  core: CoreAnalysis,
+  history: List<ChatTurn>,
+  question: String,
+): String = listOf(
+  "Discuss the verified translation analysis with the reader.",
+  "Answer the reader's question in Chinese based on the verified core analysis below. " +
+    "Do not re-divide or re-tag the grammatical components: the verified analysis is fixed. " +
+    "If the analysis conflicts with the question, follow the analysis and say so. " +
+    "Keep the answer concise and split it into short paragraphs.",
+  "Selected sentence:",
+  serializeSentence(input),
+  "Verified core result:",
+  serialize(core.toJsonElement()),
+  "Conversation history (oldest first):",
+  serialize(chatHistoryJson(history)),
+  "Reader question:",
+  question,
+).joinToString("\n\n")
+
+private fun chatHistoryJson(history: List<ChatTurn>): JsonElement = buildJsonArray {
+  history.forEach { turn ->
+    addJsonObject {
+      put("role", turn.role)
+      put("content", turn.content)
+    }
+  }
+}

@@ -16,6 +16,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -476,5 +477,58 @@ class PromptsTest {
     val ruleTextLength = prompt.slice(0 until payloadStart).length
 
     assertTrue(ruleTextLength <= 8207 * 1.48, "rule text grew beyond budget: $ruleTextLength")
+  }
+
+  /** 追问对话提示词：首行是函数内字面量，绝不进 contracts.json 的 promptFirstLines。 */
+  @Test
+  fun `chat prompt starts with the function-local literal kept out of the shared first-line table`() {
+    val chatFirstLine = "Discuss the verified translation analysis with the reader."
+    val prompt = buildChatPrompt(
+      sentence("The service works."),
+      CoreAnalysis(sentenceId = "s1", components = listOf(CoreComponent(0, 1, GrammarRole.SUBJECT, "该服务")), modelProfileId = "profile-1"),
+      listOf(ChatTurn("user", "为什么")),
+      "那宾语呢？",
+    )
+
+    assertTrue(prompt.startsWith(chatFirstLine))
+    // 首行不得混进被双端 contracts 钉死的 promptFirstLines（那张表只有五个键）。
+    contractFirstLines.forEach { (key, value) ->
+      assertTrue(value.jsonPrimitive.content != chatFirstLine, "chat first line leaked into promptFirstLines[$key]")
+    }
+  }
+
+  /** 四段结构与 Chrome 端 prompts.ts buildChatPrompt 逐字一致；内嵌 JSON 全部紧凑序列化。 */
+  @Test
+  fun `chat prompt embeds sentence core history and question in four compact sections`() {
+    val input = sentence("The service works.")
+    val core = CoreAnalysis(sentenceId = "s1", components = listOf(CoreComponent(0, 1, GrammarRole.SUBJECT, "该服务")), modelProfileId = "profile-1")
+    val history = listOf(ChatTurn("user", "为什么"), ChatTurn("assistant", "因为主语在前"))
+    val prompt = buildChatPrompt(input, core, history, "那宾语呢？")
+
+    val sections = prompt.split("\n\n")
+    assertEquals(10, sections.size)
+    assertEquals(
+      "Answer the reader's question in Chinese based on the verified core analysis below. " +
+        "Do not re-divide or re-tag the grammatical components: the verified analysis is fixed. " +
+        "If the analysis conflicts with the question, follow the analysis and say so. " +
+        "Keep the answer concise and split it into short paragraphs.",
+      sections[1],
+    )
+    assertEquals("Selected sentence:", sections[2])
+    assertEquals(serializeSentence(input), sections[3])
+    assertEquals("Verified core result:", sections[4])
+    assertEquals(
+      """{"schemaVersion":${dev.codetui.englishsyntax.domain.ContractVersions.CORE_SCHEMA},"sentenceId":"s1",""" +
+        """"components":[{"startToken":0,"endToken":1,"role":"SUBJECT","translation":"该服务"}],"modelProfileId":"profile-1"}""",
+      sections[5],
+    )
+    assertEquals("Conversation history (oldest first):", sections[6])
+    assertEquals(
+      """[{"role":"user","content":"为什么"},{"role":"assistant","content":"因为主语在前"}]""",
+      sections[7],
+    )
+    assertEquals("Reader question:", sections[8])
+    assertEquals("那宾语呢？", sections[9])
+    assertFalse(prompt.contains("\n  \""))
   }
 }

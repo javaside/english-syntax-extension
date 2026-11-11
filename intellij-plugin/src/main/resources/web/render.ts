@@ -87,6 +87,33 @@ export type DetailRequestHandler = (
   focusEnd: number,
 ) => void;
 
+/**
+ * 句头追问按钮派发的 DOM 事件名（冒泡 + composed；bootstrap-entry 在 document 级接住，
+ * 是 retry 按钮同级的事件委托先例）。点击**不发** CHAT_ASK——那时还没有合法 question。
+ */
+export const CHAT_ASK_REQUEST_EVENT = "english-syntax-chat-request";
+
+/** #createChatAsk 点击事件的载荷：anchor 为鼠标坐标；键盘激活（Enter/Space）的 click
+ *  坐标是 0，回落到按钮 rect 右下角——键盘用户同样得到按钮旁弹出的面板。 */
+export interface ChatAskRequestDetail {
+  sentenceId: string;
+  anchor: { x: number; y: number };
+}
+
+/**
+ * 句头追问入口的聊天气泡图标（描边 + 三个点，输入指示语义）。内联 SVG、currentColor
+ * 描边——跟随句子文字颜色，明暗主题零适配；aria-hidden 让屏幕阅读器只念按钮的
+ * aria-label「追问这句」（Chrome 端 CHAT_ASK_ICON 同款）。
+ */
+const CHAT_ASK_ICON =
+  '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false">' +
+  '<path d="M2.5 3h11a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H8.4l-3.2 2.6a.5.5 0 0 1-.8-.4V11h-1.9a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" ' +
+  'fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>' +
+  '<circle cx="5.4" cy="7" r="0.95" fill="currentColor"/>' +
+  '<circle cx="8" cy="7" r="0.95" fill="currentColor"/>' +
+  '<circle cx="10.6" cy="7" r="0.95" fill="currentColor"/>' +
+  "</svg>";
+
 // 16em 封顶按译文字号约等于 16 个汉字；超过则改用铺开模式（Chrome 端同款）。
 const WIDE_TRANSLATION_MIN_CHARS = 17;
 
@@ -438,6 +465,12 @@ export class PreviewRenderer {
         container.append(failure);
         continue;
       }
+      if (sentence.analysis !== null && components.length > 0) {
+        // 句头「问」按钮（Chrome 端 sentenceElement.append(createChatAsk) 同款位置）：
+        // 只有 core 成功句给追问入口——流式暂定卡的分析尚未核实，失败句没有已核实划分
+        // 可讨论。整卡重建时随之重建，点击走 document 级事件委托（bootstrap 接手开面板）。
+        section.append(this.#createChatAsk(owner, sentenceId));
+      }
       const coordinateClauseTotal = components.filter(
         (component) => component.role === "COORDINATE_CLAUSE",
       ).length;
@@ -639,6 +672,41 @@ export class PreviewRenderer {
     return retry;
   }
 
+  /**
+   * 句头追问入口按钮（Chrome 端 #createChatAsk 同款）：无文字的聊天气泡图标，点击派发
+   * CHAT_ASK_REQUEST_EVENT（冒泡 + composed）。锚点取真实点击坐标；键盘激活的 click
+   * 坐标是 0，回落到按钮 rect 右下角。注意这里**不发**任何桥消息——开面板是 bootstrap
+   * 侧回调的事，CHAT_ASK 要等面板 submit 才由合法 question 驱动。
+   */
+  #createChatAsk(owner: Document, sentenceId: string): HTMLButtonElement {
+    const ask = createElement(owner, "button", "english-syntax-chat-ask");
+    ask.type = "button";
+    ask.setAttribute("aria-label", "追问这句");
+    ask.title = "追问这句"; // 图标无文字，悬停提示承载可发现性
+    ask.innerHTML = CHAT_ASK_ICON;
+    // cursor 内联 + !important：官方 Markdown 预览的全局规则会压过 stylesheet 的 cursor
+    // （成分按钮同款坑，见 #renderCard 内注释）。
+    ask.style.setProperty("cursor", "pointer", "important");
+    ask.addEventListener("click", (event) => {
+      const rect = ask.getBoundingClientRect();
+      const detail: ChatAskRequestDetail = {
+        sentenceId,
+        anchor: {
+          x: event.clientX || rect.right,
+          y: event.clientY || rect.bottom,
+        },
+      };
+      ask.dispatchEvent(
+        new CustomEvent<ChatAskRequestDetail>(CHAT_ASK_REQUEST_EVENT, {
+          bubbles: true,
+          composed: true,
+          detail,
+        }),
+      );
+    });
+    return ask;
+  }
+
   #originalText(sentenceId: string): string {
     const tokens = this.#sentences.get(sentenceId)?.record.tokens ?? [];
     return tokens.map(({ leadingWhitespace, text }) => leadingWhitespace + text).join("");
@@ -688,6 +756,14 @@ export class PreviewRenderer {
   /** 供 bootstrap 在 VISIBLE_BLOCKS 后对可见块打「解析中」标记。 */
   markActive(blockId: string): HTMLElement | null {
     return this.currentElement(blockId);
+  }
+
+  /**
+   * 句子原文（按 token 的 leadingWhitespace + text 重建,失败句原文行同口径）。
+   * 供 bootstrap 在追问面板 open 时取锚定句摘要;未注册句返回空串。
+   */
+  sentenceText(sentenceId: string): string {
+    return this.#originalText(sentenceId);
   }
 
   restoreAll(): void {

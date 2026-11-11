@@ -11,6 +11,8 @@ import kotlin.test.assertTrue
 class BridgeProtocolTest {
   private fun parse(text: String) = BridgeProtocol.parsePageMessage(Json.parseToJsonElement(text).jsonObject)
 
+  private fun parseHost(text: String) = BridgeProtocol.parseHostMessage(Json.parseToJsonElement(text).jsonObject)
+
   @Test
   fun `accepts minimal preview ready`() {
     val message = parse("""{"version":1,"type":"PREVIEW_READY","previewId":"p1","generation":0}""")
@@ -212,6 +214,159 @@ class BridgeProtocolTest {
     val huge = "a".repeat(BridgeProtocol.MAX_BLOCK_TEXT + 1)
     assertNull(
       parse("""{"version":1,"type":"PARSE_BLOCK","previewId":"p1","generation":0,"blockId":"b1","text":"$huge"}"""),
+    )
+  }
+
+  // ---- CHAT_ASK：IntelliJ 没有第二层路由，桥的 parse case 就是防伪造门，上限全部结构化 ----
+
+  private fun chatAskJson(
+    conversationId: String = "p1:chat:1",
+    sentenceId: String = "s-b1-0",
+    history: String = """[{"role":"user","content":"上一轮问题"},{"role":"assistant","content":"上一轮回答"}]""",
+    question: String = "这个 of 短语修饰谁?",
+  ): String =
+    """{"version":1,"type":"CHAT_ASK","previewId":"p1","generation":2,"conversationId":"$conversationId","sentenceId":"$sentenceId","history":$history,"question":"$question"}"""
+
+  @Test
+  fun `accepts chat ask within caps and trims the question`() {
+    val message = parse(chatAskJson(question = "  这个 of 短语修饰谁?  ")) as PageMessage.ChatAsk
+    assertEquals("p1", message.previewId)
+    assertEquals(2, message.generation)
+    assertEquals("p1:chat:1", message.conversationId)
+    assertEquals("s-b1-0", message.sentenceId)
+    assertEquals(2, message.history.size)
+    assertEquals("user", message.history[0].role)
+    assertEquals("上一轮问题", message.history[0].content)
+    assertEquals("这个 of 短语修饰谁?", message.question)
+  }
+
+  @Test
+  fun `accepts chat ask with empty history for the first turn`() {
+    val message = parse(chatAskJson(history = "[]")) as PageMessage.ChatAsk
+    assertEquals(0, message.history.size)
+  }
+
+  @Test
+  fun `rejects chat ask with blank or oversized question`() {
+    assertNull(parse(chatAskJson(question = "")))
+    assertNull(parse(chatAskJson(question = "   ")))
+    assertNull(parse(chatAskJson(question = "x".repeat(BridgeProtocol.MAX_CHAT_QUESTION_CHARACTERS + 1))))
+    // 原文带空白超长但 trim 后在上限内：合法——上限按 trim 后文本计。
+    val padded = "  " + "x".repeat(BridgeProtocol.MAX_CHAT_QUESTION_CHARACTERS) + "  "
+    val message = parse(chatAskJson(question = padded)) as PageMessage.ChatAsk
+    assertEquals(BridgeProtocol.MAX_CHAT_QUESTION_CHARACTERS, message.question.length)
+  }
+
+  @Test
+  fun `rejects chat ask with more than six history turns`() {
+    val seven = (1..7).joinToString(",") { """{"role":"user","content":"q$it"}""" }
+    assertNull(parse(chatAskJson(history = "[$seven]")))
+    val six = (1..6).joinToString(",") { """{"role":"user","content":"q$it"}""" }
+    assertNotNull(parse(chatAskJson(history = "[$six]")) as PageMessage.ChatAsk)
+  }
+
+  @Test
+  fun `rejects chat ask whose history exceeds the character budget`() {
+    val big = "x".repeat(2_700)
+    val over = (1..3).joinToString(",") { """{"role":"user","content":"$big"}""" }
+    assertNull(parse(chatAskJson(history = "[$over]")))
+    // 恰好 8000 字符：合法
+    val half = "x".repeat(4_000)
+    val message =
+      parse(chatAskJson(history = """[{"role":"user","content":"$half"},{"role":"assistant","content":"$half"}]""")) as
+        PageMessage.ChatAsk
+    assertEquals(BridgeProtocol.MAX_CHAT_HISTORY_CHARACTERS, message.history.sumOf { it.content.length })
+  }
+
+  @Test
+  fun `rejects chat ask with invalid history shape`() {
+    // role 不在枚举
+    assertNull(parse(chatAskJson(history = """[{"role":"system","content":"hi"}]""")))
+    // content 纯空白
+    assertNull(parse(chatAskJson(history = """[{"role":"user","content":"   "}]""")))
+    // turn 多余键
+    assertNull(parse(chatAskJson(history = """[{"role":"user","content":"hi","extra":1}]""")))
+    // history 非数组
+    assertNull(parse(chatAskJson(history = """{"role":"user","content":"hi"}""")))
+  }
+
+  @Test
+  fun `chat ask whitespace gates follow the explicit javascript class`() {
+    // NBSP 两端都算空白：裁掉后取净问题（U+00A0 在 JVM isWhitespace 与 JS trim 里都命中）。
+    val nbspQuestion = parse(chatAskJson(question = "\u00A0\u00A0这个短语修饰谁?\u00A0")) as PageMessage.ChatAsk
+    assertEquals("这个短语修饰谁?", nbspQuestion.question)
+
+    // U+FEFF（ZWNBSP）：JS trim 裁掉、JVM String.trim/isBlank 留下——对齐后必须照 JS 判空拒收。
+    assertNull(parse(chatAskJson(question = "\uFEFF")))
+    assertNull(parse(chatAskJson(history = """[{"role":"user","content":"\uFEFF"}]""")))
+
+    // U+001C–U+001F：JVM isWhitespace 会多剥、JS trim 不剥——对齐后按 JS 保留在文本里。
+    val kept = parse(chatAskJson(question = "问\u001F")) as PageMessage.ChatAsk
+    assertEquals("问\u001F", kept.question)
+  }
+
+  @Test
+  fun `rejects chat ask carrying credentials or missing envelope fields`() {
+    // forbiddenKeys：CHAT_ASK 同样照拦
+    assertNull(
+      parse(
+        """{"version":1,"type":"CHAT_ASK","previewId":"p1","generation":2,"conversationId":"c1","sentenceId":"s1","history":[],"question":"q","apiKey":"leak"}""",
+      ),
+    )
+    // 缺 conversationId
+    assertNull(
+      parse(
+        """{"version":1,"type":"CHAT_ASK","previewId":"p1","generation":2,"sentenceId":"s1","history":[],"question":"q"}""",
+      ),
+    )
+    // conversationId / sentenceId 为空
+    assertNull(parse(chatAskJson(conversationId = "")))
+    assertNull(parse(chatAskJson(sentenceId = "")))
+    // 方向混淆：页面伪造的 CHAT_RESULT 不是合法 page 消息
+    assertNull(
+      parse("""{"version":1,"type":"CHAT_RESULT","previewId":"p1","generation":2,"conversationId":"c","answer":"a"}"""),
+    )
+  }
+
+  @Test
+  fun `chat host messages parse with generation and conversationId`() {
+    val stream = parseHost(
+      """{"version":1,"type":"CHAT_STREAM","previewId":"p1","generation":3,"conversationId":"p1:chat:1","text":"回答的第一段"}""",
+    ) as HostMessage.ChatStream
+    assertEquals(3, stream.generation)
+    assertEquals("p1:chat:1", stream.conversationId)
+    assertEquals("回答的第一段", stream.text)
+
+    val result = parseHost(
+      """{"version":1,"type":"CHAT_RESULT","previewId":"p1","generation":3,"conversationId":"p1:chat:1","answer":"完整回答"}""",
+    ) as HostMessage.ChatResult
+    assertEquals(3, result.generation)
+    assertEquals("p1:chat:1", result.conversationId)
+    assertEquals("完整回答", result.answer)
+
+    val error = parseHost(
+      """{"version":1,"type":"CHAT_ERROR","previewId":"p1","generation":3,"conversationId":"p1:chat:1","message":"原句已失效：请重新解析后再提问"}""",
+    ) as HostMessage.ChatError
+    assertEquals(3, error.generation)
+    assertEquals("p1:chat:1", error.conversationId)
+    assertEquals("原句已失效：请重新解析后再提问", error.message)
+  }
+
+  @Test
+  fun `rejects malformed chat host messages`() {
+    // 缺 conversationId
+    assertNull(parseHost("""{"version":1,"type":"CHAT_STREAM","previewId":"p1","generation":0,"text":"t"}"""))
+    // conversationId 为空
+    assertNull(parseHost("""{"version":1,"type":"CHAT_ERROR","previewId":"p1","generation":0,"conversationId":"","message":"m"}"""))
+    // 多余键
+    assertNull(parseHost("""{"version":1,"type":"CHAT_RESULT","previewId":"p1","generation":0,"conversationId":"c","answer":"a","extra":1}"""))
+    // answer 非字符串
+    assertNull(parseHost("""{"version":1,"type":"CHAT_RESULT","previewId":"p1","generation":0,"conversationId":"c","answer":7}"""))
+    // 方向混淆：host 侧不存在 CHAT_ASK
+    assertNull(
+      parseHost(
+        """{"version":1,"type":"CHAT_ASK","previewId":"p1","generation":0,"conversationId":"c","sentenceId":"s","history":[],"question":"q"}""",
+      ),
     )
   }
 }

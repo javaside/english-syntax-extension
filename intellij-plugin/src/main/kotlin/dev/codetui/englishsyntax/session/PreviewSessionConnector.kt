@@ -1,8 +1,12 @@
 package dev.codetui.englishsyntax.session
 
+import com.intellij.openapi.Disposable
+import com.intellij.openapi.util.Disposer
+import com.intellij.openapi.util.Key
 import dev.codetui.englishsyntax.bridge.BridgeProtocol
 import dev.codetui.englishsyntax.bridge.PageMessage
 import dev.codetui.englishsyntax.markdown.EnglishSyntaxPreviewPanel
+import dev.codetui.englishsyntax.model.ChatTurn
 
 /**
  * JS → Kotlin 消息接线：把 Panel 的页面消息派发给对应 preview 的 [PreviewSession]。
@@ -19,6 +23,9 @@ import dev.codetui.englishsyntax.markdown.EnglishSyntaxPreviewPanel
 object PreviewSessionConnector {
 
   private val LOGGER = com.intellij.openapi.diagnostic.Logger.getInstance(PreviewSessionConnector::class.java)
+
+  /** 面板关闭钩子只挂一次（connect 随 Start/快捷键重入，Disposer 不去重）。 */
+  private val DISPOSAL_HOOK_KEY = Key.create<Disposable>("english-syntax-session-disposal-hook")
 
   /**
    * Start Action 的完整接线：注册消息分发器 + 启动会话 + 触发首轮扫描。
@@ -48,6 +55,7 @@ object PreviewSessionConnector {
     val sender = HostSender { json -> panel.send(json) }
     val session = manager.obtain(panel.previewId, sender) { panel.requestScan() }
     panel.onGenerationChanged = { generation -> manager.onGenerationChanged(panel.previewId, generation) }
+    registerDisposalHook(panel, manager)
     panel.attachPageMessageDispatcher { json ->
       val message = BridgeProtocol.parsePageMessage(json) ?: return@attachPageMessageDispatcher
       if (message.previewId != panel.previewId) return@attachPageMessageDispatcher
@@ -57,11 +65,33 @@ object PreviewSessionConnector {
         is PageMessage.ParseBlock -> session.parseExplicitBlock(message.blockId, message.text)
         is PageMessage.DetailRequest ->
           session.launchDetailRequest(message.sentenceId, message.focusStart, message.focusEnd)
+        // 追问对话：上下文不过桥，Kotlin 侧从 SentenceRecord 重建；history 的桥类型
+        // （PageMessage.ChatAsk.ChatTurn）在这里换成服务层模型（model.ChatTurn）。
+        is PageMessage.ChatAsk ->
+          session.launchChatAsk(
+            message.conversationId,
+            message.sentenceId,
+            message.history.map { ChatTurn(it.role, it.content) },
+            message.question,
+          )
         is PageMessage.RetrySentence -> session.retrySentence(message.sentenceId)
         is PageMessage.PreviewReady, is PageMessage.PreviewRendered -> Unit
       }
     }
     LOGGER.info("connect: dispatcher attached for previewId=${panel.previewId}")
+  }
+
+  /**
+   * 预览关闭 → 会话回收：[EnglishSyntaxPreviewPanel.dispose] 此前不通知 manager，
+   * disposePreview 没有任何生产调用方——面板关走后在飞请求（尤其 chat 的长流式回答）
+   * 从不被取消。挂 Disposer 把「预览编辑器关走」真正路由到回收（wrap 路径下官方面板
+   * dispose 会级联到本包装，从而触发这里的钩子）。
+   */
+  private fun registerDisposalHook(panel: EnglishSyntaxPreviewPanel, manager: PreviewSessionManager) {
+    if (panel.getUserData(DISPOSAL_HOOK_KEY) != null) return
+    val hook = Disposable { manager.disposePreview(panel.previewId) }
+    panel.putUserData(DISPOSAL_HOOK_KEY, hook)
+    Disposer.register(panel, hook)
   }
 
   /** 触发首轮扫描：经 initialize 全局入口驱动 JS 侧 rescan + VISIBLE_BLOCKS 上报。 */

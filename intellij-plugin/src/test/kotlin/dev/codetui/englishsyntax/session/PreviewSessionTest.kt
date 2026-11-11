@@ -13,6 +13,8 @@ import dev.codetui.englishsyntax.domain.ExtensionFailure
 import dev.codetui.englishsyntax.domain.GrammarRole
 import dev.codetui.englishsyntax.domain.SentenceInput
 import dev.codetui.englishsyntax.domain.TokenRange
+import dev.codetui.englishsyntax.bridge.BridgeProtocol
+import dev.codetui.englishsyntax.model.ChatTurn
 import dev.codetui.englishsyntax.scheduler.SchedulerPriority
 import dev.codetui.englishsyntax.settings.JsonSchemaSupport
 import dev.codetui.englishsyntax.settings.ModelProfile
@@ -52,6 +54,19 @@ class PreviewSessionTest {
     var lastDetailCore: CoreAnalysis? = null
     /** 测试注入：analyzeCore 直接抛异常（模拟模型层崩溃，验证会话兜底给终态）。 */
     var throwOnAnalyzeCore = false
+    // ---- 追问对话（chat）接线断言用 ----
+    var chatCalls = 0
+    var lastChatConversationId: String? = null
+    var lastChatDocumentId: String? = null
+    var lastChatQuestion: String? = null
+    var lastChatHistory: List<ChatTurn>? = null
+    var lastChatInput: SentenceInput? = null
+    var lastChatCore: CoreAnalysis? = null
+    /** chat 返回前依次推送的「截至目前完整回答」分片。 */
+    var chatPushes: List<String> = emptyList()
+    var chatAnswer = ""
+    /** 测试注入：chat 直接抛异常（模拟请求失败 / 取消）。 */
+    var chatError: Throwable? = null
 
     override suspend fun analyzeCore(
       profile: ModelProfile,
@@ -105,6 +120,28 @@ class PreviewSessionTest {
     }
 
     override suspend fun lookupDetail(sentence: SentenceInput, focus: TokenRange): DetailAnalysis? = null
+
+    override suspend fun chat(
+      profile: ModelProfile,
+      documentId: String,
+      conversationId: String,
+      input: SentenceInput,
+      core: CoreAnalysis,
+      history: List<dev.codetui.englishsyntax.model.ChatTurn>,
+      question: String,
+      onStreamedText: dev.codetui.englishsyntax.analysis.StreamedTextSink?,
+    ): String {
+      chatCalls += 1
+      lastChatConversationId = conversationId
+      lastChatDocumentId = documentId
+      lastChatQuestion = question
+      lastChatHistory = history
+      lastChatInput = input
+      lastChatCore = core
+      chatError?.let { throw it }
+      onStreamedText?.let { sink -> chatPushes.forEach { sink.onText(it) } }
+      return chatAnswer
+    }
 
     override suspend fun cancelDocument(documentId: String) {
       cancelledDocuments += documentId
@@ -675,5 +712,197 @@ class PreviewSessionTest {
     kotlinx.coroutines.delay(100)
 
     assertTrue(sender.of("CORE_STREAM").isNotEmpty(), "暂停中显式派发的分片也要回推")
+  }
+
+  // ---- 追问对话（CHAT_ASK）：接线 + 取消闭环 ----
+
+  /** 注册一个块并置为 READY（带已核实 core），返回该句输入。 */
+  private fun seedReadySentence(session: PreviewSession): SentenceInput {
+    session.onVisibleBlocks(listOf("b1" to "The service validates every response carefully today."))
+    val first = session.sentences.values.firstOrNull()?.input ?: error("no sentence")
+    session.applyOutcome(
+      CoreBatchOutcome(
+        listOf(
+          CoreAnalysis(
+            sentenceId = first.sentenceId,
+            components = listOf(CoreComponent(0, 1, GrammarRole.SUBJECT, "该服务")),
+            modelProfileId = "p1",
+          ),
+        ),
+        emptyList(),
+        cacheHit = false,
+      ),
+    )
+    return first
+  }
+
+  @Test
+  fun `chat ask streams progress then settles as result for a verified sentence`() = runBlocking {
+    val session = session()
+    session.start()
+    val first = seedReadySentence(session)
+    val core = session.sentences[first.sentenceId]!!.core!!
+    service.chatPushes = listOf("回答的第", "一部分")
+    service.chatAnswer = "完整回答"
+
+    session.launchChatAsk(
+      "pv1:chat:1", first.sentenceId,
+      listOf(ChatTurn("user", "上一轮问题")), "这个短语修饰谁?",
+    )
+    kotlinx.coroutines.delay(100)
+
+    assertEquals(1, service.chatCalls)
+    assertEquals("pv1-doc", service.lastChatDocumentId, "chat 必须走页面 documentId（服务内部再派生 :chat 命名空间）")
+    assertEquals("pv1:chat:1", service.lastChatConversationId)
+    assertEquals("这个短语修饰谁?", service.lastChatQuestion)
+    assertEquals(listOf(ChatTurn("user", "上一轮问题")), service.lastChatHistory)
+    assertEquals(first.sentenceId, service.lastChatInput?.sentenceId)
+    assertSame(core, service.lastChatCore, "上下文必须是 Kotlin 侧 SentenceRecord 里已核实的 core")
+
+    // 流式分片：每次都是「截至目前完整回答」，带 generation 与 conversationId。
+    val streams = sender.of("CHAT_STREAM")
+    assertEquals(listOf("回答的第", "一部分"), streams.map { it["text"]?.jsonPrimitive?.contentOrNull })
+    assertEquals(listOf("pv1:chat:1", "pv1:chat:1"), streams.map { it["conversationId"]?.jsonPrimitive?.contentOrNull })
+    streams.forEach { assertEquals(session.generation, it["generation"]?.jsonPrimitive?.content?.toInt()) }
+
+    val result = sender.of("CHAT_RESULT").single()
+    assertEquals("完整回答", result["answer"]?.jsonPrimitive?.contentOrNull)
+    assertEquals("pv1:chat:1", result["conversationId"]?.jsonPrimitive?.contentOrNull)
+
+    // 回环钉形状：发出的 JSON 必须能被 BridgeProtocol.parseHostMessage 收下
+    //（白名单与 Task 4 的 JS 侧 parseHostMessage 同构，漏信封字段会被对端静默丢弃）。
+    (streams + result).forEach { assertNotNull(BridgeProtocol.parseHostMessage(it), "CHAT_* 消息未过 host 白名单: $it") }
+  }
+
+  @Test
+  fun `chat ask without a record or verified core answers chat error, not silence`() = runBlocking {
+    val session = session()
+    session.start()
+
+    // ① 记录不存在（stop/onGenerationChanged 清空后的常态）。
+    session.launchChatAsk("c-missing", "s-b1-0", emptyList(), "问?")
+    // ② 记录在、core 还没核实（phase != READY）。
+    session.onVisibleBlocks(listOf("b1" to "The service validates every response carefully today."))
+    val first = session.sentences.values.firstOrNull()?.input ?: error("no sentence")
+    session.launchChatAsk("c-nocore", first.sentenceId, emptyList(), "问?")
+    kotlinx.coroutines.delay(100)
+
+    assertEquals(0, service.chatCalls, "数据不可用绝不调模型")
+    val errors = sender.of("CHAT_ERROR")
+    assertEquals(
+      listOf("原句已失效：请重新解析后再提问", "原句已失效：请重新解析后再提问"),
+      errors.map { it["message"]?.jsonPrimitive?.contentOrNull },
+    )
+    assertEquals(
+      listOf("c-missing", "c-nocore"),
+      errors.map { it["conversationId"]?.jsonPrimitive?.contentOrNull },
+      "错误必须回带到发起会话的 conversationId，否则面板撤销不了悬空的 user 轮",
+    )
+  }
+
+  @Test
+  fun `chat ask after stop still answers invalid sentence instead of going silent`() = runBlocking {
+    // 「无 SessionState 静默门」的钉子：面板在 stop/RESTORE_ALL 后仍然开着，照抄
+    // launchDetailRequest 的 `if state == STOPPED return` 会把输入框永久卡在禁用态。
+    val session = session()
+    session.start()
+    val first = seedReadySentence(session)
+    session.stop()
+    kotlinx.coroutines.delay(50)
+
+    session.launchChatAsk("c-after-stop", first.sentenceId, emptyList(), "问?")
+    kotlinx.coroutines.delay(100)
+
+    assertEquals(0, service.chatCalls)
+    assertEquals(
+      "原句已失效：请重新解析后再提问",
+      sender.of("CHAT_ERROR").single()["message"]?.jsonPrimitive?.contentOrNull,
+    )
+  }
+
+  @Test
+  fun `chat ask without a profile answers a configuration error`() = runBlocking {
+    val noProfileManager = PreviewSessionManager(scope, service, { null })
+    val localSender = RecordingSender()
+    val session = noProfileManager.obtain("pv-np", localSender) { }
+    session.start()
+    val first = seedReadySentence(session)
+
+    session.launchChatAsk("c-np", first.sentenceId, emptyList(), "问?")
+    kotlinx.coroutines.delay(100)
+
+    assertEquals(0, service.chatCalls)
+    assertEquals(
+      "尚未配置可用的模型档案，请先在设置中配置",
+      localSender.of("CHAT_ERROR").single()["message"]?.jsonPrimitive?.contentOrNull,
+    )
+  }
+
+  @Test
+  fun `chat ask failure surfaces the error code in a readable chat error`() = runBlocking {
+    val session = session()
+    session.start()
+    val first = seedReadySentence(session)
+
+    // ExtensionFailure：复用既有 ErrorCode 做前缀，message 已在服务边界脱敏（不重复脱敏）。
+    service.chatError = ExtensionFailure(ErrorCode.REQUEST_TIMEOUT, "Model request timed out", true)
+    session.launchChatAsk("c-timeout", first.sentenceId, emptyList(), "问?")
+    kotlinx.coroutines.delay(100)
+    // 未知异常：兜底 NETWORK_ERROR 前缀 + 原始 message。（先等第一次 launch 读完 chatError
+    // 再切换——两次 launch 都在 Default 调度器上异步跑。）
+    service.chatError = IllegalStateException("boom")
+    session.launchChatAsk("c-crash", first.sentenceId, emptyList(), "问?")
+    kotlinx.coroutines.delay(100)
+
+    val errors = sender.of("CHAT_ERROR")
+    assertEquals(
+      listOf("REQUEST_TIMEOUT：Model request timed out", "NETWORK_ERROR：boom"),
+      errors.map { it["message"]?.jsonPrimitive?.contentOrNull },
+    )
+    errors.forEach { assertNotNull(BridgeProtocol.parseHostMessage(it)) }
+  }
+
+  @Test
+  fun `stop and generation change cancel the chat namespace`() = runBlocking {
+    val session = session()
+    session.start()
+    session.stop()
+    kotlinx.coroutines.delay(50)
+    assertTrue("pv1-doc:chat" in service.cancelledDocuments, "stop 必须取消 \${documentId}:chat（否则在飞流式回答占槽到静默超时）")
+
+    session.start()
+    session.onGenerationChanged(1)
+    kotlinx.coroutines.delay(50)
+    assertEquals(
+      2,
+      service.cancelledDocuments.count { it == "pv1-doc:chat" },
+      "stop 与 onGenerationChanged 各取消一次 chat 命名空间",
+    )
+  }
+
+  @Test
+  fun `dispose preview cancels the chat namespace before cancelling the session job`() = runBlocking {
+    // 经 manager 长命 scope 取消 chat（session scope 的 launch 会与紧随的 job.cancel 竞速
+    // 静默 no-op）；顺序必须是「先 chat 取消、后 session job 取消」。
+    val events = mutableListOf<String>()
+    val port = object : AnalysisServicePort by service {
+      override suspend fun cancelDocument(documentId: String) {
+        events += "cancel:$documentId"
+      }
+    }
+    val unconfined = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+    try {
+      val disposalManager = PreviewSessionManager(unconfined, port, { profile })
+      disposalManager.start("pv-d", sender) { }
+      val job = disposalManager.sessionJobForTest("pv-d") ?: error("no session job")
+      job.invokeOnCompletion { events += "job-cancelled" }
+
+      disposalManager.disposePreview("pv-d")
+
+      assertEquals(listOf("cancel:pv-d-doc:chat", "job-cancelled"), events)
+      assertEquals(null, disposalManager.session("pv-d"))
+    } finally {
+      unconfined.cancel()
+    }
   }
 }

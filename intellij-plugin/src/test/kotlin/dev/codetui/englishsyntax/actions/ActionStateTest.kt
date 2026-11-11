@@ -54,6 +54,17 @@ class ActionStateTest {
 
     override suspend fun lookupDetail(sentence: SentenceInput, focus: TokenRange): DetailAnalysis? = null
 
+    override suspend fun chat(
+      profile: ModelProfile,
+      documentId: String,
+      conversationId: String,
+      input: SentenceInput,
+      core: CoreAnalysis,
+      history: List<dev.codetui.englishsyntax.model.ChatTurn>,
+      question: String,
+      onStreamedText: dev.codetui.englishsyntax.analysis.StreamedTextSink?,
+    ): String = ""
+
     override suspend fun cancelDocument(documentId: String) {}
   }
 

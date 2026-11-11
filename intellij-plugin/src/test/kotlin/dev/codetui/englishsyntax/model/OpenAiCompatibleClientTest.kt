@@ -236,6 +236,106 @@ class OpenAiCompatibleClientTest {
     }
   }
 
+  // ---- 追问对话的纯文本双路径（completeText / completeTextStreaming）----
+
+  @Test
+  fun `completeText sends reasoning none without response format and returns free text verbatim`() = runBlocking {
+    FakeOpenAiServer().use { server ->
+      server.enqueueJson("This is plain prose, not JSON.")
+
+      val answer = client().completeText(profile(server.baseUrl), messages)
+
+      // 自由文本原样返回:过 parseContent 会被整块判成 INVALID_MODEL_OUTPUT。
+      assertEquals("This is plain prose, not JSON.", answer)
+      assertEquals(1, server.requests.size)
+      assertFalse(server.requests[0].body["stream"]?.jsonPrimitive?.booleanOrNull ?: true)
+      assertEquals("none", bodyField(server, 0, "reasoning_effort"))
+      assertNull(server.requests[0].body["response_format"])
+    }
+  }
+
+  @Test
+  fun `completeText downgrades reasoning rejection and resends without the field`() = runBlocking {
+    FakeOpenAiServer().use { server ->
+      server.enqueueJson("reasoning_effort not supported", status = 422)
+      server.enqueueJson("好的")
+
+      val answer = client().completeText(profile(server.baseUrl), messages)
+
+      assertEquals("好的", answer)
+      assertEquals(2, server.requests.size)
+      assertNull(bodyField(server, 1, "reasoning_effort"))
+      assertEquals(1, writer.reasoning)
+    }
+  }
+
+  @Test
+  fun `completeTextStreaming pushes deltas in order and returns the accumulated text`() = runBlocking {
+    FakeOpenAiServer().use { server ->
+      server.enqueueSse(listOf("你", "好", "！"))
+      val deltas = mutableListOf<String>()
+
+      val answer = client().completeTextStreaming(profile(server.baseUrl), messages) { deltas += it }
+
+      assertEquals(listOf("你", "好", "！"), deltas)
+      assertEquals("你好！", answer)
+      assertTrue(server.requests[0].body["stream"]?.jsonPrimitive?.booleanOrNull ?: false)
+      assertNull(server.requests[0].body["response_format"])
+      assertEquals("none", bodyField(server, 0, "reasoning_effort"))
+    }
+  }
+
+  @Test
+  fun `completeTextStreaming short-circuits to buffered when streaming is unsupported`() = runBlocking {
+    FakeOpenAiServer().use { server ->
+      server.enqueueJson("缓冲回答")
+      val deltas = mutableListOf<String>()
+
+      val answer = client().completeTextStreaming(
+        profile(server.baseUrl).copy(streamSupport = CapabilityState.UNSUPPORTED),
+        messages,
+      ) { deltas += it }
+
+      assertEquals(0, deltas.size)
+      assertEquals("缓冲回答", answer)
+      assertEquals(1, server.requests.size)
+      assertFalse(server.requests[0].body["stream"]?.jsonPrimitive?.booleanOrNull ?: true)
+    }
+  }
+
+  @Test
+  fun `completeTextStreaming falls back to buffered free text when stream is rejected`() = runBlocking {
+    FakeOpenAiServer().use { server ->
+      server.enqueueJson("stream not supported", status = 400)
+      server.enqueueJson("这是缓冲的纯文本回答")
+
+      val answer = client().completeTextStreaming(profile(server.baseUrl), messages) {}
+
+      // 回落目标是 completeText（自由文本），不是 completeJson（那要 JSON）。
+      assertEquals("这是缓冲的纯文本回答", answer)
+      assertEquals(2, server.requests.size)
+      assertTrue(server.requests[0].body["stream"]?.jsonPrimitive?.booleanOrNull ?: false)
+      assertFalse(server.requests[1].body["stream"]?.jsonPrimitive?.booleanOrNull ?: true)
+      assertEquals(1, writer.stream)
+    }
+  }
+
+  @Test
+  fun `completeTextStreaming downgrades reasoning rejection and stays streaming`() = runBlocking {
+    FakeOpenAiServer().use { server ->
+      server.enqueueJson("reasoning_effort not supported", status = 400)
+      server.enqueueSse(listOf("第", "二", "次"))
+
+      val answer = client().completeTextStreaming(profile(server.baseUrl), messages) {}
+
+      assertEquals("第二次", answer)
+      assertEquals(2, server.requests.size)
+      assertNull(bodyField(server, 1, "reasoning_effort"))
+      assertTrue(server.requests[1].body["stream"]?.jsonPrimitive?.booleanOrNull ?: false)
+      assertEquals(1, writer.reasoning)
+    }
+  }
+
   @Test
   fun `provider error never leaks api key in exception message`() = runBlocking {
     FakeOpenAiServer().use { server ->

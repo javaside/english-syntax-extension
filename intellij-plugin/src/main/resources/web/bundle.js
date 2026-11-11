@@ -1,4 +1,6 @@
-(function() {
+var EnglishSyntaxPreview = (function(exports) {
+	Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
+	const MAX_CHAT_QUESTION_CHARACTERS = 2e3;
 	const FORBIDDEN_KEYS = /* @__PURE__ */ new Set([
 		"apiKey",
 		"headers",
@@ -81,6 +83,30 @@
 			"type",
 			"previewId",
 			"generation"
+		],
+		CHAT_STREAM: [
+			"version",
+			"type",
+			"previewId",
+			"generation",
+			"conversationId",
+			"text"
+		],
+		CHAT_RESULT: [
+			"version",
+			"type",
+			"previewId",
+			"generation",
+			"conversationId",
+			"answer"
+		],
+		CHAT_ERROR: [
+			"version",
+			"type",
+			"previewId",
+			"generation",
+			"conversationId",
+			"message"
 		]
 	};
 	/** Kotlin → JS 方向：同款白名单 + generation 复检。 */
@@ -180,6 +206,39 @@
 				previewId: value.previewId,
 				generation: value.generation
 			};
+			case "CHAT_STREAM":
+				if (!isNonEmptyString(value.conversationId)) return null;
+				if (typeof value.text !== "string") return null;
+				return {
+					version: 1,
+					type: "CHAT_STREAM",
+					previewId: value.previewId,
+					generation: value.generation,
+					conversationId: value.conversationId,
+					text: value.text
+				};
+			case "CHAT_RESULT":
+				if (!isNonEmptyString(value.conversationId)) return null;
+				if (typeof value.answer !== "string") return null;
+				return {
+					version: 1,
+					type: "CHAT_RESULT",
+					previewId: value.previewId,
+					generation: value.generation,
+					conversationId: value.conversationId,
+					answer: value.answer
+				};
+			case "CHAT_ERROR":
+				if (!isNonEmptyString(value.conversationId)) return null;
+				if (typeof value.message !== "string") return null;
+				return {
+					version: 1,
+					type: "CHAT_ERROR",
+					previewId: value.previewId,
+					generation: value.generation,
+					conversationId: value.conversationId,
+					message: value.message
+				};
 			default: return null;
 		}
 	}
@@ -465,6 +524,17 @@
 		};
 		return indexOf(sentenceIdA) - indexOf(sentenceIdB);
 	}
+	/**
+	* 句头追问按钮派发的 DOM 事件名（冒泡 + composed；bootstrap-entry 在 document 级接住，
+	* 是 retry 按钮同级的事件委托先例）。点击**不发** CHAT_ASK——那时还没有合法 question。
+	*/
+	const CHAT_ASK_REQUEST_EVENT = "english-syntax-chat-request";
+	/**
+	* 句头追问入口的聊天气泡图标（描边 + 三个点，输入指示语义）。内联 SVG、currentColor
+	* 描边——跟随句子文字颜色，明暗主题零适配；aria-hidden 让屏幕阅读器只念按钮的
+	* aria-label「追问这句」（Chrome 端 CHAT_ASK_ICON 同款）。
+	*/
+	const CHAT_ASK_ICON = "<svg viewBox=\"0 0 16 16\" width=\"14\" height=\"14\" aria-hidden=\"true\" focusable=\"false\"><path d=\"M2.5 3h11a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H8.4l-3.2 2.6a.5.5 0 0 1-.8-.4V11h-1.9a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linejoin=\"round\"/><circle cx=\"5.4\" cy=\"7\" r=\"0.95\" fill=\"currentColor\"/><circle cx=\"8\" cy=\"7\" r=\"0.95\" fill=\"currentColor\"/><circle cx=\"10.6\" cy=\"7\" r=\"0.95\" fill=\"currentColor\"/></svg>";
 	const WIDE_TRANSLATION_MIN_CHARS = 17;
 	function isEchoTranslation(translation, english) {
 		const normalize = (value) => value.toLowerCase().replace(/\s+/gu, " ").trim();
@@ -705,6 +775,7 @@
 					container.append(failure);
 					continue;
 				}
+				if (sentence.analysis !== null && components.length > 0) section.append(this.#createChatAsk(owner, sentenceId));
 				const coordinateClauseTotal = components.filter((component) => component.role === "COORDINATE_CLAUSE").length;
 				let coordinateClauseIndex = 0;
 				let nextToken = 0;
@@ -829,6 +900,36 @@
 			});
 			return retry;
 		}
+		/**
+		* 句头追问入口按钮（Chrome 端 #createChatAsk 同款）：无文字的聊天气泡图标，点击派发
+		* CHAT_ASK_REQUEST_EVENT（冒泡 + composed）。锚点取真实点击坐标；键盘激活的 click
+		* 坐标是 0，回落到按钮 rect 右下角。注意这里**不发**任何桥消息——开面板是 bootstrap
+		* 侧回调的事，CHAT_ASK 要等面板 submit 才由合法 question 驱动。
+		*/
+		#createChatAsk(owner, sentenceId) {
+			const ask = createElement(owner, "button", "english-syntax-chat-ask");
+			ask.type = "button";
+			ask.setAttribute("aria-label", "追问这句");
+			ask.title = "追问这句";
+			ask.innerHTML = CHAT_ASK_ICON;
+			ask.style.setProperty("cursor", "pointer", "important");
+			ask.addEventListener("click", (event) => {
+				const rect = ask.getBoundingClientRect();
+				const detail = {
+					sentenceId,
+					anchor: {
+						x: event.clientX || rect.right,
+						y: event.clientY || rect.bottom
+					}
+				};
+				ask.dispatchEvent(new CustomEvent(CHAT_ASK_REQUEST_EVENT, {
+					bubbles: true,
+					composed: true,
+					detail
+				}));
+			});
+			return ask;
+		}
 		#originalText(sentenceId) {
 			return (this.#sentences.get(sentenceId)?.record.tokens ?? []).map(({ leadingWhitespace, text }) => leadingWhitespace + text).join("");
 		}
@@ -859,6 +960,13 @@
 		markActive(blockId) {
 			return this.currentElement(blockId);
 		}
+		/**
+		* 句子原文（按 token 的 leadingWhitespace + text 重建,失败句原文行同口径）。
+		* 供 bootstrap 在追问面板 open 时取锚定句摘要;未注册句返回空串。
+		*/
+		sentenceText(sentenceId) {
+			return this.#originalText(sentenceId);
+		}
 		restoreAll() {
 			for (const record of this.#blocks.values()) this.#restoreBlock(record);
 		}
@@ -881,6 +989,332 @@
 		isSentenceRendered(sentenceId) {
 			const entry = this.#sentences.get(sentenceId);
 			return entry?.record.analysis !== null && entry?.record.analysis !== void 0;
+		}
+	};
+	//#endregion
+	//#region src/main/resources/web/chat-panel.ts
+	/**
+	* 追问对话浮层（Chrome 端 content/chat-panel.ts 平移,DOM/样式适配预览页体系）。
+	*
+	* 预览页是非 Shadow DOM 环境:类名带 english-syntax- 前缀、视觉规则全部活在
+	* preview.css（Kotlin 单独注入,不进 bundle）；host 挂 `document.documentElement`
+	* ——官方 Markdown 预览的 updateDom 重写整个 body,挂 body 的浮层会随之消失。
+	*
+	* 会话状态 = { conversationId, 锚定句摘要, history };conversationId 由 bootstrap
+	* 在图标点击时铸好经 open 传入（Task 4 评审钉死的 seam）,所有 assistant 侧方法按
+	* 它把关:换句 open 重置会话后,旧会话的迟到流/结果直接丢弃。回答气泡纯文本 +
+	* pre-wrap（不引 markdown）,`renderStreamedText` 按「截至目前完整回答」的推送形状
+	* **全量替换**当前气泡（调度器静默重试后重画同一段文本,天然无害）。
+	*/
+	/**
+	* 拖动钳制边界:不依赖布局就能算的「至少留一个可抓取的角」——left/top 各自
+	* 距视口边 ≥8px,且 left ≤ innerWidth-120 / top ≤ innerHeight-80（面板宽 400、
+	* 高 560 以内,保证标题栏总有一截在视口里,拖丢了也拽得回来）。
+	*/
+	const DRAG_MARGIN = 8;
+	const DRAG_MAX_LEFT_RESERVE = 120;
+	const DRAG_MAX_TOP_RESERVE = 80;
+	/** 锚点弹出的右下偏移:面板左上角落在点击位置右下方 14px（阅读顺序自然）。 */
+	const CHAT_POPUP_OFFSET = 14;
+	/** 摘要行长度上限（Chrome 端 controller 同款 slice(0, 40)）。 */
+	const SUMMARY_MAX_CHARS = 40;
+	/**
+	* stop()/换代取消在飞的 chat 后,Kotlin 发来的 CHAT_ERROR 以错误码名作前缀
+	* （chatFailureText 的 `"$code：$detail"`）。那是用户侧的正常终态,不是失败——
+	* 渲染成中性提示,别把「取消」画成红色错误（Task 3 移交的语义）。
+	*/
+	const CANCELLED_MESSAGE_PREFIX = "REQUEST_CANCELLED";
+	const CANCELLED_NOTICE_TEXT = "本轮回答已取消，可重新提问";
+	var ChatPanel = class {
+		/**
+		* 提交回调:bootstrap 的接线（installChatPanel）赋值,输入框 Enter 提交时收到
+		* trim 后的问题文本。接线层负责 appendUserTurn/beginAssistantTurn 的时序与
+		* CHAT_ASK 的构造发送。
+		*/
+		onSubmit = () => {};
+		host;
+		#doc;
+		#root;
+		#summary;
+		#collapse;
+		#messages;
+		#input;
+		#send;
+		#conversationId;
+		#history = [];
+		#assistantBubble;
+		/** 拖动状态;pointerup/pointercancel 清空。null = 未在拖。 */
+		#drag = null;
+		/** 用户拖过之后的位置（像素）;重开面板时沿用,没拖过则保持 CSS 默认右下。 */
+		#placedLeft;
+		#placedTop;
+		constructor(ownerDocument = document) {
+			this.#doc = ownerDocument;
+			this.host = ownerDocument.createElement("div");
+			this.host.dataset.englishSyntaxChatPanel = "";
+			this.#root = ownerDocument.createElement("div");
+			this.#root.className = "english-syntax-chat-panel";
+			this.#root.setAttribute("aria-label", "追问对话");
+			this.#summary = ownerDocument.createElement("div");
+			this.#summary.className = "english-syntax-chat-summary";
+			const collapse = ownerDocument.createElement("button");
+			collapse.type = "button";
+			collapse.textContent = "收起";
+			collapse.addEventListener("click", () => {
+				const collapsed = this.#root.toggleAttribute("data-collapsed");
+				collapse.textContent = collapsed ? "展开" : "收起";
+			});
+			this.#collapse = collapse;
+			const close = ownerDocument.createElement("button");
+			close.type = "button";
+			close.textContent = "关闭";
+			close.addEventListener("click", () => this.dispose());
+			const header = ownerDocument.createElement("div");
+			header.className = "english-syntax-chat-header";
+			header.append(this.#summary, collapse, close);
+			header.addEventListener("pointerdown", (event) => {
+				if (event.target instanceof Element && event.target.closest("button")) return;
+				const rect = this.#root.getBoundingClientRect();
+				this.#drag = {
+					startX: event.clientX,
+					startY: event.clientY,
+					baseLeft: rect.left,
+					baseTop: rect.top
+				};
+				header.style.setProperty("cursor", "grabbing", "important");
+				event.preventDefault();
+			});
+			header.style.setProperty("cursor", "grab", "important");
+			collapse.style.setProperty("cursor", "pointer", "important");
+			close.style.setProperty("cursor", "pointer", "important");
+			ownerDocument.addEventListener("pointermove", (event) => {
+				if (this.#drag === null) return;
+				this.#applyPosition(this.#drag.baseLeft + event.clientX - this.#drag.startX, this.#drag.baseTop + event.clientY - this.#drag.startY);
+			});
+			const endDrag = () => {
+				if (this.#drag === null) return;
+				this.#drag = null;
+				header.style.setProperty("cursor", "grab", "important");
+			};
+			ownerDocument.addEventListener("pointerup", endDrag);
+			ownerDocument.addEventListener("pointercancel", endDrag);
+			this.#messages = ownerDocument.createElement("div");
+			this.#messages.className = "english-syntax-chat-messages";
+			this.#input = ownerDocument.createElement("textarea");
+			this.#input.className = "english-syntax-chat-input";
+			this.#input.setAttribute("maxlength", String(MAX_CHAT_QUESTION_CHARACTERS));
+			this.#input.setAttribute("placeholder", "追问这句的翻译或划分…");
+			this.#input.setAttribute("aria-label", "追问问题");
+			this.#input.addEventListener("keydown", (event) => {
+				if (event.isComposing) return;
+				if (event.key === "Enter" && !event.shiftKey) {
+					event.preventDefault();
+					this.#submit();
+				}
+			});
+			this.#send = ownerDocument.createElement("button");
+			this.#send.type = "button";
+			this.#send.className = "english-syntax-chat-send";
+			this.#send.textContent = "发送";
+			this.#send.style.setProperty("cursor", "pointer", "important");
+			this.#send.addEventListener("click", () => this.#submit());
+			const composer = ownerDocument.createElement("div");
+			composer.className = "english-syntax-chat-composer";
+			composer.append(this.#input, this.#send);
+			this.#root.append(header, this.#messages, composer);
+			this.host.append(this.#root);
+		}
+		/**
+		* 换锚定句 = 重置会话:历史与气泡清空、摘要行换新、conversationId 换成 bootstrap
+		* 新铸的那只,旧会话的迟到流/结果自此全部丢弃。带锚点（点「问」处）弹出:面板跟着
+		* 句子走,覆盖此前的拖动落点;不带锚点则保持既有位置（默认右下/上次拖动落点）。
+		*/
+		open(context) {
+			this.#conversationId = context.conversationId;
+			this.#history = [];
+			this.#assistantBubble = void 0;
+			if (context.anchor !== void 0) this.#applyPosition(context.anchor.x + CHAT_POPUP_OFFSET, context.anchor.y + CHAT_POPUP_OFFSET);
+			else if (this.#placedLeft !== void 0 && this.#placedTop !== void 0) this.#applyPosition(this.#placedLeft, this.#placedTop);
+			this.#messages.replaceChildren();
+			this.#summary.textContent = context.summary.slice(0, SUMMARY_MAX_CHARS);
+			this.#summary.title = context.summary;
+			this.#root.dataset.sentenceId = context.sentenceId;
+			this.#root.removeAttribute("data-collapsed");
+			this.#collapse.textContent = "收起";
+			this.#input.value = "";
+			this.#setSending(false);
+			if (!this.host.isConnected) this.#doc.documentElement.append(this.host);
+		}
+		/** 会话 id 的显式轮换（open 已带 id,这只留给测试与潜在的手动作废/续用点）。 */
+		setConversationId(id) {
+			this.#conversationId = id;
+		}
+		/**
+		* 当前会话的请求视图:history 已按 Kotlin parse 门同单位裁剪（项 ≤ 6、总字符
+		* ≤ 8000,从最旧丢起）,且**不含尾部悬空的 user 轮**——已提交未回答的那一问属于
+		* 「本轮」,由 CHAT_ASK 的 question 字段单独承载,不重复进 history。返回的是
+		* 副本,调用方改动不污染面板状态。
+		*/
+		currentConversation() {
+			if (this.#conversationId === void 0) return null;
+			return {
+				conversationId: this.#conversationId,
+				history: this.#trimmedHistory()
+			};
+		}
+		/**
+		* bootstrap 转发来的 CHAT_* 统一入口:按消息类型分发,conversationId 由各方法
+		* 自行把关（generation 等值门已在 bridge.parseHostMessage 过滤,这是第二道防线）。
+		*/
+		handleHostMessage(message) {
+			switch (message.type) {
+				case "CHAT_STREAM":
+					this.renderStreamedText(message.conversationId, message.text);
+					return;
+				case "CHAT_RESULT":
+					this.completeAssistantTurn(message.conversationId, message.answer);
+					return;
+				case "CHAT_ERROR":
+					this.failAssistantTurn(message.conversationId, message.message);
+					return;
+			}
+		}
+		appendUserTurn(text) {
+			this.#history.push({
+				role: "user",
+				content: text
+			});
+			this.#messages.append(this.#bubble("user", text));
+			this.#scrollToEnd();
+		}
+		/** 开始一轮回答:建立 pending 气泡并进入发送中（输入禁用）。旧会话 id 忽略。 */
+		beginAssistantTurn(conversationId) {
+			if (conversationId !== this.#conversationId) return;
+			this.#setSending(true);
+			const bubble = this.#bubble("assistant pending", "正在生成回答…");
+			this.#assistantBubble = bubble;
+			this.#messages.append(bubble);
+			this.#scrollToEnd();
+		}
+		/**
+		* 流式分片 = 截至目前的完整回答:全量替换当前气泡文本,不是追加。
+		* 无进行中轮次（completeAssistantTurn/failAssistantTurn 已收尾）的迟到分片
+		* 直接忽略——此时再建泡会把已结束的一轮又画出一个重复气泡。
+		*/
+		renderStreamedText(conversationId, text) {
+			if (conversationId !== this.#conversationId) return;
+			if (this.#assistantBubble === void 0) return;
+			const bubble = this.#assistantBubble;
+			bubble.classList.remove("english-syntax-chat-message--pending");
+			bubble.textContent = text;
+			this.#scrollToEnd();
+		}
+		/**
+		* 回答落定:以缓冲答案为准校平气泡（防流式尾片丢失）,push 进历史并解除发送中。
+		* 缓冲路径（无分片）同样走这里,气泡整段出现。
+		*/
+		completeAssistantTurn(conversationId, answer) {
+			if (conversationId !== this.#conversationId) return;
+			if (this.#assistantBubble === void 0) {
+				this.#assistantBubble = this.#bubble("assistant", answer);
+				this.#messages.append(this.#assistantBubble);
+			}
+			const bubble = this.#assistantBubble;
+			bubble.classList.remove("english-syntax-chat-message--pending");
+			bubble.textContent = answer;
+			this.#assistantBubble = void 0;
+			this.#history.push({
+				role: "assistant",
+				content: answer
+			});
+			this.#setSending(false);
+			this.#scrollToEnd();
+		}
+		/**
+		* 失败轮不入历史:撤销悬空 user 轮,history 始终是完整问答对;输入恢复。
+		* 无 pending 轮也画错误气泡（Kotlin「原句已失效」路径:提交后记录/core 缺失,
+		* 面板里可能没有任何进行中轮次,不能静默吞掉）。REQUEST_CANCELLED 前缀按中性
+		* 提示渲染（用户主动取消的正常终态）,原文留在 title 里备查。
+		*/
+		failAssistantTurn(conversationId, message) {
+			if (conversationId !== this.#conversationId) return;
+			if (this.#history[this.#history.length - 1]?.role === "user") this.#history.pop();
+			const cancelled = message.startsWith(CANCELLED_MESSAGE_PREFIX);
+			const text = cancelled ? CANCELLED_NOTICE_TEXT : message;
+			const bubble = this.#assistantBubble;
+			if (bubble !== void 0) {
+				bubble.className = cancelled ? "english-syntax-chat-message english-syntax-chat-message--notice" : "english-syntax-chat-message english-syntax-chat-message--error";
+				bubble.textContent = text;
+			} else this.#messages.append(this.#bubble(cancelled ? "notice" : "error", text));
+			const placed = bubble ?? this.#messages.lastElementChild;
+			if (cancelled) placed?.setAttribute("title", message);
+			this.#assistantBubble = void 0;
+			this.#setSending(false);
+			this.#scrollToEnd();
+		}
+		/**
+		* 钳制到视口内并落到 .english-syntax-chat-panel 的内联样式——它才是
+		* position:fixed 的元素,host 只是 0×0 的挂载壳,写 host 不动面板。定位后改用
+		* left/top（清掉 right/bottom 的 CSS 默认右下锚定）。记下落点供重开沿用。
+		*/
+		#applyPosition(left, top) {
+			const view = this.#doc.defaultView;
+			const maxLeft = Math.max(DRAG_MARGIN, (view?.innerWidth ?? 0) - DRAG_MAX_LEFT_RESERVE);
+			const maxTop = Math.max(DRAG_MARGIN, (view?.innerHeight ?? 0) - DRAG_MAX_TOP_RESERVE);
+			const clampedLeft = Math.min(Math.max(left, DRAG_MARGIN), maxLeft);
+			const clampedTop = Math.min(Math.max(top, DRAG_MARGIN), maxTop);
+			this.#root.style.left = `${clampedLeft}px`;
+			this.#root.style.top = `${clampedTop}px`;
+			this.#root.style.right = "auto";
+			this.#root.style.bottom = "auto";
+			this.#placedLeft = clampedLeft;
+			this.#placedTop = clampedTop;
+		}
+		/** 关闭浮层并作废会话（对话不持久化:面板关闭即丢;对象常驻,下次 open 重开）。 */
+		dispose() {
+			this.host.remove();
+			this.#conversationId = void 0;
+			this.#history = [];
+			this.#assistantBubble = void 0;
+			this.#messages.replaceChildren();
+			this.#summary.textContent = "";
+			delete this.#root.dataset.sentenceId;
+			this.#input.value = "";
+			this.#setSending(false);
+		}
+		#submit() {
+			if (this.#input.disabled) return;
+			const question = this.#input.value.trim();
+			if (question.length === 0) return;
+			this.onSubmit(question);
+			this.#input.value = "";
+		}
+		#setSending(sending) {
+			this.#input.disabled = sending;
+			this.#send.disabled = sending;
+		}
+		#bubble(variant, text) {
+			const bubble = this.#doc.createElement("div");
+			bubble.className = ["english-syntax-chat-message", ...variant.split(" ").map((part) => `english-syntax-chat-message--${part}`)].join(" ");
+			bubble.textContent = text;
+			return bubble;
+		}
+		#trimmedHistory() {
+			let items = this.#history;
+			if (items[items.length - 1]?.role === "user") items = items.slice(0, -1);
+			items = items.slice(-6);
+			let characters = items.reduce((total, turn) => total + turn.content.length, 0);
+			while (items.length > 0 && characters > 8e3) {
+				characters -= items[0].content.length;
+				items = items.slice(1);
+			}
+			return items.map((turn) => ({
+				role: turn.role,
+				content: turn.content
+			}));
+		}
+		#scrollToEnd() {
+			this.#messages.scrollTop = this.#messages.scrollHeight;
 		}
 	};
 	//#endregion
@@ -1142,6 +1576,8 @@
 		returnedCount = 0;
 		lastVisibleFingerprint = "";
 		clearAllActive();
+		chatPanelInstance?.dispose();
+		chatSentenceId = null;
 		resetScanRegistry();
 		ensureStatusElement();
 		if (s.observer !== null) s.observer.disconnect();
@@ -1212,6 +1648,12 @@
 				clearAllActive();
 				hideStatus();
 				previewHadCards = false;
+				break;
+			case "CHAT_STREAM":
+			case "CHAT_RESULT":
+			case "CHAT_ERROR":
+				chatPanel?.handleHostMessage(message);
+				return;
 		}
 		s.renderer.handleHostMessage(message);
 	}
@@ -1230,6 +1672,99 @@
 			sentenceId
 		});
 	});
+	let chatPanel = null;
+	/**
+	* 注册/注销追问面板。生产由 installChatPanel() 在模块载入时自动注册（面板随 bootstrap
+	* 常驻）；null = 拆除，供测试隔离，拆除后可再调 installChatPanel() 恢复。
+	*/
+	function setChatPanel(panel) {
+		chatPanel = panel;
+	}
+	/** conversationId 计数器：模块级持有、单调递增，跨代次不重置（id 含 previewId 仍唯一）。 */
+	let chatConversationCounter = 0;
+	/** 面板单例（构造不挂载,首次 open 才上 DOM）;installChatPanel 里接线并注册 seam。 */
+	let chatPanelInstance = null;
+	/** 当前锚定句（open 时记下,submit 时作 CHAT_ASK 的 sentenceId）;换代随面板一起作废。 */
+	let chatSentenceId = null;
+	/**
+	* 面板 submit → 先落用户轮与 pending 回答轮，再经 sendChatAsk 构造发送 CHAT_ASK。
+	* history 取面板 currentConversation()（已裁剪、不含本轮悬空 user 轮）；两 turn 的
+	* 落账时序与 Chrome 端 askChat 一致。sendChatAsk 拒发（无状态/超限）时给面板终态，
+	* 别让输入框永久卡在禁用态。
+	*/
+	function submitChatQuestion(question) {
+		const panel = chatPanelInstance;
+		if (panel === null) return;
+		const conversation = panel.currentConversation();
+		if (conversation === null || chatSentenceId === null) return;
+		panel.appendUserTurn(question);
+		panel.beginAssistantTurn(conversation.conversationId);
+		if (!sendChatAsk({
+			conversationId: conversation.conversationId,
+			sentenceId: chatSentenceId,
+			question,
+			history: conversation.history
+		})) panel.failAssistantTurn(conversation.conversationId, "发送失败：预览会话尚未就绪，请重新打开追问面板");
+	}
+	/**
+	* 实例化并注册追问面板（幂等：单例只建一次，重复调用只重新注册 seam）。模块载入时
+	* 自调一次——生产上面板随 bootstrap 常驻;测试在 setChatPanel(null) 后可再调恢复。
+	*/
+	function installChatPanel() {
+		if (chatPanelInstance === null) {
+			chatPanelInstance = new ChatPanel();
+			chatPanelInstance.onSubmit = submitChatQuestion;
+		}
+		setChatPanel(chatPanelInstance);
+		return chatPanelInstance;
+	}
+	installChatPanel();
+	/**
+	* 面板 submit → 构造并发送 CHAT_ASK。图标点击时**绝不下发**这条消息——那时还没有合法
+	* question，Kotlin 侧 parseChatAsk（trim 后 1..2000 + 白名单键集）会直接拒收。history 只做
+	* 最浅的防呆（收敛到 {role, content} 键集 + 取最近 6 项）；按字符裁剪是面板职责，硬门在 Kotlin。
+	*/
+	function sendChatAsk(input) {
+		const s = state;
+		if (s === null || s.previewId === "") return false;
+		const question = input.question.trim();
+		if (question.length === 0 || question.length > 2e3) return false;
+		postToHost({
+			version: 1,
+			type: "CHAT_ASK",
+			previewId: s.previewId,
+			generation: s.generation,
+			conversationId: input.conversationId,
+			sentenceId: input.sentenceId,
+			history: input.history.slice(-6).map((turn) => ({
+				role: turn.role,
+				content: turn.content
+			})),
+			question
+		});
+		return true;
+	}
+	document.addEventListener(CHAT_ASK_REQUEST_EVENT, (event) => {
+		if (state === null || state.previewId === "") return;
+		const detail = event.detail;
+		if (typeof detail !== "object" || detail === null) return;
+		const { sentenceId, anchor } = detail;
+		if (typeof sentenceId !== "string" || sentenceId === "") return;
+		if (typeof anchor?.x !== "number" || typeof anchor?.y !== "number") return;
+		const panel = chatPanel;
+		if (panel === null) return;
+		chatConversationCounter += 1;
+		chatSentenceId = sentenceId;
+		panel.open({
+			conversationId: `${state.previewId}:chat:${chatConversationCounter}`,
+			sentenceId,
+			summary: state.renderer.sentenceText(sentenceId).slice(0, 40),
+			anchor: {
+				x: anchor.x,
+				y: anchor.y
+			}
+		});
+	});
 	document.addEventListener("keydown", (event) => {
 		const bound = hotkey;
 		if (bound === null) return;
@@ -1246,4 +1781,8 @@
 	w.__englishSyntaxParseHoveredBlock = parseHoveredBlock;
 	w.__englishSyntaxSetHotkey = setHotkey;
 	//#endregion
-})();
+	exports.installChatPanel = installChatPanel;
+	exports.sendChatAsk = sendChatAsk;
+	exports.setChatPanel = setChatPanel;
+	return exports;
+})({});

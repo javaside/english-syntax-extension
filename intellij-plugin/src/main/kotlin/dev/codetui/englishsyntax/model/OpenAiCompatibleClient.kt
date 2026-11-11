@@ -125,6 +125,27 @@ class OpenAiCompatibleClient(
     }
   }
 
+  /**
+   * 追问对话面板的纯文本缓冲路径：与 completeJson 同体的非流式请求
+   * （reasoning_effort 默认下发、被拒降级重发一次），但**只解信封不解析 JSON**——
+   * 自由文本过 parseContent 会被整块判成 INVALID_MODEL_OUTPUT。
+   */
+  suspend fun completeText(profile: ModelProfile, messages: List<ChatMessage>): String = mapCancellation {
+    completeTextInternal(profile, messages)
+  }
+
+  /**
+   * 追问对话面板的纯文本流式路径：SSE 增量逐段回调 onDelta，返回完整回答文本。
+   * 降级链与 streamWithExtractor 同款——reasoning 被拒去掉字段重发（仍流式），
+   * stream 被拒记 unsupported 并回落 completeText（不是 completeJson，那要 JSON）。
+   * streamSupport 已知 UNSUPPORTED 时前置短路到缓冲路径。
+   */
+  suspend fun completeTextStreaming(
+    profile: ModelProfile,
+    messages: List<ChatMessage>,
+    onDelta: (String) -> Unit,
+  ): String = mapCancellation { completeTextStreamingInternal(profile, messages, onDelta) }
+
   suspend fun probeJsonCapability(profile: ModelProfile): JsonSchemaSupport = mapCancellation {
     val messages = listOf(
       ChatMessage("system", "Return only the requested JSON object."),
@@ -194,6 +215,46 @@ class OpenAiCompatibleClient(
     }
   }
 
+  /** 文本缓冲路径的降级循环：无 schema 可言，只剩 reasoning 一条降级链。 */
+  private suspend fun completeTextInternal(profile: ModelProfile, messages: List<ChatMessage>): String {
+    var current = profile
+    while (true) {
+      try {
+        val body = requestBody(current, messages, null, stream = false, useSchema = false)
+        val text = bufferedRequest(current, body, useSchema = false)
+        return envelopeTextContent(text)
+      } catch (error: UnsupportedReasoningControlException) {
+        capabilityWriter.markReasoningUnsupported(current.id)
+        current = current.copy(reasoningControl = CapabilityState.UNSUPPORTED)
+      }
+    }
+  }
+
+  /** 文本流式路径的降级循环：streamSupport 短路、stream 被拒回落缓冲、reasoning 被拒重发。 */
+  private suspend fun completeTextStreamingInternal(
+    profile: ModelProfile,
+    messages: List<ChatMessage>,
+    onDelta: (String) -> Unit,
+  ): String {
+    if (profile.streamSupport == CapabilityState.UNSUPPORTED) {
+      return completeTextInternal(profile, messages)
+    }
+    var current = profile
+    while (true) {
+      try {
+        val body = requestBody(current, messages, null, stream = true, useSchema = false)
+        return streamRawContent(current, body, useSchema = false, onDelta)
+      } catch (error: UnsupportedStreamException) {
+        capabilityWriter.markStreamUnsupported(current.id)
+        current = current.copy(streamSupport = CapabilityState.UNSUPPORTED)
+        return completeTextInternal(current, messages)
+      } catch (error: UnsupportedReasoningControlException) {
+        capabilityWriter.markReasoningUnsupported(current.id)
+        current = current.copy(reasoningControl = CapabilityState.UNSUPPORTED)
+      }
+    }
+  }
+
   private suspend fun streamWithExtractor(
     profile: ModelProfile,
     messages: List<ChatMessage>,
@@ -208,7 +269,7 @@ class OpenAiCompatibleClient(
     while (true) {
       try {
         val body = requestBody(current, messages, schema, stream = true, useSchema = schemaOn)
-        return streamRequest(current, body, schemaOn, createExtractor())
+        return parseContent(streamRawContent(current, body, schemaOn, createExtractor()))
       } catch (error: UnsupportedResponseFormatException) {
         if (!schemaOn) throw error
         capabilityWriter.markJsonSchemaUnsupported(current.id)
@@ -224,10 +285,14 @@ class OpenAiCompatibleClient(
     }
   }
 
+  /**
+   * 请求体：schema 为 null 即纯文本模式（追问对话），永不携带 response_format；
+   * reasoning_effort 与 stream 语义两条路径共用。
+   */
   private fun requestBody(
     profile: ModelProfile,
     messages: List<ChatMessage>,
-    schema: JsonSchemaSpec,
+    schema: JsonSchemaSpec?,
     stream: Boolean,
     useSchema: Boolean,
   ): JsonObject = buildJsonObject {
@@ -243,7 +308,7 @@ class OpenAiCompatibleClient(
     put("temperature", 0)
     put("stream", stream)
     if (profile.reasoningControl != CapabilityState.UNSUPPORTED) put("reasoning_effort", "none")
-    if (useSchema) {
+    if (useSchema && schema != null) {
       put("response_format", buildJsonObject {
         put("type", "json_schema")
         put("json_schema", buildJsonObject {
@@ -283,12 +348,17 @@ class OpenAiCompatibleClient(
     return text
   }
 
-  private suspend fun streamRequest(
+  /**
+   * SSE 读循环本体：SseDecoder 解帧、静默超时看门狗、逐段回调 consume，
+   * 返回累积的原始文本。JSON 路径在外面接 parseContent；文本路径直接使用返回值，
+   * 绝不能把自由文本喂进 JSON 解析。
+   */
+  private suspend fun streamRawContent(
     profile: ModelProfile,
     body: JsonObject,
     useSchema: Boolean,
     consume: (String) -> Unit,
-  ): JsonElement {
+  ): String {
     val request = httpRequest(profile, body)
     val response = try {
       withTimeout(profile.timeoutMs.toLong()) {
@@ -380,7 +450,7 @@ class OpenAiCompatibleClient(
     }
 
     if (content.isEmpty()) throw UnsupportedStreamException()
-    return parseContent(content)
+    return content
   }
 
   private suspend fun httpRequest(profile: ModelProfile, body: JsonObject): HttpRequest {
@@ -397,7 +467,12 @@ class OpenAiCompatibleClient(
       .build()
   }
 
-  private suspend fun secretsFor(profile: ModelProfile): List<String> {
+  /**
+   * 该 profile 的全部出站密钥（API key + 自定义 header 值）。调用方（analysis 层）
+   * 在把模型自由文本发往 UI 前用它做 redactSecrets 脱敏——与 Chrome 端
+   * redactProfileSecrets 同语义,密钥只在此处解析、永不跨桥。
+   */
+  suspend fun secretsFor(profile: ModelProfile): List<String> {
     val secrets = mutableListOf(credentials.get(profile.id, CredentialStore.API_KEY_FIELD).orEmpty())
     for (name in profile.headerNames) {
       credentials.get(profile.id, "header:$name")?.let(secrets::add)
@@ -459,16 +534,21 @@ private fun stripSingleJsonFence(content: String): String {
   return match?.groupValues?.get(1) ?: trimmed
 }
 
-private fun parseEnvelopeContent(text: String): JsonElement {
+private fun parseEnvelopeContent(text: String): JsonElement = parseContent(envelopeTextContent(text))
+
+/**
+ * 只取信封里的正文文本（choices[0].message.content），原样返回、不做任何 JSON 解析——
+ * 追问对话的自由文本走这里；过 parseContent 会被整块判成 INVALID_MODEL_OUTPUT。
+ */
+private fun envelopeTextContent(text: String): String {
   val envelope = try {
     json.parseToJsonElement(text).jsonObject
   } catch (_: Exception) {
     throw ExtensionFailure(ErrorCode.INVALID_MODEL_OUTPUT, "Model response envelope is not valid JSON", false)
   }
   val content = envelope["choices"]?.jsonArray?.firstOrNull()?.jsonObject?.get("message")?.jsonObject?.get("content")
-  val string = content?.jsonPrimitive?.takeIf { it.isString }?.content
+  return content?.jsonPrimitive?.takeIf { it.isString }?.content
     ?: throw ExtensionFailure(ErrorCode.INVALID_MODEL_OUTPUT, "Model response is missing choices[0].message.content", false)
-  return parseContent(string)
 }
 
 /**

@@ -61,10 +61,19 @@ class PreviewSessionManager(
   }
 
   fun disposePreview(previewId: String) {
+    // chat 命名空间的取消必须走 **manager 自己的长命 scope**：若在 session scope 里 launch，
+    // 会与紧随其后的 session job.cancel() 竞速（launch 尚未执行就被取消 → 静默 no-op），
+    // 面板关走后在飞的流式回答就会占住并发槽直到静默超时。documentId = "$previewId-doc"
+    // 是确定性派生（PreviewSession 构造处同款），先于 session job cancel 发出。
+    // core 命名空间在 dispose 路径上的既有缺口不在追问对话范围（观察项）。
+    scope.launch { analysis.cancelDocument("$previewId-doc:chat") }
     sessions.remove(previewId)?.dispose()
     sessionJobs.remove(previewId)?.cancel()
     if (activePreviewId == previewId) activePreviewId = null
   }
+
+  /** 测试可见：preview 会话的 Job（钉住 disposePreview「先取消 chat 命名空间、后取消 job」的顺序）。 */
+  internal fun sessionJobForTest(previewId: String): Job? = sessionJobs[previewId]
 
   fun disposeAll() {
     sessions.keys.toList().forEach { disposePreview(it) }

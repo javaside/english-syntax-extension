@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // bootstrap 的模块级状态（state/previewHadCards/lastVisibleFingerprint 等）在同一进程内
 // 跨用例共享，因此每个用例都重新 initialize() 来复位（previewHadCards 只在「先有卡、再清卡」
 // 的判据里用到，RESTORE_ALL 分支会把它复位，详见用例）。
-import "./bootstrap-entry";
+import { installChatPanel, sendChatAsk, setChatPanel, type ChatPanelSeam } from "./bootstrap-entry";
 
 interface Posted {
   type: string;
@@ -385,5 +385,385 @@ describe("bootstrap-entry 按段解析", () => {
 
     // 复位：hotkey 是模块级状态，跨用例共享。
     setHotkey({ code: "KeyT", altKey: true, ctrlKey: false, shiftKey: false, metaKey: false });
+  });
+});
+
+describe("bootstrap-entry 追问对话接线", () => {
+  const initialize = () =>
+    (window as unknown as Record<string, unknown>).__englishSyntaxInitialize as (
+      previewId: string,
+      generation: number,
+      autoScan?: boolean,
+    ) => void;
+  const hostMessage = () =>
+    (window as unknown as Record<string, unknown>).__englishSyntaxMessage as (
+      message: Record<string, unknown>,
+    ) => void;
+
+  /** 渲染出一张 core 成功卡（带追问图标），返回句 id 与图标元素。 */
+  function renderOneSentence(previewId: string): { sentenceId: string; icon: HTMLElement } {
+    const el = document.createElement("p");
+    el.textContent = "The service validates every response before returning anything.";
+    document.body.append(el);
+    initialize()(previewId, 0, false);
+    const blockId = el.getAttribute("data-english-syntax-block");
+    if (blockId === null) throw new Error("scan did not assign a block id");
+    hostMessage()(coreResultMessage(previewId, 0, blockId));
+    const icon = document.querySelector<HTMLElement>(".english-syntax-chat-ask");
+    if (icon === null) throw new Error("chat icon not rendered on core-success sentence");
+    return { sentenceId: `s-${blockId}-0`, icon };
+  }
+
+  afterEach(() => {
+    // chatPanel 是模块级 seam：不拆掉会让其它 describe 的 host 消息被这里的假面板吃掉。
+    setChatPanel(null);
+  });
+
+  it("图标点击 → 打开面板回调 {sentenceId, anchor}，不发任何桥消息", async () => {
+    const opens: Array<{ conversationId: string; sentenceId: string; anchor: { x: number; y: number } }> = [];
+    const panel: ChatPanelSeam = {
+      open: (request) => {
+        opens.push(request);
+      },
+      handleHostMessage: () => {},
+    };
+    setChatPanel(panel);
+    const { sentenceId, icon } = renderOneSentence("pv-chat");
+    posted.length = 0;
+
+    icon.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 150, clientY: 90 }));
+    await flush();
+
+    expect(opens).toHaveLength(1);
+    expect(opens[0]!.sentenceId).toBe(sentenceId);
+    expect(opens[0]!.anchor).toEqual({ x: 150, y: 90 });
+    // conversationId 由 bootstrap 的模块级计数器铸造（`${previewId}:chat:${n}`），open 时传入。
+    expect(opens[0]!.conversationId).toMatch(/^pv-chat:chat:\d+$/);
+    // B3：点击时没有合法 question（Kotlin parseChatAsk 会拒收），CHAT_ASK 只能由面板 submit 驱动。
+    expect(posted.filter((m) => m.type === "CHAT_ASK")).toHaveLength(0);
+    expect(posted).toHaveLength(0);
+  });
+
+  it("再点一次图标 → 计数器递增出新的 conversationId", async () => {
+    const opens: Array<{ conversationId: string }> = [];
+    setChatPanel({
+      open: (request) => {
+        opens.push({ conversationId: request.conversationId });
+      },
+      handleHostMessage: () => {},
+    });
+    const { icon } = renderOneSentence("pv-chat-again");
+
+    icon.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 1, clientY: 2 }));
+    icon.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 3, clientY: 4 }));
+    await flush();
+
+    expect(opens).toHaveLength(2);
+    expect(opens[0]!.conversationId).toMatch(/^pv-chat-again:chat:\d+$/);
+    expect(opens[1]!.conversationId).not.toBe(opens[0]!.conversationId);
+  });
+
+  it("未注册面板时点击图标是无害 no-op", async () => {
+    const { icon } = renderOneSentence("pv-nopanel");
+    posted.length = 0;
+
+    expect(() => icon.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 1, clientY: 2 }))).not.toThrow();
+    await flush();
+
+    expect(posted).toHaveLength(0);
+  });
+
+  it("面板 submit（sendChatAsk）→ 构造并发送 CHAT_ASK；空问题不发", async () => {
+    initialize()("pv-ask", 0, false);
+
+    const ok = sendChatAsk({
+      conversationId: "pv-ask:chat:1",
+      sentenceId: "s-b1-0",
+      question: "  为什么这里是系表结构？  ",
+      history: [
+        { role: "user", content: "第一问" },
+        { role: "assistant", content: "第一答" },
+      ],
+    });
+    expect(ok).toBe(true);
+
+    const ask = posted.find((m) => m.type === "CHAT_ASK");
+    expect(ask).toBeDefined();
+    // 键集必须与 Kotlin hasOnlyKeys 白名单逐字一致：多一个键整条消息就被静默丢弃。
+    expect(Object.keys(ask!).sort()).toEqual([
+      "conversationId",
+      "generation",
+      "history",
+      "previewId",
+      "question",
+      "sentenceId",
+      "type",
+      "version",
+    ]);
+    expect(ask!.version).toBe(1);
+    expect(ask!.previewId).toBe("pv-ask");
+    expect(ask!.generation).toBe(0);
+    expect(ask!.conversationId).toBe("pv-ask:chat:1");
+    expect(ask!.sentenceId).toBe("s-b1-0");
+    // question 在发送侧先 trim（与 Kotlin 门同口径）。
+    expect(ask!.question).toBe("为什么这里是系表结构？");
+    expect(ask!.history).toEqual([
+      { role: "user", content: "第一问" },
+      { role: "assistant", content: "第一答" },
+    ]);
+
+    // 空白问题：直接不发（面板 submit 的防呆回退）。
+    expect(
+      sendChatAsk({ conversationId: "pv-ask:chat:1", sentenceId: "s-b1-0", question: "   ", history: [] }),
+    ).toBe(false);
+    expect(posted.filter((m) => m.type === "CHAT_ASK")).toHaveLength(1);
+  });
+
+  it("CHAT_STREAM / CHAT_RESULT / CHAT_ERROR → 原样转发面板缝；旧 generation 到不了面板", async () => {
+    const received: string[] = [];
+    const messages: unknown[] = [];
+    setChatPanel({
+      open: () => {},
+      handleHostMessage: (message) => {
+        received.push(message.type);
+        messages.push(message);
+      },
+    });
+    initialize()("pv-host", 3, false);
+
+    hostMessage()({
+      version: 1, type: "CHAT_STREAM", previewId: "pv-host", generation: 3,
+      conversationId: "c1", text: "部分回答",
+    });
+    hostMessage()({
+      version: 1, type: "CHAT_RESULT", previewId: "pv-host", generation: 3,
+      conversationId: "c1", answer: "完整回答",
+    });
+    hostMessage()({
+      version: 1, type: "CHAT_ERROR", previewId: "pv-host", generation: 3,
+      conversationId: "c1", message: "REQUEST_CANCELLED：请求已取消",
+    });
+    await flush();
+
+    expect(received).toEqual(["CHAT_STREAM", "CHAT_RESULT", "CHAT_ERROR"]);
+    // 原样转发：与 parseHostMessage 的产物逐字段一致。REQUEST_CANCELLED 前缀渲染成中性
+    // 文案是 Task 5 面板的事，接线层不得改写。
+    expect(messages[0]).toEqual({
+      version: 1, type: "CHAT_STREAM", previewId: "pv-host", generation: 3,
+      conversationId: "c1", text: "部分回答",
+    });
+    expect(messages[1]).toEqual({
+      version: 1, type: "CHAT_RESULT", previewId: "pv-host", generation: 3,
+      conversationId: "c1", answer: "完整回答",
+    });
+    expect(messages[2]).toEqual({
+      version: 1, type: "CHAT_ERROR", previewId: "pv-host", generation: 3,
+      conversationId: "c1", message: "REQUEST_CANCELLED：请求已取消",
+    });
+
+    // 旧代次的迟到消息在 parseHostMessage 的 generation 等值门就被丢弃（第一道防线）。
+    hostMessage()({
+      version: 1, type: "CHAT_STREAM", previewId: "pv-host", generation: 2,
+      conversationId: "c1", text: "旧代次",
+    });
+    await flush();
+    expect(received).toHaveLength(3);
+  });
+});
+
+describe("bootstrap-entry 追问面板实装接线（ChatPanel）", () => {
+  const initialize = () =>
+    (window as unknown as Record<string, unknown>).__englishSyntaxInitialize as (
+      previewId: string,
+      generation: number,
+      autoScan?: boolean,
+    ) => void;
+  const hostMessage = () =>
+    (window as unknown as Record<string, unknown>).__englishSyntaxMessage as (
+      message: Record<string, unknown>,
+    ) => void;
+
+  /** 渲染出一张 core 成功卡（带追问图标），返回句 id 与图标元素（Task 4 同款夹具）。 */
+  function renderOneSentence(previewId: string): { sentenceId: string; icon: HTMLElement } {
+    const el = document.createElement("p");
+    el.textContent = "The service validates every response before returning anything.";
+    document.body.append(el);
+    initialize()(previewId, 0, false);
+    const blockId = el.getAttribute("data-english-syntax-block");
+    if (blockId === null) throw new Error("scan did not assign a block id");
+    hostMessage()(coreResultMessage(previewId, 0, blockId));
+    // 同一用例里可能已渲染过别句的卡（换代重开路径），取文档序最后一个图标。
+    const icons = document.querySelectorAll<HTMLElement>(".english-syntax-chat-ask");
+    const icon = icons[icons.length - 1];
+    if (icon === undefined) throw new Error("chat icon not rendered on core-success sentence");
+    return { sentenceId: `s-${blockId}-0`, icon };
+  }
+
+  /** 实装面板:前面的 describe 在 afterEach 里 setChatPanel(null),这里重新注册。 */
+  beforeEach(() => {
+    installChatPanel();
+  });
+
+  afterEach(() => {
+    // initialize() 的 dispose 已在换代时收走 host;这里兜底拆面板与 seam,不外溢到别的文件用例。
+    document.querySelector("[data-english-syntax-chat-panel]")?.remove();
+    setChatPanel(null);
+  });
+
+  it("图标点击 → 实装面板在锚点右下 14px 弹出,host 挂 documentElement,摘要行取锚定句原文", async () => {
+    const { icon } = renderOneSentence("pv-live");
+    icon.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 150, clientY: 90 }));
+    await flush();
+
+    const host = document.querySelector<HTMLElement>("[data-english-syntax-chat-panel]");
+    expect(host).not.toBeNull();
+    // 挂 document.documentElement:官方 updateDom 重写 body 带不走浮层。
+    expect(host!.parentElement).toBe(document.documentElement);
+    const surface = host!.querySelector<HTMLElement>(".english-syntax-chat-panel")!;
+    expect(surface.style.left).toBe("164px"); // 150 + 14
+    expect(surface.style.top).toBe("104px"); // 90 + 14
+    // 摘要 = renderer 按 token 重建的句原文（夹具 tokensJson 只有 The/service）。
+    expect(host!.querySelector(".english-syntax-chat-summary")?.textContent).toBe("The service");
+    expect(host!.querySelector(".english-syntax-chat-summary")?.getAttribute("title")).toBe(
+      "The service",
+    );
+  });
+
+  it("Enter 提交 → CHAT_ASK 携带会话 id 与空历史;CHAT_STREAM/CHAT_RESULT 全量渲染进气泡", async () => {
+    const { sentenceId, icon } = renderOneSentence("pv-round");
+    icon.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 30, clientY: 30 }));
+    await flush();
+    posted.length = 0;
+
+    const host = document.querySelector<HTMLElement>("[data-english-syntax-chat-panel]")!;
+    const input = host.querySelector<HTMLTextAreaElement>("textarea")!;
+    input.value = "  为什么这么划分?  ";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    await flush();
+
+    const ask = posted.find((m) => m.type === "CHAT_ASK");
+    expect(ask).toBeDefined();
+    expect(ask!.sentenceId).toBe(sentenceId);
+    expect(ask!.question).toBe("为什么这么划分?");
+    expect(ask!.conversationId).toMatch(/^pv-round:chat:\d+$/);
+    expect(ask!.history).toEqual([]); // 首轮无历史
+    // 面板侧:用户气泡已落、pending 气泡在建、输入禁用。
+    expect(host.querySelectorAll(".english-syntax-chat-message--user")).toHaveLength(1);
+    expect(host.querySelector(".english-syntax-chat-message--pending")).not.toBeNull();
+    expect(input.disabled).toBe(true);
+
+    const conversationId = ask!.conversationId as string;
+    hostMessage()({
+      version: 1, type: "CHAT_STREAM", previewId: "pv-round", generation: 0,
+      conversationId, text: "流式半段",
+    });
+    await flush();
+    expect(host.querySelector(".english-syntax-chat-message--assistant")!.textContent).toBe("流式半段");
+
+    hostMessage()({
+      version: 1, type: "CHAT_RESULT", previewId: "pv-round", generation: 0,
+      conversationId, answer: "完整回答",
+    });
+    await flush();
+    expect(host.querySelector(".english-syntax-chat-message--assistant")!.textContent).toBe("完整回答");
+    expect(input.disabled).toBe(false);
+  });
+
+  it("第二轮提问的 CHAT_ASK 带上不含悬空轮的面板历史", async () => {
+    const { icon } = renderOneSentence("pv-multi");
+    icon.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 30, clientY: 30 }));
+    await flush();
+
+    const host = document.querySelector<HTMLElement>("[data-english-syntax-chat-panel]")!;
+    const input = host.querySelector<HTMLTextAreaElement>("textarea")!;
+    input.value = "问一";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    await flush();
+    const first = posted.find((m) => m.type === "CHAT_ASK")!;
+    hostMessage()({
+      version: 1, type: "CHAT_RESULT", previewId: "pv-multi", generation: 0,
+      conversationId: first.conversationId, answer: "答一",
+    });
+    await flush();
+
+    input.value = "问二";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    await flush();
+
+    const asks = posted.filter((m) => m.type === "CHAT_ASK");
+    expect(asks).toHaveLength(2);
+    expect(asks[1]!.conversationId).toBe(asks[0]!.conversationId); // 同一会话内多轮
+    expect(asks[1]!.history).toEqual([
+      { role: "user", content: "问一" },
+      { role: "assistant", content: "答一" },
+    ]);
+  });
+
+  it("CHAT_ERROR 画错误气泡并撤销悬空用户轮;REQUEST_CANCELLED 前缀渲染中性提示", async () => {
+    const { icon } = renderOneSentence("pv-err");
+    icon.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 30, clientY: 30 }));
+    await flush();
+
+    const host = document.querySelector<HTMLElement>("[data-english-syntax-chat-panel]")!;
+    const input = host.querySelector<HTMLTextAreaElement>("textarea")!;
+    const ask = (question: string): string => {
+      input.value = question;
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+      return String(posted.find((m) => m.type === "CHAT_ASK")!.conversationId);
+    };
+
+    const first = ask("问一");
+    await flush();
+    hostMessage()({
+      version: 1, type: "CHAT_ERROR", previewId: "pv-err", generation: 0,
+      conversationId: first, message: "NETWORK_ERROR：模型请求失败",
+    });
+    await flush();
+    expect(host.querySelector(".english-syntax-chat-message--error")?.textContent).toBe(
+      "NETWORK_ERROR：模型请求失败",
+    );
+    expect(input.disabled).toBe(false);
+
+    const second = ask("问二");
+    expect(second).toBe(first); // 失败轮不入历史,会话 id 不变
+    await flush();
+    hostMessage()({
+      version: 1, type: "CHAT_ERROR", previewId: "pv-err", generation: 0,
+      conversationId: second, message: "REQUEST_CANCELLED：Scheduled request was cancelled",
+    });
+    await flush();
+    // 取消是中性终态:notice 气泡,且不再新增红色错误气泡。
+    expect(host.querySelector(".english-syntax-chat-message--notice")?.textContent).toBe(
+      "本轮回答已取消，可重新提问",
+    );
+    expect(host.querySelectorAll(".english-syntax-chat-message--error")).toHaveLength(1);
+  });
+
+  it("initialize() 换代重初始化收走面板(stale 会话),迟到的 CHAT_* 无害", async () => {
+    const { icon } = renderOneSentence("pv-regen");
+    icon.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 30, clientY: 30 }));
+    await flush();
+    expect(document.querySelector("[data-english-syntax-chat-panel]")).not.toBeNull();
+
+    // 官方重渲染 → Kotlin 换代 initialize(新 generation):旧会话上下文随 DOM 作废。
+    initialize()("pv-regen", 1, false);
+    await flush();
+    expect(document.querySelector("[data-english-syntax-chat-panel]")).toBeNull();
+
+    // 已作废会话的迟到消息不炸、不复活面板(conversationId 已被 dispose 清空)。
+    expect(() =>
+      hostMessage()({
+        version: 1, type: "CHAT_STREAM", previewId: "pv-regen", generation: 1,
+        conversationId: "pv-regen:chat:1", text: "迟到",
+      }),
+    ).not.toThrow();
+    await flush();
+    expect(document.querySelector("[data-english-syntax-chat-panel]")).toBeNull();
+
+    // 面板对象常驻:下一次点图标照常重开。
+    const { icon: icon2 } = renderOneSentence("pv-regen-2");
+    icon2.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 10, clientY: 10 }));
+    await flush();
+    expect(document.querySelector("[data-english-syntax-chat-panel]")).not.toBeNull();
   });
 });
