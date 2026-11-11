@@ -291,6 +291,21 @@ class BridgeProtocolTest {
   }
 
   @Test
+  fun `chat ask whitespace gates follow the explicit javascript class`() {
+    // NBSP 两端都算空白：裁掉后取净问题（U+00A0 在 JVM isWhitespace 与 JS trim 里都命中）。
+    val nbspQuestion = parse(chatAskJson(question = "\u00A0\u00A0这个短语修饰谁?\u00A0")) as PageMessage.ChatAsk
+    assertEquals("这个短语修饰谁?", nbspQuestion.question)
+
+    // U+FEFF（ZWNBSP）：JS trim 裁掉、JVM String.trim/isBlank 留下——对齐后必须照 JS 判空拒收。
+    assertNull(parse(chatAskJson(question = "\uFEFF")))
+    assertNull(parse(chatAskJson(history = """[{"role":"user","content":"\uFEFF"}]""")))
+
+    // U+001C–U+001F：JVM isWhitespace 会多剥、JS trim 不剥——对齐后按 JS 保留在文本里。
+    val kept = parse(chatAskJson(question = "问\u001F")) as PageMessage.ChatAsk
+    assertEquals("问\u001F", kept.question)
+  }
+
+  @Test
   fun `rejects chat ask carrying credentials or missing envelope fields`() {
     // forbiddenKeys：CHAT_ASK 同样照拦
     assertNull(

@@ -749,14 +749,21 @@ class AnalysisServiceTest {
   @Test
   fun `a retryable mid-stream failure restarts the text without concatenating attempts`() = runBlocking {
     // 第一次尝试：两片后停在尾部空转 → 静默超时（可重试）→ 调度器静默重跑。
-    // tailGap 必须 > 静默超时检出点(~2×timeoutMs)且 < 重试到达时刻(timeout+500ms 退避),
-    // 否则假服务器单线程 handler 会把第二次尝试挡在门外、烧掉队尾响应。
-    server.enqueueSlowSse(listOf("第一次", "尝试"), gapMillis = 20, tailGapMillis = 400)
+    // 时序余量刻意拉大（CI 抖动窗口）：默认退避(500ms+jitter≤100ms) + tailGap=400ms 时，
+    // 静默超时检出点(~timeoutMs)与尾部补发只隔 ~160ms，慢机器上看门狗一漂就错过超时、
+    // 首轮直接成功，用例间歇性翻红。注入确定性调度时序：重试固定 2s 无抖动、tailGap 1s
+    // —— 检出(<~240ms) << 尾部补发(1s) << 重试到达(~2.2s)，两侧各留 ~700ms。
+    // （重试必须晚于尾部补发：假服务器 handler 单线程，第二次尝试早到会被第一次的
+    // 尾部睡眠挡在门外、烧掉队尾响应。）
+    val deterministic = newService(
+      scheduler = RequestScheduler(concurrency = 4, retryDelayMillis = { 2_000L }, jitterMillis = { 0L }),
+    )
+    server.enqueueSlowSse(listOf("第一次", "尝试"), gapMillis = 20, tailGapMillis = 1_000)
     // 第二次尝试：完整回答。
     server.enqueueSse(listOf("第二", "次", "回答"))
     val pushed = mutableListOf<String>()
 
-    val answer = service.chat(
+    val answer = deterministic.chat(
       profile(timeoutMs = 120), "doc-1", "c1", chatInput, chatCore, emptyList(), "问",
       StreamedTextSink { pushed += it },
     )

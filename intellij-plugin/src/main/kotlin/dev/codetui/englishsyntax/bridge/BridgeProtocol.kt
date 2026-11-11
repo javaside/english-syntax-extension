@@ -184,6 +184,17 @@ object BridgeProtocol {
 
   private val forbiddenKeys = setOf("apiKey", "headers", "baseUrl")
 
+  // JS `String.prototype.trim()` 的显式字符类（与 Segmenter/AnalysisValidator 的
+  // jsWhitespaceClass 同一集合）：JVM 的 String.trim/isBlank 会多剥 U+001C–U+001F、
+  // 漏剥 U+FEFF，与 web/bridge.ts 的 .trim() 分叉——桥是两端一致的防伪造门，
+  // 「什么算空白」必须两端同答案（NBSP 两端恰好都命中，真正分叉的是 FEFF 与 001C–001F）。
+  private const val JS_WHITESPACE_CLASS =
+    "\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff"
+  private val chatTrimPattern = Regex("^[${JS_WHITESPACE_CLASS}]+|[${JS_WHITESPACE_CLASS}]+\\z")
+
+  /** 与 JS `.trim()` 同一字符集的裁剪；CHAT_ASK 门里所有 trim / 空白判断都走它。 */
+  internal fun trimJsWhitespace(text: String): String = chatTrimPattern.replace(text, "")
+
   fun parsePageMessage(value: JsonObject): PageMessage? {
     // 公共键先做类型级白名单之外的提取；每类型的具体键白名单在各自分支里校验。
     if (value.int("version") != VERSION) return null
@@ -268,13 +279,15 @@ object BridgeProtocol {
       val role = turn.string("role") ?: return null
       if (role != "user" && role != "assistant") return null
       val content = turn.string("content") ?: return null
-      if (content.isBlank()) return null
+      // 空白判断走 JS 显式字符类（trimJsWhitespace），与 web/bridge.ts 的 content.trim() 同答案。
+      if (trimJsWhitespace(content).isEmpty()) return null
       historyCharacters += content.length
       if (historyCharacters > MAX_CHAT_HISTORY_CHARACTERS) return null
       PageMessage.ChatAsk.ChatTurn(role, content)
     }
     // trim 在门里做掉（Chrome SW 同款）：下游拿到的就是规范化文本，1..2000 按 trim 后计。
-    val question = value.string("question")?.trim() ?: return null
+    // 裁剪字符集与 JS `.trim()` 逐字符一致（U+FEFF 算空白、U+001C–U+001F 不算）。
+    val question = trimJsWhitespace(value.string("question") ?: return null)
     if (question.isEmpty() || question.length > MAX_CHAT_QUESTION_CHARACTERS) return null
     return PageMessage.ChatAsk(previewId, generation, conversationId, sentenceId, turns, question)
   }
