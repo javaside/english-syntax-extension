@@ -13,6 +13,8 @@ import dev.codetui.englishsyntax.scheduler.SchedulerPriority
 import dev.codetui.englishsyntax.settings.ModelProfile
 import dev.codetui.englishsyntax.analysis.StreamedComponentSink
 import dev.codetui.englishsyntax.analysis.StreamedStructureSink
+import dev.codetui.englishsyntax.analysis.StreamedTextSink
+import dev.codetui.englishsyntax.model.ChatTurn
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -65,6 +67,17 @@ class PageMessageWiringTest {
     )
 
     override suspend fun lookupDetail(sentence: SentenceInput, focus: TokenRange): DetailAnalysis? = null
+
+    override suspend fun chat(
+      profile: ModelProfile,
+      documentId: String,
+      conversationId: String,
+      input: SentenceInput,
+      core: CoreAnalysis,
+      history: List<ChatTurn>,
+      question: String,
+      onStreamedText: StreamedTextSink?,
+    ): String = ""
 
     override suspend fun cancelDocument(documentId: String) {}
   }

@@ -19,14 +19,17 @@ import dev.codetui.englishsyntax.language.ValidationResult
 import dev.codetui.englishsyntax.language.validateCoreBatch
 import dev.codetui.englishsyntax.language.validateDetail
 import dev.codetui.englishsyntax.model.ChatMessage
+import dev.codetui.englishsyntax.model.ChatTurn
 import dev.codetui.englishsyntax.model.DETAIL_OUTPUT_SHAPE
 import dev.codetui.englishsyntax.model.JsonSchemaSpec
 import dev.codetui.englishsyntax.model.OpenAiCompatibleClient
 import dev.codetui.englishsyntax.model.StreamedComponent
+import dev.codetui.englishsyntax.model.buildChatPrompt
 import dev.codetui.englishsyntax.model.buildCorePrompt
 import dev.codetui.englishsyntax.model.buildDetailPrompt
 import dev.codetui.englishsyntax.model.buildRepairPrompt
 import dev.codetui.englishsyntax.model.isLoopbackBaseUrl
+import dev.codetui.englishsyntax.model.redactSecrets
 import dev.codetui.englishsyntax.model.serialize
 import dev.codetui.englishsyntax.model.serializeSentence
 import dev.codetui.englishsyntax.model.toJsonElement
@@ -53,6 +56,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
+import java.security.MessageDigest
 
 data class AnalysisFailure(
   val sentenceId: String,
@@ -80,6 +84,11 @@ fun interface StreamedStructureSink {
   fun accept(sentenceId: String, focus: TokenRange, structures: List<DetailStructure>)
 }
 
+/** 追问对话的流式文本：每次回调给的都是截至目前的完整回答，渲染端整体替换即可。 */
+fun interface StreamedTextSink {
+  fun onText(textSoFar: String)
+}
+
 /**
  * 会话层依赖的分析服务端口（便于测试用假实现替换具体类）。
  */
@@ -105,6 +114,21 @@ interface AnalysisServicePort {
   ): DetailOutcome
 
   suspend fun lookupDetail(sentence: SentenceInput, focus: TokenRange): DetailAnalysis?
+
+  /**
+   * 追问对话一轮：返回最终全文。无缓存、无修复轮；文本在回调与返回前都已过脱敏。
+   * 上下文（句子 + 已核实 core）由调用方取好传入，sentenceId 不进签名。
+   */
+  suspend fun chat(
+    profile: ModelProfile,
+    documentId: String,
+    conversationId: String,
+    input: SentenceInput,
+    core: CoreAnalysis,
+    history: List<ChatTurn>,
+    question: String,
+    onStreamedText: StreamedTextSink? = null,
+  ): String
 
   suspend fun cancelDocument(documentId: String)
 }
@@ -344,6 +368,49 @@ class AnalysisService(
     }
   }
 
+  /**
+   * 追问对话：不查/不写缓存、无修复轮（自由文本无 schema 可校验）；错误原样上抛。
+   * 调度走 `"${documentId}:chat"` 独立命名空间（取消绝不连坐该页在跑的 core/detail）、
+   * DETAIL_CLICK 优先级、按轮唯一 cacheKey（防同会话两问被调度器去重合并）。
+   * onStreamedText 每次回调给的都是截至目前完整回答（先脱敏）——与 CORE_STREAM 的
+   * 整段重画约定一致,调度器对可重试错误静默重跑后重试天然无害;前提是累积器
+   * 声明在调度 run 块内部,每次尝试从零累积。
+   */
+  override suspend fun chat(
+    profile: ModelProfile,
+    documentId: String,
+    conversationId: String,
+    input: SentenceInput,
+    core: CoreAnalysis,
+    history: List<ChatTurn>,
+    question: String,
+    onStreamedText: StreamedTextSink?,
+  ): String {
+    val secrets = client.secretsFor(profile)
+    val messages = listOf(ChatMessage("user", buildChatPrompt(input, core, history, question)))
+    return scheduler.schedule(
+      ScheduledRequest(
+        cacheKey = chatCacheKey(conversationId, question),
+        documentId = "$documentId:chat",
+        priority = SchedulerPriority.DETAIL_CLICK,
+        sentenceCount = 1,
+      ),
+    ) {
+      // 累积器必须声明在 run 块内部：调度器对可重试失败会静默重跑 run()，把它提升到
+      // 请求外会让两次尝试的流拼成 "AB…AB…"（Chrome analysis-service.ts 同款教训）。
+      val accumulated = StringBuilder()
+      val answer = if (onStreamedText == null) {
+        client.completeText(profile, messages)
+      } else {
+        client.completeTextStreaming(profile, messages) { delta ->
+          accumulated.append(delta)
+          onStreamedText.onText(redactSecrets(accumulated.toString(), secrets))
+        }
+      }
+      redactSecrets(answer, secrets)
+    }
+  }
+
   override suspend fun cancelDocument(documentId: String) = scheduler.cancelDocument(documentId)
 
   private suspend fun analyzeCoreChunk(
@@ -562,6 +629,17 @@ class AnalysisService(
         focus = focus,
       ),
     )
+
+    /**
+     * 追问对话的按轮 cacheKey：调度器按 `documentId\0cacheKey` 合并在飞请求，
+     * 同一会话两问在飞时共用 key 会直接拿到第一问的答案（串答案）。取问题
+     * SHA-256 的前 16 个十六进制字符，与 Chrome 端 cacheKeyOf 同款。
+     */
+    private fun chatCacheKey(conversationId: String, question: String): String {
+      val digest = MessageDigest.getInstance("SHA-256").digest(question.toByteArray(Charsets.UTF_8))
+      val hex = digest.joinToString(separator = "") { byte -> "%02x".format(byte) }
+      return "$conversationId:${hex.take(16)}"
+    }
 
     private fun invalidOutput(errors: List<ValidationError>): ExtensionFailure {
       val summary = errors.joinToString("; ") { "${it.path.ifEmpty { "output" }}: ${it.message}" }
