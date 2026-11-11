@@ -226,13 +226,53 @@ button.english-syntax-component * {
   opacity: 0.6;
 }
 
+/* 句头追问入口：聊天气泡图标按钮（Chrome 端 .chat-ask 同款），只出现在 core 成功句头部。
+   平时半透明、悬停句区（或键盘聚焦）才完全显现——无文字，可发现性由 title「追问这句」承载。
+   cursor 不在这里写：官方主题会压过 stylesheet 的 cursor，走 render.ts 的内联 !important。 */
+.english-syntax-chat-ask {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.55em;
+  height: 1.55em;
+  min-width: 20px;
+  min-height: 20px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  opacity: 0.45;
+  transition: opacity 120ms ease, background-color 120ms ease;
+}
+
+.english-syntax-sentence:hover .english-syntax-chat-ask,
+.english-syntax-chat-ask:focus-visible {
+  opacity: 1;
+}
+
+.english-syntax-chat-ask:hover:enabled {
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.english-syntax-chat-ask:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
+.english-syntax-chat-ask svg {
+  display: block;
+}
+
 .english-syntax-provisional {
   opacity: 0.75;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .english-syntax-component,
-  .english-syntax-retry {
+  .english-syntax-retry,
+  .english-syntax-chat-ask {
     transition: none;
   }
 }

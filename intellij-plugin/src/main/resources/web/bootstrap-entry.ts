@@ -5,7 +5,16 @@
  * window.EnglishSyntaxHost.post(jsonText)(JBCefJSQuery 注入)。
  * 由构建(rolldown)打包成单文件 IIFE 注入预览页。
  */
-import { BRIDGE_VERSION, parseHostMessage } from "./bridge";
+import {
+  BRIDGE_VERSION,
+  MAX_CHAT_HISTORY_TURNS,
+  MAX_CHAT_QUESTION_CHARACTERS,
+  parseHostMessage,
+  type ChatErrorHostMessage,
+  type ChatResultHostMessage,
+  type ChatStreamHostMessage,
+  type ChatTurn,
+} from "./bridge";
 import {
   deepestHovered,
   ensureBlockId,
@@ -14,7 +23,7 @@ import {
   resetScanRegistry,
   scanMarkdownBlocks,
 } from "./preview";
-import { PreviewRenderer } from "./render";
+import { CHAT_ASK_REQUEST_EVENT, PreviewRenderer } from "./render";
 import { setDarkMode } from "./roles";
 
 interface RuntimeState {
@@ -407,6 +416,14 @@ function handleHostMessage(hostJson: unknown): void {
       // 复位要赶在 MutationObserver 微任务回调之前（同步、同一 JS task 内即可满足）。
       previewHadCards = false;
       break;
+    case "CHAT_STREAM":
+    case "CHAT_RESULT":
+    case "CHAT_ERROR":
+      // 追问对话三件套：generation 已在 parseHostMessage 顶部等值过滤，这里**原样**转发
+      // 给面板缝——conversationId 路由（第二道防线）与 REQUEST_CANCELLED 之类前缀的
+      // 中性化渲染都是 Task 5 面板的职责，接线层不得改写消息。
+      chatPanel?.handleHostMessage(message);
+      return;
     default:
       break;
   }
@@ -428,6 +445,101 @@ document.addEventListener("click", (event) => {
     previewId: state.previewId,
     generation: state.generation,
     sentenceId,
+  });
+});
+
+// —— 追问对话接线缝：Task 5 的 chat-panel 经 setChatPanel 插进来（图标按钮由 render.ts
+//    派发 CHAT_ASK_REQUEST_EVENT，这里在 document 级接住；照 DETAIL_REQUEST 走构造回调
+//    的既有模式，只是面板对象晚于 bootstrap 存在，所以是可后注册的 seam）。 ——
+
+/** CHAT_* 三条 host 消息（generation 已在 parseHostMessage 过滤）；面板按 conversationId 二次把关。 */
+export type ChatHostMessage = ChatStreamHostMessage | ChatResultHostMessage | ChatErrorHostMessage;
+
+/** 图标点击的锚点：鼠标取真实坐标，键盘激活回落按钮 rect 右下（render.ts 点击处计算）。 */
+export interface ChatAnchor {
+  x: number;
+  y: number;
+}
+
+/**
+ * 打开面板的请求：conversationId 由本模块铸好（`${previewId}:chat:${n}`，n 为模块级计数器，
+ * 与面板解耦、open 时传入）。面板存下它即可路由迟到的 CHAT_* 消息（generation 过滤之后的
+ * 第二道防线）。
+ */
+export interface ChatOpenRequest {
+  conversationId: string;
+  sentenceId: string;
+  anchor: ChatAnchor;
+}
+
+/**
+ * 面板 submit 的载荷：conversationId/sentenceId 用 open 时传入的那份，history 取面板
+ * currentConversation()（不含悬空的当轮 user 提问），question 即提交文本。
+ */
+export interface ChatAskInput {
+  conversationId: string;
+  sentenceId: string;
+  question: string;
+  history: ChatTurn[];
+}
+
+/** Task 5 的追问面板要实现的最小接口（图标点击与 CHAT_* host 消息到达时被调用）。 */
+export interface ChatPanelSeam {
+  open(request: ChatOpenRequest): void;
+  handleHostMessage(message: ChatHostMessage): void;
+}
+
+let chatPanel: ChatPanelSeam | null = null;
+
+/** 注册/注销追问面板（Task 5 实例化 ChatPanel 后调用；null = 拆除）。 */
+export function setChatPanel(panel: ChatPanelSeam | null): void {
+  chatPanel = panel;
+}
+
+/** conversationId 计数器：模块级持有、单调递增，跨代次不重置（id 含 previewId 仍唯一）。 */
+let chatConversationCounter = 0;
+
+/**
+ * 面板 submit → 构造并发送 CHAT_ASK。图标点击时**绝不下发**这条消息——那时还没有合法
+ * question，Kotlin 侧 parseChatAsk（trim 后 1..2000 + 白名单键集）会直接拒收。history 只做
+ * 最浅的防呆（收敛到 {role, content} 键集 + 取最近 6 项）；按字符裁剪是面板职责，硬门在 Kotlin。
+ */
+export function sendChatAsk(input: ChatAskInput): boolean {
+  const s = state;
+  if (s === null || s.previewId === "") return false;
+  const question = input.question.trim();
+  if (question.length === 0 || question.length > MAX_CHAT_QUESTION_CHARACTERS) return false;
+  postToHost({
+    version: BRIDGE_VERSION,
+    type: "CHAT_ASK",
+    previewId: s.previewId,
+    generation: s.generation,
+    conversationId: input.conversationId,
+    sentenceId: input.sentenceId,
+    history: input.history
+      .slice(-MAX_CHAT_HISTORY_TURNS)
+      .map((turn) => ({ role: turn.role, content: turn.content })),
+    question,
+  });
+  return true;
+}
+
+// 图标点击：只开面板（锚点 + 新铸的 conversationId），不发任何桥消息。
+document.addEventListener(CHAT_ASK_REQUEST_EVENT, (event) => {
+  if (state === null || state.previewId === "") return;
+  // 事件可能被页面脚本伪造：载荷按 unknown 复核形状，锚点只收两个数字。
+  const detail: unknown = (event as CustomEvent).detail;
+  if (typeof detail !== "object" || detail === null) return;
+  const { sentenceId, anchor } = detail as { sentenceId?: unknown; anchor?: { x?: unknown; y?: unknown } };
+  if (typeof sentenceId !== "string" || sentenceId === "") return;
+  if (typeof anchor?.x !== "number" || typeof anchor?.y !== "number") return;
+  const panel = chatPanel;
+  if (panel === null) return;
+  chatConversationCounter += 1;
+  panel.open({
+    conversationId: `${state.previewId}:chat:${chatConversationCounter}`,
+    sentenceId,
+    anchor: { x: anchor.x, y: anchor.y },
   });
 });
 

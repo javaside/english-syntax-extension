@@ -371,7 +371,8 @@ describe("PreviewRenderer", () => {
     ) {
       if (this.classList.contains("english-syntax-component")) {
         const sentence = this.parentElement;
-        const index = sentence === null ? 0 : [...sentence.children].indexOf(this);
+        const index =
+          sentence === null ? 0 : [...sentence.querySelectorAll(".english-syntax-component")].indexOf(this);
         const top = index === 0 ? 40 : 60;
         return {
           top,
@@ -435,7 +436,8 @@ describe("PreviewRenderer", () => {
     ) {
       if (this.classList.contains("english-syntax-component")) {
         const sentence = this.parentElement;
-        const index = sentence === null ? 0 : [...sentence.children].indexOf(this);
+        const index =
+          sentence === null ? 0 : [...sentence.querySelectorAll(".english-syntax-component")].indexOf(this);
         const top = index === 0 ? 40 : 60; // 第一个成分独占一行,后两个在下一行
         return { top, bottom: top + 16, height: 16, left: 0, right: 0, width: 0, x: 0, y: 0, toJSON: () => ({}) } as DOMRect;
       }
@@ -651,7 +653,8 @@ describe("PreviewRenderer", () => {
     ) {
       if (this.classList.contains("english-syntax-component")) {
         const sentence = this.parentElement;
-        const index = sentence === null ? 0 : [...sentence.children].indexOf(this);
+        const index =
+          sentence === null ? 0 : [...sentence.querySelectorAll(".english-syntax-component")].indexOf(this);
         const top = index === 0 ? 40 : 60;
         return {
           top,
@@ -683,6 +686,114 @@ describe("PreviewRenderer", () => {
     } finally {
       vi.restoreAllMocks();
     }
+  });
+
+  describe("句头追问图标按钮", () => {
+    it("does not render the chat icon on failed sentences", () => {
+      const { renderer } = setup();
+      renderer.renderCoreError("s1", "b1", "INVALID_MODEL_OUTPUT", "bad json", [
+        { id: 0, text: "Classify", leadingWhitespace: "", punctuation: false },
+        { id: 1, text: "the", leadingWhitespace: " ", punctuation: false },
+        { id: 2, text: "request", leadingWhitespace: " ", punctuation: false },
+        { id: 3, text: ".", leadingWhitespace: "", punctuation: true },
+      ]);
+      expect(document.querySelector(".english-syntax-chat-ask")).toBeNull();
+    });
+
+    it("does not render the chat icon while the card is still provisional", () => {
+      // 流式暂定卡:分析未核实,追问的「已核实上下文」还不存在——入口要等 CORE_RESULT。
+      const { renderer } = setup();
+      renderer.renderCoreStream("s1", "b1", [
+        { startToken: 0, endToken: 1, role: "SUBJECT", translation: "该服务", text: "The service" },
+      ]);
+      expect(document.querySelector(".english-syntax-chat-ask")).toBeNull();
+    });
+
+    it("renders the bubble icon at the head of core-success sentences (Chrome parity)", () => {
+      const { renderer } = setup();
+      renderer.renderCoreResult(
+        "s1",
+        "b1",
+        corePayload("s1", [
+          { startToken: 0, endToken: 1, role: "SUBJECT", translation: "该服务", text: "The service" },
+        ]),
+      );
+
+      const sentence = document.querySelector(".english-syntax-sentence");
+      const ask = sentence?.querySelector<HTMLElement>(".english-syntax-chat-ask");
+      expect(ask).not.toBeNull();
+      expect(ask?.tagName).toBe("BUTTON");
+      // 句头第一个子元素(在成分按钮之前,Chrome 端 sentenceElement.append(createChatAsk) 同款)。
+      expect(sentence?.firstElementChild).toBe(ask);
+      // 无文字:可发现性由 title/aria 承载;SVG 气泡对屏幕阅读器隐藏。
+      expect(ask?.textContent).toBe("");
+      expect(ask?.getAttribute("aria-label")).toBe("追问这句");
+      expect(ask?.getAttribute("title")).toBe("追问这句");
+      const svg = ask?.querySelector("svg");
+      expect(svg).not.toBeNull();
+      expect(svg?.getAttribute("aria-hidden")).toBe("true");
+      // 官方主题会压过 stylesheet 的 cursor:内联 pointer + important(成分按钮同款坑)。
+      expect(ask?.style.getPropertyValue("cursor")).toBe("pointer");
+    });
+
+    it("dispatches a bubbling composed chat-request event; keyboard activation falls back to the button rect", () => {
+      const { renderer } = setup();
+      renderer.renderCoreResult(
+        "s1",
+        "b1",
+        corePayload("s1", [
+          { startToken: 0, endToken: 1, role: "SUBJECT", translation: "该服务", text: "The service" },
+        ]),
+      );
+      const ask = document.querySelector<HTMLElement>(".english-syntax-chat-ask")!;
+
+      const seen: Array<{ detail: unknown; composed: boolean }> = [];
+      const listener = (event: Event): void => {
+        seen.push({
+          detail: (event as CustomEvent).detail,
+          composed: event.composed,
+        });
+      };
+      document.addEventListener("english-syntax-chat-request", listener);
+      try {
+        // 鼠标点击:锚点取真实坐标。
+        ask.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 120, clientY: 64 }));
+        expect(seen).toEqual([
+          { detail: { sentenceId: "s1", anchor: { x: 120, y: 64 } }, composed: true },
+        ]);
+
+        // 键盘激活(Enter/Space)的 click 坐标是 0:回落到按钮 rect 右下角。
+        const original = HTMLElement.prototype.getBoundingClientRect;
+        vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
+          this: HTMLElement,
+        ) {
+          if (this.classList.contains("english-syntax-chat-ask")) {
+            return {
+              top: 40, bottom: 56, height: 16, left: 10, right: 26, width: 16, x: 10, y: 40,
+              toJSON: () => ({}),
+            } as DOMRect;
+          }
+          return original.call(this);
+        });
+        ask.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        expect(seen[1]!.detail).toEqual({ sentenceId: "s1", anchor: { x: 26, y: 56 } });
+      } finally {
+        document.removeEventListener("english-syntax-chat-request", listener);
+        vi.restoreAllMocks();
+      }
+    });
+
+    it("the injected stylesheet ships the chat icon's Chrome-parity visuals (circle, semi-transparent, hover-revealed)", () => {
+      // happy-dom 不加载注入样式表,只能按文本钉住(隐藏属性那条 CSS 测试同款)。
+      // 少了这组规则的症状:图标带浏览器默认按钮边框/背景,且不会「悬停句区才显现」。
+      const css = readFileSync(join(process.cwd(), "src/main/resources/web/preview.css"), "utf8");
+      expect(css).toMatch(/\.english-syntax-chat-ask\s*\{/);
+      // 20px 圆形最小尺寸 + 默认半透明。
+      expect(css).toMatch(/\.english-syntax-chat-ask[^{]*\{[^}]*min-width:\s*20px[^}]*opacity:\s*0\.45/s);
+      // 悬停句区(或键盘聚焦)才完全显现。
+      expect(css).toMatch(/\.english-syntax-sentence:hover \.english-syntax-chat-ask/);
+      expect(css).toMatch(/\.english-syntax-chat-ask:focus-visible/);
+    });
   });
 
   it("renders sentences in source order even when streamed messages arrive out of order", () => {

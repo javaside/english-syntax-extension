@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // bootstrap 的模块级状态（state/previewHadCards/lastVisibleFingerprint 等）在同一进程内
 // 跨用例共享，因此每个用例都重新 initialize() 来复位（previewHadCards 只在「先有卡、再清卡」
 // 的判据里用到，RESTORE_ALL 分支会把它复位，详见用例）。
-import "./bootstrap-entry";
+import { sendChatAsk, setChatPanel, type ChatPanelSeam } from "./bootstrap-entry";
 
 interface Posted {
   type: string;
@@ -385,5 +385,188 @@ describe("bootstrap-entry 按段解析", () => {
 
     // 复位：hotkey 是模块级状态，跨用例共享。
     setHotkey({ code: "KeyT", altKey: true, ctrlKey: false, shiftKey: false, metaKey: false });
+  });
+});
+
+describe("bootstrap-entry 追问对话接线", () => {
+  const initialize = () =>
+    (window as unknown as Record<string, unknown>).__englishSyntaxInitialize as (
+      previewId: string,
+      generation: number,
+      autoScan?: boolean,
+    ) => void;
+  const hostMessage = () =>
+    (window as unknown as Record<string, unknown>).__englishSyntaxMessage as (
+      message: Record<string, unknown>,
+    ) => void;
+
+  /** 渲染出一张 core 成功卡（带追问图标），返回句 id 与图标元素。 */
+  function renderOneSentence(previewId: string): { sentenceId: string; icon: HTMLElement } {
+    const el = document.createElement("p");
+    el.textContent = "The service validates every response before returning anything.";
+    document.body.append(el);
+    initialize()(previewId, 0, false);
+    const blockId = el.getAttribute("data-english-syntax-block");
+    if (blockId === null) throw new Error("scan did not assign a block id");
+    hostMessage()(coreResultMessage(previewId, 0, blockId));
+    const icon = document.querySelector<HTMLElement>(".english-syntax-chat-ask");
+    if (icon === null) throw new Error("chat icon not rendered on core-success sentence");
+    return { sentenceId: `s-${blockId}-0`, icon };
+  }
+
+  afterEach(() => {
+    // chatPanel 是模块级 seam：不拆掉会让其它 describe 的 host 消息被这里的假面板吃掉。
+    setChatPanel(null);
+  });
+
+  it("图标点击 → 打开面板回调 {sentenceId, anchor}，不发任何桥消息", async () => {
+    const opens: Array<{ conversationId: string; sentenceId: string; anchor: { x: number; y: number } }> = [];
+    const panel: ChatPanelSeam = {
+      open: (request) => {
+        opens.push(request);
+      },
+      handleHostMessage: () => {},
+    };
+    setChatPanel(panel);
+    const { sentenceId, icon } = renderOneSentence("pv-chat");
+    posted.length = 0;
+
+    icon.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 150, clientY: 90 }));
+    await flush();
+
+    expect(opens).toHaveLength(1);
+    expect(opens[0]!.sentenceId).toBe(sentenceId);
+    expect(opens[0]!.anchor).toEqual({ x: 150, y: 90 });
+    // conversationId 由 bootstrap 的模块级计数器铸造（`${previewId}:chat:${n}`），open 时传入。
+    expect(opens[0]!.conversationId).toMatch(/^pv-chat:chat:\d+$/);
+    // B3：点击时没有合法 question（Kotlin parseChatAsk 会拒收），CHAT_ASK 只能由面板 submit 驱动。
+    expect(posted.filter((m) => m.type === "CHAT_ASK")).toHaveLength(0);
+    expect(posted).toHaveLength(0);
+  });
+
+  it("再点一次图标 → 计数器递增出新的 conversationId", async () => {
+    const opens: Array<{ conversationId: string }> = [];
+    setChatPanel({
+      open: (request) => {
+        opens.push({ conversationId: request.conversationId });
+      },
+      handleHostMessage: () => {},
+    });
+    const { icon } = renderOneSentence("pv-chat-again");
+
+    icon.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 1, clientY: 2 }));
+    icon.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 3, clientY: 4 }));
+    await flush();
+
+    expect(opens).toHaveLength(2);
+    expect(opens[0]!.conversationId).toMatch(/^pv-chat-again:chat:\d+$/);
+    expect(opens[1]!.conversationId).not.toBe(opens[0]!.conversationId);
+  });
+
+  it("未注册面板时点击图标是无害 no-op", async () => {
+    const { icon } = renderOneSentence("pv-nopanel");
+    posted.length = 0;
+
+    expect(() => icon.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 1, clientY: 2 }))).not.toThrow();
+    await flush();
+
+    expect(posted).toHaveLength(0);
+  });
+
+  it("面板 submit（sendChatAsk）→ 构造并发送 CHAT_ASK；空问题不发", async () => {
+    initialize()("pv-ask", 0, false);
+
+    const ok = sendChatAsk({
+      conversationId: "pv-ask:chat:1",
+      sentenceId: "s-b1-0",
+      question: "  为什么这里是系表结构？  ",
+      history: [
+        { role: "user", content: "第一问" },
+        { role: "assistant", content: "第一答" },
+      ],
+    });
+    expect(ok).toBe(true);
+
+    const ask = posted.find((m) => m.type === "CHAT_ASK");
+    expect(ask).toBeDefined();
+    // 键集必须与 Kotlin hasOnlyKeys 白名单逐字一致：多一个键整条消息就被静默丢弃。
+    expect(Object.keys(ask!).sort()).toEqual([
+      "conversationId",
+      "generation",
+      "history",
+      "previewId",
+      "question",
+      "sentenceId",
+      "type",
+      "version",
+    ]);
+    expect(ask!.version).toBe(1);
+    expect(ask!.previewId).toBe("pv-ask");
+    expect(ask!.generation).toBe(0);
+    expect(ask!.conversationId).toBe("pv-ask:chat:1");
+    expect(ask!.sentenceId).toBe("s-b1-0");
+    // question 在发送侧先 trim（与 Kotlin 门同口径）。
+    expect(ask!.question).toBe("为什么这里是系表结构？");
+    expect(ask!.history).toEqual([
+      { role: "user", content: "第一问" },
+      { role: "assistant", content: "第一答" },
+    ]);
+
+    // 空白问题：直接不发（面板 submit 的防呆回退）。
+    expect(
+      sendChatAsk({ conversationId: "pv-ask:chat:1", sentenceId: "s-b1-0", question: "   ", history: [] }),
+    ).toBe(false);
+    expect(posted.filter((m) => m.type === "CHAT_ASK")).toHaveLength(1);
+  });
+
+  it("CHAT_STREAM / CHAT_RESULT / CHAT_ERROR → 原样转发面板缝；旧 generation 到不了面板", async () => {
+    const received: string[] = [];
+    const messages: unknown[] = [];
+    setChatPanel({
+      open: () => {},
+      handleHostMessage: (message) => {
+        received.push(message.type);
+        messages.push(message);
+      },
+    });
+    initialize()("pv-host", 3, false);
+
+    hostMessage()({
+      version: 1, type: "CHAT_STREAM", previewId: "pv-host", generation: 3,
+      conversationId: "c1", text: "部分回答",
+    });
+    hostMessage()({
+      version: 1, type: "CHAT_RESULT", previewId: "pv-host", generation: 3,
+      conversationId: "c1", answer: "完整回答",
+    });
+    hostMessage()({
+      version: 1, type: "CHAT_ERROR", previewId: "pv-host", generation: 3,
+      conversationId: "c1", message: "REQUEST_CANCELLED：请求已取消",
+    });
+    await flush();
+
+    expect(received).toEqual(["CHAT_STREAM", "CHAT_RESULT", "CHAT_ERROR"]);
+    // 原样转发：与 parseHostMessage 的产物逐字段一致。REQUEST_CANCELLED 前缀渲染成中性
+    // 文案是 Task 5 面板的事，接线层不得改写。
+    expect(messages[0]).toEqual({
+      version: 1, type: "CHAT_STREAM", previewId: "pv-host", generation: 3,
+      conversationId: "c1", text: "部分回答",
+    });
+    expect(messages[1]).toEqual({
+      version: 1, type: "CHAT_RESULT", previewId: "pv-host", generation: 3,
+      conversationId: "c1", answer: "完整回答",
+    });
+    expect(messages[2]).toEqual({
+      version: 1, type: "CHAT_ERROR", previewId: "pv-host", generation: 3,
+      conversationId: "c1", message: "REQUEST_CANCELLED：请求已取消",
+    });
+
+    // 旧代次的迟到消息在 parseHostMessage 的 generation 等值门就被丢弃（第一道防线）。
+    hostMessage()({
+      version: 1, type: "CHAT_STREAM", previewId: "pv-host", generation: 2,
+      conversationId: "c1", text: "旧代次",
+    });
+    await flush();
+    expect(received).toHaveLength(3);
   });
 });
