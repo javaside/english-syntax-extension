@@ -857,7 +857,12 @@ export class PreviewRenderer {
     return row;
   }
 
-  /** F2 提交：trim 后非空才发（Kotlin parse 门同口径），行整体进入禁用等待。 */
+  /**
+   * F2 提交：trim 后 1..MAX_FEEDBACK_CHARACTERS 才发（Kotlin parse 门同口径），行整体
+   * 进入禁用等待。上限守卫必须在进 waiting **前**拒绝——textarea maxlength 只是 UI
+   * 缓冲（直接改 value 可绕过），若只靠 bootstrap 回调的静默 return 兜底，行已全禁用
+   * 且永无 FEEDBACK_ERROR 回来，等于自己把自己锁死。
+   */
   #submitCorrection(): void {
     const correction = this.#correction;
     if (correction === null || correction.status === "waiting") return;
@@ -866,6 +871,7 @@ export class PreviewRenderer {
     if (input === null) return;
     const feedback = input.value.trim();
     if (feedback.length === 0) return;
+    if (feedback.length > MAX_FEEDBACK_CHARACTERS) return;
     correction.status = "waiting";
     const submit = row.querySelector<HTMLButtonElement>(".english-syntax-feedback-submit");
     const cancel = row.querySelector<HTMLButtonElement>(".english-syntax-feedback-cancel");

@@ -3,6 +3,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { MAX_FEEDBACK_CHARACTERS } from "./bridge";
 import { CORRECTION_OPEN_EVENT, PreviewRenderer } from "./render";
 import { setDarkMode, isDarkMode } from "./roles";
 
@@ -976,6 +977,29 @@ describe("PreviewRenderer", () => {
       expect(submit.disabled).toBe(true);
       expect(cancel.disabled).toBe(true);
       expect(submit.textContent).toBe("提交中…");
+    });
+
+    it("over-limit feedback (maxlength bypassed via direct value) stays editable and sends nothing", () => {
+      // 防御路径：maxlength 只是 UI 缓冲，直接改 textarea.value 可绕过。上限守卫必须在
+      // #submitCorrection 进 waiting 前拒绝——若只靠 bootstrap 回调的静默 return 兜底，
+      // 行已全禁用且永无 FEEDBACK_ERROR 回来，等于自己把自己锁死。
+      const { renderer, feedbackRequests } = setupFeedback();
+      hadCoreFailure(renderer);
+      const { textarea, submit, cancel } = openRow(renderer);
+
+      textarea.value = "x".repeat(MAX_FEEDBACK_CHARACTERS + 1);
+      submit.click();
+      expect(feedbackRequests).toHaveLength(0);
+      // 仍可编辑：未进入等待态，草稿保留。
+      expect(textarea.disabled).toBe(false);
+      expect(submit.disabled).toBe(false);
+      expect(cancel.disabled).toBe(false);
+      expect(submit.textContent).toBe("提交");
+
+      // 收回上限内后照常提交（守卫不吞合法输入）。
+      textarea.value = "x".repeat(MAX_FEEDBACK_CHARACTERS);
+      submit.click();
+      expect(feedbackRequests).toEqual([["s1", "x".repeat(MAX_FEEDBACK_CHARACTERS)]]);
     });
 
     it("Enter submits and Shift+Enter keeps the newline (chat composer parity)", () => {
