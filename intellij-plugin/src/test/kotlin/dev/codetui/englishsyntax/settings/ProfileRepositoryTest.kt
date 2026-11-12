@@ -37,6 +37,14 @@ class ProfileRepositoryTest {
     state: ProfileState = ProfileState(),
   ) = ProfileRepository(state, credentials)
 
+  /** F6：applyForm 会把暂停指纹解除派发到后台；单测无平台应用，注入立即执行 + 空操作。 */
+  private val immediateBackground = EnglishSyntaxConfigurable.BackgroundDispatcher { task -> task() }
+
+  private val noopPauseControl = object : EnglishSyntaxConfigurable.PauseControl {
+    override suspend fun releaseIfFingerprintChanged(profileId: String) = false
+    override fun release(profileId: String) {}
+  }
+
   private fun profile(
     baseUrl: String = "https://api.example.com/v1/",
     headers: Map<String, String> = emptyMap(),
@@ -200,7 +208,8 @@ class ProfileRepositoryTest {
     repository.save(profile(), apiKey = "old-key")
     val configurable = EnglishSyntaxConfigurable(repository, ProfileState(), EnglishSyntaxConfigurable.ConnectionProbe { _ ->
         EnglishSyntaxConfigurable.ConnectionProbeResult(true, "stub")
-      }, profileRefresh = EnglishSyntaxConfigurable.ProfileRefresh { })
+      }, profileRefresh = EnglishSyntaxConfigurable.ProfileRefresh { },
+      background = immediateBackground, pauseControl = noopPauseControl)
 
     configurable.resetForm()
     assertFalse(configurable.isFormModified())
@@ -268,12 +277,14 @@ class ProfileRepositoryTest {
       EnglishSyntaxConfigurable.ConnectionProbeResult(false, "timeout")
     }
 
-    val ok = EnglishSyntaxConfigurable(repository, ProfileState(), successProbe, profileRefresh = EnglishSyntaxConfigurable.ProfileRefresh { })
+    val ok = EnglishSyntaxConfigurable(repository, ProfileState(), successProbe, profileRefresh = EnglishSyntaxConfigurable.ProfileRefresh { },
+      background = immediateBackground, pauseControl = noopPauseControl)
     ok.resetForm()
     assertTrue(ok.runConnectionAction())
     assertTrue(ok.actionStatus.contains("OK"))
 
-    val bad = EnglishSyntaxConfigurable(repository, ProfileState(), failureProbe, profileRefresh = EnglishSyntaxConfigurable.ProfileRefresh { })
+    val bad = EnglishSyntaxConfigurable(repository, ProfileState(), failureProbe, profileRefresh = EnglishSyntaxConfigurable.ProfileRefresh { },
+      background = immediateBackground, pauseControl = noopPauseControl)
     bad.resetForm()
     assertFalse(bad.runConnectionAction())
     assertTrue(bad.actionStatus.contains("failed"))
@@ -374,7 +385,8 @@ class ProfileRepositoryTest {
     repository.save(profile().copy(id = "profile-2", name = "Second"))
     val configurable = EnglishSyntaxConfigurable(repository, ProfileState(), EnglishSyntaxConfigurable.ConnectionProbe { _ ->
         EnglishSyntaxConfigurable.ConnectionProbeResult(true, "stub")
-      }, profileRefresh = EnglishSyntaxConfigurable.ProfileRefresh { })
+      }, profileRefresh = EnglishSyntaxConfigurable.ProfileRefresh { },
+      background = immediateBackground, pauseControl = noopPauseControl)
 
     configurable.selectProfile("profile-2")
     configurable.form.name = "Updated second"

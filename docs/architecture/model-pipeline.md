@@ -288,6 +288,8 @@ raw → validateCoreBatch（解析前预丢弃纯标点成分）
 - 暂停期间:`ANALYZE_CORE` 仍返回缓存命中 + 批级 `AUTH_FAILED`;`ANALYZE_DETAIL` 先查缓存,未命中才报错;预载与纠正直接报错;chat 直接 `AUTH_FAILED`。
 - 「测试连接」**不受暂停门拦截**(这是用户显式自检),成功即解除——修好服务端后无需重载扩展。
 
+**IntelliJ 对应物**(`intellij-plugin` 的 `session/ProfilePauseRegistry.kt`,实例是 `PreviewSessionManagerService` 里的应用级单例):指纹组成同款,但 apiKey/自定义头在 PasswordSafe,经 `ProfileRepository` suspend 组装。暂停门在 `PreviewSession` 会话层(Chrome 在 SW 路由层——IntelliJ 的 `AnalysisService` 无 dispatch 概念):dispatch/用户重试前置查表,命中即回落 `lookupCore` 纯缓存(未命中句 AUTH_FAILED 失败,暂停优先于绕缓存);detail 先查缓存未命中报 AUTH_FAILED;chat/feedback 直接 `CHAT_ERROR`/`FEEDBACK_ERROR`(无缓存兜底语义)。core 的 outcome failures 与五条路径抛出的 `AUTH_FAILED` 都上报暂停表。解除路径三条:设置页保存后指纹比较(**经 BackgroundDispatcher 后台执行**,不占 EDT;`activateForm` 的 setActive 也先经 saveForm 覆盖)、测试连接成功无条件解除、profile 删除清理死 key。
+
 ## 11. 脱敏
 
 `redactProfileSecrets(text, profile)` 把 `apiKey` 与所有自定义头的值在文本里替换成 `[redacted]`。覆盖:

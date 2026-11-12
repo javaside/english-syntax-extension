@@ -31,6 +31,12 @@ enum class SessionState { STOPPED, RUNNING, PAUSED }
 
 private val LOGGER = com.intellij.openapi.diagnostic.Logger.getInstance(PreviewSession::class.java)
 
+/**
+ * F6 暂停分支的 AUTH_FAILED 文案（与 Chrome ERROR_MESSAGES[AUTH_FAILED] 逐字一致）。
+ * CORE_ERROR 的 code 字段才是 web 侧友好文案的判据，这里主要进日志与 CHAT/FEEDBACK_ERROR。
+ */
+private const val AUTH_FAILED_MESSAGE = "模型档案鉴权失败，更新凭据后才会恢复"
+
 enum class SentencePhase { DISCOVERED, CACHE_CHECK, QUEUED, REQUESTING, VALIDATING, READY, FAILED, STALE }
 
 /** Kotlin → JS 发送端口（Panel 或假实现）。 */
@@ -60,6 +66,8 @@ class PreviewSession(
   private val sender: HostSender,
   private val blockRequester: BlockRequester,
   private val now: () -> Long = System::currentTimeMillis,
+  /** F6 AUTH_FAILED 暂停表；默认「永不暂停」的空表（未接线时门直通，测试用）。 */
+  private val pauseRegistry: ProfilePauseRegistry = ProfilePauseRegistry { null },
 ) {
   var state: SessionState = SessionState.STOPPED
     private set
@@ -321,6 +329,12 @@ class PreviewSession(
   private suspend fun dispatchRetry(input: SentenceInput) {
     if (state != SessionState.RUNNING && state != SessionState.PAUSED) return
     val profile = currentProfile ?: return
+    // F6 暂停门与普通 dispatch 同款：重试是绕缓存手势，但暂停优先——命中缓存照回，
+    // 未命中句 AUTH_FAILED，绝不重发模型请求。
+    pausedCoreOutcome(profile, listOf(input))?.let {
+      applyOutcome(it)
+      return
+    }
     val capturedVersion = operationVersion
     val outcome: CoreBatchOutcome = analysis.analyzeCore(
       profile = profile,
@@ -383,6 +397,14 @@ class PreviewSession(
     }
 
     inputs.forEach { sentences[it.sentenceId]?.phase = SentencePhase.QUEUED }
+    // F6 暂停门（Chrome 路由层 isProfilePaused 的会话层等价物——AnalysisService 无
+    // dispatch 概念）：命中暂停表就不再发模型请求。暂停优先于绕缓存（重试/重析也要
+    // 模型，暂停说明模型用不了）；bypassCache 语义到此为止。
+    pausedCoreOutcome(profile, inputs)?.let {
+      LOGGER.info("dispatch: profile=${profile.id} paused, serving ${inputs.size} sentences from cache")
+      applyOutcome(it)
+      return
+    }
     LOGGER.info("dispatch: ${inputs.size} sentences, profile=${profile.id}, priority=${priorityFor(active = true, offscreen = offscreen)}")
     // 流式接线：分片一到就回推 CORE_STREAM，JS 侧立即渲染成分（Chrome 端同款）。
     // 曾漏传 onStreamedComponent → 全程走非流式 completeJson，等整批返回才渲染——
@@ -414,6 +436,14 @@ class PreviewSession(
     } catch (error: Throwable) {
       if (error is kotlinx.coroutines.CancellationException) throw error
       if (capturedVersion != operationVersion) return
+      // F6 记账：抛出的 AUTH_FAILED 同样挂起 profile（Chrome catch 分支同款）——
+      // AnalysisService 正常把 AUTH_FAILED 折进 failures，这里是防御位。
+      recordAuthFailureIfAny(profile, error)
+      if (error is ExtensionFailure && error.code == ErrorCode.AUTH_FAILED) {
+        // Chrome 同款 cacheWithAuthError：不整批报错，缓存命中照回 + 未命中句 AUTH_FAILED。
+        applyOutcome(cacheFallbackOutcome(inputs))
+        return
+      }
       LOGGER.warn("dispatch: analyzeCore threw, marking batch as failed: ${error.message}")
       val failure = AnalysisFailure(
         inputs.first().sentenceId,
@@ -429,6 +459,11 @@ class PreviewSession(
       return
     }
     if (capturedVersion != operationVersion) return
+    // F6 记账：首批请求结果 AUTH_FAILED → 上报暂停表，后续批次走上面的暂停门，
+    // 不再对死凭据白发请求（Chrome outcome.failures 检查同款）。
+    if (outcome.failures.any { it.error.code == ErrorCode.AUTH_FAILED }) {
+      pauseRegistry.recordAuthFailed(profile.id)
+    }
     LOGGER.info("dispatch: outcome ready=${outcome.result.size} failed=${outcome.failures.size} cacheHit=${outcome.cacheHit}")
     applyOutcome(outcome)
   }
@@ -479,34 +514,94 @@ class PreviewSession(
     })
   }
 
+  /**
+   * F6 暂停门的 core 等价物（Chrome `cacheWithAuthError`）：profile 被挂起时整批回落
+   * `lookupCore` 纯缓存——命中句照常产出 CORE_RESULT（缓存键与模型无关，换/修模型前
+   * 译文不消失），未命中句标 AUTH_FAILED 失败（渲染层按 code 出鉴权友好文案）。
+   * 未暂停返回 null（门直通）。
+   */
+  private suspend fun pausedCoreOutcome(profile: ModelProfile, inputs: List<SentenceInput>): CoreBatchOutcome? {
+    if (!pauseRegistry.isPaused(profile.id)) return null
+    return cacheFallbackOutcome(inputs)
+  }
+
+  private suspend fun cacheFallbackOutcome(inputs: List<SentenceInput>): CoreBatchOutcome {
+    val cached = analysis.lookupCore(inputs)
+    val cachedIds = cached.map { it.sentenceId }.toSet()
+    val failures = inputs.filter { it.sentenceId !in cachedIds }.map { input ->
+      AnalysisFailure(input.sentenceId, ExtensionFailure(ErrorCode.AUTH_FAILED, AUTH_FAILED_MESSAGE, false))
+    }
+    return CoreBatchOutcome(cached, failures, cacheHit = cached.isNotEmpty())
+  }
+
+  /** F6 记账：抛出的失败是 AUTH_FAILED 时把 profile 记入暂停表（Chrome 各 handler 同款）。 */
+  private suspend fun recordAuthFailureIfAny(profile: ModelProfile, error: Throwable) {
+    val failure = error as? ExtensionFailure ?: return
+    if (failure.code == ErrorCode.AUTH_FAILED) pauseRegistry.recordAuthFailed(profile.id)
+  }
+
   /** 详解点击：detail 优先级由 AnalysisService 内部固定。 */
   suspend fun onDetailRequest(sentenceId: String, focusStart: Int, focusEnd: Int) {
     val record = sentences[sentenceId] ?: return
     if (state == SessionState.STOPPED) return
     val profile = currentProfile ?: return
     val core = record.core ?: return
+    // F6 暂停门（Chrome paused-detail 同款）：暂停期间详解也先查缓存——命中照回
+    // DETAIL_RESULT（缓存键与模型无关），未命中才报 AUTH_FAILED；不发模型请求。
+    if (pauseRegistry.isPaused(profile.id)) {
+      val cached = analysis.lookupDetail(record.input, TokenRange(focusStart, focusEnd))
+      if (cached != null) {
+        sender.send(buildJsonObject {
+          put("version", 1)
+          put("type", "DETAIL_RESULT")
+          put("previewId", previewId)
+          put("generation", generation)
+          put("sentenceId", sentenceId)
+          put("analysisJson", detailJson(cached))
+        })
+      } else {
+        sender.send(buildJsonObject {
+          put("version", 1)
+          put("type", "CORE_ERROR")
+          put("previewId", previewId)
+          put("generation", generation)
+          put("sentenceId", sentenceId)
+          put("blockId", record.blockId)
+          put("code", ErrorCode.AUTH_FAILED.name)
+          put("message", AUTH_FAILED_MESSAGE)
+          put("tokensJson", tokensJson(sentenceId))
+        })
+      }
+      return
+    }
     val capturedVersion = operationVersion
-    val detail = analysis.analyzeDetail(
-      profile = profile,
-      documentId = documentId,
-      sentence = record.input,
-      core = core,
-      focus = TokenRange(focusStart, focusEnd),
-      onStreamedStructure = StreamedStructureSink { sentenceId, focus, structures ->
-        if (state == SessionState.RUNNING && capturedVersion == operationVersion) {
-          sender.send(buildJsonObject {
-            put("version", 1)
-            put("type", "DETAIL_STREAM")
-            put("previewId", previewId)
-            put("generation", generation)
-            put("sentenceId", sentenceId)
-            put("focusStart", focus.startToken)
-            put("focusEnd", focus.endToken)
-            put("structuresJson", structuresJson(sentenceId, structures))
-          })
-        }
-      },
-    )
+    // F6 记账：detail 抛 AUTH_FAILED 时挂起 profile（Chrome ANALYZE_DETAIL catch 同款）。
+    val detail = try {
+      analysis.analyzeDetail(
+        profile = profile,
+        documentId = documentId,
+        sentence = record.input,
+        core = core,
+        focus = TokenRange(focusStart, focusEnd),
+        onStreamedStructure = StreamedStructureSink { sentenceId, focus, structures ->
+          if (state == SessionState.RUNNING && capturedVersion == operationVersion) {
+            sender.send(buildJsonObject {
+              put("version", 1)
+              put("type", "DETAIL_STREAM")
+              put("previewId", previewId)
+              put("generation", generation)
+              put("sentenceId", sentenceId)
+              put("focusStart", focus.startToken)
+              put("focusEnd", focus.endToken)
+              put("structuresJson", structuresJson(sentenceId, structures))
+            })
+          }
+        },
+      )
+    } catch (error: Throwable) {
+      recordAuthFailureIfAny(profile, error)
+      throw error
+    }
     sender.send(buildJsonObject {
       put("version", 1)
       put("type", "DETAIL_RESULT")
@@ -530,7 +625,9 @@ class PreviewSession(
             put("generation", generation)
             put("sentenceId", sentenceId)
             put("blockId", sentences[sentenceId]?.blockId ?: "")
-            put("code", "DETAIL_FAILED")
+            // ExtensionFailure 带真实错误码（AUTH_FAILED 等，渲染层按码出文案）；
+            // 其它异常才落到笼统 DETAIL_FAILED。
+            put("code", (error as? ExtensionFailure)?.code?.name ?: "DETAIL_FAILED")
             put("message", error.message ?: "detail request failed")
             put("tokensJson", tokensJson(sentenceId))
           })
@@ -575,31 +672,42 @@ class PreviewSession(
       sendChatError(conversationId, "尚未配置可用的模型档案，请先在设置中配置")
       return
     }
+    // F6 暂停门（Chrome CHAT_ASK 同款）：chat 没有缓存兜底语义，直接 CHAT_ERROR 明示。
+    if (pauseRegistry.isPaused(profile.id)) {
+      sendChatError(conversationId, AUTH_FAILED_MESSAGE)
+      return
+    }
     val capturedVersion = operationVersion
-    val answer = analysis.chat(
-      profile = profile,
-      documentId = documentId,
-      conversationId = conversationId,
-      input = record.input,
-      core = core,
-      history = history,
-      question = question,
-      onStreamedText = StreamedTextSink { textSoFar ->
-        // text 是「截至目前的完整回答」（全量替换渲染，重试安全）。generation 读 send 时点，
-        // 与 CORE_STREAM 同款；stop/换代升 operationVersion 压住旧会话分片，JS 侧 generation
-        // 过滤 + conversationId 把关是第二、三道防线。
-        if (capturedVersion == operationVersion) {
-          sender.send(buildJsonObject {
-            put("version", 1)
-            put("type", "CHAT_STREAM")
-            put("previewId", previewId)
-            put("generation", generation)
-            put("conversationId", conversationId)
-            put("text", textSoFar)
-          })
-        }
-      },
-    )
+    // F6 记账：chat 抛 AUTH_FAILED 时挂起 profile（Chrome CHAT_ASK catch 同款）。
+    val answer = try {
+      analysis.chat(
+        profile = profile,
+        documentId = documentId,
+        conversationId = conversationId,
+        input = record.input,
+        core = core,
+        history = history,
+        question = question,
+        onStreamedText = StreamedTextSink { textSoFar ->
+          // text 是「截至目前的完整回答」（全量替换渲染，重试安全）。generation 读 send 时点，
+          // 与 CORE_STREAM 同款；stop/换代升 operationVersion 压住旧会话分片，JS 侧 generation
+          // 过滤 + conversationId 把关是第二、三道防线。
+          if (capturedVersion == operationVersion) {
+            sender.send(buildJsonObject {
+              put("version", 1)
+              put("type", "CHAT_STREAM")
+              put("previewId", previewId)
+              put("generation", generation)
+              put("conversationId", conversationId)
+              put("text", textSoFar)
+            })
+          }
+        },
+      )
+    } catch (error: Throwable) {
+      recordAuthFailureIfAny(profile, error)
+      throw error
+    }
     sender.send(buildJsonObject {
       put("version", 1)
       put("type", "CHAT_RESULT")
@@ -667,14 +775,26 @@ class PreviewSession(
       sendFeedbackError(sentenceId, "尚未配置可用的模型档案，请先在设置中配置")
       return
     }
+    // F6 暂停门（Chrome REANALYZE_WITH_FEEDBACK 同款）：暂停的死 key 不得继续收纠正
+    // 请求——直接 FEEDBACK_ERROR，卡片保持已核实划分不动。
+    if (pauseRegistry.isPaused(profile.id)) {
+      sendFeedbackError(sentenceId, AUTH_FAILED_MESSAGE)
+      return
+    }
     val capturedVersion = operationVersion
-    val corrected = analysis.analyzeWithFeedback(
-      profile = profile,
-      documentId = documentId,
-      input = record.input,
-      core = core,
-      feedback = feedback,
-    )
+    // F6 记账：纠正抛 AUTH_FAILED 时挂起 profile（Chrome REANALYZE_WITH_FEEDBACK catch 同款）。
+    val corrected = try {
+      analysis.analyzeWithFeedback(
+        profile = profile,
+        documentId = documentId,
+        input = record.input,
+        core = core,
+        feedback = feedback,
+      )
+    } catch (error: Throwable) {
+      recordAuthFailureIfAny(profile, error)
+      throw error
+    }
     if (capturedVersion != operationVersion) return
     // 成功经 applyOutcome 落账：record.core 更新 + READY 相位 + CORE_RESULT（blockId=句所在块）
     // + SESSION_STATE。手发消息不更新记录会让后续 detail/chat 对着过期成分讲。

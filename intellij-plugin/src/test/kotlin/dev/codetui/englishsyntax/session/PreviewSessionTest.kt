@@ -32,6 +32,7 @@ import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertSame
@@ -56,6 +57,13 @@ class PreviewSessionTest {
     var lastDetailCore: CoreAnalysis? = null
     /** 测试注入：analyzeCore 直接抛异常（模拟模型层崩溃，验证会话兜底给终态）。 */
     var throwOnAnalyzeCore = false
+    /** 测试注入（F6）：analyzeCore 抛指定异常（AUTH_FAILED 兜底分支断言）。 */
+    var analyzeCoreThrowable: Throwable? = null
+    // ---- F6 AUTH_FAILED 暂停接线断言用 ----
+    /** 测试注入：lookupDetail 的缓存表（暂停期 detail 回落断言）。 */
+    var detailLookupResults: MutableMap<String, DetailAnalysis> = mutableMapOf()
+    /** 测试注入：analyzeDetail 直接抛异常（detail 的 AUTH_FAILED 记账断言）。 */
+    var detailError: Throwable? = null
     /**
      * 测试注入（F3 在飞批竞速）：analyzeCore 挂起直至 gate 完成的一次性门。
      * 置位后**下一次**调用在返回前挂起（消费后自清），此后调用不再挂起。
@@ -103,6 +111,7 @@ class PreviewSessionTest {
         gate.await()
       }
       if (throwOnAnalyzeCore) throw IllegalStateException("model crash")
+      analyzeCoreThrowable?.let { throw it }
       onStreamOnce?.let { it(onStreamedComponent!!) }
       onStreamOnce = null
       if (authFailure) {
@@ -129,6 +138,7 @@ class PreviewSessionTest {
     ): DetailOutcome {
       detailCalls += 1
       lastDetailCore = core
+      detailError?.let { throw it }
       detailOutcome?.let { return it }
       val detail = DetailAnalysis(
         sentenceId = sentence.sentenceId,
@@ -141,7 +151,8 @@ class PreviewSessionTest {
       return DetailOutcome(detail, cacheHit = false)
     }
 
-    override suspend fun lookupDetail(sentence: SentenceInput, focus: TokenRange): DetailAnalysis? = null
+    override suspend fun lookupDetail(sentence: SentenceInput, focus: TokenRange): DetailAnalysis? =
+      detailLookupResults[sentence.sentenceId]
 
     override suspend fun chat(
       profile: ModelProfile,
@@ -1358,5 +1369,266 @@ class PreviewSessionTest {
     kotlinx.coroutines.delay(100)
     assertEquals(3, service.analyzeCalls, "换代后的新代次扫描照常派发")
     assertEquals(false, service.lastBypassCache, "重析操作已被换代取代，新代次首轮不得继承 bypass 标志")
+  }
+
+  // ---- F6 AUTH_FAILED 暂停 + 缓存兜底 ----
+
+  /** F6 共用：挂真实暂停表的 manager/session/sender（凭据指纹可变，供解除路径断言）。 */
+  private fun sessionWithPauseRegistry(
+    previewId: String,
+    fingerprintProvider: () -> String?,
+  ): Triple<PreviewSession, ProfilePauseRegistry, RecordingSender> {
+    val registry = ProfilePauseRegistry({ fingerprintProvider() })
+    val pausedManager = PreviewSessionManager(scope, service, { profile }, pauseRegistry = registry)
+    val localSender = RecordingSender()
+    val session = pausedManager.obtain(previewId, localSender) { }
+    return Triple(session, registry, localSender)
+  }
+
+  /**
+   * ① 首批 AUTH_FAILED：结果上报暂停表；第二批**不再发模型请求**（analyzeCalls 探针），
+   * 命中缓存句照常产出 CORE_RESULT（缓存键与模型无关，换/修模型前译文不消失），
+   * 未命中句标 AUTH_FAILED 失败（对齐 Chrome cacheWithAuthError）。
+   */
+  @Test
+  fun `auth failed outcome pauses the profile and the next batch serves cache without model requests`() = runBlocking {
+    val (session, registry, localSender) = sessionWithPauseRegistry("pv-auth") { "fp-1" }
+    session.start()
+
+    // 首批：两句全部鉴权失败。
+    service.authFailure = true
+    session.onVisibleBlocks(listOf("b1" to "The service validates every response. Second sentence here too."))
+    session.flushBatch(offscreen = false)
+    kotlinx.coroutines.delay(100)
+    assertEquals(1, service.analyzeCalls)
+    assertTrue(registry.isPaused("p1"), "首批 AUTH_FAILED 结果必须上报暂停表")
+
+    // 第二批：命中缓存句照常 CORE_RESULT，miss 句 AUTH_FAILED，且绝不发模型请求。
+    service.authFailure = false
+    service.lookupResults["s-b2-0"] = CoreAnalysis(
+      sentenceId = "s-b2-0",
+      components = listOf(CoreComponent(0, 1, GrammarRole.SUBJECT, "另一个块的主语")),
+      modelProfileId = "cached",
+    )
+    session.onVisibleBlocks(listOf("b2" to "Another english block arrives. It also holds two sentences."))
+    session.flushBatch(offscreen = false)
+    kotlinx.coroutines.delay(100)
+
+    assertEquals(1, service.analyzeCalls, "暂停期间后续批次不得再发模型请求")
+    assertEquals(SentencePhase.READY, session.sentences["s-b2-0"]?.phase, "缓存命中句照常落账")
+    assertEquals(SentencePhase.FAILED, session.sentences["s-b2-1"]?.phase, "未命中句标失败")
+    assertEquals(1, localSender.of("CORE_RESULT").count { it["sentenceId"]?.jsonPrimitive?.contentOrNull == "s-b2-0" })
+    val error = localSender.of("CORE_ERROR").single { it["sentenceId"]?.jsonPrimitive?.contentOrNull == "s-b2-1" }
+    assertEquals("AUTH_FAILED", error["code"]?.jsonPrimitive?.contentOrNull, "未命中句必须带 AUTH_FAILED 错误码")
+    assertNotNull(BridgeProtocol.parseHostMessage(error), "CORE_ERROR 必须能过 host 白名单回环")
+  }
+
+  /** ①-补充：用户重试同受暂停门管——回落缓存，不再发模型请求。 */
+  @Test
+  fun `retry during pause falls back to cache instead of hitting the model`() = runBlocking {
+    val (session, registry, _) = sessionWithPauseRegistry("pv-auth-retry") { "fp-1" }
+    session.start()
+    service.authFailure = true
+    session.onVisibleBlocks(listOf("b1" to "The service validates every response carefully today."))
+    session.flushBatch(offscreen = false)
+    kotlinx.coroutines.delay(100)
+    assertEquals(1, service.analyzeCalls)
+    assertTrue(registry.isPaused("p1"))
+    assertEquals(SentencePhase.FAILED, session.sentences["s-b1-0"]?.phase)
+
+    // 失败句用户重试：暂停优先于 bypass——查缓存命中则落账，绝不重发模型请求。
+    service.authFailure = false
+    service.lookupResults["s-b1-0"] = CoreAnalysis(
+      sentenceId = "s-b1-0",
+      components = listOf(CoreComponent(0, 1, GrammarRole.SUBJECT, "该服务")),
+      modelProfileId = "cached",
+    )
+    session.retrySentence("s-b1-0")
+    kotlinx.coroutines.delay(100)
+
+    assertEquals(1, service.analyzeCalls, "暂停期间重试不得发模型请求（暂停优先于绕缓存）")
+    assertEquals(SentencePhase.READY, session.sentences["s-b1-0"]?.phase)
+  }
+
+  /** ①-补充：analyzeCore 抛 AUTH_FAILED（而非 failures 携带）同样记账并走缓存兜底。 */
+  @Test
+  fun `auth failed thrown from analyze core is recorded and falls back to cache`() = runBlocking {
+    val (session, registry, localSender) = sessionWithPauseRegistry("pv-auth-throw") { "fp-1" }
+    session.start()
+    service.analyzeCoreThrowable = ExtensionFailure(ErrorCode.AUTH_FAILED, "auth", false)
+    // 两句的块，只种第一句的缓存——第二句走 miss → AUTH_FAILED。
+    service.lookupResults["s-b1-0"] = CoreAnalysis(
+      sentenceId = "s-b1-0",
+      components = listOf(CoreComponent(0, 1, GrammarRole.SUBJECT, "该服务")),
+      modelProfileId = "cached",
+    )
+    session.onVisibleBlocks(listOf("b1" to "The service validates every response. Second sentence here too."))
+    session.flushBatch(offscreen = false)
+    kotlinx.coroutines.delay(100)
+
+    assertTrue(registry.isPaused("p1"), "抛出的 AUTH_FAILED 同样要记账")
+    assertEquals(1, localSender.of("CORE_RESULT").size, "兜底仍要回缓存命中句")
+    val error = localSender.of("CORE_ERROR").single()
+    assertEquals("s-b1-1", error["sentenceId"]?.jsonPrimitive?.contentOrNull)
+    assertEquals("AUTH_FAILED", error["code"]?.jsonPrimitive?.contentOrNull, "不得误报成 NETWORK_ERROR")
+  }
+
+  /** ② 凭据指纹变化解除：解除后新请求照发模型（对齐 Chrome isProfilePaused 懒解除语义）。 */
+  @Test
+  fun `credential fingerprint change releases the pause and dispatch reaches the model again`() = runBlocking {
+    var fingerprint = "fp-1"
+    val (session, registry, _) = sessionWithPauseRegistry("pv-auth-release") { fingerprint }
+    session.start()
+    service.authFailure = true
+    session.onVisibleBlocks(listOf("b1" to "The service validates every response carefully today."))
+    session.flushBatch(offscreen = false)
+    kotlinx.coroutines.delay(100)
+    assertEquals(1, service.analyzeCalls)
+    assertTrue(registry.isPaused("p1"))
+
+    // 用户改了凭据（保存/setActive 处比较指纹）→ 解除；同一批句子重新派发照发模型。
+    fingerprint = "fp-2"
+    assertTrue(registry.releaseIfFingerprintChanged("p1"))
+    assertFalse(registry.isPaused("p1"))
+
+    service.authFailure = false
+    service.outcome = CoreBatchOutcome(
+      listOf(
+        CoreAnalysis(
+          sentenceId = "s-b1-0",
+          components = listOf(CoreComponent(0, 1, GrammarRole.SUBJECT, "该服务")),
+          modelProfileId = "p1",
+        ),
+      ),
+      emptyList(),
+      cacheHit = false,
+    )
+    session.onVisibleBlocks(listOf("b1" to "The service validates every response carefully today."))
+    session.flushBatch(offscreen = false)
+    kotlinx.coroutines.delay(100)
+    assertEquals(2, service.analyzeCalls, "解除后新请求必须照发模型")
+    assertEquals(SentencePhase.READY, session.sentences["s-b1-0"]?.phase)
+  }
+
+  /** ④-detail：暂停期详解先查缓存——命中照回 DETAIL_RESULT，未命中回 AUTH_FAILED。 */
+  @Test
+  fun `paused profile serves detail from cache and reports auth failed on miss`() = runBlocking {
+    val (session, registry, localSender) = sessionWithPauseRegistry("pv-auth-detail") { "fp-1" }
+    session.start()
+    registry.recordAuthFailed("p1")
+    val first = seedReadySentence(session)
+
+    // 未命中：CORE_ERROR 带 AUTH_FAILED（不是笼统 DETAIL_FAILED），且绝不发模型请求。
+    session.launchDetailRequest(first.sentenceId, 0, 1)
+    kotlinx.coroutines.delay(100)
+    assertEquals(0, service.detailCalls, "暂停期 detail 未命中不得发模型请求")
+    val error = localSender.of("CORE_ERROR").single()
+    assertEquals("AUTH_FAILED", error["code"]?.jsonPrimitive?.contentOrNull)
+    assertEquals(first.sentenceId, error["sentenceId"]?.jsonPrimitive?.contentOrNull)
+
+    // 命中：照回 DETAIL_RESULT（缓存键与模型无关），同样不发模型请求。
+    service.detailLookupResults[first.sentenceId] = DetailAnalysis(
+      sentenceId = first.sentenceId,
+      focus = TokenRange(0, 1),
+      structures = emptyList(),
+      grammarPoints = emptyList(),
+      explanation = "cached",
+      modelProfileId = "cached",
+    )
+    session.launchDetailRequest(first.sentenceId, 0, 1)
+    kotlinx.coroutines.delay(100)
+    assertEquals(0, service.detailCalls)
+    val result = localSender.of("DETAIL_RESULT").single()
+    assertTrue(
+      (result["analysisJson"]?.jsonPrimitive?.contentOrNull ?: "").contains("cached"),
+      "命中的缓存详解必须照回",
+    )
+  }
+
+  /** ④-detail-记账：详解请求抛 AUTH_FAILED 时上报暂停表。 */
+  @Test
+  fun `detail auth failure pauses the profile`() = runBlocking {
+    val (session, registry, localSender) = sessionWithPauseRegistry("pv-auth-detail-rec") { "fp-1" }
+    session.start()
+    val first = seedReadySentence(session)
+    assertFalse(registry.isPaused("p1"))
+
+    service.detailError = ExtensionFailure(ErrorCode.AUTH_FAILED, "auth", false)
+    session.launchDetailRequest(first.sentenceId, 0, 1)
+    kotlinx.coroutines.delay(100)
+
+    assertTrue(registry.isPaused("p1"), "detail 的 AUTH_FAILED 必须上报暂停表")
+    assertEquals(
+      "AUTH_FAILED",
+      localSender.of("CORE_ERROR").single()["code"]?.jsonPrimitive?.contentOrNull,
+      "ExtensionFailure 的错误码不得被 DETAIL_FAILED 兜底覆写",
+    )
+  }
+
+  /** ④-chat：暂停直接 CHAT_ERROR（chat 无缓存兜底语义）；chat 抛 AUTH_FAILED 同样记账。 */
+  @Test
+  fun `paused profile answers chat error and a chat auth failure pauses the profile`() = runBlocking {
+    // ① 已暂停：直接 CHAT_ERROR，绝不发模型请求。
+    val (session, registry, localSender) = sessionWithPauseRegistry("pv-auth-chat") { "fp-1" }
+    session.start()
+    registry.recordAuthFailed("p1")
+    val first = seedReadySentence(session)
+
+    session.launchChatAsk("c-paused", first.sentenceId, emptyList(), "问?")
+    kotlinx.coroutines.delay(100)
+    assertEquals(0, service.chatCalls, "暂停期 chat 不得发模型请求")
+    val pausedError = localSender.of("CHAT_ERROR").single()
+    assertEquals("模型档案鉴权失败，更新凭据后才会恢复", pausedError["message"]?.jsonPrimitive?.contentOrNull)
+    assertNotNull(BridgeProtocol.parseHostMessage(pausedError))
+
+    // ② chat 抛 AUTH_FAILED → 上报暂停表（Chrome CHAT_ASK catch 同款）。
+    val (freshSession, freshRegistry, freshSender) = sessionWithPauseRegistry("pv-auth-chat-rec") { "fp-2" }
+    freshSession.start()
+    val seeded = seedReadySentence(freshSession)
+    assertFalse(freshRegistry.isPaused("p1"))
+
+    service.chatError = ExtensionFailure(ErrorCode.AUTH_FAILED, "auth", false)
+    freshSession.launchChatAsk("c-auth", seeded.sentenceId, emptyList(), "问?")
+    kotlinx.coroutines.delay(100)
+
+    assertTrue(freshRegistry.isPaused("p1"), "chat 的 AUTH_FAILED 必须上报暂停表")
+    assertEquals(
+      "AUTH_FAILED：auth",
+      freshSender.of("CHAT_ERROR").single()["message"]?.jsonPrimitive?.contentOrNull,
+    )
+  }
+
+  /** ④-feedback：暂停直接 FEEDBACK_ERROR；feedback 抛 AUTH_FAILED 同样记账（暂停的死 key 不得继续收纠正）。 */
+  @Test
+  fun `paused profile answers feedback error and a feedback auth failure pauses the profile`() = runBlocking {
+    // ① 已暂停：直接 FEEDBACK_ERROR，绝不发模型请求。
+    val (session, registry, localSender) = sessionWithPauseRegistry("pv-auth-fb") { "fp-1" }
+    session.start()
+    registry.recordAuthFailed("p1")
+    val first = seedReadySentence(session)
+
+    session.launchFeedback(first.sentenceId, "反馈")
+    kotlinx.coroutines.delay(100)
+    assertEquals(0, service.feedbackCalls, "暂停期纠正不得发模型请求")
+    val pausedError = localSender.of("FEEDBACK_ERROR").single()
+    assertEquals("模型档案鉴权失败，更新凭据后才会恢复", pausedError["message"]?.jsonPrimitive?.contentOrNull)
+    assertEquals(first.sentenceId, pausedError["sentenceId"]?.jsonPrimitive?.contentOrNull)
+    assertNotNull(BridgeProtocol.parseHostMessage(pausedError))
+
+    // ② 纠正抛 AUTH_FAILED → 上报暂停表。
+    val (freshSession, freshRegistry, freshSender) = sessionWithPauseRegistry("pv-auth-fb-rec") { "fp-2" }
+    freshSession.start()
+    val seeded = seedReadySentence(freshSession)
+    assertFalse(freshRegistry.isPaused("p1"))
+
+    service.feedbackError = ExtensionFailure(ErrorCode.AUTH_FAILED, "auth", false)
+    freshSession.launchFeedback(seeded.sentenceId, "反馈")
+    kotlinx.coroutines.delay(100)
+
+    assertTrue(freshRegistry.isPaused("p1"), "feedback 的 AUTH_FAILED 必须上报暂停表")
+    assertEquals(
+      "AUTH_FAILED：auth",
+      freshSender.of("FEEDBACK_ERROR").single()["message"]?.jsonPrimitive?.contentOrNull,
+    )
   }
 }

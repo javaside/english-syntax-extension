@@ -82,12 +82,27 @@ class AnalysisServiceService {
 class PreviewSessionManagerService {
   val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
+  /**
+   * F6 AUTH_FAILED 暂停表：与 manager 同生命周期（应用级单例）。指纹经
+   * ProfileRepository 组装（apiKey 与自定义头都在 PasswordSafe，suspend 读取）；
+   * 设置页的解除路径（保存指纹比较/测试连接成功/删除清理）也取这同一实例。
+   */
+  val pauseRegistry: dev.codetui.englishsyntax.session.ProfilePauseRegistry by lazy {
+    val repository = service<ProfileRepository>()
+    dev.codetui.englishsyntax.session.ProfilePauseRegistry(
+      fingerprintOf = { profileId ->
+        dev.codetui.englishsyntax.session.ProfilePauseRegistry.credentialFingerprint(repository, profileId)
+      },
+    )
+  }
+
   val manager: dev.codetui.englishsyntax.session.PreviewSessionManager by lazy {
     val repository = service<ProfileRepository>()
     dev.codetui.englishsyntax.session.PreviewSessionManager(
       scope = scope,
       analysis = service<AnalysisServiceService>().analysis,
       profileProvider = { repository.active() },
+      pauseRegistry = pauseRegistry,
     )
   }
 }

@@ -9,11 +9,13 @@ import kotlin.test.assertTrue
 import kotlinx.coroutines.runBlocking
 
 /**
- * F4 缓存导入/导出入口 + F5 profile 切换即时生效的设置页测试。
+ * F4 缓存导入/导出入口 + F5 profile 切换即时生效 + F6 AUTH_FAILED 暂停解除路径的设置页测试。
  *
  * - IO 不在 EDT：由 BackgroundDispatcher seam 钉住——action 只把 IO 块派发给 seam，
  *   测试先断言「派发前 transfer 未被调用」，再手动执行捕获的块（对应生产的 pooled 线程）。
  * - F5：ProfileRefresh seam 记录 refreshProfile 被调次数。
+ * - F6：PauseControl seam 记录解除路径（保存后指纹比较在后台块内、测试连接成功无条件解除、
+ *   profile 删除清理）。
  */
 class EnglishSyntaxConfigurableCacheTransferTest {
 
@@ -84,6 +86,22 @@ class EnglishSyntaxConfigurableCacheTransferTest {
     }
   }
 
+  /** F6：暂停表解除路径的记录桩（保存后指纹比较 / 测试连接成功 / profile 删除）。 */
+  private class RecordingPauseControl : EnglishSyntaxConfigurable.PauseControl {
+    val fingerprintReleases = mutableListOf<String>()
+    val releases = mutableListOf<String>()
+    var fingerprintChanged = false
+
+    override suspend fun releaseIfFingerprintChanged(profileId: String): Boolean {
+      fingerprintReleases += profileId
+      return fingerprintChanged
+    }
+
+    override fun release(profileId: String) {
+      releases += profileId
+    }
+  }
+
   private fun profile(
     id: String = "profile-1",
     name: String = "Example",
@@ -103,10 +121,11 @@ class EnglishSyntaxConfigurableCacheTransferTest {
     ui: FakeCacheTransferUi = FakeCacheTransferUi(),
     dispatcher: CapturingDispatcher = CapturingDispatcher(),
     refresh: RecordingProfileRefresh = RecordingProfileRefresh(),
-  ): EnglishSyntaxConfigurable {
-    val probe = EnglishSyntaxConfigurable.ConnectionProbe {
+    probe: EnglishSyntaxConfigurable.ConnectionProbe = EnglishSyntaxConfigurable.ConnectionProbe {
       EnglishSyntaxConfigurable.ConnectionProbeResult(true, "stub")
-    }
+    },
+    pause: RecordingPauseControl = RecordingPauseControl(),
+  ): EnglishSyntaxConfigurable {
     return EnglishSyntaxConfigurable(
       repository,
       ProfileState(),
@@ -115,6 +134,7 @@ class EnglishSyntaxConfigurableCacheTransferTest {
       transferUi = ui,
       background = dispatcher,
       profileRefresh = refresh,
+      pauseControl = pause,
     )
   }
 
@@ -261,6 +281,60 @@ class EnglishSyntaxConfigurableCacheTransferTest {
     // 幂等场景：对当前 active 重复「启用」不炸，repository 状态不变。
     assertTrue(configurable.activateForm())
     assertEquals("profile-1", repository.active()?.id)
+  }
+
+  // ---- F6 AUTH_FAILED 暂停的解除路径（保存指纹比较 / 测试连接成功 / 删除清理）----
+
+  /**
+   * ② 改凭据保存后解除：指纹比较（要读 PasswordSafe）派发到后台线程，EDT 上不得发生；
+   * 后台块以保存的 profile id 调 releaseIfFingerprintChanged。
+   */
+  @Test
+  fun `saving a profile dispatches the pause fingerprint release off the caller thread`() {
+    val repository = repositoryWithTwoProfiles()
+    val pause = RecordingPauseControl()
+    val dispatcher = CapturingDispatcher()
+    val configurable = configurable(repository, dispatcher = dispatcher, pause = pause)
+
+    configurable.selectProfile("profile-2")
+    configurable.form.apiKey = "sk-replaced"
+    assertTrue(configurable.saveForm())
+
+    assertEquals(0, pause.fingerprintReleases.size, "EDT 上不得做指纹组装（PasswordSafe 读取）")
+    dispatcher.tasks.single().invoke()
+    assertEquals(listOf("profile-2"), pause.fingerprintReleases, "保存后必须按该 profile 比较指纹解除")
+  }
+
+  /** ③ 测试连接成功解除（对齐 Chrome TEST_PROFILE 的 resumeProfile）；失败不解除。 */
+  @Test
+  fun `a successful connection test releases the pause and a failed one does not`() {
+    val repository = repositoryWithTwoProfiles()
+    val okPause = RecordingPauseControl()
+    val okConfigurable = configurable(repository, pause = okPause)
+    okConfigurable.selectProfile("profile-1")
+    assertTrue(okConfigurable.runConnectionAction())
+    assertEquals(listOf("profile-1"), okPause.releases, "连接成功必须无条件解除暂停")
+
+    val failingProbe = EnglishSyntaxConfigurable.ConnectionProbe {
+      EnglishSyntaxConfigurable.ConnectionProbeResult(false, "401 Unauthorized")
+    }
+    val failedPause = RecordingPauseControl()
+    val failedConfigurable = configurable(repositoryWithTwoProfiles(), probe = failingProbe, pause = failedPause)
+    failedConfigurable.selectProfile("profile-1")
+    assertFalse(failedConfigurable.runConnectionAction())
+    assertEquals(0, failedPause.releases.size, "连接失败不得解除暂停")
+  }
+
+  /** profile 删除时清掉暂停条目（防死 key：同 id 重建的新 profile 不继承旧暂停）。 */
+  @Test
+  fun `deleting a profile clears its pause entry`() {
+    val repository = repositoryWithTwoProfiles()
+    val pause = RecordingPauseControl()
+    val configurable = configurable(repository, pause = pause)
+
+    configurable.selectProfile("profile-2")
+    assertTrue(configurable.deleteForm())
+    assertEquals(listOf("profile-2"), pause.releases)
   }
 
   private fun repositoryWithTwoProfiles(): ProfileRepository {

@@ -222,3 +222,5 @@ Chrome 扩展之外,本仓库还交付一个 IntelliJ IDEA Markdown 预览插件
 追问对话支线(与 Chrome 端 §5 的 chat 链路同构):句头聊天气泡图标(core 成功句才有)打开锚点弹出的浮层面板(`web/chat-panel.ts`,可拖动、多轮流式),面板 submit 才发 `CHAT_ASK`——Kotlin `AnalysisService.chat` 是无缓存、无修复的旁路(`DETAIL_CLICK` 档、`${documentId}:chat` 调度命名空间、按轮 cacheKey),流式 `CHAT_STREAM` 推**全量**文本、`CHAT_RESULT` 校平;stop/换代/面板关闭(`Disposer` → `disposePreview`)三处都回收 chat 命名空间的在飞请求。
 
 生命周期:每个预览一个 `PreviewSession`(child Job),面板 dispose 时随项目 scope 取消;Profile 是 start 时刻的快照,设置变更后由 Manager 刷新。JCEF 不可用时 Action 不可用并提示切换 JetBrains Runtime。
+
+AUTH_FAILED 暂停(F6,对齐 Chrome 鉴权暂停):请求结果/抛出的鉴权失败把 profile 记入应用级 `ProfilePauseRegistry`(`PreviewSessionManagerService` 单例,id → 凭据指纹);会话层 dispatch/重试前置查表,命中即回落纯缓存(未命中句 AUTH_FAILED 失败,不发模型请求),detail 先查缓存、chat/纠直接报错;凭据指纹变化(设置页保存,后台比较)或「测试连接」成功即解除,profile 删除清理死 key。这与用户手动 `pause()`(只挡新派发)是两回事——前者是 profile 级事实,随应用存活。

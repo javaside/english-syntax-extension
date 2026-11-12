@@ -40,6 +40,7 @@ class EnglishSyntaxConfigurable(
   private val profileRefresh: ProfileRefresh = ProfileRefresh {
     service<PreviewSessionManagerService>().manager.refreshProfile()
   },
+  private val pauseControl: PauseControl = ServicePauseControl(),
 ) : BoundConfigurable(EnglishSyntaxBundle.message("settings.display.name")) {
 
   data class CacheSummary(val entries: Int, val estimatedBytes: Long)
@@ -134,6 +135,29 @@ class EnglishSyntaxConfigurable(
   /** F5：profile 切换/保存后刷新已开会话的 profile 快照（无会话时是幂等 no-op）。 */
   fun interface ProfileRefresh {
     fun refresh()
+  }
+
+  /**
+   * F6：AUTH_FAILED 暂停表的解除路径（保存后指纹比较 / 测试连接成功 / profile 删除）。
+   * 生产实现指向应用级 ProfilePauseRegistry；测试注入记录桩。
+   */
+  interface PauseControl {
+    /**
+     * 凭据指纹变化时解除；返回是否真的解除。指纹组装要读 PasswordSafe——只能在后台
+     * 线程调用（未暂停时内部短路，无凭据读取）。
+     */
+    suspend fun releaseIfFingerprintChanged(profileId: String): Boolean
+
+    /** 无条件解除（测试连接成功 / profile 删除清理；纯内存操作）。 */
+    fun release(profileId: String)
+  }
+
+  private class ServicePauseControl : PauseControl {
+    override suspend fun releaseIfFingerprintChanged(profileId: String): Boolean =
+      service<PreviewSessionManagerService>().pauseRegistry.releaseIfFingerprintChanged(profileId)
+
+    override fun release(profileId: String) =
+      service<PreviewSessionManagerService>().pauseRegistry.release(profileId)
   }
 
   /** 测试连接的抽象：生产打真模型探测，测试注入假实现。 */
@@ -389,6 +413,9 @@ class EnglishSyntaxConfigurable(
 
   fun deleteForm(): Boolean = try {
     runBlocking { repository.delete(form.id) }
+    // F6：profile 删除时清掉暂停表条目（纯内存操作）——死 key 不得让同 id 重建的新
+    // profile 继承旧暂停。
+    pauseControl.release(form.id)
     resetForm()
     setStatus("Profile deleted")
     true
@@ -440,30 +467,40 @@ class EnglishSyntaxConfigurable(
 
   fun isFormModified(): Boolean = form != baseline
 
-  fun applyForm() = runBlocking {
-    val headers = parseHeaders(form.headers)
-    val current = repository.list().firstOrNull { it.id == form.id }
-    repository.save(
-      ModelProfile(
-        id = form.id,
-        name = form.name,
-        baseUrl = form.baseUrl,
-        model = form.model,
-        headerNames = headers.keys,
-        timeoutMs = form.timeoutMs,
-        jsonSchemaSupport = current?.jsonSchemaSupport ?: JsonSchemaSupport.UNKNOWN,
-        streamSupport = current?.streamSupport,
-        reasoningControl = current?.reasoningControl,
-      ),
-      apiKey = form.apiKey,
-      headerValues = headers,
-    )
-    profileState.state.cacheLimitMb = form.cacheLimitMb
-    profileState.state.streamRendering = form.streamRendering
-    baseline = form.copy()
-    // F5（apply 路径）：保存的正是当前激活 profile 时，已开会话的快照需要刷新——
-    // 只改 baseUrl/model 等字段不换激活也算 profile 变更；保存非激活 profile 不触发。
-    if (repository.active()?.id == form.id) profileRefresh.refresh()
+  fun applyForm(): Unit {
+    runBlocking {
+      val headers = parseHeaders(form.headers)
+      val current = repository.list().firstOrNull { it.id == form.id }
+      repository.save(
+        ModelProfile(
+          id = form.id,
+          name = form.name,
+          baseUrl = form.baseUrl,
+          model = form.model,
+          headerNames = headers.keys,
+          timeoutMs = form.timeoutMs,
+          jsonSchemaSupport = current?.jsonSchemaSupport ?: JsonSchemaSupport.UNKNOWN,
+          streamSupport = current?.streamSupport,
+          reasoningControl = current?.reasoningControl,
+        ),
+        apiKey = form.apiKey,
+        headerValues = headers,
+      )
+      profileState.state.cacheLimitMb = form.cacheLimitMb
+      profileState.state.streamRendering = form.streamRendering
+      baseline = form.copy()
+      // F5（apply 路径）：保存的正是当前激活 profile 时，已开会话的快照需要刷新——
+      // 只改 baseUrl/model 等字段不换激活也算 profile 变更；保存非激活 profile 不触发。
+      if (repository.active()?.id == form.id) profileRefresh.refresh()
+    }
+    // F6：保存后凭据指纹若已变化（改 key/模型/地址/头），解除该 profile 的 AUTH_FAILED
+    // 暂停（activateForm 的 setActive 路径也先经 saveForm 走到这里）。指纹组装要读
+    // PasswordSafe，派发到后台线程执行，不占 EDT；未暂停时内部短路为零开销。
+    // id 先取值再进闭包——后台块执行时用户可能已切到别的 profile。
+    val savedProfileId = form.id
+    background.dispatch {
+      runBlocking { pauseControl.releaseIfFingerprintChanged(savedProfileId) }
+    }
   }
 
   /** 测试连接：先保存（probe 需要 PasswordSafe 里的 key），再探测端点能力。 */
@@ -478,6 +515,11 @@ class EnglishSyntaxConfigurable(
     val result = runBlocking { connectionProbe.probe(profile) }
     val text = if (result.success) "Test connection: ${result.message}" else "Test connection failed: ${result.message}"
     setStatus(text)
+    if (result.success) {
+      // F6：连接成功 = 凭据已验证可用，解除该 profile 的 AUTH_FAILED 暂停（对齐 Chrome
+      // TEST_PROFILE 的 resumeProfile——修好服务端后无需重载插件）。纯内存操作，EDT 安全。
+      pauseControl.release(profile.id)
+    }
     return result.success
   }
 
