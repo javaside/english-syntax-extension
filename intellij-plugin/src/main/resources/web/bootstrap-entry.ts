@@ -386,6 +386,15 @@ function handleHostMessage(hostJson: unknown): void {
         setStatus(`⏸ 已暂停（${message.ready}/${message.discovered}）`, "paused", false);
         return;
       }
+      // 纯缓存会话（无 profile，只查了缓存）：miss 句保持原文、既不计 ready 也不计
+      // failed，通用 allSettled 公式在这里永远凑不满——走专属措辞「✓ 缓存命中 x/y 句」
+      // 并淡出（Kotlin 发的是会话累计计数，多批会话的文案随最新累计刷新）。
+      if (message.state === "cacheOnly") {
+        clearTimeout(completeTimer);
+        setStatus(`✓ 缓存命中 ${message.ready}/${message.discovered} 句`, "running", false);
+        completeTimer = setTimeout(hideStatus, 2500);
+        return;
+      }
       const allSettled =
         message.discovered > 0 && message.ready + message.failed >= message.discovered;
       if (allSettled) {

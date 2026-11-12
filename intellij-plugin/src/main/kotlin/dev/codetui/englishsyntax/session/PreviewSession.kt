@@ -305,12 +305,15 @@ class PreviewSession(
     if (state == SessionState.PAUSED && !allowPaused) return
     val capturedVersion = operationVersion
     val profile = currentProfile ?: run {
-      // 无 Profile：纯缓存查询，未命中句保持原文。
+      // 无 Profile：纯缓存查询。命中句置 READY；未命中句置 STALE——对齐 Chrome 纯缓存
+      // 会话的 skipped 语义：保持原文渲染、不计 failed，且 registerFresh 对 STALE 放行，
+      // 配好 profile 后的重扫能把它们重新派发（留 DISCOVERED 会永久滞留、置 FAILED 会被
+      // 计成失败并渲染成失败行，都救不回来）。
       val cached = analysis.lookupCore(inputs)
       val cachedIds = cached.map { it.sentenceId }.toSet()
       inputs.forEach { input ->
         sentences[input.sentenceId]?.phase =
-          if (input.sentenceId in cachedIds) SentencePhase.READY else SentencePhase.FAILED
+          if (input.sentenceId in cachedIds) SentencePhase.READY else SentencePhase.STALE
       }
       sender.send(buildJsonObject {
         put("version", 1)
@@ -318,8 +321,11 @@ class PreviewSession(
         put("previewId", previewId)
         put("generation", generation)
         put("state", "cacheOnly")
-        put("ready", cached.size)
-        put("discovered", inputs.size)
+        // 终态计数取会话累计（与 applyOutcome 同口径）：此前发本批计数，多批会话下
+        // web 侧拿不到全量 ready/discovered，「缓存命中 x/y 句」的 y 永远不对。
+        put("ready", counts.ready)
+        put("discovered", counts.discovered)
+        put("failed", counts.failed)
       })
       return
     }

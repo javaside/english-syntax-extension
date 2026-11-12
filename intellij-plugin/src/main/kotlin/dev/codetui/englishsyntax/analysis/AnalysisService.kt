@@ -277,17 +277,23 @@ class AnalysisService(
     }
 
     val failuresBySentence = mutableMapOf<String, AnalysisFailure>()
+    // F1：INVALID_MODEL_OUTPUT 的真实校验 summary 现在会直达页面 failure 行（web render
+    // 不再按 code 覆写），构造 failures 的边界统一按 profile 密钥脱敏——镜像 Chrome SW
+    // 边界脱敏；PreviewSession 不持凭据，桥发送层做不了这件事。client 抛出的
+    // ExtensionFailure 多已在 HTTP 边界脱敏过，重复脱敏幂等、无副作用。
+    val settleSecrets = client.secretsFor(profile)
     settled.forEach { (chunk, outcome) ->
       outcome.onSuccess { value ->
         value.valid.forEach { analysis -> results[analysis.sentenceId] = analysis }
         value.invalid.forEach { (sentence, errors) ->
-          failuresBySentence[sentence.sentenceId] = AnalysisFailure(sentence.sentenceId, invalidOutput(errors))
+          failuresBySentence[sentence.sentenceId] = AnalysisFailure(sentence.sentenceId, invalidOutput(errors, settleSecrets))
         }
       }.onFailure { error ->
         val failure = error as? ExtensionFailure
           ?: ExtensionFailure(ErrorCode.NETWORK_ERROR, error.message ?: "Model request failed", true)
+        val redacted = failure.copy(message = redactSecrets(failure.message, settleSecrets))
         chunk.forEach { (sentence, _) ->
-          failuresBySentence[sentence.sentenceId] = AnalysisFailure(sentence.sentenceId, failure)
+          failuresBySentence[sentence.sentenceId] = AnalysisFailure(sentence.sentenceId, redacted)
         }
       }
     }
@@ -356,7 +362,7 @@ class AnalysisService(
       validation = validateDetail(repairRaw, sentence, focus, profile.id)
     }
     val valid = validation as? ValidationResult.Valid
-      ?: throw invalidOutput((validation as ValidationResult.Invalid).errors)
+      ?: throw invalidOutput((validation as ValidationResult.Invalid).errors, client.secretsFor(profile))
     serializeMutex.withLock { cache.putDetail(key, profile.id, detailToJson(valid.value)) }
     return DetailOutcome(valid.value, cacheHit = false)
   }
@@ -641,12 +647,22 @@ class AnalysisService(
       return "$conversationId:${hex.take(16)}"
     }
 
-    private fun invalidOutput(errors: List<ValidationError>): ExtensionFailure {
+    /**
+     * 两轮修复仍失败的真实校验 summary（"path: message" 拼接）。F1 之后它不再只进
+     * IDEA 日志，而是经 CORE_ERROR.message 直达页面 failure 行——所以在这里（构造
+     * failures 的边界，镜像 Chrome SW）按 profile 密钥脱敏后再外发；日志同步用脱敏
+     * 后的文本，避免把密钥写进 idea.log。
+     */
+    private fun invalidOutput(errors: List<ValidationError>, secrets: List<String>): ExtensionFailure {
       val summary = errors.joinToString("; ") { "${it.path.ifEmpty { "output" }}: ${it.message}" }
-      LOGGER.warn("Model output remained invalid after two repairs: $summary")
+      val message = redactSecrets(
+        "Model output remained invalid after two repairs${if (summary.isEmpty()) "" else ": $summary"}",
+        secrets,
+      )
+      LOGGER.warn("Model output remained invalid after two repairs: $message")
       return ExtensionFailure(
         ErrorCode.INVALID_MODEL_OUTPUT,
-        "Model output remained invalid after two repairs${if (summary.isEmpty()) "" else ": $summary"}",
+        message,
         false,
       )
     }

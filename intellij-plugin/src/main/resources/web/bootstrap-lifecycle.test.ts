@@ -181,6 +181,55 @@ describe("bootstrap-entry 手动扫描模式", () => {
   });
 });
 
+describe("bootstrap-entry 纯缓存会话浮层（cacheOnly）", () => {
+  const initialize = () =>
+    (window as unknown as Record<string, unknown>).__englishSyntaxInitialize as (
+      previewId: string,
+      generation: number,
+      autoScan?: boolean,
+    ) => void;
+  const hostMessage = () =>
+    (window as unknown as Record<string, unknown>).__englishSyntaxMessage as (
+      message: Record<string, unknown>,
+    ) => void;
+  const label = (): string =>
+    document.querySelector(".english-syntax-status-label")?.textContent ?? "";
+  const statusEl = (): HTMLElement | null => document.getElementById("english-syntax-status");
+
+  it("cacheOnly SESSION_STATE → 「✓ 缓存命中 x/y 句」并淡出，绕过 allSettled 公式", async () => {
+    // F7：无 profile 的纯缓存会话里 miss 句保持原文、既不计 ready 也不计 failed，
+    // 通用公式 `ready+failed>=discovered` 永不满足——必须走 state==="cacheOnly" 专属
+    // 措辞并淡出。多批会话下每条 SESSION_STATE 带累计计数，文案随最新累计更新而不是
+    // 卡在第一批的 x/y。
+    initialize()("pv-cacheonly", 0, false);
+
+    vi.useFakeTimers();
+    try {
+      // 第一批：2/5 命中。ready+failed=2 < discovered=5，公式会判「未完成」永转圈。
+      hostMessage()({
+        version: 1, type: "SESSION_STATE", previewId: "pv-cacheonly", generation: 0,
+        state: "cacheOnly", ready: 2, discovered: 5, failed: 0,
+      });
+      expect(label()).toBe("✓ 缓存命中 2/5 句");
+      expect(label()).not.toContain("句法学习");
+
+      // 第二批（累计 3/8）：措辞随累计计数刷新。
+      hostMessage()({
+        version: 1, type: "SESSION_STATE", previewId: "pv-cacheonly", generation: 0,
+        state: "cacheOnly", ready: 3, discovered: 8, failed: 0,
+      });
+      expect(label()).toBe("✓ 缓存命中 3/8 句");
+
+      // 2.5s 后淡出（与「解析完成」同款 completeTimer）。
+      expect(statusEl()?.hidden ?? true).toBe(false);
+      vi.advanceTimersByTime(2500);
+      expect(statusEl()?.hidden ?? true).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe("bootstrap-entry 按段解析", () => {
   const initialize = () =>
     (window as unknown as Record<string, unknown>).__englishSyntaxInitialize as (

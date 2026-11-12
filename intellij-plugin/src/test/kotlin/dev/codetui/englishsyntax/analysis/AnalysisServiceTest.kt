@@ -827,4 +827,58 @@ class AnalysisServiceTest {
     }
     assertEquals("密钥是 [redacted] 请保密。", pushed.last())
   }
+
+  /**
+   * F1：INVALID_MODEL_OUTPUT 的真实校验 summary 现在会直达页面 failure 行（render 不再
+   * 按 code 覆写），构造 failures 的边界必须先按 profile 密钥脱敏——镜像 Chrome SW 边界
+   * 脱敏。密钥值取「Model」（validator 文案里出现的字面片段）以确定性地证明脱敏真的跑过：
+   * 未脱敏的 message 以 "Model output remained…" 开头。
+   */
+  @Test
+  fun `core failure message is redacted with profile secrets at the boundary`() = runBlocking {
+    val credentials = MapCredentialStore()
+    credentials.put("profile-1", CredentialStore.API_KEY_FIELD, "Model")
+    val secretService = newService(credentials = credentials)
+    val sentence = sentence("s1", "The service validates every response.")
+    server.enqueueJson("not-json-first")
+    server.enqueueJson("not-json-repair-one")
+    server.enqueueJson("not-json-repair-two")
+
+    val outcome = secretService.analyzeCore(profile(), "doc-1", listOf(sentence))
+
+    assertEquals(1, outcome.failures.size)
+    assertEquals(ErrorCode.INVALID_MODEL_OUTPUT, outcome.failures[0].error.code)
+    val message = outcome.failures[0].error.message ?: ""
+    assertFalse(message.contains("Model"), "failure message leaked the api key value: $message")
+    assertTrue(message.contains("[redacted]"), "boundary redaction must have run: $message")
+  }
+
+  /** 详解路径同款：analyzeDetail 两轮仍非法时上抛的 invalidOutput 也在边界脱敏。 */
+  @Test
+  fun `detail failure message is redacted with profile secrets at the boundary`() = runBlocking {
+    val credentials = MapCredentialStore()
+    credentials.put("profile-1", CredentialStore.API_KEY_FIELD, "Model")
+    val secretService = newService(credentials = credentials)
+    val sentence = sentence("s1", "The service works.")
+    val core = CoreAnalysis(
+      sentenceId = "s1",
+      components = listOf(CoreComponent(0, 1, GrammarRole.SUBJECT, "该服务")),
+      modelProfileId = "profile-1",
+    )
+    // explanation 为空 → 两轮都校验失败（第二轮走 jumpQueue 的修复请求）。
+    val invalid = """{"sentenceId":"s1","focus":{"startToken":0,"endToken":1},"structures":[],"grammarPoints":[],"explanation":""}"""
+    server.enqueueJson(invalid)
+    server.enqueueJson(invalid)
+
+    val error = runCatching {
+      secretService.analyzeDetail(profile(), "doc-1", sentence, core, TokenRange(0, 1))
+    }.exceptionOrNull()
+
+    val failure = error as? ExtensionFailure
+    assertNotNull(failure)
+    assertEquals(ErrorCode.INVALID_MODEL_OUTPUT, failure.code)
+    val message = failure.message
+    assertFalse(message.contains("Model"), "detail failure message leaked the api key value: $message")
+    assertTrue(message.contains("[redacted]"), "boundary redaction must have run: $message")
+  }
 }

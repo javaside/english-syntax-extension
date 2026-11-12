@@ -576,6 +576,60 @@ class PreviewSessionTest {
     assertEquals("cacheOnly", states[0]["state"]?.jsonPrimitive?.contentOrNull)
   }
 
+  /**
+   * F7：cacheOnly 多批会话。① 终态 SESSION_STATE 必须发**会话累计**计数（此前发本批
+   * 计数，多批下 web 的 `ready+failed>=discovered` 永不满足、浮层卡死）；② 未命中句置
+   * STALE——不计 failed、不滞留 DISCOVERED/FAILED，registerFresh 对 STALE 放行，配好
+   * profile 后的重扫能把它们重新派发（对齐 Chrome skipped 语义：保持原文、无失败样式）。
+   */
+  @Test
+  fun `cache only multi batch settles cumulative counts and leaves misses stale for redispatch`() = runBlocking {
+    var currentProfile: ModelProfile? = null
+    val mutableManager = PreviewSessionManager(scope, service, { currentProfile })
+    val localSender = RecordingSender()
+    val session = mutableManager.obtain("pv-cache", localSender) { }
+    session.start()
+    // 预置缓存命中：只有 s-b1-0 查得到，其余全部 miss。
+    service.lookupResults["s-b1-0"] = CoreAnalysis(
+      sentenceId = "s-b1-0",
+      components = listOf(CoreComponent(0, 1, GrammarRole.SUBJECT, "该服务")),
+      modelProfileId = "cached",
+    )
+    val blockOne = "The service validates every response. Second sentence here too."
+    val blockTwo = "Another english block arrives. It also holds two sentences."
+    session.onVisibleBlocks(listOf("b1" to blockOne))
+    session.flushBatch(offscreen = false)
+    kotlinx.coroutines.delay(50)
+    session.onVisibleBlocks(listOf("b2" to blockTwo))
+    session.flushBatch(offscreen = false)
+    kotlinx.coroutines.delay(100)
+
+    assertEquals(0, service.analyzeCalls, "无 profile 绝不调模型")
+    assertEquals(SentencePhase.READY, session.sentences["s-b1-0"]?.phase)
+    assertEquals(SentencePhase.STALE, session.sentences["s-b1-1"]?.phase)
+    assertEquals(SentencePhase.STALE, session.sentences["s-b2-0"]?.phase)
+    assertEquals(SentencePhase.STALE, session.sentences["s-b2-1"]?.phase)
+    assertEquals(0, session.counts.failed, "cacheOnly 未命中句不计 failed")
+
+    val states = localSender.of("SESSION_STATE")
+    assertTrue(states.isNotEmpty())
+    val terminal = states.last()
+    assertEquals("cacheOnly", terminal["state"]?.jsonPrimitive?.contentOrNull)
+    // 累计口径：4 句已发现、1 句命中——本批计数会是 ready=0/discovered=2（第二批全 miss）。
+    assertEquals(1, terminal["ready"]?.jsonPrimitive?.content?.toInt())
+    assertEquals(4, terminal["discovered"]?.jsonPrimitive?.content?.toInt())
+
+    // 配好 profile 后重扫：STALE 句重新派发（READY 命中句不动）。
+    currentProfile = profile
+    session.currentProfile = profile
+    session.onVisibleBlocks(listOf("b1" to blockOne))
+    session.flushBatch(offscreen = false)
+    kotlinx.coroutines.delay(100)
+
+    assertEquals(1, service.analyzeCalls, "重扫应把 STALE 句重新派发")
+    assertEquals(listOf("s-b1-1"), service.lastSentences.map { it.sentenceId })
+  }
+
   @Test
   fun `priority maps active offscreen and inactive`() {
     val session = session()

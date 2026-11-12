@@ -141,6 +141,12 @@ const ERROR_TEXT: Readonly<Record<string, string>> = {
 };
 
 function friendlyErrorMessage(code: string, fallback: string): string {
+  // F1：仅 INVALID_MODEL_OUTPUT 且桥上 message 非空时显示原始校验 summary——真实
+  // validator 摘要（"path: message"）正是 Chrome 侧逐句失败文案的形态，Kotlin 侧在
+  // 构造 failures 的边界已按 profile 密钥脱敏；继续覆写成笼统文案会把排障刚需藏进
+  // IDEA 日志。其余已知 code 照旧走 ERROR_TEXT：传输/鉴权类的 raw message 是
+  // provider/HTTP 原文，上屏既看不懂又可能带内部信息——ERROR_TEXT 存在的理由。
+  if (code === "INVALID_MODEL_OUTPUT" && fallback.trim() !== "") return fallback;
   return ERROR_TEXT[code] ?? `${code}：${fallback}`;
 }
 

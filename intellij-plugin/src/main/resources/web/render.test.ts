@@ -169,22 +169,72 @@ describe("PreviewRenderer", () => {
     renderer.renderCoreError(
       "s1",
       "b1",
-      "INVALID_MODEL_OUTPUT",
-      "原始 JSON 不该上屏",
+      "AUTH_FAILED",
+      '{"error":{"message":"Insufficient Balance"}}',
       tokens,
     );
 
     const retry = document.querySelector(".english-syntax-retry") as HTMLButtonElement;
     expect(retry).not.toBeNull();
-    // 错误文案按 code 出友好提示，不再透传模型原始 JSON
-    expect(document.querySelector(".english-syntax-error")?.textContent).toContain("模型返回结果无法解析");
-    expect(document.querySelector(".english-syntax-error")?.textContent).not.toContain("原始 JSON");
+    // 传输/鉴权类 code 出友好提示，不透传 provider 原始 JSON（看不懂又可能泄内部信息）。
+    expect(document.querySelector(".english-syntax-error")?.textContent).toContain(
+      "模型配置鉴权失败",
+    );
+    expect(document.querySelector(".english-syntax-error")?.textContent).not.toContain("Insufficient Balance");
     // 即使完整结果到达前没有流式分片，CORE_ERROR 自带 tokens 也能保留准确原句。
     expect(document.querySelector(".english-syntax-original")?.textContent).toBe("Classify the request.");
 
     retry.click();
     expect(detailRequests.length).toBe(0); // 失败句重试走 RETRY_SENTENCE，不触发 detail
     void element;
+  });
+
+  it("INVALID_MODEL_OUTPUT with a non-empty message shows the real validator summary (F1)", () => {
+    // F1：两轮修复仍失败的真实校验错误已在 CORE_ERROR.message 桥上（Kotlin 侧构造
+    // failures 时按 profile 密钥边界脱敏），屏上直接显示它——正是 Chrome 侧逐句失败
+    // 文案的形态；继续覆写成笼统文案会把排障刚需藏进 IDEA 日志。
+    const { renderer } = setup();
+    const tokens = [
+      { id: 0, text: "Classify", leadingWhitespace: "", punctuation: false },
+      { id: 1, text: "the", leadingWhitespace: " ", punctuation: false },
+      { id: 2, text: "request", leadingWhitespace: " ", punctuation: false },
+      { id: 3, text: ".", leadingWhitespace: "", punctuation: true },
+    ];
+    const summary =
+      "Model output remained invalid after two repairs: sentences[0].components[2].role: must be a known grammar role";
+    renderer.renderCoreError("s1", "b1", "INVALID_MODEL_OUTPUT", summary, tokens);
+
+    const error = document.querySelector(".english-syntax-error")?.textContent ?? "";
+    expect(error).toContain("Model output remained invalid after two repairs");
+    expect(error).toContain("must be a known grammar role");
+    expect(error).not.toContain("模型返回结果无法解析");
+  });
+
+  it("INVALID_MODEL_OUTPUT with an empty message keeps the friendly fallback text", () => {
+    // 桥上 message 缺失/为空（旧缓存或异常路径）时仍走 ERROR_TEXT，不显示空错误行。
+    const { renderer } = setup();
+    const tokens = [
+      { id: 0, text: "Classify", leadingWhitespace: "", punctuation: false },
+      { id: 1, text: "the", leadingWhitespace: " ", punctuation: false },
+      { id: 2, text: "request", leadingWhitespace: " ", punctuation: false },
+      { id: 3, text: ".", leadingWhitespace: "", punctuation: true },
+    ];
+    renderer.renderCoreError("s1", "b1", "INVALID_MODEL_OUTPUT", "", tokens);
+
+    expect(document.querySelector(".english-syntax-error")?.textContent).toContain("模型返回结果无法解析");
+  });
+
+  it("unknown codes keep the code-prefixed raw fallback", () => {
+    const { renderer } = setup();
+    const tokens = [
+      { id: 0, text: "Classify", leadingWhitespace: "", punctuation: false },
+      { id: 1, text: "the", leadingWhitespace: " ", punctuation: false },
+      { id: 2, text: "request", leadingWhitespace: " ", punctuation: false },
+      { id: 3, text: ".", leadingWhitespace: "", punctuation: true },
+    ];
+    renderer.renderCoreError("s1", "b1", "SOME_NEW_CODE", "细节信息", tokens);
+
+    expect(document.querySelector(".english-syntax-error")?.textContent).toContain("SOME_NEW_CODE：细节信息");
   });
 
   it("restoreAll removes plugin nodes and data attributes", () => {
