@@ -81,6 +81,13 @@ class PreviewSession(
   private var documentId = "$previewId-doc"
   private val pausedBlocks = mutableListOf<SentenceInput>()
 
+  /**
+   * F3 会话级一次性绕缓存标志：[reanalyzeAll] 置位，[flushBatch] 冲批时消费（取走即
+   * 复位）——onVisibleBlocks → dispatch 路径现状不带 bypass（只有 dispatchRetry 带），
+   * 这里把标志插进该收口。stop/换代会把挂起的重析操作作废，标志随之复位。
+   */
+  private var bypassCacheOnce = false
+
   internal data class SentenceRecord(
     var phase: SentencePhase,
     val blockId: String,
@@ -116,6 +123,7 @@ class PreviewSession(
   fun stop() {
     state = SessionState.STOPPED
     operationVersion += 1
+    bypassCacheOnce = false
     sentences.clear()
     pendingBatch.clear()
     pausedBlocks.clear()
@@ -134,10 +142,44 @@ class PreviewSession(
     })
   }
 
+  /**
+   * F3 重新解析全部段落（绕过缓存）：Chrome `REANALYZE_VISIBLE` 的 IDE 等价物
+   * （IntelliJ 无视口概念，全量扫描本就一次上报）。仅 RUNNING 可用（stopped 拒，
+   * 对齐 Chrome；PAUSED 也非 RUNNING）。
+   *
+   * 顺序不可换（评审 B4 钉死）：
+   * ① **先**升 operationVersion 并取消在飞批——[applyOutcome] 自身无版本守卫，旧批
+   *   返回会把刚失效的句标回 READY，而 [registerFresh] 对 READY 不放行、重扫会跳过
+   *   它们 → 静默漏译。镜像 [stop] 的取消（释放调度槽），但**不改 state、不发
+   *   RESTORE_ALL**；顺带清掉 pendingBatch，别让还在 120ms 合批窗口里的句子以
+   *   「不绕缓存」的旧姿态溜出去。
+   * ② 全量失效：phase→STALE（registerFresh 对 STALE 放行，READY+FAILED 一并重派）、
+   *   core 清空（旧成分不得被 detail/chat/纠正继续引用）。
+   * ③ 置一次性 [bypassCacheOnce] 标志。
+   * ④ `requestScan()` 重驱扫描（**同 generation**）：panel.requestScan →
+   *   `__englishSyntaxInitialize` 重置指纹 → 页面重报 VISIBLE_BLOCKS → requesting
+   *   竖条由此重闪。web 侧**无新消息**（重派走既有 CORE_RESULT/CORE_ERROR）。
+   */
+  fun reanalyzeAll() {
+    if (state != SessionState.RUNNING) return
+    operationVersion += 1
+    pendingBatch.clear()
+    scope.launch { analysis.cancelDocument(documentId) }
+    sentences.values.forEach { record ->
+      record.phase = SentencePhase.STALE
+      record.core = null
+    }
+    bypassCacheOnce = true
+    blockRequester.requestScan()
+    LOGGER.info("reanalyzeAll: invalidated ${sentences.size} sentences (generation=$generation, bypass next dispatch)")
+  }
+
   fun onGenerationChanged(newGeneration: Int) {
     if (newGeneration <= generation) return
     generation = newGeneration
     operationVersion += 1
+    // 换代作废挂起的重析操作：新代次的首轮扫描不得继承 bypass 标志。
+    bypassCacheOnce = false
     // 旧代次作废：取消在飞（含 chat 命名空间）、清空记录；防抖后由下一次 VISIBLE_BLOCKS 重新驱动。
     scope.launch {
       analysis.cancelDocument(documentId)
@@ -296,10 +338,20 @@ class PreviewSession(
     val batch = pendingBatch.toList()
     pendingBatch.clear()
     batchDeadline = 0
-    scope.launch { dispatch(batch, offscreen) }
+    // F3 一次性绕缓存标志在**真正冲批**时消费（取走即复位）：手动冲批（测试）与 120ms
+    // 自动冲批走同一收口，重析后的下一次普通重扫自然回落缓存路径。显式按段解析
+    // （parseExplicitBlock）不经这里，保持「不绕缓存」的既有语义。
+    val bypass = bypassCacheOnce
+    bypassCacheOnce = false
+    scope.launch { dispatch(batch, offscreen, bypassCache = bypass) }
   }
 
-  private suspend fun dispatch(inputs: List<SentenceInput>, offscreen: Boolean, allowPaused: Boolean = false) {
+  private suspend fun dispatch(
+    inputs: List<SentenceInput>,
+    offscreen: Boolean,
+    allowPaused: Boolean = false,
+    bypassCache: Boolean = false,
+  ) {
     // 普通路径行为不变（PAUSED 直接返回）；只有显式手势传 allowPaused = true 穿透。
     if (state == SessionState.STOPPED) return
     if (state == SessionState.PAUSED && !allowPaused) return
@@ -341,6 +393,7 @@ class PreviewSession(
         documentId = documentId,
         sentences = inputs,
         priority = priorityFor(active = true, offscreen = offscreen),
+        bypassCache = bypassCache,
         onStreamedComponent = StreamedComponentSink { sentenceId, components ->
           // 非 STOPPED 即可回推：applyOutcome 本来就不看暂停（在飞请求的最终结果照样
           // 渲染），分片却被丢掉，表现为「暂停后卡片突然整块冒出来、没有流式过程」。

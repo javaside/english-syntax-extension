@@ -56,6 +56,11 @@ class PreviewSessionManager(
     sessions[previewId]?.stop()
   }
 
+  /** F3 绕缓存整屏重析：仅会话 RUNNING 时生效（会话内部自判，非 RUNNING 静默拒）。 */
+  fun reanalyzeAll(previewId: String) {
+    sessions[previewId]?.reanalyzeAll()
+  }
+
   fun onGenerationChanged(previewId: String, generation: Int) {
     sessions[previewId]?.onGenerationChanged(generation)
   }

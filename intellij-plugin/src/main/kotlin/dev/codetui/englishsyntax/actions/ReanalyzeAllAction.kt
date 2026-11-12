@@ -1,0 +1,67 @@
+package dev.codetui.englishsyntax.actions
+
+import com.intellij.openapi.actionSystem.ActionUpdateThread
+import com.intellij.openapi.actionSystem.AnAction
+import com.intellij.openapi.actionSystem.AnActionEvent
+import dev.codetui.englishsyntax.markdown.EnglishSyntaxPreviewPanel
+import dev.codetui.englishsyntax.session.PreviewSessionManager
+
+/**
+ * F3 重新解析全部段落（绕过缓存）：Chrome `REANALYZE_VISIBLE` 的 IDE 等价物
+ * （IntelliJ 无视口概念，全量扫描本就一次上报）。
+ *
+ * 仅当前文件的会话 RUNNING 时可用（stopped 拒，对齐 Chrome）。机制全在
+ * [PreviewSession.reanalyzeAll]：掐在飞批 → 全量失效（STALE/core=null）→ 一次性
+ * bypass 标志 → 同 generation 重驱扫描（requestScan 重置指纹 → VISIBLE_BLOCKS
+ * 重新上报，requesting 竖条重闪）——web 侧无新消息。
+ */
+class ReanalyzeAllAction(
+  private val managerProvider: (com.intellij.openapi.project.Project) -> PreviewSessionManager? = { _ ->
+      com.intellij.openapi.components.service<dev.codetui.englishsyntax.PreviewSessionManagerService>().manager
+    },
+) : AnAction() {
+
+  override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
+
+  override fun update(event: AnActionEvent) {
+    val project = event.project
+    val manager = project?.let { runCatching { managerProvider(it) }.getOrNull() }
+    // 只看当前文件自己的会话，不受其它文件会话影响——多文件可并行翻译。
+    // update() 用只读的 findWrappedPanel：findPanel 会 wrap + 注入 JCEF，放这里会
+    // 让「点开工具菜单」就自动初始化 JS、扫描全文（假翻译回归）。
+    val session = project?.let { wrappedPanel(it) }?.let { panel -> manager?.session(panel.previewId) }
+    event.presentation.isEnabled = PreviewActionSupport.reanalyzeAllEnabled(session?.state)
+  }
+
+  override fun actionPerformed(event: AnActionEvent) {
+    val project = event.project ?: return
+    val manager = runCatching { managerProvider(project) }.getOrNull()
+    if (manager == null) {
+      ActionNotifier.warn(project, "句法学习服务不可用：请检查设置页配置")
+      return
+    }
+    val panel = panel(project)
+    if (panel == null) {
+      ActionNotifier.warn(project, "当前没有可用的 Markdown 预览面板")
+      return
+    }
+    val session = manager.session(panel.previewId) ?: run {
+      ActionNotifier.warn(project, "当前文件尚未开始句法学习")
+      return
+    }
+    if (!PreviewActionSupport.reanalyzeAllEnabled(session.state)) {
+      ActionNotifier.warn(project, "会话未在运行中：请先开始句法学习（或从暂停中继续）再重新解析")
+      return
+    }
+    manager.reanalyzeAll(panel.previewId)
+    ActionNotifier.info(project, "正在绕过缓存重新解析全部段落…（进度见预览页右下角）")
+  }
+
+  /** 当前文件面板：actionPerformed 用，会 wrap/attach（真正定位可 send 的面板）。 */
+  private fun panel(project: com.intellij.openapi.project.Project): EnglishSyntaxPreviewPanel? =
+    EnglishSyntaxPreviewPanel.findPanel(project)
+
+  /** update() 专用：只读定位已 wrap 的面板，无注入副作用。 */
+  private fun wrappedPanel(project: com.intellij.openapi.project.Project): EnglishSyntaxPreviewPanel? =
+    EnglishSyntaxPreviewPanel.findWrappedPanel(project)
+}

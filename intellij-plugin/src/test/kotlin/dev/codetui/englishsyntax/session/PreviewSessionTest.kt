@@ -18,6 +18,7 @@ import dev.codetui.englishsyntax.model.ChatTurn
 import dev.codetui.englishsyntax.scheduler.SchedulerPriority
 import dev.codetui.englishsyntax.settings.JsonSchemaSupport
 import dev.codetui.englishsyntax.settings.ModelProfile
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -32,6 +33,7 @@ import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
@@ -54,6 +56,11 @@ class PreviewSessionTest {
     var lastDetailCore: CoreAnalysis? = null
     /** 测试注入：analyzeCore 直接抛异常（模拟模型层崩溃，验证会话兜底给终态）。 */
     var throwOnAnalyzeCore = false
+    /**
+     * 测试注入（F3 在飞批竞速）：analyzeCore 挂起直至 gate 完成的一次性门。
+     * 置位后**下一次**调用在返回前挂起（消费后自清），此后调用不再挂起。
+     */
+    var analyzeGate: CompletableDeferred<Unit>? = null
     // ---- 追问对话（chat）接线断言用 ----
     var chatCalls = 0
     var lastChatConversationId: String? = null
@@ -91,6 +98,10 @@ class PreviewSessionTest {
       lastPriority = priority
       lastSentences = sentences
       lastBypassCache = bypassCache
+      analyzeGate?.let { gate ->
+        analyzeGate = null
+        gate.await()
+      }
       if (throwOnAnalyzeCore) throw IllegalStateException("model crash")
       onStreamOnce?.let { it(onStreamedComponent!!) }
       onStreamOnce = null
@@ -1111,5 +1122,241 @@ class PreviewSessionTest {
       "尚未配置可用的模型档案，请先在设置中配置",
       localSender.of("FEEDBACK_ERROR").single()["message"]?.jsonPrimitive?.contentOrNull,
     )
+  }
+
+  // ---- F3 重新解析全部段落（绕缓存）：reanalyzeAll ----
+
+  /** 「缓存命中 start」开局：首轮结果直接落账（cacheHit=true），句 READY。 */
+  private fun seedCacheHitStart(session: PreviewSession, blocks: List<Pair<String, String>>) {
+    service.outcome = CoreBatchOutcome(
+      listOf(
+        CoreAnalysis(
+          sentenceId = "s-b1-0",
+          components = listOf(CoreComponent(0, 1, GrammarRole.SUBJECT, "该服务")),
+          modelProfileId = "p1",
+        ),
+      ),
+      emptyList(),
+      cacheHit = true,
+    )
+    session.start()
+    session.onVisibleBlocks(blocks)
+    session.flushBatch(offscreen = false)
+  }
+
+  /**
+   * ① 缓存命中 start 后 reanalyzeAll：失效句必须绕过缓存重新派发（模型再次被调——
+   * 否则 registerFresh 的 READY 门 + 缓存短路会让「重析」变成空操作）且结果重画。
+   */
+  @Test
+  fun `reanalyze all after a cache hit start bypasses the cache and re-renders sentences`() = runBlocking {
+    val session = session()
+    val blocks = listOf("b1" to "The service validates every response carefully today.")
+    seedCacheHitStart(session, blocks)
+    kotlinx.coroutines.delay(100)
+    assertEquals(1, service.analyzeCalls)
+    assertEquals(SentencePhase.READY, session.sentences["s-b1-0"]?.phase)
+    assertEquals(1, sender.of("CORE_RESULT").size)
+    val generationBefore = session.generation
+
+    session.reanalyzeAll()
+
+    // 同 generation 重驱扫描（不新增 Kotlin→JS 消息；指纹重置由 initialize 自己做）。
+    assertEquals(2, scanRequests, "reanalyzeAll 必须经 requestScan 重驱页面重扫")
+    assertEquals(generationBefore, session.generation, "重析不换代")
+    assertEquals(SentencePhase.STALE, session.sentences["s-b1-0"]?.phase)
+    assertNull(session.sentences["s-b1-0"]?.core, "旧 core 必须清空，防 detail/chat 继续引用过期成分")
+
+    // 页面重报同一批块（initialize 重置指纹 → VISIBLE_BLOCKS 重新上报 → 竖条重闪）。
+    session.onVisibleBlocks(blocks)
+    session.flushBatch(offscreen = false)
+    kotlinx.coroutines.delay(100)
+
+    assertEquals(2, service.analyzeCalls, "失效句必须重新派发模型请求（不再被 READY 门挡住）")
+    assertEquals(true, service.lastBypassCache, "重析轮必须绕过缓存")
+    assertEquals(2, sender.of("CORE_RESULT").size, "新结果必须重画（第二条 CORE_RESULT）")
+    assertEquals(SentencePhase.READY, session.sentences["s-b1-0"]?.phase)
+  }
+
+  /** ② 非 RUNNING（STOPPED/PAUSED）一律静默拒：不重驱扫描、不取消、不失效。 */
+  @Test
+  fun `reanalyze all is rejected unless the session is running`() = runBlocking {
+    // 从未 start（STOPPED）。
+    val stopped = manager.obtain("pv-stopped", sender) { scanRequests += 1 }
+    stopped.reanalyzeAll()
+    assertEquals(0, scanRequests)
+    kotlinx.coroutines.delay(50)
+    assertTrue(service.cancelledDocuments.isEmpty(), "STOPPED 拒绝不触发取消")
+
+    // start 后 stop（STOPPED；对齐 Chrome stopped 拒）。
+    val stoppedAfterRun = manager.obtain("pv-stopped2", sender) { scanRequests += 1 }
+    stoppedAfterRun.start()
+    stoppedAfterRun.stop()
+    kotlinx.coroutines.delay(50)
+    service.cancelledDocuments.clear()
+    stoppedAfterRun.reanalyzeAll()
+    assertEquals(1, scanRequests, "只有 start 那一次扫描，reanalyzeAll 不得再触发")
+    assertTrue(service.cancelledDocuments.isEmpty())
+
+    // PAUSED 同样非 RUNNING，拒。
+    val paused = manager.obtain("pv-paused", sender) { scanRequests += 1 }
+    paused.start()
+    paused.pause()
+    paused.reanalyzeAll()
+    assertEquals(2, scanRequests, "PAUSED 的 reanalyzeAll 不得触发第三次扫描")
+    assertEquals(SessionState.PAUSED, paused.state, "被拒的 reanalyzeAll 不得改会话状态")
+  }
+
+  /**
+   * ③ bypass 标志一次性：重析轮绕缓存落账后，下一次普通重扫（失败句重派）不得再绕缓存。
+   */
+  @Test
+  fun `bypass flag is one-shot so the next ordinary rescan does not bypass the cache`() = runBlocking {
+    val session = session()
+    val blocks = listOf("b1" to "The service validates every response. Second sentence here too.")
+    // 首轮两句全成（bypass 与否无所谓，先造出可失效的 READY 记录）。
+    service.outcome = CoreBatchOutcome(
+      listOf(
+        CoreAnalysis(sentenceId = "s-b1-0", components = listOf(CoreComponent(0, 1, GrammarRole.SUBJECT, "该服务")), modelProfileId = "p1"),
+        CoreAnalysis(sentenceId = "s-b1-1", components = listOf(CoreComponent(0, 1, GrammarRole.SUBJECT, "第二句")), modelProfileId = "p1"),
+      ),
+      emptyList(),
+      cacheHit = false,
+    )
+    session.start()
+    session.onVisibleBlocks(blocks)
+    session.flushBatch(offscreen = false)
+    kotlinx.coroutines.delay(100)
+    assertEquals(1, service.analyzeCalls)
+
+    // 重析轮：一成一败——失败句是后续普通重扫的天然重派入口。
+    session.reanalyzeAll()
+    service.outcome = CoreBatchOutcome(
+      listOf(
+        CoreAnalysis(sentenceId = "s-b1-0", components = listOf(CoreComponent(0, 1, GrammarRole.SUBJECT, "该服务")), modelProfileId = "p1"),
+      ),
+      listOf(
+        AnalysisFailure("s-b1-1", ExtensionFailure(ErrorCode.INVALID_MODEL_OUTPUT, "invalid", false)),
+      ),
+      cacheHit = false,
+    )
+    session.onVisibleBlocks(blocks)
+    session.flushBatch(offscreen = false)
+    kotlinx.coroutines.delay(100)
+    assertEquals(2, service.analyzeCalls)
+    assertEquals(true, service.lastBypassCache, "重析轮必须绕缓存")
+    assertEquals(SentencePhase.READY, session.sentences["s-b1-0"]?.phase)
+    assertEquals(SentencePhase.FAILED, session.sentences["s-b1-1"]?.phase)
+
+    // 普通重扫：RUNNING 中再点「开始」→ requestScan → 重报 VISIBLE_BLOCKS，失败句重派。
+    session.start()
+    assertEquals(3, scanRequests)
+    session.onVisibleBlocks(blocks)
+    session.flushBatch(offscreen = false)
+    kotlinx.coroutines.delay(100)
+
+    assertEquals(3, service.analyzeCalls)
+    assertEquals(listOf("s-b1-1"), service.lastSentences.map { it.sentenceId }, "普通重扫只重派失败句")
+    assertEquals(false, service.lastBypassCache, "bypass 标志一次性：重析后的普通重扫不得再绕缓存")
+  }
+
+  /**
+   * ④ 在飞批竞速（评审 B4 钉死的顺序）：reanalyzeAll **先**升版本 + 取消在飞，
+   * 旧 outcome 必须被版本守卫丢弃——applyOutcome 自身无守卫，若不先掐掉，旧批会把
+   * 已失效句标回 READY，而重扫的 registerFresh 对 READY 不放行 → 静默漏译。
+   */
+  @Test
+  fun `reanalyze all kills in-flight batches and the stale outcome cannot mark invalidated sentences ready`() = runBlocking {
+    val session = session()
+    val blocks = listOf("b1" to "The service validates every response carefully today.")
+    seedCacheHitStart(session, blocks)
+    kotlinx.coroutines.delay(100)
+    assertEquals(1, service.analyzeCalls)
+
+    // 第二批在飞：analyzeCore 挂起在一次性门上。
+    val gate = CompletableDeferred<Unit>()
+    service.analyzeGate = gate
+    session.reanalyzeAll()
+    session.onVisibleBlocks(blocks)
+    session.flushBatch(offscreen = false)
+    kotlinx.coroutines.delay(100)
+    assertEquals(SentencePhase.QUEUED, session.sentences["s-b1-0"]?.phase, "一批应在飞（挂起在 analyzeCore 内）")
+    assertEquals(2, service.analyzeCalls)
+
+    // 此刻再触发一次 reanalyzeAll：掐掉在飞批（升版本 + cancelDocument，镜像 stop 但不发 RESTORE_ALL）。
+    val sessionStatesBeforeDrop = sender.of("SESSION_STATE").size
+    session.reanalyzeAll()
+    kotlinx.coroutines.delay(50)
+    assertTrue("pv1-doc" in service.cancelledDocuments, "reanalyzeAll 必须取消在飞批（镜像 stop 的取消）")
+    assertEquals(SessionState.RUNNING, session.state, "重析不改会话状态")
+    assertEquals(0, sender.of("RESTORE_ALL").size, "重析不发 RESTORE_ALL")
+    assertEquals(SentencePhase.STALE, session.sentences["s-b1-0"]?.phase)
+
+    // 旧批此刻返回：必须被版本守卫丢弃。
+    gate.complete(Unit)
+    kotlinx.coroutines.delay(100)
+    assertEquals(
+      SentencePhase.STALE,
+      session.sentences["s-b1-0"]?.phase,
+      "旧 outcome 不得把已失效句标回 READY（否则重扫跳过它们 → 静默漏译）",
+    )
+    assertEquals(1, sender.of("CORE_RESULT").size, "旧 outcome 不得重画（只有首轮那一条 CORE_RESULT）")
+    assertEquals(
+      sessionStatesBeforeDrop,
+      sender.of("SESSION_STATE").size,
+      "applyOutcome 未被调用（SESSION_STATE 只随它发出）",
+    )
+
+    // 重扫回来后正常走绕缓存路径并落账。
+    session.onVisibleBlocks(blocks)
+    session.flushBatch(offscreen = false)
+    kotlinx.coroutines.delay(100)
+    assertEquals(3, service.analyzeCalls)
+    assertEquals(true, service.lastBypassCache)
+    assertEquals(SentencePhase.READY, session.sentences["s-b1-0"]?.phase)
+  }
+
+  /** ⑤ 停止/换代守卫照常：重析后 stop 丢弃迟到上报；换代清记录且不继承 bypass 标志。 */
+  @Test
+  fun `stop and generation guards still apply after reanalyze all`() = runBlocking {
+    // ① 重析后立即 stop：RESTORE_ALL 照发、记录清空；迟到的重扫上报被 STOPPED 门丢弃。
+    val session = session()
+    val blocks = listOf("b1" to "The service validates every response carefully today.")
+    seedCacheHitStart(session, blocks)
+    kotlinx.coroutines.delay(100)
+    assertEquals(1, service.analyzeCalls)
+
+    session.reanalyzeAll()
+    session.stop()
+    kotlinx.coroutines.delay(50)
+    assertEquals(SessionState.STOPPED, session.state)
+    assertEquals(1, sender.of("RESTORE_ALL").size)
+    assertEquals(0, session.counts.discovered)
+    session.onVisibleBlocks(blocks)
+    session.flushBatch(offscreen = false)
+    kotlinx.coroutines.delay(100)
+    assertEquals(1, service.analyzeCalls, "stop 后迟到的重扫上报不得派发")
+
+    // ② 重析后换代：记录清空、在飞再取消一次；换代后的新扫描不继承 bypass 标志。
+    val session2 = manager.obtain("pv-gen", sender) { }
+    session2.start()
+    session2.onVisibleBlocks(blocks)
+    session2.flushBatch(offscreen = false)
+    kotlinx.coroutines.delay(100)
+    assertEquals(2, service.analyzeCalls)
+
+    session2.reanalyzeAll()
+    session2.onGenerationChanged(1)
+    kotlinx.coroutines.delay(50)
+    assertEquals(0, session2.counts.discovered)
+    assertTrue(
+      service.cancelledDocuments.count { it == "pv-gen-doc" } >= 2,
+      "reanalyzeAll 与换代各取消一次在飞批",
+    )
+    session2.onVisibleBlocks(blocks)
+    session2.flushBatch(offscreen = false)
+    kotlinx.coroutines.delay(100)
+    assertEquals(3, service.analyzeCalls, "换代后的新代次扫描照常派发")
+    assertEquals(false, service.lastBypassCache, "重析操作已被换代取代，新代次首轮不得继承 bypass 标志")
   }
 }

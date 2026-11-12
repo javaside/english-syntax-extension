@@ -34,6 +34,12 @@ object PreviewActionSupport {
   fun hoverParseEnabled(isMarkdownFile: Boolean, jcefSupported: Boolean): Boolean =
     isMarkdownFile && jcefSupported
 
+  /**
+   * F3 绕缓存整屏重析的可用性：**仅会话 RUNNING**（Chrome `REANALYZE_VISIBLE` 的
+   * stopped 拒同款；PAUSED 也不是 RUNNING——先继续再重析）。null = 无会话，不可用。
+   */
+  fun reanalyzeAllEnabled(state: SessionState?): Boolean = state == SessionState.RUNNING
+
   /** Toggle 按钮文案：running → 暂停；paused → 继续；否则 → 暂停（不可用）。 */
   fun togglePauseText(state: SessionState): String = when (state) {
     SessionState.PAUSED -> "继续"

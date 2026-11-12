@@ -181,4 +181,32 @@ class ActionStateTest {
     )
     assertTrue(xml.contains("first-keystroke=\"alt T\""), "默认键位应为 Alt+T")
   }
+
+  // ---- F3 重新解析全部段落（绕过缓存）Action ----
+
+  @Test
+  fun `reanalyze all is enabled only while the session is running`() {
+    // 对齐 Chrome REANALYZE_VISIBLE：stopped 拒；PAUSED 也不是 RUNNING（先继续再重析）。
+    assertFalse(PreviewActionSupport.reanalyzeAllEnabled(null))
+    val session = manager.obtain("pv1", sender) {}
+    assertFalse(PreviewActionSupport.reanalyzeAllEnabled(session.state), "STOPPED 不可用")
+    session.start()
+    assertTrue(PreviewActionSupport.reanalyzeAllEnabled(session.state), "RUNNING 可用")
+    session.pause()
+    assertFalse(PreviewActionSupport.reanalyzeAllEnabled(session.state), "PAUSED 不可用")
+  }
+
+  @Test
+  fun `plugin xml registers the reanalyze all action in the tools group`() {
+    val xml = ActionStateTest::class.java.classLoader
+      .getResourceAsStream("META-INF/plugin.xml")!!
+      .use { it.readBytes().toString(Charsets.UTF_8) }
+
+    assertTrue(
+      xml.contains("id=\"EnglishSyntax.ReanalyzeAll\""),
+      "重析 Action 必须注册（id 与既有四件套同前缀）",
+    )
+    assertTrue(xml.contains("dev.codetui.englishsyntax.actions.ReanalyzeAllAction"))
+    assertTrue(xml.contains("重新解析全部段落（绕过缓存）"), "菜单文案必须是既定中文措辞")
+  }
 }

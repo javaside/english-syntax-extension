@@ -30,6 +30,10 @@
       <action id="EnglishSyntax.Stop"
               class="dev.codetui.englishsyntax.actions.StopSyntaxLearningAction"
               text="停止并恢复原文"/>
+      <action id="EnglishSyntax.ReanalyzeAll"
+              class="dev.codetui.englishsyntax.actions.ReanalyzeAllAction"
+              text="重新解析全部段落（绕过缓存）"
+              description="作废全部已解析句子并绕过缓存重新请求模型（仅会话运行中可用）"/>
     </group>
   </actions>
 </idea-plugin>
