@@ -3,7 +3,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { PreviewRenderer } from "./render";
+import { CORRECTION_OPEN_EVENT, PreviewRenderer } from "./render";
 import { setDarkMode, isDarkMode } from "./roles";
 
 const HIDDEN = "data-english-syntax-hidden";
@@ -843,6 +843,301 @@ describe("PreviewRenderer", () => {
       // 悬停句区(或键盘聚焦)才完全显现。
       expect(css).toMatch(/\.english-syntax-sentence:hover \.english-syntax-chat-ask/);
       expect(css).toMatch(/\.english-syntax-chat-ask:focus-visible/);
+    });
+  });
+
+  describe("F2 内联纠正输入行", () => {
+    const TOKENS = [
+      { id: 0, text: "Classify", leadingWhitespace: "", punctuation: false },
+      { id: 1, text: "the", leadingWhitespace: " ", punctuation: false },
+      { id: 2, text: "request", leadingWhitespace: " ", punctuation: false },
+      { id: 3, text: ".", leadingWhitespace: "", punctuation: true },
+    ];
+
+    function setupFeedback(): {
+      renderer: PreviewRenderer;
+      element: HTMLElement;
+      feedbackRequests: Array<[string, string]>;
+    } {
+      const element = paragraph("p1");
+      const feedbackRequests: Array<[string, string]> = [];
+      const renderer = new PreviewRenderer(
+        () => {},
+        (sentenceId, feedback) => {
+          feedbackRequests.push([sentenceId, feedback]);
+        },
+      );
+      renderer.registerBlock("b1", element);
+      renderer.registerSentence("b1", "s1");
+      return { renderer, element, feedbackRequests };
+    }
+
+    /**
+     * 成功句 → 详解失败（A9 quirk）：`renderCoreError` 会把 analysis 置 null，但
+     * Kotlin 侧 record.core 仍在——「曾有 core」标志必须在置 null 前捕获，纠正入口
+     * （「纠正」按钮）据此保留。
+     */
+    function hadCoreFailure(renderer: PreviewRenderer): void {
+      renderer.renderCoreResult(
+        "s1",
+        "b1",
+        corePayload("s1", [
+          { startToken: 0, endToken: 2, role: "OBJECT", translation: "分类请求", text: "Classify the request" },
+        ]),
+        TOKENS,
+      );
+      renderer.renderCoreError("s1", "b1", "DETAIL_FAILED", "detail request failed", TOKENS);
+    }
+
+    function openRow(renderer: PreviewRenderer): {
+      row: HTMLElement;
+      textarea: HTMLTextAreaElement;
+      submit: HTMLButtonElement;
+      cancel: HTMLButtonElement;
+    } {
+      renderer.openCorrection("s1");
+      const row = document.querySelector<HTMLElement>(".english-syntax-feedback");
+      if (row === null) throw new Error("correction row not rendered");
+      return {
+        row,
+        textarea: row.querySelector<HTMLTextAreaElement>(".english-syntax-feedback-input")!,
+        submit: row.querySelector<HTMLButtonElement>(".english-syntax-feedback-submit")!,
+        cancel: row.querySelector<HTMLButtonElement>(".english-syntax-feedback-cancel")!,
+      };
+    }
+
+    it("renders the 纠正 button next to 重新解析 on a had-core failure row (detail-failure quirk)", () => {
+      const { renderer } = setupFeedback();
+      hadCoreFailure(renderer);
+
+      const failure = document.querySelector(".english-syntax-sentence-failure");
+      expect(failure).not.toBeNull();
+      const retry = failure?.querySelector<HTMLButtonElement>(".english-syntax-retry");
+      const correct = failure?.querySelector<HTMLButtonElement>(".english-syntax-correct");
+      expect(retry).not.toBeNull();
+      expect(correct).not.toBeNull();
+      expect(correct?.textContent).toBe("纠正");
+      // 「重新解析」旁：纠正按钮紧跟其后。
+      expect(correct?.previousElementSibling).toBe(retry);
+    });
+
+    it("renders no 纠正 button for a sentence that never had core (fresh core failure)", () => {
+      // 纠正以 Kotlin 侧仍在的 record.core 为底稿——全新 core 失败没有可纠正的划分，
+      // 不设入口（想纠正先「重新解析」拿到核实划分）。
+      const { renderer } = setupFeedback();
+      renderer.renderCoreError("s1", "b1", "INVALID_MODEL_OUTPUT", "bad json", TOKENS);
+
+      expect(document.querySelector(".english-syntax-retry")).not.toBeNull();
+      expect(document.querySelector(".english-syntax-correct")).toBeNull();
+      // 直接调 API 也是 no-op。
+      renderer.openCorrection("s1");
+      expect(document.querySelector(".english-syntax-feedback")).toBeNull();
+    });
+
+    it("纠正 button dispatches a bubbling composed correction-open event (chat icon precedent)", () => {
+      const { renderer } = setupFeedback();
+      hadCoreFailure(renderer);
+      const correct = document.querySelector<HTMLElement>(".english-syntax-correct")!;
+
+      const seen: Array<{ detail: unknown; composed: boolean }> = [];
+      const listener = (event: Event): void => {
+        seen.push({ detail: (event as CustomEvent).detail, composed: event.composed });
+      };
+      document.addEventListener(CORRECTION_OPEN_EVENT, listener);
+      try {
+        correct.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        expect(seen).toEqual([{ detail: { sentenceId: "s1" }, composed: true }]);
+      } finally {
+        document.removeEventListener(CORRECTION_OPEN_EVENT, listener);
+      }
+    });
+
+    it("openCorrection inserts an inline row below the card; submit sends trimmed feedback and disables the row", () => {
+      const { renderer, feedbackRequests } = setupFeedback();
+      hadCoreFailure(renderer);
+
+      const { row, textarea, submit, cancel } = openRow(renderer);
+      // 句卡下方：行挂在卡片元素正后方，不在被整卡重建的卡片里。
+      expect(row.previousElementSibling?.hasAttribute("data-english-syntax-card")).toBe(true);
+      expect(textarea.getAttribute("maxlength")).toBe("2000");
+      expect(submit.textContent).toBe("提交");
+      expect(cancel.textContent).toBe("取消");
+
+      // 空白反馈不提交（Kotlin parse 门同样拒收）。
+      textarea.value = "   ";
+      submit.click();
+      expect(feedbackRequests).toHaveLength(0);
+
+      textarea.value = "  of applications 应是定语不是状语  ";
+      submit.click();
+      expect(feedbackRequests).toEqual([["s1", "of applications 应是定语不是状语"]]);
+      // 等待中禁用（输入与两个按钮全部冻结）。
+      expect(textarea.disabled).toBe(true);
+      expect(submit.disabled).toBe(true);
+      expect(cancel.disabled).toBe(true);
+      expect(submit.textContent).toBe("提交中…");
+    });
+
+    it("Enter submits and Shift+Enter keeps the newline (chat composer parity)", () => {
+      const { renderer, feedbackRequests } = setupFeedback();
+      hadCoreFailure(renderer);
+      const { textarea } = openRow(renderer);
+
+      textarea.value = "划分不对";
+      textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+      expect(feedbackRequests).toEqual([["s1", "划分不对"]]);
+
+      textarea.value = "换个描述";
+      textarea.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Enter", shiftKey: true, bubbles: true, cancelable: true }),
+      );
+      expect(feedbackRequests).toHaveLength(1);
+    });
+
+    it("FEEDBACK_ERROR shows the message in the row, leaves the card untouched, and stays retryable", () => {
+      const { renderer, feedbackRequests } = setupFeedback();
+      hadCoreFailure(renderer);
+      const { row, textarea, submit } = openRow(renderer);
+      textarea.value = "划分不对";
+      submit.click();
+
+      const failureErrorBefore = document.querySelector(".english-syntax-error")?.textContent;
+      renderer.renderFeedbackError(
+        "s1",
+        "INVALID_MODEL_OUTPUT：Model output remained invalid after one repair: sentences[0].components[1].role: must be a known grammar role",
+      );
+
+      // 错误就地显示在输入行（F1 口径：INVALID_MODEL_OUTPUT 显示真实 summary）。
+      const rowError = row.querySelector(".english-syntax-feedback-error");
+      expect(rowError?.textContent).toContain("Model output remained invalid after one repair");
+      expect(rowError?.textContent).toContain("must be a known grammar role");
+      // 卡片不动：失败行仍是原来的详解失败文案，没有被失败重画（had-core 句的重画会
+      // 抹掉仍在 Kotlin 侧的核实划分）。
+      expect(document.querySelector(".english-syntax-error")?.textContent).toBe(failureErrorBefore);
+      expect(document.querySelectorAll(".english-syntax-sentence-failure")).toHaveLength(1);
+      // 输入恢复、草稿保留、可重试。
+      expect(textarea.disabled).toBe(false);
+      expect(submit.disabled).toBe(false);
+      expect(textarea.value).toBe("划分不对");
+      expect(submit.textContent).toBe("提交");
+
+      textarea.value = "再描述一次";
+      submit.click();
+      expect(feedbackRequests).toHaveLength(2);
+      expect(feedbackRequests[1]).toEqual(["s1", "再描述一次"]);
+    });
+
+    it("ignores FEEDBACK_ERROR for other sentences or before any submit", () => {
+      const { renderer } = setupFeedback();
+      hadCoreFailure(renderer);
+      const { row, textarea, submit } = openRow(renderer);
+      const errorSlot = (): { hidden: boolean; text: string } => {
+        const slot = row.querySelector<HTMLElement>(".english-syntax-feedback-error");
+        return { hidden: slot === null || slot.hidden === true, text: slot?.textContent ?? "" };
+      };
+
+      // 未提交（editing）时到达的错误与本轮无关：不显示、不打断输入。
+      renderer.renderFeedbackError("s1", "early");
+      expect(errorSlot()).toEqual({ hidden: true, text: "" });
+      expect(textarea.disabled).toBe(false);
+
+      textarea.value = "划分不对";
+      submit.click();
+      // 其他句子的错误不影响本行：仍在等待。
+      renderer.renderFeedbackError("s-other", "boom");
+      expect(errorSlot()).toEqual({ hidden: true, text: "" });
+      expect(textarea.disabled).toBe(true);
+    });
+
+    it("a late FEEDBACK_ERROR after the row closed is harmless", () => {
+      const { renderer } = setupFeedback();
+      hadCoreFailure(renderer);
+      const { cancel } = openRow(renderer);
+      cancel.click();
+      expect(document.querySelector(".english-syntax-feedback")).toBeNull();
+
+      expect(() => renderer.renderFeedbackError("s1", "late")).not.toThrow();
+      expect(document.querySelector(".english-syntax-feedback")).toBeNull();
+    });
+
+    it("CORE_RESULT for the corrected sentence re-renders the card and removes the row", () => {
+      const { renderer, feedbackRequests } = setupFeedback();
+      hadCoreFailure(renderer);
+      const { textarea, submit } = openRow(renderer);
+      textarea.value = "划分不对";
+      submit.click();
+
+      renderer.renderCoreResult(
+        "s1",
+        "b1",
+        corePayload("s1", [
+          { startToken: 0, endToken: 1, role: "SUBJECT", translation: "该服务", text: "The service" },
+        ]),
+        TOKENS,
+      );
+
+      expect(document.querySelector(".english-syntax-feedback")).toBeNull();
+      // 既有重画路径：成功卡片的成分照常渲染。
+      expect(document.querySelectorAll(".english-syntax-component").length).toBeGreaterThan(0);
+      expect(feedbackRequests).toHaveLength(1);
+    });
+
+    it("keeps the open row (with draft) across sibling repaints — the row does not live in the rebuilt card", () => {
+      // 失败行是易碎的（只在 errorSentenceId 匹配的那一帧渲染）；输入行的存续只依赖
+      // renderer 状态，兄弟句消息触发的整卡重建既不能吞掉行、也不能丢草稿。
+      const { renderer } = setupFeedback();
+      renderer.registerSentence("b1", "s2");
+      hadCoreFailure(renderer);
+      const { textarea } = openRow(renderer);
+      textarea.value = "翻译不对";
+
+      renderer.renderCoreStream("s2", "b1", [
+        { startToken: 0, endToken: 1, role: "SUBJECT", translation: "该服务", text: "The service" },
+      ]);
+
+      const row = document.querySelector<HTMLElement>(".english-syntax-feedback");
+      expect(row).not.toBeNull();
+      expect(row?.querySelector<HTMLTextAreaElement>(".english-syntax-feedback-input")?.value).toBe("翻译不对");
+    });
+
+    it("取消 closes the row; openCorrection no-ops for unknown sentences", () => {
+      const { renderer } = setupFeedback();
+      hadCoreFailure(renderer);
+      const { cancel } = openRow(renderer);
+      cancel.click();
+      expect(document.querySelector(".english-syntax-feedback")).toBeNull();
+
+      renderer.openCorrection("unknown");
+      expect(document.querySelector(".english-syntax-feedback")).toBeNull();
+    });
+
+    it("restoreAll and block re-registration drop the open row", () => {
+      const { renderer, element } = setupFeedback();
+      hadCoreFailure(renderer);
+      openRow(renderer);
+      expect(document.querySelector(".english-syntax-feedback")).not.toBeNull();
+
+      renderer.restoreAll();
+      expect(document.querySelector(".english-syntax-feedback")).toBeNull();
+
+      // 重新注册同块（换代重扫）：行随旧句子作废，不会悬在新卡上。
+      hadCoreFailure(renderer);
+      renderer.openCorrection("s1");
+      expect(document.querySelector(".english-syntax-feedback")).not.toBeNull();
+      renderer.registerBlock("b1", element);
+      expect(document.querySelector(".english-syntax-feedback")).toBeNull();
+    });
+
+    it("the injected stylesheet ships the correction button and inline row visuals (chat vocabulary)", () => {
+      // happy-dom 不加载注入样式表，只能按文本钉住（隐藏属性/chat 图标 CSS 测试同款）。
+      const css = readFileSync(join(process.cwd(), "src/main/resources/web/preview.css"), "utf8");
+      expect(css).toMatch(/\.english-syntax-correct\s*\{/);
+      expect(css).toMatch(/\.english-syntax-feedback\s*\{/);
+      expect(css).toMatch(/\.english-syntax-feedback-input\s*\{/);
+      // 错误就地显示沿用 chat 错误气泡的视觉语汇。
+      expect(css).toMatch(/\.english-syntax-feedback-error\s*\{/);
+      // 深色主题有对应覆盖（chat 面板同款考虑，否则暗色页上一块白补丁）。
+      expect(css).toMatch(/\[data-english-syntax-dark="true"\][^{]*\.english-syntax-feedback\s*\{/);
     });
   });
 

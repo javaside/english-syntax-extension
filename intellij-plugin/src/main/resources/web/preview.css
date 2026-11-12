@@ -138,7 +138,8 @@ button.english-syntax-component * {
 }
 
 .english-syntax-component:focus-visible,
-.english-syntax-retry:focus-visible {
+.english-syntax-retry:focus-visible,
+.english-syntax-correct:focus-visible {
   outline: 2px solid currentColor;
   outline-offset: 2px;
 }
@@ -200,7 +201,9 @@ button.english-syntax-component * {
   color: #dc2626;
 }
 
-.english-syntax-retry {
+/* 失败行的操作按钮：「重新解析」与 F2「纠正」同一视觉语汇（纠正按钮在其后，带左边距）。 */
+.english-syntax-retry,
+.english-syntax-correct {
   margin-inline-start: 0.5em;
   border: 1px solid currentColor;
   border-radius: 0.25em;
@@ -213,15 +216,18 @@ button.english-syntax-component * {
     transform 80ms ease;
 }
 
-.english-syntax-retry:hover:enabled {
+.english-syntax-retry:hover:enabled,
+.english-syntax-correct:hover:enabled {
   background: color-mix(in srgb, currentColor 12%, transparent);
 }
 
-.english-syntax-retry:active:enabled {
+.english-syntax-retry:active:enabled,
+.english-syntax-correct:active:enabled {
   transform: translateY(1px);
 }
 
-.english-syntax-retry:disabled {
+.english-syntax-retry:disabled,
+.english-syntax-correct:disabled {
   cursor: default;
   opacity: 0.6;
 }
@@ -323,7 +329,10 @@ button.english-syntax-component * {
 
 .english-syntax-chat-header button:focus-visible,
 .english-syntax-chat-send:focus-visible,
-.english-syntax-chat-input:focus-visible {
+.english-syntax-chat-input:focus-visible,
+.english-syntax-feedback-input:focus-visible,
+.english-syntax-feedback-submit:focus-visible,
+.english-syntax-feedback-cancel:focus-visible {
   outline: 2px solid #18181b;
   outline-offset: 1px;
 }
@@ -426,6 +435,81 @@ button.english-syntax-component * {
   display: none;
 }
 
+/* —— F2 内联纠正输入行（render.ts #createCorrectionRow）：失败行「纠正」按钮打开，
+   挂在卡片（或还原后的原文块）之后。视觉复用追问面板的语汇：同款输入框边框/圆角、
+   禁用态、主按钮（发送=提交）与错误气泡；cursor 走 JS 内联 !important（成分按钮同款坑）。 —— */
+
+.english-syntax-feedback {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-block: 0.35em 0.55em;
+  padding: 8px 10px;
+  max-inline-size: 100%;
+  overflow-wrap: anywhere;
+  border: 1px solid #d4d4d8;
+  border-radius: 8px;
+  background: #fff;
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+
+.english-syntax-feedback-input {
+  resize: vertical;
+  min-height: 2.4em;
+  max-height: 9em;
+  font: inherit;
+  color: inherit;
+  padding: 6px 8px;
+  border: 1px solid #d4d4d8;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.english-syntax-feedback-input:disabled {
+  background: #f4f4f5;
+}
+
+.english-syntax-feedback-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.english-syntax-feedback-submit,
+.english-syntax-feedback-cancel {
+  appearance: none;
+  font: 11px/1.4 system-ui, sans-serif;
+  color: #52525b;
+  padding: 4px 14px;
+  border: 1px solid #d4d4d8;
+  border-radius: 6px;
+  background: transparent;
+}
+
+.english-syntax-feedback-submit {
+  background: #18181b;
+  border-color: #18181b;
+  color: #fff;
+}
+
+.english-syntax-feedback-submit:disabled,
+.english-syntax-feedback-cancel:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+/* 纠正失败就地显示（chat 错误气泡同款视觉）：message 为 Kotlin 侧 F1 口径文案。 */
+.english-syntax-feedback-error {
+  color: #b91c1c;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  padding: 6px 10px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* 深色主题（Kotlin 注入根 data 属性）：面板自带浅色底，不随主题换会成暗页白补丁。 */
 :root[data-english-syntax-dark="true"] .english-syntax-chat-panel {
   background: #1f2937;
@@ -479,6 +563,39 @@ button.english-syntax-component * {
   color: #111827;
 }
 
+/* F2 内联纠正输入行的深色覆盖（chat 面板同款考虑：自带浅色底不随主题换会成白补丁）。 */
+:root[data-english-syntax-dark="true"] .english-syntax-feedback {
+  background: #1f2937;
+  border-color: #374151;
+  color: #e5e7eb;
+}
+
+:root[data-english-syntax-dark="true"] .english-syntax-feedback-input {
+  background: #111827;
+  border-color: #4b5563;
+}
+
+:root[data-english-syntax-dark="true"] .english-syntax-feedback-input:disabled {
+  background: #374151;
+}
+
+:root[data-english-syntax-dark="true"] .english-syntax-feedback-cancel {
+  color: #9ca3af;
+  border-color: #4b5563;
+}
+
+:root[data-english-syntax-dark="true"] .english-syntax-feedback-submit {
+  background: #e5e7eb;
+  border-color: #e5e7eb;
+  color: #111827;
+}
+
+:root[data-english-syntax-dark="true"] .english-syntax-feedback-error {
+  color: #fca5a5;
+  background: #3f1d1d;
+  border-color: #7f2d2d;
+}
+
 .english-syntax-provisional {
   opacity: 0.75;
 }
@@ -486,6 +603,7 @@ button.english-syntax-component * {
 @media (prefers-reduced-motion: reduce) {
   .english-syntax-component,
   .english-syntax-retry,
+  .english-syntax-correct,
   .english-syntax-chat-ask {
     transition: none;
   }

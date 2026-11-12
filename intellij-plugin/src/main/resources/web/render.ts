@@ -8,7 +8,7 @@
  * 模型文本一律 textContent；旧 generation 的消息在入口处丢弃。
  */
 
-import type { HostMessage } from "./bridge";
+import { MAX_FEEDBACK_CHARACTERS, type HostMessage } from "./bridge";
 import { circledNumber, roleColor, roleLabel, structureColor } from "./roles";
 
 const HIDDEN_ATTRIBUTE = "data-english-syntax-hidden";
@@ -44,6 +44,13 @@ interface SentenceRecord {
   provisional: ComponentPayload[] | null;
   tokens: TokenPayload[];
   failed: boolean;
+  /**
+   * F2：「曾有已核实 core」标志。`renderCoreError` 会把 analysis 置 null——详解失败
+   * （A9 quirk）正是这样把成功句打成失败行的，但 Kotlin 侧 record.core 仍在，纠正
+   * 以它为底稿。标志必须在置 null **前**捕获，失败行的「纠正」按钮据此保留；
+   * 全新 core 失败句从未有过核实划分，不设纠正入口。
+   */
+  hadCore: boolean;
 }
 
 interface TokenPayload {
@@ -86,6 +93,21 @@ export type DetailRequestHandler = (
   focusStart: number,
   focusEnd: number,
 ) => void;
+
+/** F2 纠正提交回调：feedback 已 trim 且 1..MAX_FEEDBACK_CHARACTERS（构造方负责发桥消息）。 */
+export type FeedbackRequestHandler = (sentenceId: string, feedback: string) => void;
+
+/**
+ * 失败行「纠正」按钮派发的 DOM 事件名（冒泡 + composed；bootstrap-entry 在 document
+ * 级接住并回调 openCorrection——CHAT_ASK_REQUEST_EVENT 同款委托先例）。点击**不发**
+ * FEEDBACK_REQUEST——那时还没有合法 feedback，提交只能由输入行驱动。
+ */
+export const CORRECTION_OPEN_EVENT = "english-syntax-correction-open";
+
+/** #createCorrectionButton 点击事件的载荷。 */
+export interface CorrectionOpenDetail {
+  sentenceId: string;
+}
 
 /**
  * 句头追问按钮派发的 DOM 事件名（冒泡 + composed；bootstrap-entry 在 document 级接住，
@@ -176,9 +198,24 @@ export class PreviewRenderer {
   readonly #blockSentenceOrder = new Map<string, string[]>();
   #currentDetail: { sentenceId: string; focusStart: number; focusEnd: number } | null = null;
   readonly #onDetailRequest: DetailRequestHandler;
+  readonly #onFeedbackRequest: FeedbackRequestHandler;
+  /**
+   * F2 内联纠正输入行的常驻状态。行 DOM 挂在卡片（或还原后的原文块）**之后**——
+   * 不参与 #renderCard 的整卡重建，失败行只在 errorSentenceId 匹配的那一帧渲染、
+   * 兄弟句消息一重画就消失，输入行的存续不能依赖它（草稿/焦点随常驻 DOM 天然保留）。
+   */
+  #correction: {
+    sentenceId: string;
+    status: "editing" | "waiting" | "error";
+    row: HTMLElement;
+  } | null = null;
 
-  constructor(onDetailRequest: DetailRequestHandler) {
+  constructor(
+    onDetailRequest: DetailRequestHandler,
+    onFeedbackRequest: FeedbackRequestHandler = () => {},
+  ) {
     this.#onDetailRequest = onDetailRequest;
+    this.#onFeedbackRequest = onFeedbackRequest;
   }
 
   /**
@@ -195,7 +232,12 @@ export class PreviewRenderer {
   registerBlock(blockId: string, element: HTMLElement): void {
     const previous = this.#blocks.get(blockId);
     if (previous !== undefined) {
-      for (const sentenceId of previous.sentences.keys()) this.#sentences.delete(sentenceId);
+      for (const sentenceId of previous.sentences.keys()) {
+        // F2：纠正行随旧句子一起作废——换代重扫后 sentenceId 会复用，悬着的旧行
+        // 不能落在新卡上（对不上新记录的核实质）。
+        if (this.#correction?.sentenceId === sentenceId) this.#closeCorrection();
+        this.#sentences.delete(sentenceId);
+      }
     }
     this.#blocks.set(blockId, { blockId, element, card: null, sentences: new Map() });
     this.#blockSentenceOrder.set(blockId, []);
@@ -249,6 +291,12 @@ export class PreviewRenderer {
       case "RESTORE_ALL":
         this.restoreAll();
         break;
+      case "FEEDBACK_ERROR":
+        // F2 纠正失败：错误就地进输入行、卡片不动。bootstrap 的 switch 对 FEEDBACK_ERROR
+        // 有显式转发 case（brief 钉死），这里是统一入口的镜像，两处不会对同一条消息
+        // 双跑（bootstrap 转发后 return，不落回这里的调用方路径）。
+        this.renderFeedbackError(message.sentenceId, message.message);
+        break;
       default:
         break;
     }
@@ -281,10 +329,13 @@ export class PreviewRenderer {
     const entry = this.#sentences.get(sentenceId);
     if (entry === undefined) return;
     entry.record.analysis = analysis;
+    entry.record.hadCore = true; // F2：核实划分到手，纠正入口自此有底稿。
     if (tokens.length > 0) entry.record.tokens = tokens;
     entry.record.provisional = null;
     entry.record.failed = false;
     this.#sentences.set(sentenceId, entry);
+    // F2：纠正成功的结果走既有重画；输入行随之移除（卡片已是最新划分）。
+    if (this.#correction?.sentenceId === sentenceId) this.#closeCorrection();
     // 登记句子顺序并重画。
     const order = this.#blockSentenceOrder.get(entry.blockId) ?? [];
     if (!order.includes(sentenceId)) order.push(sentenceId);
@@ -302,6 +353,9 @@ export class PreviewRenderer {
     this.#ensureSentence(blockId, sentenceId);
     const entry = this.#sentences.get(sentenceId);
     if (entry === undefined) return;
+    // F2：「曾有 core」在 analysis 置 null **前**捕获——详解失败（A9 quirk）正是
+    // 这条路径把成功句打成失败行的，Kotlin 侧 record.core 仍在，「纠正」按钮据此保留。
+    if (entry.record.analysis !== null) entry.record.hadCore = true;
     entry.record.failed = true;
     entry.record.analysis = null;
     entry.record.provisional = null;
@@ -324,7 +378,13 @@ export class PreviewRenderer {
     if (this.#sentences.has(sentenceId)) return;
     const record = this.#blocks.get(blockId);
     if (record === undefined) return;
-    record.sentences.set(sentenceId, { analysis: null, provisional: null, tokens: [], failed: false });
+    record.sentences.set(sentenceId, {
+      analysis: null,
+      provisional: null,
+      tokens: [],
+      failed: false,
+      hadCore: false,
+    });
     this.#sentences.set(sentenceId, { blockId, record: record.sentences.get(sentenceId)! });
   }
 
@@ -338,6 +398,56 @@ export class PreviewRenderer {
 
   requestDetail(sentenceId: string, focusStart: number, focusEnd: number): void {
     this.#onDetailRequest(sentenceId, focusStart, focusEnd);
+  }
+
+  /**
+   * F2：打开（或切换到）某句的内联纠正输入行。生产入口是失败行「纠正」按钮经
+   * bootstrap 的 document 级委托（CORRECTION_OPEN_EVENT）；只有 `hadCore` 的句子
+   * 可开——纠正是对已核实划分的一次性修正，全新 core 失败没有底稿。同时只保留
+   * 一行（详解面板同款取舍），重复开同一句是 no-op（保留草稿）。
+   */
+  openCorrection(sentenceId: string): void {
+    const entry = this.#sentences.get(sentenceId);
+    if (entry === undefined || !entry.record.hadCore) return;
+    if (this.#correction !== null) {
+      if (this.#correction.sentenceId === sentenceId) return;
+      this.#closeCorrection();
+    }
+    const record = this.#blocks.get(entry.blockId);
+    if (record === undefined) return;
+    const row = this.#createCorrectionRow(record.element.ownerDocument, sentenceId);
+    this.#correction = { sentenceId, status: "editing", row };
+    this.#placeCorrectionRow();
+  }
+
+  /**
+   * F2 纠正失败：FEEDBACK_ERROR 的 message 就地显示在输入行（chat 面板 CHAT_ERROR
+   * 同款形态；message 已是 Kotlin 侧 F1 口径——INVALID_MODEL_OUTPUT 带真实脱敏
+   * summary），输入恢复、草稿保留、可重试。**绝不触碰句卡**：对 had-core 句做失败
+   * 重画会把仍在 Kotlin 侧的核实划分抹掉（Kotlin 侧同样绝不自发 CORE_ERROR）。
+   * generation 过滤在 bridge 层，这里按 sentenceId 关联到唯一打开的行，且只收
+   * waiting 态（提交过）的错误——编辑中的迟到错误不覆盖新一轮输入。
+   */
+  renderFeedbackError(sentenceId: string, message: string): void {
+    const correction = this.#correction;
+    if (correction === null || correction.sentenceId !== sentenceId) return;
+    if (correction.status !== "waiting") return;
+    correction.status = "error";
+    const row = correction.row;
+    const input = row.querySelector<HTMLTextAreaElement>(".english-syntax-feedback-input");
+    const submit = row.querySelector<HTMLButtonElement>(".english-syntax-feedback-submit");
+    const cancel = row.querySelector<HTMLButtonElement>(".english-syntax-feedback-cancel");
+    const error = row.querySelector<HTMLElement>(".english-syntax-feedback-error");
+    if (input !== null) input.disabled = false;
+    if (submit !== null) {
+      submit.disabled = false;
+      submit.textContent = "提交";
+    }
+    if (cancel !== null) cancel.disabled = false;
+    if (error !== null) {
+      error.textContent = message;
+      error.hidden = false;
+    }
   }
 
   /**
@@ -428,6 +538,8 @@ export class PreviewRenderer {
       options.detailStructures === undefined
     ) {
       this.#restoreBlock(record);
+      // F2：卡片还原后纠正行改挂原文块之后——原句重新可见，行仍在它的正下方。
+      this.#placeCorrectionRow();
       return;
     }
     if (record.card === null) {
@@ -437,6 +549,8 @@ export class PreviewRenderer {
     }
     record.element.setAttribute(HIDDEN_ATTRIBUTE, "true");
     this.#renderCard(record, order, options);
+    // F2：整卡重建不动行（它在卡片外），重贴一次确保仍钉在卡片正后方。
+    this.#placeCorrectionRow();
   }
 
   #renderCard(
@@ -468,6 +582,9 @@ export class PreviewRenderer {
           createElement(owner, "span", "english-syntax-error", options.message ?? "解析失败"),
         );
         failure.append(this.#createRetry(owner, sentenceId));
+        // F2：曾有核实划分（如详解失败 quirk）的失败行加「纠正」入口——Kotlin 侧
+        // record.core 仍在，纠正以它为底稿；全新 core 失败没有可纠正的划分，不设按钮。
+        if (sentence.hadCore) failure.append(this.#createCorrectionButton(owner, sentenceId));
         container.append(failure);
         continue;
       }
@@ -679,6 +796,107 @@ export class PreviewRenderer {
   }
 
   /**
+   * F2 失败行的「纠正」按钮：点击只派发 CORRECTION_OPEN_EVENT（冒泡 + composed），
+   * 不直接开行、不发桥消息——开行由 bootstrap 的 document 级委托回调 openCorrection
+   * （CHAT_ASK_REQUEST_EVENT 同款先例）。视觉与「重新解析」同款（preview.css 分组选择器）。
+   */
+  #createCorrectionButton(owner: Document, sentenceId: string): HTMLButtonElement {
+    const correct = createElement(owner, "button", "english-syntax-correct", "纠正");
+    correct.type = "button";
+    // cursor 内联 + !important：官方 Markdown 预览的全局规则会压过 stylesheet 的 cursor
+    // （成分按钮同款坑，见 #renderCard 内注释）。
+    correct.style.setProperty("cursor", "pointer", "important");
+    correct.addEventListener("click", () => {
+      correct.dispatchEvent(
+        new CustomEvent<CorrectionOpenDetail>(CORRECTION_OPEN_EVENT, {
+          bubbles: true,
+          composed: true,
+          detail: { sentenceId },
+        }),
+      );
+    });
+    return correct;
+  }
+
+  /** F2 内联纠正输入行：textarea（maxlength 与 Kotlin 门同值）+ 提交/取消 + 错误槽。 */
+  #createCorrectionRow(owner: Document, sentenceId: string): HTMLElement {
+    const row = createElement(owner, "div", "english-syntax-feedback");
+    row.dataset.sentenceId = sentenceId;
+
+    const input = owner.createElement("textarea");
+    input.className = "english-syntax-feedback-input";
+    input.setAttribute("maxlength", String(MAX_FEEDBACK_CHARACTERS));
+    input.setAttribute("placeholder", "描述这句需要纠正的划分或译文…");
+    input.setAttribute("aria-label", "纠正反馈");
+    input.addEventListener("keydown", (event) => {
+      // IME 组字中的 Enter 是选字确认，不是提交（chat composer 同款）。
+      if (event.isComposing) return;
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault(); // Shift+Enter 走默认换行
+        this.#submitCorrection();
+      }
+    });
+
+    const submit = createElement(owner, "button", "english-syntax-feedback-submit", "提交");
+    submit.type = "button";
+    submit.style.setProperty("cursor", "pointer", "important");
+    submit.addEventListener("click", () => this.#submitCorrection());
+
+    const cancel = createElement(owner, "button", "english-syntax-feedback-cancel", "取消");
+    cancel.type = "button";
+    cancel.style.setProperty("cursor", "pointer", "important");
+    cancel.addEventListener("click", () => this.#closeCorrection());
+
+    const actions = createElement(owner, "div", "english-syntax-feedback-actions");
+    actions.append(submit, cancel);
+
+    const error = createElement(owner, "div", "english-syntax-feedback-error");
+    error.hidden = true;
+
+    row.append(input, actions, error);
+    return row;
+  }
+
+  /** F2 提交：trim 后非空才发（Kotlin parse 门同口径），行整体进入禁用等待。 */
+  #submitCorrection(): void {
+    const correction = this.#correction;
+    if (correction === null || correction.status === "waiting") return;
+    const row = correction.row;
+    const input = row.querySelector<HTMLTextAreaElement>(".english-syntax-feedback-input");
+    if (input === null) return;
+    const feedback = input.value.trim();
+    if (feedback.length === 0) return;
+    correction.status = "waiting";
+    const submit = row.querySelector<HTMLButtonElement>(".english-syntax-feedback-submit");
+    const cancel = row.querySelector<HTMLButtonElement>(".english-syntax-feedback-cancel");
+    const error = row.querySelector<HTMLElement>(".english-syntax-feedback-error");
+    input.disabled = true;
+    if (submit !== null) {
+      submit.disabled = true;
+      submit.textContent = "提交中…";
+    }
+    if (cancel !== null) cancel.disabled = true;
+    if (error !== null) error.hidden = true; // 重试前先收起上一轮错误
+    this.#onFeedbackRequest(correction.sentenceId, feedback);
+  }
+
+  /** F2：把纠正行钉在卡片（或还原后的原文块）正后方——整卡重建/还原都不会吞掉它。 */
+  #placeCorrectionRow(): void {
+    const correction = this.#correction;
+    if (correction === null) return;
+    const entry = this.#sentences.get(correction.sentenceId);
+    const record = entry === undefined ? undefined : this.#blocks.get(entry.blockId);
+    if (record === undefined) return;
+    (record.card ?? record.element).after(correction.row);
+  }
+
+  #closeCorrection(): void {
+    if (this.#correction === null) return;
+    this.#correction.row.remove();
+    this.#correction = null;
+  }
+
+  /**
    * 句头追问入口按钮（Chrome 端 #createChatAsk 同款）：无文字的聊天气泡图标，点击派发
    * CHAT_ASK_REQUEST_EVENT（冒泡 + composed）。锚点取真实点击坐标；键盘激活的 click
    * 坐标是 0，回落到按钮 rect 右下角。注意这里**不发**任何桥消息——开面板是 bootstrap
@@ -773,6 +991,8 @@ export class PreviewRenderer {
   }
 
   restoreAll(): void {
+    // F2：清卡是「我方主动 restore」，纠正行随之收走（行钉在卡片/原文块之后）。
+    this.#closeCorrection();
     for (const record of this.#blocks.values()) this.#restoreBlock(record);
   }
 
@@ -780,7 +1000,13 @@ export class PreviewRenderer {
   registerSentence(blockId: string, sentenceId: string): void {
     const record = this.#blocks.get(blockId);
     if (record === undefined) return;
-    record.sentences.set(sentenceId, { analysis: null, provisional: null, tokens: [], failed: false });
+    record.sentences.set(sentenceId, {
+      analysis: null,
+      provisional: null,
+      tokens: [],
+      failed: false,
+      hadCore: false,
+    });
     this.#sentences.set(sentenceId, { blockId, record: record.sentences.get(sentenceId)! });
   }
 

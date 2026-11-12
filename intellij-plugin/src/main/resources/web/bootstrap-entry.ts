@@ -9,6 +9,7 @@ import {
   BRIDGE_VERSION,
   MAX_CHAT_HISTORY_TURNS,
   MAX_CHAT_QUESTION_CHARACTERS,
+  MAX_FEEDBACK_CHARACTERS,
   parseHostMessage,
   type ChatErrorHostMessage,
   type ChatResultHostMessage,
@@ -23,7 +24,7 @@ import {
   resetScanRegistry,
   scanMarkdownBlocks,
 } from "./preview";
-import { CHAT_ASK_REQUEST_EVENT, PreviewRenderer } from "./render";
+import { CHAT_ASK_REQUEST_EVENT, CORRECTION_OPEN_EVENT, PreviewRenderer } from "./render";
 import { setDarkMode } from "./roles";
 import { ChatPanel } from "./chat-panel";
 
@@ -219,16 +220,33 @@ function trackPreviewRendered(): boolean {
 
 function ensureState(): RuntimeState {
   if (state !== null) return state;
-  const renderer = new PreviewRenderer((sentenceId, focusStart, focusEnd) => {
-    postToHost({
-      version: BRIDGE_VERSION,
-      type: "DETAIL_REQUEST",
-      previewId: state?.previewId ?? "",
-      generation: state?.generation ?? 0,
-      sentenceId,
-      focus: { startToken: focusStart, endToken: focusEnd },
-    });
-  });
+  const renderer = new PreviewRenderer(
+    (sentenceId, focusStart, focusEnd) => {
+      postToHost({
+        version: BRIDGE_VERSION,
+        type: "DETAIL_REQUEST",
+        previewId: state?.previewId ?? "",
+        generation: state?.generation ?? 0,
+        sentenceId,
+        focus: { startToken: focusStart, endToken: focusEnd },
+      });
+    },
+    // F2 纠正提交：renderer 已按 trim 后 1..MAX_FEEDBACK_CHARACTERS 把关，这里照
+    // DETAIL_REQUEST 的既有模式构造 FEEDBACK_REQUEST（键集与 Kotlin parseFeedbackRequest
+    // 白名单逐字一致，多一个键整条消息被静默丢弃）。结果复用 CORE_RESULT / FEEDBACK_ERROR。
+    (sentenceId, feedback) => {
+      const trimmed = feedback.trim();
+      if (trimmed.length === 0 || trimmed.length > MAX_FEEDBACK_CHARACTERS) return;
+      postToHost({
+        version: BRIDGE_VERSION,
+        type: "FEEDBACK_REQUEST",
+        previewId: state?.previewId ?? "",
+        generation: state?.generation ?? 0,
+        sentenceId,
+        feedback: trimmed,
+      });
+    },
+  );
   state = { renderer, previewId: "", generation: 0, autoScan: true, visibility: null, observer: null };
   return state;
 }
@@ -439,6 +457,12 @@ function handleHostMessage(hostJson: unknown): void {
       // 中性化渲染都是 Task 5 面板的职责，接线层不得改写消息。
       chatPanel?.handleHostMessage(message);
       return;
+    case "FEEDBACK_ERROR":
+      // F2 纠正失败：generation 已在 parseHostMessage 顶部等值过滤；错误就地转进输入行
+      // （卡片不动）是 renderer 的职责，这里显式转发后 return——不落回底部对
+      // renderer.handleHostMessage 的统一调用（那里虽有镜像 case，双跑会重复消费）。
+      s.renderer.renderFeedbackError(message.sentenceId, message.message);
+      return;
     default:
       break;
   }
@@ -612,6 +636,20 @@ document.addEventListener(CHAT_ASK_REQUEST_EVENT, (event) => {
     summary: state.renderer.sentenceText(sentenceId).slice(0, 40),
     anchor: { x: anchor.x, y: anchor.y },
   });
+});
+
+// F2 纠正按钮的 document 级委托（chat 图标同款先例）：失败行「纠正」按钮只派发
+// CORRECTION_OPEN_EVENT，这里接住并回调 renderer.openCorrection 开内联输入行。点击
+// 本身不发桥消息——FEEDBACK_REQUEST 只由输入行的提交驱动（那时才有合法 feedback）。
+document.addEventListener(CORRECTION_OPEN_EVENT, (event) => {
+  const s = state;
+  if (s === null) return;
+  // 事件可能被页面脚本伪造：载荷按 unknown 复核形状（chat-request 监听同款）。
+  const detail: unknown = (event as CustomEvent).detail;
+  if (typeof detail !== "object" || detail === null) return;
+  const { sentenceId } = detail as { sentenceId?: unknown };
+  if (typeof sentenceId !== "string" || sentenceId === "") return;
+  s.renderer.openCorrection(sentenceId);
 });
 
 // 焦点在 JCEF 预览里时 IDEA Action 可能收不到按键（取决于 JCEF 是否跑在离屏渲染模式），

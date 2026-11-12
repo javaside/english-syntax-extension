@@ -72,6 +72,11 @@ describe("bootstrap-entry 停止回归", () => {
     // 「该段已解析」有两处判据：鼠标停在卡片里、以及停在已出过卡的原文上（卡片的兄弟节点）。
     // 少一处就会对同一段重复下发，页面永远停在「解析中」——而这两条判据都只活在 bundle 里。
     expect(bundle.match(/该段已解析/g) ?? []).toHaveLength(2);
+    // F2 纠正反馈：桥消息与内联输入行同样只经 bundle 进真机——忘了重建 bundle 的症状
+    // 是「单测全绿、真机失败行没有纠正按钮」。
+    expect(bundle).toContain("FEEDBACK_REQUEST");
+    expect(bundle).toContain("english-syntax-feedback");
+    expect(bundle).toContain("english-syntax-correct");
   });
 
   it("RESTORE_ALL 清卡后不再把清卡误判成官方重渲染、也不重新亮出进度浮层", async () => {
@@ -814,5 +819,152 @@ describe("bootstrap-entry 追问面板实装接线（ChatPanel）", () => {
     icon2.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 10, clientY: 10 }));
     await flush();
     expect(document.querySelector("[data-english-syntax-chat-panel]")).not.toBeNull();
+  });
+});
+
+describe("bootstrap-entry F2 纠正反馈接线", () => {
+  const initialize = () =>
+    (window as unknown as Record<string, unknown>).__englishSyntaxInitialize as (
+      previewId: string,
+      generation: number,
+      autoScan?: boolean,
+    ) => void;
+  const hostMessage = () =>
+    (window as unknown as Record<string, unknown>).__englishSyntaxMessage as (
+      message: Record<string, unknown>,
+    ) => void;
+
+  function coreErrorMessage(previewId: string, generation: number, blockId: string): Record<string, unknown> {
+    // 详解失败（A9 quirk）：CORE_ERROR 带 code=DETAIL_FAILED，但 Kotlin 侧 record.core
+    // 仍在——纠正入口（失败行的「纠正」按钮）据此保留。
+    return {
+      version: 1,
+      type: "CORE_ERROR",
+      previewId,
+      generation,
+      sentenceId: `s-${blockId}-0`,
+      blockId,
+      code: "DETAIL_FAILED",
+      message: "detail request failed",
+      tokensJson: JSON.stringify([
+        { id: 0, text: "The", leadingWhitespace: "", punctuation: false },
+        { id: 1, text: "service", leadingWhitespace: " ", punctuation: false },
+      ]),
+    };
+  }
+
+  /** 渲染出一条「曾有 core → 详解失败」的失败行（带纠正按钮），返回按钮元素。 */
+  function renderHadCoreFailure(previewId: string): { sentenceId: string; correct: HTMLElement } {
+    const el = document.createElement("p");
+    el.textContent = "The service validates every response before returning anything.";
+    document.body.append(el);
+    initialize()(previewId, 0, false);
+    const blockId = el.getAttribute("data-english-syntax-block");
+    if (blockId === null) throw new Error("scan did not assign a block id");
+    hostMessage()(coreResultMessage(previewId, 0, blockId));
+    hostMessage()(coreErrorMessage(previewId, 0, blockId));
+    const correct = document.querySelector<HTMLElement>(".english-syntax-correct");
+    if (correct === null) throw new Error("correction button not rendered on had-core failure row");
+    return { sentenceId: `s-${blockId}-0`, correct };
+  }
+
+  it("纠正按钮经 document 级委托打开输入行，点击本身不发任何桥消息", async () => {
+    const { correct } = renderHadCoreFailure("pv-correct");
+    posted.length = 0;
+
+    correct.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await flush();
+
+    const row = document.querySelector<HTMLElement>(".english-syntax-feedback");
+    expect(row).not.toBeNull();
+    // B3 同款钉子：点击时还没有合法 feedback（Kotlin parseFeedbackRequest 会拒收），
+    // FEEDBACK_REQUEST 只能由输入行的提交驱动。
+    expect(posted.filter((m) => m.type === "FEEDBACK_REQUEST")).toHaveLength(0);
+  });
+
+  it("行内提交 → FEEDBACK_REQUEST 键集与 Kotlin 白名单逐字一致、feedback 已 trim", async () => {
+    const { sentenceId, correct } = renderHadCoreFailure("pv-submit");
+    correct.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await flush();
+
+    const row = document.querySelector<HTMLElement>(".english-syntax-feedback")!;
+    const textarea = row.querySelector<HTMLTextAreaElement>(".english-syntax-feedback-input")!;
+    expect(textarea.getAttribute("maxlength")).toBe("2000");
+    textarea.value = "  of applications 应是定语不是状语  ";
+    row.querySelector<HTMLButtonElement>(".english-syntax-feedback-submit")!.click();
+    await flush();
+
+    const request = posted.find((m) => m.type === "FEEDBACK_REQUEST");
+    expect(request).toBeDefined();
+    // 键集必须与 Kotlin hasOnlyKeys 白名单逐字一致：多一个键整条消息就被静默丢弃。
+    expect(Object.keys(request!).sort()).toEqual([
+      "feedback",
+      "generation",
+      "previewId",
+      "sentenceId",
+      "type",
+      "version",
+    ]);
+    expect(request!.version).toBe(1);
+    expect(request!.previewId).toBe("pv-submit");
+    expect(request!.generation).toBe(0);
+    expect(request!.sentenceId).toBe(sentenceId);
+    expect(request!.feedback).toBe("of applications 应是定语不是状语");
+    // 等待中禁用（renderer 职责，经真实 DOM 钉住）。
+    expect(textarea.disabled).toBe(true);
+  });
+
+  it("FEEDBACK_ERROR 就地转发进输入行、失败行不动；旧 generation 的迟到错误到不了行里", async () => {
+    const { sentenceId, correct } = renderHadCoreFailure("pv-fberr");
+    correct.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await flush();
+    const row = document.querySelector<HTMLElement>(".english-syntax-feedback")!;
+    const textarea = row.querySelector<HTMLTextAreaElement>(".english-syntax-feedback-input")!;
+    textarea.value = "划分不对";
+    row.querySelector<HTMLButtonElement>(".english-syntax-feedback-submit")!.click();
+    await flush();
+
+    const failureErrorBefore = document.querySelector(".english-syntax-error")?.textContent;
+    hostMessage()({
+      version: 1, type: "FEEDBACK_ERROR", previewId: "pv-fberr", generation: 0,
+      sentenceId, message: "INVALID_MODEL_OUTPUT：Model output remained invalid after one repair: components[1].role: must be a known grammar role",
+    });
+    await flush();
+
+    const rowError = row.querySelector(".english-syntax-feedback-error");
+    expect(rowError?.textContent).toContain("Model output remained invalid after one repair");
+    // 卡片不动：失败行仍是详解失败文案，没有被失败重画。
+    expect(document.querySelector(".english-syntax-error")?.textContent).toBe(failureErrorBefore);
+    expect(textarea.disabled).toBe(false);
+
+    // 旧代次的迟到错误在 parseHostMessage 的 generation 等值门就被丢弃（第一道防线）。
+    hostMessage()({
+      version: 1, type: "FEEDBACK_ERROR", previewId: "pv-fberr", generation: 7,
+      sentenceId, message: "STALE：late",
+    });
+    await flush();
+    expect(row.querySelector(".english-syntax-feedback-error")?.textContent).not.toContain("STALE");
+  });
+
+  it("纠正成功 CORE_RESULT → 既有重画路径更新卡片并移除输入行", async () => {
+    const { correct } = renderHadCoreFailure("pv-fbok");
+    correct.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await flush();
+    const row = document.querySelector<HTMLElement>(".english-syntax-feedback")!;
+    const textarea = row.querySelector<HTMLTextAreaElement>(".english-syntax-feedback-input")!;
+    textarea.value = "划分不对";
+    row.querySelector<HTMLButtonElement>(".english-syntax-feedback-submit")!.click();
+    await flush();
+
+    const blockId = document
+      .querySelector<HTMLElement>("[data-english-syntax-block]")
+      ?.getAttribute("data-english-syntax-block");
+    if (typeof blockId !== "string" || blockId === "") throw new Error("block element missing");
+    // 纠正成功：Kotlin applyOutcome 落账后按既有 CORE_RESULT 路径（blockId=句所在块）重发。
+    hostMessage()(coreResultMessage("pv-fbok", 0, blockId));
+    await flush();
+
+    expect(document.querySelector(".english-syntax-feedback")).toBeNull();
+    expect(document.querySelectorAll(".english-syntax-component").length).toBeGreaterThan(0);
   });
 });
