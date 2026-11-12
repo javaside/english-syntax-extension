@@ -19,7 +19,8 @@ import kotlinx.serialization.json.jsonObject
 import org.cef.browser.CefBrowser
 import org.cef.browser.CefFrame
 import org.cef.handler.CefLoadHandlerAdapter
-import org.intellij.plugins.markdown.ui.preview.jcef.MarkdownJCEFHtmlPanel
+import com.intellij.openapi.util.UserDataHolder
+import com.intellij.ui.jcef.JCEFHtmlPanel
 import org.intellij.plugins.markdown.ui.preview.MarkdownPreviewFileEditor
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
@@ -36,7 +37,7 @@ fun interface HostMessageTransport {
 
 /**
  * 官方 Markdown 预览的能力层包装：**不**自建预览浏览器，而是复用 IDEA 默认的
- * `MarkdownJCEFHtmlPanel`（官方 JCEF 预览）——它继承 `JCEFHtmlPanel` → `JBCefBrowser`，
+ * 平台 `JCEFHtmlPanel`（官方 Markdown JCEF 预览的公共基类；具体实现类的 FQN 在 IDEA 版本间
  * 因此 `executeJavaScript` 与 `JBCefJSQuery.create` 都是公开 API，无需反射、无需让
  * 用户切换 provider。
  *
@@ -47,7 +48,7 @@ fun interface HostMessageTransport {
  * 纯协议测试可传 `hostPanel = null` + `transportOverride`，不触碰 JCEF。
  */
 class EnglishSyntaxPreviewPanel(
-  private val hostPanel: MarkdownJCEFHtmlPanel? = null,
+  private val hostPanel: JCEFHtmlPanel? = null,
   transportOverride: HostMessageTransport? = null,
   parentDisposable: Disposable? = null,
 ) : UserDataHolderBase(), Disposable {
@@ -114,7 +115,8 @@ class EnglishSyntaxPreviewPanel(
      * MarkdownPreviewFileEditor，也可能包在 MarkdownEditorWithPreview
      * （TextEditorWithPreview）里。面板不是 FileEditor 本身——绝不能对
      * selectedEditor 做 `as? EnglishSyntaxPreviewPanel` 强转（永远 null）。
-     * 只认官方 `MarkdownJCEFHtmlPanel`（IDEA 默认预览就是它），其它面板返回 null。
+     * 只认 JCEF 官方预览面板（`as? JCEFHtmlPanel`，IDEA 默认预览即它；2026.2 起官方实现类
+     * 已迁包，一律经平台基类引用，见 MarkdownPanelApiContractTest），其它面板返回 null。
      */
     fun findPanel(project: Project): EnglishSyntaxPreviewPanel? {
       val manager = FileEditorManager.getInstance(project)
@@ -128,7 +130,7 @@ class EnglishSyntaxPreviewPanel(
         .filterIsInstance<MarkdownPreviewFileEditor>()
         .firstNotNullOfOrNull { previewEditor ->
           val panel = previewEditor.getUserData(MarkdownPreviewFileEditor.PREVIEW_BROWSER)?.get()
-          (panel as? MarkdownJCEFHtmlPanel)?.let(::wrap)
+          (panel as? JCEFHtmlPanel)?.let(::wrap)
         }
     }
 
@@ -152,19 +154,31 @@ class EnglishSyntaxPreviewPanel(
         .filterIsInstance<MarkdownPreviewFileEditor>()
         .firstNotNullOfOrNull { previewEditor ->
           val panel = previewEditor.getUserData(MarkdownPreviewFileEditor.PREVIEW_BROWSER)?.get()
-          (panel as? MarkdownJCEFHtmlPanel)?.getUserData(WRAPPER_KEY)
+          (panel as? JCEFHtmlPanel)?.let(::existingWrapper)
         }
     }
 
     /** 包装（或复用已有包装）：挂 UserData 保证 previewId 稳定，官方面板 dispose 时释放。 */
-    fun wrap(hostPanel: MarkdownJCEFHtmlPanel): EnglishSyntaxPreviewPanel {
-      hostPanel.getUserData(WRAPPER_KEY)?.let { return it }
+    fun wrap(hostPanel: JCEFHtmlPanel): EnglishSyntaxPreviewPanel {
+      val holder = holderOf(hostPanel)
+      holder.getUserData(WRAPPER_KEY)?.let { return it }
       val wrapper = EnglishSyntaxPreviewPanel(hostPanel = hostPanel)
-      hostPanel.putUserData(WRAPPER_KEY, wrapper)
+      holder.putUserData(WRAPPER_KEY, wrapper)
       Disposer.register(hostPanel, wrapper)
       wrapper.attach()
       return wrapper
     }
+
+    /**
+     * 面板 → wrapper 缓存宿主。UserDataHolder 由具体面板实现(2025.1 的旧类与
+     * 2026.2 的新类都是),平台 JCEFHtmlPanel 基类不承诺——经运行时转换接住两端。
+     */
+    private fun holderOf(panel: JCEFHtmlPanel): UserDataHolder =
+      panel as? UserDataHolder
+        ?: error("Markdown preview panel is not a UserDataHolder: ${panel.javaClass.name}")
+
+    private fun existingWrapper(panel: JCEFHtmlPanel): EnglishSyntaxPreviewPanel? =
+      (panel as? UserDataHolder)?.getUserData(WRAPPER_KEY)
 
     private fun loadWebResource(path: String): String {
       val stream = EnglishSyntaxPreviewPanel::class.java.classLoader.getResourceAsStream(path)

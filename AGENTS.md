@@ -26,7 +26,7 @@ IntelliJ 插件(动了 `intellij-plugin/`、`shared-fixtures/` 或桥协议时;�
 
 - **密钥不进 JCEF**:API key 只存 PasswordSafe(经 `CredentialStore`),永不进 panel 外发脚本、bridge 消息、缓存或日志。`SecretIsolationTest` 钉住。
 - **generation 在 Kotlin/JS 双端校验**:Kotlin 侧 `PreviewSession.onGenerationChanged` 取消旧请求并清空记录;JS 侧 `parseHostMessage` 丢弃非当前 generation 的一切回调。任何一端漏掉都会让旧响应污染新 DOM。
-- **Markdown 插件内部 API 只留在 `markdown/` 包**:`org.intellij.plugins.markdown` 的类型不泄漏到 session/analysis/actions;不反射访问官方 `MarkdownJCEFHtmlPanel` 私有字段。升级 Markdown 插件时只有这一个包要对着编译。
+- **Markdown 插件内部 API 只留在 `markdown/` 包**:`org.intellij.plugins.markdown` 的类型不泄漏到 session/analysis/actions;不反射访问官方 `MarkdownJCEFHtmlPanel` 私有字段。官方面板只经平台基类 `JCEFHtmlPanel` 引用(具体类 FQN 会随 IDE 版本迁移,2026.2 即迁包一次,绑定即 NoClassDefFoundError),`UserDataHolder` 走运行时转换。升级 Markdown 插件时只有这一个包要对着编译。
 
 ## 关键工程约定
 
