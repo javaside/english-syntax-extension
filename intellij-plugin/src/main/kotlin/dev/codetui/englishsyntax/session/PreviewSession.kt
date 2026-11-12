@@ -336,19 +336,49 @@ class PreviewSession(
       return
     }
     val capturedVersion = operationVersion
-    val outcome: CoreBatchOutcome = analysis.analyzeCore(
-      profile = profile,
-      documentId = documentId,
-      sentences = listOf(input),
-      priority = SchedulerPriority.USER_RETRY,
-      bypassCache = true,
-    )
+    // 异常兜底与 dispatch 同款（终审 F-1）：会话入口都是普通 child Job 上的 scope.launch，
+    // analyzeCore 抛非取消异常一旦逸散就取消整个会话 Job——state 仍 RUNNING 而后续派发
+    // 全部静默 no-op（会话假死到面板重建）。取消照常重抛（保持 stop/换代语义）；AUTH_FAILED
+    // 走缓存兜底，其余折成 NETWORK_ERROR 终态。
+    val outcome: CoreBatchOutcome = try {
+      analysis.analyzeCore(
+        profile = profile,
+        documentId = documentId,
+        sentences = listOf(input),
+        priority = SchedulerPriority.USER_RETRY,
+        bypassCache = true,
+      )
+    } catch (error: Throwable) {
+      if (error is kotlinx.coroutines.CancellationException) throw error
+      if (capturedVersion != operationVersion) return
+      // F6 记账（dispatch catch 同款防御位）：抛出的 AUTH_FAILED 同样挂起 profile。
+      recordAuthFailureIfAny(profile, error)
+      if (error is ExtensionFailure && error.code == ErrorCode.AUTH_FAILED) {
+        // Chrome 同款 cacheWithAuthError：缓存命中照回 + 未命中句 AUTH_FAILED。
+        applyOutcome(cacheFallbackOutcome(listOf(input)))
+        return
+      }
+      LOGGER.warn("dispatchRetry: analyzeCore threw, marking sentence as failed: ${error.message}")
+      applyOutcome(
+        CoreBatchOutcome(
+          emptyList(),
+          listOf(
+            AnalysisFailure(
+              input.sentenceId,
+              ExtensionFailure(ErrorCode.NETWORK_ERROR, error.message ?: "model request failed", true),
+            ),
+          ),
+          cacheHit = false,
+        ),
+      )
+      return
+    }
     if (capturedVersion != operationVersion) return
     // F6 记账（与批 dispatch 同款对称）：重试结果 AUTH_FAILED → 上报暂停表，后续重试
     // 走上面的暂停门，不再对死凭据白发请求（Chrome 重发 ANALYZE_CORE 经同一 handler
     // 记账）。真实 AnalysisService 把 AUTH_FAILED 折进 failures 而非抛出，故只挂 outcome 路径。
     if (outcome.failures.any { it.error.code == ErrorCode.AUTH_FAILED }) {
-      pauseRegistry.recordAuthFailed(profile.id)
+      recordAuthFailedSafely(profile.id)
     }
     applyOutcome(outcome)
   }
@@ -468,7 +498,7 @@ class PreviewSession(
     // F6 记账：首批请求结果 AUTH_FAILED → 上报暂停表，后续批次走上面的暂停门，
     // 不再对死凭据白发请求（Chrome outcome.failures 检查同款）。
     if (outcome.failures.any { it.error.code == ErrorCode.AUTH_FAILED }) {
-      pauseRegistry.recordAuthFailed(profile.id)
+      recordAuthFailedSafely(profile.id)
     }
     LOGGER.info("dispatch: outcome ready=${outcome.result.size} failed=${outcome.failures.size} cacheHit=${outcome.cacheHit}")
     applyOutcome(outcome)
@@ -540,10 +570,26 @@ class PreviewSession(
     return CoreBatchOutcome(cached, failures, cacheHit = cached.isNotEmpty())
   }
 
+  /**
+   * F6 记账的失败隔离（终审 F-1）：recordAuthFailed 组装凭据指纹要读 PasswordSafe，
+   * 读失败只影响「这次没记上」——下次真实失败还会再记，log 后继续。绝不让它传播进
+   * session Job：会话入口都是普通 child Job 上的 scope.launch，非取消异常会把整个会话
+   * brick 成「state 仍 RUNNING、后续派发全部静默 no-op」直到面板重建。取消照常重抛
+   * （保持 stop/换代的结构化取消语义）。
+   */
+  private suspend fun recordAuthFailedSafely(profileId: String) {
+    try {
+      pauseRegistry.recordAuthFailed(profileId)
+    } catch (error: Throwable) {
+      if (error is kotlinx.coroutines.CancellationException) throw error
+      LOGGER.warn("recordAuthFailed: failed to record auth pause for profile=$profileId: ${error.message}")
+    }
+  }
+
   /** F6 记账：抛出的失败是 AUTH_FAILED 时把 profile 记入暂停表（Chrome 各 handler 同款）。 */
   private suspend fun recordAuthFailureIfAny(profile: ModelProfile, error: Throwable) {
     val failure = error as? ExtensionFailure ?: return
-    if (failure.code == ErrorCode.AUTH_FAILED) pauseRegistry.recordAuthFailed(profile.id)
+    if (failure.code == ErrorCode.AUTH_FAILED) recordAuthFailedSafely(profile.id)
   }
 
   /** 详解点击：detail 优先级由 AnalysisService 内部固定。 */

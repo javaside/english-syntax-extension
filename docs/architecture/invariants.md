@@ -715,3 +715,13 @@
 **为什么** 第一版把 ASCII 歧义字符放进数学字符类,会让整段技术英语的纯英文回显直接通过并写缓存,违背「翻译辅助理解英文」与 spec §5.2 专名必须补中文类型。
 
 **守护测试** `translation-quality.symbol-span.test.ts` 13 个正反例 + Kotlin 共享 `translation-quality.json`。
+
+### 会话入口的非取消异常必须就地兜底,记账读 PasswordSafe 也要失败隔离
+
+**规则** `PreviewSession` 的每个入口(dispatch/dispatchRetry/detail/chat/feedback)都跑在普通 child Job 上(`PreviewSessionManager.obtain` 给会话的是 `Job(parent)`,非 SupervisorJob),协程内任何非取消 Throwable 逸散都会取消会话 Job——之后所有 `scope.launch` 静默 no-op。所以:① 每处 `analyzeCore` 调用都包同款兜底 catch(取消重抛 → 版本守卫 → AUTH_FAILED 走缓存兜底 → 其余折 NETWORK_ERROR 终态);② `pauseRegistry.recordAuthFailed`(suspend,组装凭据指纹要读 PasswordSafe)必须经 `recordAuthFailedSafely` 失败隔离——读失败只影响「这次没记上」(下次真实失败还会再记),log 后继续,取消照常重抛。
+
+**为什么** F6 记账曾把这个洞从 dispatchRetry 扩到 dispatch:dispatch 的 outcome 记账在 try/catch 之后裸调,PasswordSafe 读失败直接逸散;dispatchRetry 则连 `analyzeCore` 都没有守卫。会话 Job 一死,state 仍停在 RUNNING、页面无任何报错,唯一救法是重建 preview 面板(2026-11-12 终审 Important)。整体 `runCatching` 吞掉一切也不行:吞掉 `CancellationException` 会破坏 stop()/换代的取消语义,必须显式重抛。
+
+**症状** 模型层抛一次非取消异常(或 PasswordSafe 抖动一次)后,会话「假死」:崩溃句永远停在 QUEUED(无 CORE_ERROR 终态,JS 侧 settledBlocks 凑不满),新块再也不派发;测试里表现为 `manager.sessionJobForTest(...)` 不再 isActive、后续 `analyzeCalls` 不增。
+
+**守护测试** `PreviewSessionTest`:`retry model crash folds to network error and keeps the session dispatching`(重试崩→NETWORK_ERROR 终态+会话活)、`pause bookkeeping failure during dispatch does not brick the session`、`retry pause bookkeeping failure is isolated and a later failure records the pause`(隔离只丢当次、PasswordSafe 恢复后照常记账)。

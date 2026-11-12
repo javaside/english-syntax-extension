@@ -1496,6 +1496,123 @@ class PreviewSessionTest {
     assertEquals(SentencePhase.READY, session.sentences["s-b1-0"]?.phase, "缓存命中句照常落账")
   }
 
+  // ---- 终审 F-1：dispatchRetry 异常兜底 + F6 记账失败隔离 ----
+
+  /**
+   * dispatchRetry 的异常兜底。会话入口都是普通 child Job 上的 scope.launch，
+   * analyzeCore 抛非取消异常若逸散，会话 Job 被取消——state 仍 RUNNING 而后续派发
+   * 全部静默 no-op（会话假死到面板重建）。必须折成 CORE_ERROR(NETWORK_ERROR) 终态。
+   */
+  @Test
+  fun `retry model crash folds to network error and keeps the session dispatching`() = runBlocking {
+    val session = session()
+    session.start()
+    // 首轮失败（INVALID_MODEL_OUTPUT，与兜底码区分开）：句落 FAILED，成为可重试句。
+    service.outcome = CoreBatchOutcome(
+      emptyList(),
+      listOf(AnalysisFailure("s-b1-0", ExtensionFailure(ErrorCode.INVALID_MODEL_OUTPUT, "invalid", false))),
+      cacheHit = false,
+    )
+    session.onVisibleBlocks(listOf("b1" to "The service validates every response carefully today."))
+    session.flushBatch(offscreen = false)
+    kotlinx.coroutines.delay(100)
+    assertEquals(1, service.analyzeCalls)
+    assertEquals(SentencePhase.FAILED, session.sentences["s-b1-0"]?.phase)
+
+    // 重试时模型层直接崩溃（非取消异常）：句要有 NETWORK_ERROR 终态，会话 Job 不得死。
+    service.throwOnAnalyzeCore = true
+    session.retrySentence("s-b1-0")
+    kotlinx.coroutines.delay(100)
+
+    val retryError = sender.of("CORE_ERROR").last { it["sentenceId"]?.jsonPrimitive?.contentOrNull == "s-b1-0" }
+    assertEquals("NETWORK_ERROR", retryError["code"]?.jsonPrimitive?.contentOrNull, "重试崩溃必须折成 NETWORK_ERROR 终态")
+    assertEquals(SentencePhase.FAILED, session.sentences["s-b1-0"]?.phase)
+    assertTrue(manager.sessionJobForTest("pv1")!!.isActive, "重试的非取消异常不得取消会话 Job（brick 整个会话）")
+
+    // 会话未被 brick 的行为证明：新块照常派发（崩溃的重试也计一次 analyzeCalls）。
+    service.throwOnAnalyzeCore = false
+    session.onVisibleBlocks(listOf("b2" to "Another english block arrives today."))
+    session.flushBatch(offscreen = false)
+    kotlinx.coroutines.delay(100)
+    assertEquals(3, service.analyzeCalls, "崩溃后的会话必须还能派发后续块")
+  }
+
+  /**
+   * F6 记账的失败隔离（dispatch 路径）。recordAuthFailed 组装凭据指纹要读
+   * PasswordSafe——读失败只影响「这次没记上」（下次真实失败还会再记），log 后继续；
+   * 逸散则会取消会话 Job，AUTH_FAILED 结果也永远落不了终态。
+   */
+  @Test
+  fun `pause bookkeeping failure during dispatch does not brick the session`() = runBlocking {
+    val registry = ProfilePauseRegistry({ error("PasswordStore unavailable") })
+    val pausedManager = PreviewSessionManager(scope, service, { profile }, pauseRegistry = registry)
+    val localSender = RecordingSender()
+    val session = pausedManager.obtain("pv-auth-psafe", localSender) { }
+    session.start()
+
+    service.authFailure = true
+    session.onVisibleBlocks(listOf("b1" to "The service validates every response carefully today."))
+    session.flushBatch(offscreen = false)
+    kotlinx.coroutines.delay(100)
+
+    assertEquals(1, service.analyzeCalls)
+    assertEquals(SentencePhase.FAILED, session.sentences["s-b1-0"]?.phase, "记账失败不得吞掉 AUTH_FAILED 结果的落账")
+    assertEquals("AUTH_FAILED", localSender.of("CORE_ERROR").single()["code"]?.jsonPrimitive?.contentOrNull)
+    assertFalse(registry.isPaused("p1"), "指纹组装失败——暂停确实没记上（下次真实失败还会再记）")
+    assertTrue(pausedManager.sessionJobForTest("pv-auth-psafe")!!.isActive, "记账异常不得取消会话 Job")
+
+    // 会话未被 brick 的行为证明：新块照常派发。
+    service.authFailure = false
+    session.onVisibleBlocks(listOf("b2" to "Another english block arrives today."))
+    session.flushBatch(offscreen = false)
+    kotlinx.coroutines.delay(100)
+    assertEquals(2, service.analyzeCalls, "记账崩溃后的会话必须还能派发后续块")
+  }
+
+  /**
+   * F6 记账失败隔离（dispatchRetry 路径）+ 恢复语义。指纹读失败只丢「这一次」记账：
+   * 重试句照常 AUTH_FAILED 落终态；PasswordSafe 恢复后的下一次真实失败把暂停补记上。
+   */
+  @Test
+  fun `retry pause bookkeeping failure is isolated and a later failure records the pause`() = runBlocking {
+    var fingerprintCrashes = true
+    val registry = ProfilePauseRegistry({ if (fingerprintCrashes) error("PasswordStore unavailable") else "fp-1" })
+    val pausedManager = PreviewSessionManager(scope, service, { profile }, pauseRegistry = registry)
+    val localSender = RecordingSender()
+    val session = pausedManager.obtain("pv-auth-psafe-retry", localSender) { }
+    session.start()
+
+    // 首轮 NETWORK_ERROR（非 AUTH、不触发记账）：句 FAILED，成为可重试句。
+    service.outcome = CoreBatchOutcome(
+      emptyList(),
+      listOf(AnalysisFailure("s-b1-0", ExtensionFailure(ErrorCode.NETWORK_ERROR, "net", true))),
+      cacheHit = false,
+    )
+    session.onVisibleBlocks(listOf("b1" to "The service validates every response carefully today."))
+    session.flushBatch(offscreen = false)
+    kotlinx.coroutines.delay(100)
+    assertEquals(1, service.analyzeCalls)
+    assertEquals(SentencePhase.FAILED, session.sentences["s-b1-0"]?.phase)
+
+    // 重试遇 AUTH_FAILED outcome：记账（读指纹）崩掉——句仍要 AUTH_FAILED 落终态。
+    service.authFailure = true
+    session.retrySentence("s-b1-0")
+    kotlinx.coroutines.delay(100)
+    assertEquals(2, service.analyzeCalls)
+    assertEquals(SentencePhase.FAILED, session.sentences["s-b1-0"]?.phase, "记账失败不得吞掉重试结果的落账")
+    val retryError = localSender.of("CORE_ERROR").last { it["sentenceId"]?.jsonPrimitive?.contentOrNull == "s-b1-0" }
+    assertEquals("AUTH_FAILED", retryError["code"]?.jsonPrimitive?.contentOrNull)
+    assertFalse(registry.isPaused("p1"), "指纹组装失败——这次没记上")
+    assertTrue(pausedManager.sessionJobForTest("pv-auth-psafe-retry")!!.isActive, "记账异常不得取消会话 Job")
+
+    // PasswordSafe 恢复：再次重试仍 AUTH_FAILED → 记账补上，后续重试走暂停门。
+    fingerprintCrashes = false
+    session.retrySentence("s-b1-0")
+    kotlinx.coroutines.delay(100)
+    assertEquals(3, service.analyzeCalls)
+    assertTrue(registry.isPaused("p1"), "恢复后的真实失败必须照常记账（隔离只丢当次，不丢能力）")
+  }
+
   /** ①-补充：analyzeCore 抛 AUTH_FAILED（而非 failures 携带）同样记账并走缓存兜底。 */
   @Test
   fun `auth failed thrown from analyze core is recorded and falls back to cache`() = runBlocking {
@@ -1554,6 +1671,54 @@ class PreviewSessionTest {
     kotlinx.coroutines.delay(100)
     assertEquals(2, service.analyzeCalls, "解除后新请求必须照发模型")
     assertEquals(SentencePhase.READY, session.sentences["s-b1-0"]?.phase)
+  }
+
+  /**
+   * ②-F3 交互（终审 Minor 钉子）：F6 暂停门优先于 F3 重析的一次性绕缓存标志。首轮
+   * AUTH_FAILED 把 profile 挂起后，用户再点「重新解析」也不能靠 bypass 穿透暂停门重发
+   * 模型请求——重析批照走 pausedCoreOutcome：命中缓存句 CORE_RESULT、miss 句
+   * AUTH_FAILED。（dispatchRetry 暂停门间接盖过同一路径；这里把显式交互直接钉住。）
+   */
+  @Test
+  fun `reanalyze all while the profile is paused keeps the pause gate over the bypass flag`() = runBlocking {
+    val (session, registry, localSender) = sessionWithPauseRegistry("pv-auth-reanalyze") { "fp-1" }
+    session.start()
+
+    // 首轮两句全部 AUTH_FAILED：真实记账路径把 profile 挂起，句落 FAILED。
+    service.authFailure = true
+    val blocks = listOf("b1" to "The service validates every response. Second sentence here too.")
+    session.onVisibleBlocks(blocks)
+    session.flushBatch(offscreen = false)
+    kotlinx.coroutines.delay(100)
+    assertEquals(1, service.analyzeCalls)
+    assertTrue(registry.isPaused("p1"))
+    assertEquals(SentencePhase.FAILED, session.sentences["s-b1-0"]?.phase)
+
+    // 只种第一句缓存：重析批过暂停门时「命中照回 / miss 报 AUTH_FAILED」两侧都可断言。
+    service.authFailure = false
+    service.lookupResults["s-b1-0"] = CoreAnalysis(
+      sentenceId = "s-b1-0",
+      components = listOf(CoreComponent(0, 1, GrammarRole.SUBJECT, "该服务")),
+      modelProfileId = "cached",
+    )
+
+    // F3 重析（会话仍 RUNNING，仅 profile 暂停）：置 bypass 标志、全量失效、重驱扫描。
+    session.reanalyzeAll()
+    assertEquals(SessionState.RUNNING, session.state)
+    assertEquals(SentencePhase.STALE, session.sentences["s-b1-0"]?.phase)
+    assertEquals(SentencePhase.STALE, session.sentences["s-b1-1"]?.phase)
+
+    // 页面重报同一批块 → flushBatch 消费 bypass 标志 → dispatch：暂停门压过 bypass。
+    session.onVisibleBlocks(blocks)
+    session.flushBatch(offscreen = false)
+    kotlinx.coroutines.delay(100)
+
+    assertEquals(1, service.analyzeCalls, "暂停门必须压过 bypass 标志——重析批也不得发模型请求")
+    assertEquals(SentencePhase.READY, session.sentences["s-b1-0"]?.phase, "命中缓存句照常产出")
+    assertEquals(1, localSender.of("CORE_RESULT").count { it["sentenceId"]?.jsonPrimitive?.contentOrNull == "s-b1-0" })
+    assertEquals(SentencePhase.FAILED, session.sentences["s-b1-1"]?.phase, "miss 句标 AUTH_FAILED 失败")
+    val error = localSender.of("CORE_ERROR").last { it["sentenceId"]?.jsonPrimitive?.contentOrNull == "s-b1-1" }
+    assertEquals("AUTH_FAILED", error["code"]?.jsonPrimitive?.contentOrNull)
   }
 
   /** ④-detail：暂停期详解先查缓存——命中照回 DETAIL_RESULT，未命中回 AUTH_FAILED。 */
