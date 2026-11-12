@@ -1,8 +1,15 @@
 package dev.codetui.englishsyntax.settings
 
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.service
+import com.intellij.openapi.fileChooser.FileChooser
+import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory
+import com.intellij.openapi.fileChooser.FileChooserFactory
+import com.intellij.openapi.fileChooser.FileSaverDescriptor
 import com.intellij.openapi.options.BoundConfigurable
+import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
+import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.ui.dsl.builder.AlignX
 import com.intellij.ui.dsl.builder.bindIntText
 import com.intellij.ui.dsl.builder.bindSelected
@@ -10,7 +17,13 @@ import com.intellij.ui.dsl.builder.bindText
 import com.intellij.ui.dsl.builder.panel
 import dev.codetui.englishsyntax.AnalysisServiceService
 import dev.codetui.englishsyntax.EnglishSyntaxBundle
+import dev.codetui.englishsyntax.PreviewSessionManagerService
+import dev.codetui.englishsyntax.actions.ActionNotifier
+import dev.codetui.englishsyntax.cache.CacheTransfer
+import dev.codetui.englishsyntax.cache.ImportReport
 import kotlinx.coroutines.runBlocking
+import java.nio.file.Files
+import java.nio.file.Path
 import java.util.UUID
 
 class EnglishSyntaxConfigurable(
@@ -19,6 +32,14 @@ class EnglishSyntaxConfigurable(
   private val connectionProbe: ConnectionProbe = ServiceConnectionProbe(),
   private val cacheOperations: CacheOperations = ServiceCacheOperations(),
   private val clearConfirmation: ClearConfirmation = DialogClearConfirmation(),
+  private val cacheTransfer: CacheTransferOperations = ServiceCacheTransferOperations(),
+  private val transferUi: CacheTransferUi = IdeaCacheTransferUi(),
+  private val background: BackgroundDispatcher = BackgroundDispatcher { task ->
+    ApplicationManager.getApplication().executeOnPooledThread { task() }
+  },
+  private val profileRefresh: ProfileRefresh = ProfileRefresh {
+    service<PreviewSessionManagerService>().manager.refreshProfile()
+  },
 ) : BoundConfigurable(EnglishSyntaxBundle.message("settings.display.name")) {
 
   data class CacheSummary(val entries: Int, val estimatedBytes: Long)
@@ -49,6 +70,70 @@ class EnglishSyntaxConfigurable(
       EnglishSyntaxBundle.message("settings.cache.clear.title"),
       Messages.getQuestionIcon(),
     ) == Messages.YES
+  }
+
+  /** F4 缓存导入导出的 IO 抽象：包装 CacheTransfer 与文件读写，只允许在后台线程调用。 */
+  interface CacheTransferOperations {
+    /** 导出全部缓存到 path；返回导出条数。IO 失败抛异常。 */
+    suspend fun exportTo(path: Path): Int
+
+    /** 从 path 读取并导入；格式/版本问题以 [ImportReport.Failure] 返回，IO 失败抛异常。 */
+    suspend fun importFrom(path: Path): ImportReport
+  }
+
+  private class ServiceCacheTransferOperations : CacheTransferOperations {
+    override suspend fun exportTo(path: Path): Int {
+      val cache = service<AnalysisServiceService>().cache
+      val entries = cache.stats().entries
+      Files.writeString(path, CacheTransfer.exportJson(cache))
+      return entries
+    }
+
+    override suspend fun importFrom(path: Path): ImportReport =
+      CacheTransfer.importCacheFile(service<AnalysisServiceService>().cache, Files.readString(path))
+  }
+
+  /** F4 文件选择与结果 balloon 的抽象：对话框留在 EDT，balloon（Notifications.Bus）线程安全。 */
+  interface CacheTransferUi {
+    fun chooseExportFile(): Path?
+
+    fun chooseImportFile(): Path?
+
+    fun balloon(text: String, error: Boolean)
+  }
+
+  private class IdeaCacheTransferUi : CacheTransferUi {
+    override fun chooseExportFile(): Path? {
+      val descriptor = FileSaverDescriptor(
+        "Export analysis cache",
+        "English Syntax Learning cache exchange file",
+        "json",
+      )
+      return FileChooserFactory.getInstance()
+        .createSaveFileDialog(descriptor, null as Project?)
+        .save(null as VirtualFile?, "english-syntax-cache.json")
+        ?.file
+        ?.toPath()
+    }
+
+    override fun chooseImportFile(): Path? {
+      val descriptor = FileChooserDescriptorFactory.createSingleFileDescriptor("json")
+      return FileChooser.chooseFile(descriptor, null as Project?, null)?.toNioPath()
+    }
+
+    override fun balloon(text: String, error: Boolean) {
+      if (error) ActionNotifier.warn(null, text) else ActionNotifier.info(null, text)
+    }
+  }
+
+  /** 设置页后台线程派发（EDT 规矩：导入导出的 IO 不得占用 EDT）；测试捕获以断言派发形态。 */
+  fun interface BackgroundDispatcher {
+    fun dispatch(task: () -> Unit)
+  }
+
+  /** F5：profile 切换/保存后刷新已开会话的 profile 快照（无会话时是幂等 no-op）。 */
+  fun interface ProfileRefresh {
+    fun refresh()
   }
 
   /** 测试连接的抽象：生产打真模型探测，测试注入假实现。 */
@@ -159,6 +244,8 @@ class EnglishSyntaxConfigurable(
         cacheStatusLabel = javax.swing.JLabel(cacheStatus) as javax.swing.JLabel?
         cell(cacheStatusLabel!!)
         button(EnglishSyntaxBundle.message("settings.cache.clear")) { runClearCacheAction() }
+        button(EnglishSyntaxBundle.message("settings.cache.export")) { runExportCacheAction() }
+        button(EnglishSyntaxBundle.message("settings.cache.import")) { runImportCacheAction() }
       }
       row {
         checkBox(EnglishSyntaxBundle.message("settings.streamRendering")).bindSelected(form::streamRendering)
@@ -231,10 +318,64 @@ class EnglishSyntaxConfigurable(
     }
   }
 
+  /**
+   * F4 导出缓存：EDT 只弹保存对话框；序列化与文件写入全部经 [BackgroundDispatcher]
+   * 在后台线程执行（runBlocking 只允许出现在后台块内），结果以 balloon 反馈「已导出 N 条」。
+   */
+  fun runExportCacheAction(): Boolean {
+    val target = transferUi.chooseExportFile() ?: return false
+    background.dispatch {
+      try {
+        val exported = runBlocking { cacheTransfer.exportTo(target) }
+        transferUi.balloon("已导出 $exported 条缓存", error = false)
+      } catch (error: Exception) {
+        transferUi.balloon("导出失败：${error.message ?: error.javaClass.simpleName}", error = true)
+      }
+    }
+    return true
+  }
+
+  /**
+   * F4 导入缓存：同 [runExportCacheAction] 的线程规矩；导入报告按 Chrome 选项页同款
+   * 口径反馈（新增/跳过/无效丢弃），格式校验失败整体拒绝并说明原因。缓存用量标签的
+   * 刷新刻意不做——它写 Swing 组件，只能留在 EDT，而结果已在后台以 balloon 呈现。
+   */
+  fun runImportCacheAction(): Boolean {
+    val source = transferUi.chooseImportFile() ?: return false
+    background.dispatch {
+      try {
+        when (val report = runBlocking { cacheTransfer.importFrom(source) }) {
+          is ImportReport.Ok -> transferUi.balloon(
+            if (report.invalid > 0) {
+              "已导入 ${report.added} 条，跳过 ${report.skipped} 条，无效丢弃 ${report.invalid} 条"
+            } else {
+              "已导入 ${report.added} 条，跳过 ${report.skipped} 条"
+            },
+            error = false,
+          )
+          is ImportReport.Failure -> transferUi.balloon(importFailureText(report.reason), error = true)
+        }
+      } catch (error: Exception) {
+        transferUi.balloon("导入失败：${error.message ?: error.javaClass.simpleName}", error = true)
+      }
+    }
+    return true
+  }
+
+  /** 与 Chrome 选项页 `importFailureMessage` 同款的整体拒绝文案。 */
+  private fun importFailureText(reason: String): String = when (reason) {
+    "not-json" -> "导入失败：文件不是有效的 JSON。"
+    "bad-format" -> "导入失败：文件格式不符，不是本插件导出的缓存文件。"
+    "schema-mismatch" -> "导入失败：缓存 schema 版本不匹配，请让对方升级扩展或插件后重新导出。"
+    else -> "导入失败：$reason"
+  }
+
   fun activateForm(): Boolean {
     if (!saveForm()) return false
     return try {
       repository.setActive(form.id)
+      // F5：切换激活后已开会话的新请求立即用新 profile（refreshProfile 无会话时幂等 no-op）。
+      profileRefresh.refresh()
       setStatus("Profile activated: ${form.name}")
       true
     } catch (error: IllegalArgumentException) {
@@ -320,6 +461,9 @@ class EnglishSyntaxConfigurable(
     profileState.state.cacheLimitMb = form.cacheLimitMb
     profileState.state.streamRendering = form.streamRendering
     baseline = form.copy()
+    // F5（apply 路径）：保存的正是当前激活 profile 时，已开会话的快照需要刷新——
+    // 只改 baseUrl/model 等字段不换激活也算 profile 变更；保存非激活 profile 不触发。
+    if (repository.active()?.id == form.id) profileRefresh.refresh()
   }
 
   /** 测试连接：先保存（probe 需要 PasswordSafe 里的 key），再探测端点能力。 */

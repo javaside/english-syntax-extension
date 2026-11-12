@@ -200,7 +200,7 @@ class ProfileRepositoryTest {
     repository.save(profile(), apiKey = "old-key")
     val configurable = EnglishSyntaxConfigurable(repository, ProfileState(), EnglishSyntaxConfigurable.ConnectionProbe { _ ->
         EnglishSyntaxConfigurable.ConnectionProbeResult(true, "stub")
-      })
+      }, profileRefresh = EnglishSyntaxConfigurable.ProfileRefresh { })
 
     configurable.resetForm()
     assertFalse(configurable.isFormModified())
@@ -268,12 +268,12 @@ class ProfileRepositoryTest {
       EnglishSyntaxConfigurable.ConnectionProbeResult(false, "timeout")
     }
 
-    val ok = EnglishSyntaxConfigurable(repository, ProfileState(), successProbe)
+    val ok = EnglishSyntaxConfigurable(repository, ProfileState(), successProbe, profileRefresh = EnglishSyntaxConfigurable.ProfileRefresh { })
     ok.resetForm()
     assertTrue(ok.runConnectionAction())
     assertTrue(ok.actionStatus.contains("OK"))
 
-    val bad = EnglishSyntaxConfigurable(repository, ProfileState(), failureProbe)
+    val bad = EnglishSyntaxConfigurable(repository, ProfileState(), failureProbe, profileRefresh = EnglishSyntaxConfigurable.ProfileRefresh { })
     bad.resetForm()
     assertFalse(bad.runConnectionAction())
     assertTrue(bad.actionStatus.contains("failed"))
@@ -374,7 +374,7 @@ class ProfileRepositoryTest {
     repository.save(profile().copy(id = "profile-2", name = "Second"))
     val configurable = EnglishSyntaxConfigurable(repository, ProfileState(), EnglishSyntaxConfigurable.ConnectionProbe { _ ->
         EnglishSyntaxConfigurable.ConnectionProbeResult(true, "stub")
-      })
+      }, profileRefresh = EnglishSyntaxConfigurable.ProfileRefresh { })
 
     configurable.selectProfile("profile-2")
     configurable.form.name = "Updated second"
