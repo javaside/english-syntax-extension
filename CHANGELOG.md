@@ -4,25 +4,32 @@
 
 ## 1.4.2 — 2026-11-12
 
-并列名词片段不再整段拿不到译文。`CORE_PROMPT_VERSION` 由 `17` 升为 `20`（18 并列片段各并列项各一个 head、19 非 FANBOYS 并列不逐项各标、20 混合列表逐项判定），`DETAIL_PROMPT_VERSION` 保持 `10`——已有 core 缓存会按版本键整体作废并重新分析，这是预期行为；IntelliJ 插件同批修复，版本号随扩展同步。本版同时合入 IntelliJ 插件的功能补齐与两处渲染修复；协议与提示词零变更。
+双端大版本：Chrome 扩展新增**段落诊断**与**追问对话**两大功能并修复并列片段划分；IntelliJ 插件补齐追问对话与七项功能对齐 Chrome，兼容 IDEA 2026.2。
 
-### IntelliJ 插件功能补齐（对齐 Chrome 扩展的七项）
+### Chrome 扩展新增
 
-逐句失败原因上屏（仅 `INVALID_MODEL_OUTPUT` 显示真实校验摘要，传输/鉴权类保留友好文案）；纠正反馈闭环（失败行「纠正」按钮 → 内联输入行 → 单轮修复、无缓存、成功落账失败不动卡片）；「重新解析全部段落（绕过缓存）」Action；设置页缓存导入/导出入口；profile 切换即时生效；`AUTH_FAILED` 暂停与缓存兜底（凭据指纹记忆、三条解除路径）；纯缓存模式收尾措辞（累计计数、miss 句 STALE 语义）。
+- **段落诊断「这段为什么没被翻译」**：右键任意段落（含选区）即可查看——本地证据（扫描六道门判定、落点优先级、分句分词、请求可行性）加模型解释的结构化面板，一键复制。失败不再是黑箱。
+- **追问对话面板**：句头聊天气泡图标打开浮层面板，针对该句成分多轮流式问答（回答边生成边显示、携带历史上下文）；面板在点击处锚点旁弹出（不再固定右下），标题栏可拖动，换锚定句自动重置会话。
+- **逐句失败原因直达页面**：两轮修复仍失败的真实校验错误随 `CORE_RESULT.failures` 到达卡片失败行——排障不再需要打开服务日志。
+- **选区冷启动轻量化**：对选中文字右键解析不再触发整页翻译（冷启动只解析目标）。
+- **右键菜单注册兜底**：部分环境 SW 启动不跑 `onInstalled`，右键菜单永不出现——改为 SW 每次启动即注册。
 
-### 渲染修复
+### 双端划分准确性（`CORE_PROMPT_VERSION` 17 → 20，已有 core 缓存按版本键作废重析，属预期）
 
-- **纯缓存模式命中句上屏**：无 profile 会话此前只置 READY 相位 + 发 `SESSION_STATE`，浮层说「✓ 缓存命中 x/y 句」但页面看不到任何译文（缓存导入让「有缓存、无 profile」更常见）。现在命中句经 `applyOutcome` 走 `CORE_RESULT` 下发渲染——对齐 Chrome 把命中 analyses 放进 `CORE_RESULT` 返回；miss 句保持原文、置 STALE 不计失败，配好 profile 后重扫照常重派。
-- **失败行持久渲染**：多句段落里失败行只在触发帧渲染，兄弟句的 `CORE_RESULT` 一到就整块重画——失败句变成空 section，原文隐藏、译文没有、重试/纠正按钮全丢（恰是纠正入口最需要出现的时刻）。失败文案现在存进句子 record，任何重画都从持久状态渲染失败行。
+- **并列名词片段不再整段拿不到译文**（18）：`A DESIGN.md - a markdown file ... - and a FRAME.md, ...` 这类被破折号同位语隔开的并列项，旧硬门「片段至多一个 `FRAGMENT_HEAD`」判非法，整段无译文；现在双端只对并列项放行（各项各一个 head、连词单列 `CONJUNCTION`），修饰语标 head 照旧被拒。
+- **非 FANBOYS 并列的修复死锁**（19）：逗号/分号并列的片段此前修复轮反复改标同一种错法；诊断落点同步收敛到语义单元（不再诊断容器元素）。
+- **混合列表逐项判定**（20）：`A; B; and C` 的分号项按各自紧邻连词逐项判定，不再一刀切。
 
-### 修复
+### IntelliJ 插件
 
-- **并列片段的第二个并列项不再被判非法**：`A DESIGN.md - a markdown file describing your brand's colors, type, and voice - and a FRAME.md, which is that same design system extended with a motion language: how things enter, exit, and move in your brand's videos.` 这类片段里，两个并列项被破折号同位语隔开，第二项既并不进同一个 `FRAGMENT_HEAD`（成分不得重叠）也不是修饰语。旧硬门「片段至多一个 `FRAGMENT_HEAD`」把这种正确划分判非法，模型首轮与两轮修复都返回同一份划分，整段因此**没有译文**。现在双端 validator 只对**并列项**放行：每个额外 head 的紧邻前一个语义成分必须是 `CONJUNCTION`（`A DESIGN.md` + APPOSITIVE + CONJUNCTION `and` + `a FRAME.md`），把修饰语标成第二个 head 的错标照旧被拒。
-- **提示词两端同步教会并列片段**：core 规则补上「未并列时恰好一个 `FRAGMENT_HEAD`、并列时各项各一个 head、连词单列」的正例与「未被隔断的并列短语仍是一个成分」的反例；修复轮明确要求不得把并列项改标 `APPOSITIVE` / `ATTRIBUTE`、不得把连词留在 head 里（真机对照实验里，同结构的逗号版本正是被这样"修"成错标的）。
-- 黄金集新增 `fragment-coordinated-heads` 一句并钉住 span/role，conventions 同步改写；`validator-messages.json` 补正反两例。
+- **追问对话面板（与 Chrome 全量对等）**：桥消息三件套、流式分发与取消回收、句头问按钮、浮层面板——多轮历史、锚定重置、深色主题全套。
+- **兼容 IDEA 2026.2**：官方 `MarkdownJCEFHtmlPanel` 面板类迁移导致 Option+T 报 `NoClassDefFoundError`——改经平台 `JCEFHtmlPanel` 引用。
+- **功能补齐七项（对齐 Chrome 扩展）**：逐句失败原因上屏（`INVALID_MODEL_OUTPUT` 显示真实校验摘要）；纠正反馈闭环（失败行「纠正」→ 内联输入 → 单轮修复、无缓存）；「重新解析全部段落（绕过缓存）」；设置页缓存导入/导出；profile 切换即时生效；`AUTH_FAILED` 暂停与缓存兜底（凭据指纹记忆、三条解除路径）；纯缓存模式收尾（累计计数、miss 句保持原文）。
+- **渲染修复**：纯缓存模式命中句上屏（此前浮层报「✓ 缓存命中 x/y 句」但页面无译文）；失败行持久渲染（不再被兄弟句重画吞掉，重试/纠正按钮不消失）。
 
 ### 测试与验收记录
 
+- 段落诊断、追问对话（双端）、并列片段修复各有 E2E/单测/真机验收记录；评分与黄金集变化见提交历史。
 - 真机复现与验收脚本留在 `.superpowers/acceptance/`（不提交）：真 DeepSeek 上对比修复前后同一句的划分与失败原因。
 
 ## 1.4.1 — 2026-10-11
