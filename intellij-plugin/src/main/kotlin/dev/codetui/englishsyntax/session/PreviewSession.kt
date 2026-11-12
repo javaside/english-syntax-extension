@@ -344,6 +344,12 @@ class PreviewSession(
       bypassCache = true,
     )
     if (capturedVersion != operationVersion) return
+    // F6 记账（与批 dispatch 同款对称）：重试结果 AUTH_FAILED → 上报暂停表，后续重试
+    // 走上面的暂停门，不再对死凭据白发请求（Chrome 重发 ANALYZE_CORE 经同一 handler
+    // 记账）。真实 AnalysisService 把 AUTH_FAILED 折进 failures 而非抛出，故只挂 outcome 路径。
+    if (outcome.failures.any { it.error.code == ErrorCode.AUTH_FAILED }) {
+      pauseRegistry.recordAuthFailed(profile.id)
+    }
     applyOutcome(outcome)
   }
 

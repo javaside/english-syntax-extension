@@ -1450,6 +1450,52 @@ class PreviewSessionTest {
     assertEquals(SentencePhase.READY, session.sentences["s-b1-0"]?.phase)
   }
 
+  /**
+   * ①-补充：未暂停时重试遇 AUTH_FAILED outcome → 同样上报暂停表（与批 dispatch 的
+   * 记账对称）。持久场景：暂停被凭据变更解除 → 新凭据仍是坏的 → 全部块已处终态
+   * （无新批可记账），只剩用户反复重试同一句——每次重试都要把 profile 重新挂起，
+   * 后续重试不再对死凭据白发模型请求。
+   */
+  @Test
+  fun `retry auth failure outcome records the pause so later retries stop hitting the model`() = runBlocking {
+    val (session, registry, _) = sessionWithPauseRegistry("pv-auth-retry-rec") { "fp-1" }
+    session.start()
+
+    // 首批 NETWORK_ERROR（非 AUTH）：句落 FAILED，但 profile 不进暂停表。
+    service.outcome = CoreBatchOutcome(
+      emptyList(),
+      listOf(AnalysisFailure("s-b1-0", ExtensionFailure(ErrorCode.NETWORK_ERROR, "net", true))),
+      cacheHit = false,
+    )
+    session.onVisibleBlocks(listOf("b1" to "The service validates every response carefully today."))
+    session.flushBatch(offscreen = false)
+    kotlinx.coroutines.delay(100)
+    assertEquals(1, service.analyzeCalls)
+    assertEquals(SentencePhase.FAILED, session.sentences["s-b1-0"]?.phase)
+    assertFalse(registry.isPaused("p1"), "非 AUTH 失败不得记账")
+
+    // 未暂停时的用户重试：outcome 携带 AUTH_FAILED → dispatchRetry 必须记账。
+    service.authFailure = true
+    session.retrySentence("s-b1-0")
+    kotlinx.coroutines.delay(100)
+    assertEquals(2, service.analyzeCalls, "未暂停时重试照发模型请求")
+    assertTrue(registry.isPaused("p1"), "重试结果的 AUTH_FAILED 必须上报暂停表")
+    assertEquals(SentencePhase.FAILED, session.sentences["s-b1-0"]?.phase)
+
+    // 记账生效：再次重试同一句走暂停门回落缓存，不再发模型请求。
+    service.authFailure = false
+    service.lookupResults["s-b1-0"] = CoreAnalysis(
+      sentenceId = "s-b1-0",
+      components = listOf(CoreComponent(0, 1, GrammarRole.SUBJECT, "该服务")),
+      modelProfileId = "cached",
+    )
+    session.retrySentence("s-b1-0")
+    kotlinx.coroutines.delay(100)
+
+    assertEquals(2, service.analyzeCalls, "记账后的重试不得再发模型请求")
+    assertEquals(SentencePhase.READY, session.sentences["s-b1-0"]?.phase, "缓存命中句照常落账")
+  }
+
   /** ①-补充：analyzeCore 抛 AUTH_FAILED（而非 failures 携带）同样记账并走缓存兜底。 */
   @Test
   fun `auth failed thrown from analyze core is recorded and falls back to cache`() = runBlocking {
