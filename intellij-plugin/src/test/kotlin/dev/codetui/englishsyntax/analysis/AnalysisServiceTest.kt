@@ -171,6 +171,41 @@ class AnalysisServiceTest {
     assertEquals("profile-1", outcome.result[0].modelProfileId)
   }
 
+  /**
+   * 钉住 bypassCache 的正向保证：缓存里已有该句的合法条目时，绕缓存仍必须真调模型
+   * （结果来自模型而非缓存），且模型结果回写覆盖旧条目。若把绕缓存判定挪到缓存
+   * 查找之后（拿缓存结果充数），这里会先红——只跑空缓存的 bypass 用例测不出这一点。
+   */
+  @Test
+  fun `bypass cache with a seeded valid entry still calls the model and overwrites the cache`() = runBlocking {
+    val sentence = sentence("s1", "The service validates every response.")
+    // 种入一条译文可区分的合法缓存（profile 与译文都与即将入队的模型响应不同）。
+    val key = dev.codetui.englishsyntax.cache.createCoreCacheKey(
+      dev.codetui.englishsyntax.cache.CoreCacheKeyInput(
+        "The service validates every response.",
+        dev.codetui.englishsyntax.domain.ContractVersions.CORE_SCHEMA,
+        dev.codetui.englishsyntax.domain.ContractVersions.CORE_PROMPT,
+      ),
+    )
+    cache.putCore(
+      key,
+      "other-profile",
+      json.parseToJsonElement("""{"schemaVersion":${dev.codetui.englishsyntax.domain.ContractVersions.CORE_SCHEMA},"sentenceId":"s1","components":[{"startToken":0,"endToken":1,"role":"SUBJECT","translation":"陈旧主语"},{"startToken":2,"endToken":2,"role":"PREDICATE","translation":"陈旧谓语"},{"startToken":3,"endToken":5,"role":"OBJECT","translation":"陈旧宾语"}],"modelProfileId":"other-profile"}""") as JsonObject,
+    )
+    server.enqueueJson(validCoreRaw("s1"))
+
+    val outcome = service.analyzeCore(profile(), "doc-1", listOf(sentence), bypassCache = true)
+
+    assertEquals(1, server.requests.size, "种入的缓存条目可命中也必须调模型（bypass 不读缓存）")
+    assertFalse(outcome.cacheHit, "结果必须来自模型而非缓存")
+    assertEquals(1, outcome.result.size)
+    assertEquals(listOf("该服务", "校验", "每个响应"), outcome.result[0].components.map { it.translation })
+    // 模型结果回写覆盖了种入的旧条目（profile 与译文都换成新值）。
+    val overwritten = cache.getCore(key)
+    assertNotNull(overwritten)
+    assertEquals("profile-1", overwritten.getValue("modelProfileId").jsonPrimitive.content)
+  }
+
   @Test
   fun `loopback chunks six sentences per request`() = runBlocking {
     // 假服务器在 127.0.0.1 → loopback 策略：一次请求合并全部 6 句。
