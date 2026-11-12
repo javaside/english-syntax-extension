@@ -512,7 +512,7 @@
 
 ### Markdown 内部 API 不出 `markdown/` 包
 
-**规则**:`org.intellij.plugins.markdown.*` 类型只允许出现在 `markdown/` 包与 `plugin.xml`;不反射访问官方 `MarkdownJCEFHtmlPanel` 私有字段。
+**规则**:`org.intellij.plugins.markdown.*` 类型只允许出现在 `markdown/` 包与 `plugin.xml`;不反射访问官方 `MarkdownJCEFHtmlPanel` 私有字段。官方 Markdown JCEF 面板**只经平台基类 `com.intellij.ui.jcef.JCEFHtmlPanel` 引用**,绝不引用 Markdown 插件的具体面板类(FQN 在 IDEA 版本间会迁移:2026.2 把 `MarkdownJCEFHtmlPanel` 从 `org.intellij.plugins.markdown.ui.preview.jcef` 挪到 `com.intellij.markdown.jcef.preview` content module;绑定任一 FQN 都会在用户升级 IDE 后 NoClassDefFoundError)。面板的 `UserDataHolder` 也不由平台基类承诺——经运行时 `as?` 转换接住两端。
 
 **为什么**:Markdown 插件的 API 没有 compat 承诺;泄漏面每多一个包,升级时编译断裂点就多一处。
 
