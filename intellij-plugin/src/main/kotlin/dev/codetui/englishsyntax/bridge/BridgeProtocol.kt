@@ -75,6 +75,18 @@ sealed interface PageMessage {
     /** 一轮历史：用户提问或模型回答（不含 system——系统指令由 Kotlin 侧拼）。 */
     data class ChatTurn(val role: String, val content: String)
   }
+
+  /**
+   * 纠正反馈（JS→Kotlin，F2）：对已核实划分的一次性纠正请求。结果不是新消息——
+   * 成功复用 CORE_RESULT（blockId = 句所在块），失败回 [HostMessage.FeedbackError]。
+   * feedback 的 trim 1..2000 防伪造门与 CHAT_ASK 的 question 同款（结构化进 parse）。
+   */
+  data class FeedbackRequest(
+    override val previewId: String,
+    override val generation: Int,
+    val sentenceId: String,
+    val feedback: String,
+  ) : PageMessage
 }
 
 /** Kotlin → JS 的封闭消息集合。 */
@@ -162,6 +174,18 @@ sealed interface HostMessage {
     val conversationId: String,
     val message: String,
   ) : HostMessage
+
+  /**
+   * 纠正反馈失败（F2）：与 CHAT_ERROR 平行、按 sentenceId 关联（不混淆会话）。
+   * 纠正失败**绝不**复用 CORE_ERROR——那会把句卡片打成失败行、抹掉已核实的划分；
+   * 错误回内联输入行，人类可读文案（message 按 F1 口径带错误码前缀），无 code 字段。
+   */
+  data class FeedbackError(
+    override val previewId: String,
+    override val generation: Int,
+    val sentenceId: String,
+    val message: String,
+  ) : HostMessage
 }
 
 /**
@@ -181,6 +205,9 @@ object BridgeProtocol {
   const val MAX_CHAT_HISTORY_TURNS = 6
   const val MAX_CHAT_HISTORY_CHARACTERS = 8000
   const val MAX_CHAT_QUESTION_CHARACTERS = 2000
+
+  // 纠正反馈入站上限（与 CHAT_ASK 的 question 同值同款）：trim 后 1..2000。
+  const val MAX_FEEDBACK_CHARACTERS = 2000
 
   private val forbiddenKeys = setOf("apiKey", "headers", "baseUrl")
 
@@ -243,6 +270,8 @@ object BridgeProtocol {
 
       "CHAT_ASK" -> parseChatAsk(value, previewId, generation)
 
+      "FEEDBACK_REQUEST" -> parseFeedbackRequest(value, previewId, generation)
+
       else -> null
     }
   }
@@ -290,6 +319,19 @@ object BridgeProtocol {
     val question = trimJsWhitespace(value.string("question") ?: return null)
     if (question.isEmpty() || question.length > MAX_CHAT_QUESTION_CHARACTERS) return null
     return PageMessage.ChatAsk(previewId, generation, conversationId, sentenceId, turns, question)
+  }
+
+  /**
+   * FEEDBACK_REQUEST 的防伪造门（CHAT_ASK question 同款）：键白名单 + sentenceId 非空 +
+   * feedback trim 后 1..2000。trim 同样走 [trimJsWhitespace]（与 web/bridge.ts 的 .trim()
+   * 同一字符集——桥是两端一致的门，「什么算空白」必须两端同答案）。
+   */
+  private fun parseFeedbackRequest(value: JsonObject, previewId: String, generation: Int): PageMessage.FeedbackRequest? {
+    if (!hasOnlyKeys(value, "version", "type", "previewId", "generation", "sentenceId", "feedback")) return null
+    val sentenceId = value.string("sentenceId")?.takeIf { it.isNotEmpty() } ?: return null
+    val feedback = trimJsWhitespace(value.string("feedback") ?: return null)
+    if (feedback.isEmpty() || feedback.length > MAX_FEEDBACK_CHARACTERS) return null
+    return PageMessage.FeedbackRequest(previewId, generation, sentenceId, feedback)
   }
 
   /** Kotlin → JS 侧同样守卫：host 消息也可能被篡改后回注，generation 必须非负。 */
@@ -360,6 +402,11 @@ object BridgeProtocol {
         if (!hasOnlyKeys(value, "version", "type", "previewId", "generation", "conversationId", "message")) return null
         val conversationId = value.string("conversationId")?.takeIf { it.isNotEmpty() } ?: return null
         HostMessage.ChatError(previewId, generation, conversationId, value.string("message") ?: return null)
+      }
+      "FEEDBACK_ERROR" -> {
+        if (!hasOnlyKeys(value, "version", "type", "previewId", "generation", "sentenceId", "message")) return null
+        val sentenceId = value.string("sentenceId")?.takeIf { it.isNotEmpty() } ?: return null
+        HostMessage.FeedbackError(previewId, generation, sentenceId, value.string("message") ?: return null)
       }
       else -> null
     }

@@ -581,6 +581,75 @@ class PreviewSession(
     return "$code：$detail"
   }
 
+  /**
+   * 桥接层入口：纠正反馈经 session scope 派发（onPageMessage 在 JCEF 线程回调）。
+   *
+   * 与 [launchChatAsk] 同款**不设 SessionState 静默门**：内联输入行在 stop 后仍开着，
+   * 静默丢弃会把提交按钮永久卡在禁用态；数据可用性（记录/core/profile）用
+   * FEEDBACK_ERROR 明示。成功经 [applyOutcome] 落账（record.core 更新 + READY 相位 +
+   * SESSION_STATE），再按既有 CORE_RESULT 路径重画；失败回 FEEDBACK_ERROR——
+   * **绝不自发 CORE_ERROR**（那会把句卡片打成失败行、抹掉已核实的划分）。
+   */
+  fun launchFeedback(sentenceId: String, feedback: String) {
+    scope.launch {
+      runCatching { onFeedback(sentenceId, feedback) }
+        .onFailure { error ->
+          if (error is kotlinx.coroutines.CancellationException) throw error
+          // dispose 竞速下 panel.send 可能已抛错——回收路径不得再炸 scope（launchChatAsk 同款）。
+          runCatching { sendFeedbackError(sentenceId, feedbackFailureText(error)) }
+            .onFailure { LOGGER.warn("launchFeedback: failed to deliver FEEDBACK_ERROR: ${it.message}") }
+        }
+    }
+  }
+
+  private suspend fun onFeedback(sentenceId: String, feedback: String) {
+    val record = sentences[sentenceId]
+    val core = record?.core
+    if (record == null || core == null) {
+      // stop()/onGenerationChanged() 都会清空 sentences——「stop 后再纠正」也走这条，不静默。
+      sendFeedbackError(sentenceId, "原句已失效：请重新解析后再纠正")
+      return
+    }
+    val profile = currentProfile ?: run {
+      sendFeedbackError(sentenceId, "尚未配置可用的模型档案，请先在设置中配置")
+      return
+    }
+    val capturedVersion = operationVersion
+    val corrected = analysis.analyzeWithFeedback(
+      profile = profile,
+      documentId = documentId,
+      input = record.input,
+      core = core,
+      feedback = feedback,
+    )
+    if (capturedVersion != operationVersion) return
+    // 成功经 applyOutcome 落账：record.core 更新 + READY 相位 + CORE_RESULT（blockId=句所在块）
+    // + SESSION_STATE。手发消息不更新记录会让后续 detail/chat 对着过期成分讲。
+    applyOutcome(CoreBatchOutcome(listOf(corrected), emptyList(), cacheHit = false))
+  }
+
+  private fun sendFeedbackError(sentenceId: String, message: String) {
+    sender.send(buildJsonObject {
+      put("version", 1)
+      put("type", "FEEDBACK_ERROR")
+      put("previewId", previewId)
+      put("generation", generation)
+      put("sentenceId", sentenceId)
+      put("message", message)
+    })
+  }
+
+  /**
+   * 纠正失败文案（[chatFailureText] 同款 F1 口径）：message 已在服务边界脱敏
+   * （invalidOutput），这里只加错误码前缀；未知异常兜底 NETWORK_ERROR。
+   */
+  private fun feedbackFailureText(error: Throwable): String {
+    val failure = error as? ExtensionFailure
+    val code = failure?.code?.name ?: ErrorCode.NETWORK_ERROR.name
+    val detail = (failure?.message ?: error.message)?.takeUnless { it.isNullOrBlank() } ?: "correction request failed"
+    return "$code：$detail"
+  }
+
   /** 重试：FAILED 句以 USER_RETRY 最高优先级重新请求（用户显式手势，绕过缓存）。 */
   fun retrySentence(sentenceId: String) {
     if (state != SessionState.RUNNING && state != SessionState.PAUSED) return

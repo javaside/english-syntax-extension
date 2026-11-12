@@ -13,6 +13,8 @@ export const MAX_BLOCK_TEXT = 20_000;
 export const MAX_CHAT_HISTORY_TURNS = 6;
 export const MAX_CHAT_HISTORY_CHARACTERS = 8000;
 export const MAX_CHAT_QUESTION_CHARACTERS = 2000;
+// 纠正反馈入站上限（与 Kotlin BridgeProtocol.MAX_FEEDBACK_CHARACTERS 同步；CHAT_ASK question 同值同款）。
+export const MAX_FEEDBACK_CHARACTERS = 2000;
 
 export interface PageMessageBase {
   version: number;
@@ -79,6 +81,17 @@ export interface ChatAskPageMessage extends PageMessageBase {
   question: string;
 }
 
+/**
+ * 纠正反馈（JS→Kotlin，F2）：对已核实划分的一次性纠正请求。成功结果复用
+ * CORE_RESULT（blockId = 句所在块），失败回 FEEDBACK_ERROR——都不在本类型里。
+ * feedback 为 trim 后 1..2000 的上限在 parse 里结构化校验（CHAT_ASK 同款）。
+ */
+export interface FeedbackRequestPageMessage extends PageMessageBase {
+  type: "FEEDBACK_REQUEST";
+  sentenceId: string;
+  feedback: string;
+}
+
 // CHAT_* 三条 host 消息均带 generation（parseHostMessage 顶部的等值门槛自动过滤
 // 旧代次）与 conversationId（面板侧第二道防线按它丢弃非本会话的迟到消息）。
 // CHAT_STREAM.text 是「截至目前的完整回答」而非增量——全量替换渲染，重试安全。
@@ -102,6 +115,16 @@ export interface ChatErrorHostMessage extends PageMessageBase {
   message: string;
 }
 
+/**
+ * 纠正反馈失败（F2）：与 CHAT_ERROR 平行、按 sentenceId 关联（不混淆会话）。
+ * 带 generation（parseHostMessage 顶部的等值门槛自动过滤旧代次）；无 code 字段。
+ */
+export interface FeedbackErrorHostMessage extends PageMessageBase {
+  type: "FEEDBACK_ERROR";
+  sentenceId: string;
+  message: string;
+}
+
 export type PageMessage =
   | PreviewReady
   | VisibleBlocks
@@ -109,7 +132,8 @@ export type PageMessage =
   | RetrySentence
   | PreviewRendered
   | ParseBlock
-  | ChatAskPageMessage;
+  | ChatAskPageMessage
+  | FeedbackRequestPageMessage;
 
 export type HostMessage =
   | ({ type: "SESSION_STATE"; state: string; ready: number; discovered: number; failed: number } & PageMessageBase)
@@ -121,7 +145,8 @@ export type HostMessage =
   | ({ type: "RESTORE_ALL" } & PageMessageBase)
   | ChatStreamHostMessage
   | ChatResultHostMessage
-  | ChatErrorHostMessage;
+  | ChatErrorHostMessage
+  | FeedbackErrorHostMessage;
 
 const FORBIDDEN_KEYS = new Set(["apiKey", "headers", "baseUrl"]);
 
@@ -149,6 +174,7 @@ const PAGE_KEYS_BY_TYPE: Readonly<Record<string, readonly string[]>> = {
   PREVIEW_RENDERED: ["version", "type", "previewId", "generation"],
   PARSE_BLOCK: ["version", "type", "previewId", "generation", "blockId", "text"],
   CHAT_ASK: ["version", "type", "previewId", "generation", "conversationId", "sentenceId", "history", "question"],
+  FEEDBACK_REQUEST: ["version", "type", "previewId", "generation", "sentenceId", "feedback"],
 };
 
 /** JS → Kotlin 方向：白名单校验后返回封闭联合，或 null 表示拒绝。 */
@@ -276,6 +302,22 @@ export function parsePageMessage(value: unknown): PageMessage | null {
         question,
       };
     }
+    case "FEEDBACK_REQUEST": {
+      // 防伪造门（与 Kotlin parseFeedbackRequest 镜像）：键白名单 + trim 后 1..2000。
+      if (!hasOnlyKeys(value, PAGE_KEYS_BY_TYPE.FEEDBACK_REQUEST!)) return null;
+      if (!isNonEmptyString(value.sentenceId)) return null;
+      if (typeof value.feedback !== "string") return null;
+      const feedback = value.feedback.trim();
+      if (feedback.length === 0 || feedback.length > MAX_FEEDBACK_CHARACTERS) return null;
+      return {
+        version: BRIDGE_VERSION,
+        type: "FEEDBACK_REQUEST",
+        previewId: value.previewId,
+        generation: value.generation,
+        sentenceId: value.sentenceId,
+        feedback,
+      };
+    }
     default:
       return null;
   }
@@ -292,6 +334,7 @@ const HOST_KEYS_BY_TYPE: Readonly<Record<string, readonly string[]>> = {
   CHAT_STREAM: ["version", "type", "previewId", "generation", "conversationId", "text"],
   CHAT_RESULT: ["version", "type", "previewId", "generation", "conversationId", "answer"],
   CHAT_ERROR: ["version", "type", "previewId", "generation", "conversationId", "message"],
+  FEEDBACK_ERROR: ["version", "type", "previewId", "generation", "sentenceId", "message"],
 };
 
 /** Kotlin → JS 方向：同款白名单 + generation 复检。 */
@@ -434,6 +477,18 @@ export function parseHostMessage(value: unknown, currentGeneration: number): Hos
         previewId: value.previewId,
         generation: value.generation,
         conversationId: value.conversationId,
+        message: value.message,
+      };
+    // F2 纠正反馈失败：generation 等值门槛已在函数顶部统一生效，这里补 sentenceId/message 守卫。
+    case "FEEDBACK_ERROR":
+      if (!isNonEmptyString(value.sentenceId)) return null;
+      if (typeof value.message !== "string") return null;
+      return {
+        version: BRIDGE_VERSION,
+        type: "FEEDBACK_ERROR",
+        previewId: value.previewId,
+        generation: value.generation,
+        sentenceId: value.sentenceId,
         message: value.message,
       };
     default:

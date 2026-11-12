@@ -26,6 +26,8 @@ import dev.codetui.englishsyntax.model.OpenAiCompatibleClient
 import dev.codetui.englishsyntax.model.StreamedComponent
 import dev.codetui.englishsyntax.model.buildChatPrompt
 import dev.codetui.englishsyntax.model.buildCorePrompt
+import dev.codetui.englishsyntax.model.buildCorrectionPrompt
+import dev.codetui.englishsyntax.model.buildCorrectionPromptRepair
 import dev.codetui.englishsyntax.model.buildDetailPrompt
 import dev.codetui.englishsyntax.model.buildRepairPrompt
 import dev.codetui.englishsyntax.model.isLoopbackBaseUrl
@@ -129,6 +131,20 @@ interface AnalysisServicePort {
     question: String,
     onStreamedText: StreamedTextSink? = null,
   ): String
+
+  /**
+   * 纠正反馈（F2）：克隆 Chrome `reanalyzeWithFeedback`——单句、首轮 + **至多一轮修复**
+   * （修复 prompt 收平铺 errors，无 RepairErrorGroup 分组）、USER_RETRY 档。相对 Chrome
+   * 刻意去掉 correction 缓存读写（spec F2 裁决：SQLite 无 correction 槽位，纠正是一次性
+   * 探索输入）。失败抛 [ExtensionFailure]（消息已按 profile 密钥在边界脱敏）。
+   */
+  suspend fun analyzeWithFeedback(
+    profile: ModelProfile,
+    documentId: String,
+    input: SentenceInput,
+    core: CoreAnalysis,
+    feedback: String,
+  ): CoreAnalysis
 
   suspend fun cancelDocument(documentId: String)
 }
@@ -419,6 +435,47 @@ class AnalysisService(
 
   override suspend fun cancelDocument(documentId: String) = scheduler.cancelDocument(documentId)
 
+  /**
+   * 纠正反馈（F2）：克隆 Chrome `reanalyzeWithFeedback` 的结构——首轮（correctionPrompt）
+   * + 至多一轮修复（correctionRepairPrompt 收**平铺** errors、`jumpQueue` 插队，Chrome
+   * requestModel 的 jumpQueue=true 同款）、USER_RETRY 档、文本脱敏在 invalidOutput 失败
+   * 边界。刻意分叉：不查/不写任何缓存（spec F2 裁决）。调度 cacheKey 掺 feedback 文本
+   * 哈希（chatCacheKey 先例）——纠正与 chat 不同，走页面 documentId 本身（Chrome 同款，
+   * 被 stop/换代的 cancelDocument 连坐取消是预期语义），不同反馈文本必须各自成请求。
+   */
+  override suspend fun analyzeWithFeedback(
+    profile: ModelProfile,
+    documentId: String,
+    input: SentenceInput,
+    core: CoreAnalysis,
+    feedback: String,
+  ): CoreAnalysis {
+    val key = correctionCacheKey(input.sentenceId, feedback)
+    val raw = request(
+      profile,
+      documentId,
+      SchedulerPriority.USER_RETRY,
+      key,
+      listOf(ChatMessage("user", buildCorrectionPrompt(input, core, feedback))),
+      coreSchema,
+    )
+    var validation = validateCoreBatch(raw, listOf(input), profile.id)
+    if (validation is ValidationResult.Invalid) {
+      val repairRaw = request(
+        profile,
+        documentId,
+        SchedulerPriority.USER_RETRY,
+        "${key}:repair",
+        listOf(ChatMessage("user", buildCorrectionPromptRepair(input, core, feedback, validation.errors, raw))),
+        coreSchema,
+        jumpQueue = true,
+      )
+      validation = validateCoreBatch(repairRaw, listOf(input), profile.id)
+    }
+    return (validation as? ValidationResult.Valid)?.value?.first()
+      ?: throw invalidOutput((validation as ValidationResult.Invalid).errors, client.secretsFor(profile))
+  }
+
   private suspend fun analyzeCoreChunk(
     profile: ModelProfile,
     documentId: String,
@@ -645,6 +702,17 @@ class AnalysisService(
       val digest = MessageDigest.getInstance("SHA-256").digest(question.toByteArray(Charsets.UTF_8))
       val hex = digest.joinToString(separator = "") { byte -> "%02x".format(byte) }
       return "$conversationId:${hex.take(16)}"
+    }
+
+    /**
+     * 纠正反馈的调度 cacheKey（[chatCacheKey] 先例）：纠正不写缓存，这个 key 只用于
+     * 调度器去重——不掺 feedback 文本哈希时，同一句在飞的两个不同纠正会被合并成一个
+     * 请求，第二个用户拿到第一个的划分。repair 后缀与 Chrome `${key}:repair` 同款。
+     */
+    private fun correctionCacheKey(sentenceId: String, feedback: String): String {
+      val digest = MessageDigest.getInstance("SHA-256").digest(feedback.toByteArray(Charsets.UTF_8))
+      val hex = digest.joinToString(separator = "") { byte -> "%02x".format(byte) }
+      return "correction:$sentenceId:${hex.take(16)}"
     }
 
     /**

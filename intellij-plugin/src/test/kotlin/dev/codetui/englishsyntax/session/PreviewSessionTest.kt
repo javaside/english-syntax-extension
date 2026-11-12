@@ -67,6 +67,17 @@ class PreviewSessionTest {
     var chatAnswer = ""
     /** 测试注入：chat 直接抛异常（模拟请求失败 / 取消）。 */
     var chatError: Throwable? = null
+    // ---- 纠正反馈（feedback）接线断言用 ----
+    var feedbackCalls = 0
+    var lastFeedbackDocumentId: String? = null
+    var lastFeedbackSentenceId: String? = null
+    var lastFeedbackText: String? = null
+    var lastFeedbackInput: SentenceInput? = null
+    var lastFeedbackCore: CoreAnalysis? = null
+    /** 测试注入：analyzeWithFeedback 返回的纠正结果（null 时返回默认单成分结果）。 */
+    var feedbackResult: CoreAnalysis? = null
+    /** 测试注入：analyzeWithFeedback 直接抛异常（模拟两轮仍非法 / 网络 / 取消）。 */
+    var feedbackError: Throwable? = null
 
     override suspend fun analyzeCore(
       profile: ModelProfile,
@@ -145,6 +156,27 @@ class PreviewSessionTest {
 
     override suspend fun cancelDocument(documentId: String) {
       cancelledDocuments += documentId
+    }
+
+    override suspend fun analyzeWithFeedback(
+      profile: ModelProfile,
+      documentId: String,
+      input: SentenceInput,
+      core: CoreAnalysis,
+      feedback: String,
+    ): CoreAnalysis {
+      feedbackCalls += 1
+      lastFeedbackDocumentId = documentId
+      lastFeedbackSentenceId = input.sentenceId
+      lastFeedbackText = feedback
+      lastFeedbackInput = input
+      lastFeedbackCore = core
+      feedbackError?.let { throw it }
+      return feedbackResult ?: CoreAnalysis(
+        sentenceId = input.sentenceId,
+        components = listOf(CoreComponent(0, 1, GrammarRole.SUBJECT, "纠正后的主语")),
+        modelProfileId = "p1",
+      )
     }
   }
 
@@ -958,5 +990,126 @@ class PreviewSessionTest {
     } finally {
       unconfined.cancel()
     }
+  }
+
+  // ---- 纠正反馈（FEEDBACK_REQUEST → launchFeedback → FEEDBACK_ERROR / CORE_RESULT）----
+
+  @Test
+  fun `feedback updates the record through apply outcome and sends core result`() = runBlocking {
+    val session = session()
+    session.start()
+    val first = seedReadySentence(session)
+    val seededCore = session.sentences[first.sentenceId]!!.core!!
+    val corrected = CoreAnalysis(
+      sentenceId = first.sentenceId,
+      components = listOf(CoreComponent(0, 5, GrammarRole.SUBJECT, "纠正后的整句划分")),
+      modelProfileId = "p1",
+    )
+    service.feedbackResult = corrected
+
+    session.launchFeedback(first.sentenceId, "这个 of 短语应该是定语")
+    kotlinx.coroutines.delay(100)
+
+    assertEquals(1, service.feedbackCalls)
+    assertEquals("pv1-doc", service.lastFeedbackDocumentId, "纠正走页面 documentId（Chrome correction 同款，无独立命名空间）")
+    assertEquals(first.sentenceId, service.lastFeedbackSentenceId)
+    assertEquals("这个 of 短语应该是定语", service.lastFeedbackText)
+    assertSame(seededCore, service.lastFeedbackCore, "纠正上下文必须是 Kotlin 侧 SentenceRecord 里已核实的 core")
+
+    // 成功必须经 applyOutcome 落账：record.core 更新 + READY 相位 + SESSION_STATE。
+    val record = session.sentences[first.sentenceId]!!
+    assertEquals(SentencePhase.READY, record.phase)
+    assertSame(corrected, record.core, "手发结果不经 applyOutcome 会让后续 detail/chat 对着过期成分讲")
+
+    // 成功复用既有 CORE_RESULT 路径（blockId=句所在块）；seedReadySentence 已发过一条，这里是第二条。
+    val results = sender.of("CORE_RESULT")
+    assertEquals(2, results.size)
+    assertEquals(first.sentenceId, results.last()["sentenceId"]?.jsonPrimitive?.contentOrNull)
+    assertEquals("b1", results.last()["blockId"]?.jsonPrimitive?.contentOrNull)
+    assertTrue(
+      (results.last()["analysisJson"]?.jsonPrimitive?.contentOrNull ?: "").contains("纠正后的整句划分"),
+    )
+    assertTrue(sender.of("FEEDBACK_ERROR").isEmpty())
+    assertTrue(sender.of("CORE_ERROR").isEmpty())
+    assertNotNull(BridgeProtocol.parseHostMessage(results.last()), "CORE_RESULT 必须能过 host 白名单回环")
+    assertTrue(sender.of("SESSION_STATE").isNotEmpty(), "applyOutcome 落账后回推 SESSION_STATE")
+  }
+
+  @Test
+  fun `feedback without a record or verified core answers feedback error, not silence`() = runBlocking {
+    val session = session()
+    session.start()
+
+    // ① 记录不存在（stop/onGenerationChanged 清空后的常态）。
+    session.launchFeedback("s-missing", "反馈")
+    // ② 记录在、core 还没核实（phase != READY）。
+    session.onVisibleBlocks(listOf("b1" to "The service validates every response carefully today."))
+    val first = session.sentences.values.firstOrNull()?.input ?: error("no sentence")
+    session.launchFeedback(first.sentenceId, "反馈")
+    kotlinx.coroutines.delay(100)
+
+    assertEquals(0, service.feedbackCalls, "原句失效绝不调模型")
+    val errors = sender.of("FEEDBACK_ERROR")
+    assertEquals(2, errors.size)
+    assertEquals(
+      listOf("s-missing", first.sentenceId),
+      errors.map { it["sentenceId"]?.jsonPrimitive?.contentOrNull },
+      "错误必须按 sentenceId 关联（与 CHAT_ERROR 的 conversationId 把关平行）",
+    )
+    errors.forEach { error ->
+      assertEquals("原句已失效：请重新解析后再纠正", error["message"]?.jsonPrimitive?.contentOrNull)
+      assertNotNull(BridgeProtocol.parseHostMessage(error), "FEEDBACK_ERROR 未过 host 白名单: $error")
+    }
+  }
+
+  /**
+   * 失败绝不走 CORE_ERROR（那会把句卡片打成失败行、抹掉已核实的划分——Chrome 的纠正失败
+   * 也不动卡片）：错误回内联输入行（FEEDBACK_ERROR），message 按 F1 口径带真实错误码前缀。
+   */
+  @Test
+  fun `feedback failure answers feedback error and keeps the verified card intact`() = runBlocking {
+    val session = session()
+    session.start()
+    val first = seedReadySentence(session)
+    val seededCore = session.sentences[first.sentenceId]!!.core!!
+    // 服务边界（invalidOutput）已脱敏的真实校验 summary：会话层只加错误码前缀，不重复脱敏。
+    service.feedbackError = ExtensionFailure(
+      ErrorCode.INVALID_MODEL_OUTPUT,
+      "Model output remained invalid after two repairs: sentences[0].components: coverage is incomplete",
+      false,
+    )
+
+    session.launchFeedback(first.sentenceId, "反馈")
+    kotlinx.coroutines.delay(100)
+
+    assertTrue(sender.of("CORE_ERROR").isEmpty(), "纠正失败不得发 CORE_ERROR（会摧毁合法卡片）")
+    val error = sender.of("FEEDBACK_ERROR").single()
+    assertEquals(first.sentenceId, error["sentenceId"]?.jsonPrimitive?.contentOrNull)
+    assertEquals(
+      "INVALID_MODEL_OUTPUT：Model output remained invalid after two repairs: sentences[0].components: coverage is incomplete",
+      error["message"]?.jsonPrimitive?.contentOrNull,
+    )
+    // 卡片不动：record.core 保持已核实划分、相位仍 READY。
+    assertSame(seededCore, session.sentences[first.sentenceId]!!.core)
+    assertEquals(SentencePhase.READY, session.sentences[first.sentenceId]!!.phase)
+    assertNotNull(BridgeProtocol.parseHostMessage(error))
+  }
+
+  @Test
+  fun `feedback without a profile answers a configuration error`() = runBlocking {
+    val noProfileManager = PreviewSessionManager(scope, service, { null })
+    val localSender = RecordingSender()
+    val session = noProfileManager.obtain("pv-np-fb", localSender) { }
+    session.start()
+    val first = seedReadySentence(session)
+
+    session.launchFeedback(first.sentenceId, "反馈")
+    kotlinx.coroutines.delay(100)
+
+    assertEquals(0, service.feedbackCalls)
+    assertEquals(
+      "尚未配置可用的模型档案，请先在设置中配置",
+      localSender.of("FEEDBACK_ERROR").single()["message"]?.jsonPrimitive?.contentOrNull,
+    )
   }
 }

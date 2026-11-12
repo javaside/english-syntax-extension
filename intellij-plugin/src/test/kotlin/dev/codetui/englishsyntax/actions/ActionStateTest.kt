@@ -66,6 +66,15 @@ class ActionStateTest {
     ): String = ""
 
     override suspend fun cancelDocument(documentId: String) {}
+
+    /** F2 接口演进的最小桩：Action 状态测试不覆盖纠正路径。 */
+    override suspend fun analyzeWithFeedback(
+      profile: ModelProfile,
+      documentId: String,
+      input: SentenceInput,
+      core: CoreAnalysis,
+      feedback: String,
+    ): CoreAnalysis = core
   }
 
   private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)

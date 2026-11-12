@@ -358,3 +358,52 @@ private fun chatHistoryJson(history: List<ChatTurn>): JsonElement = buildJsonArr
     }
   }
 }
+
+/**
+ * 纠正反馈提示词（F2）：六段结构逐字对齐 Chrome analysis-service.ts 的
+ * correctionPrompt（首行 / 不变式 / CORE_OUTPUT_SHAPE / 句子 / 已核实 core / 反馈）。
+ * 首行是函数内字面量，**绝不进 contracts.json 的 promptFirstLines**——那张表被双端
+ * contracts 钉死且只有五个键，Chrome 端 correction 首行同样不在 PROMPT_FIRST_LINES
+ * （已核实），故零 contracts 变更。
+ */
+fun buildCorrectionPrompt(
+  input: SentenceInput,
+  core: CoreAnalysis,
+  feedback: String,
+): String = listOf(
+  "Reanalyze the supplied sentence using the reader's correction feedback.",
+  "Keep the sentence ID and Tokens unchanged. Return core-analysis JSON only.",
+  CORE_OUTPUT_SHAPE,
+  "Sentence and Tokens:\n${serializeSentence(input)}",
+  "Previously verified core analysis:\n${serialize(core.toJsonElement())}",
+  "Reader feedback:\n$feedback",
+).joinToString("\n\n")
+
+/**
+ * 纠正反馈修复轮：逐字对齐 Chrome correctionRepairPrompt——修复指令 → **整段内嵌**
+ * 首轮纠正 prompt（保留全部纠正上下文）→ **平铺** errors（单句无需 RepairErrorGroup
+ * 分组，Chrome 亦如此）→ 非法 JSON → 收尾不变式。至多一轮。
+ */
+fun buildCorrectionPromptRepair(
+  input: SentenceInput,
+  core: CoreAnalysis,
+  feedback: String,
+  errors: List<ValidationError>,
+  invalidJson: JsonElement,
+): String = listOf(
+  "Repair only the structure of the invalid correction analysis while preserving the entire correction context below.",
+  buildCorrectionPrompt(input, core, feedback),
+  "Validation errors:\n${serialize(flatErrorsJson(errors))}",
+  "Invalid JSON:\n${serialize(invalidJson)}",
+  "Return the repaired core-analysis JSON only. Do not add sentences or change sentence IDs or Tokens.",
+).joinToString("\n\n")
+
+/** 平铺校验错误：`[{"path","message"}]`，与 Chrome `serialize(errors)` 同形（无分组信封）。 */
+private fun flatErrorsJson(errors: List<ValidationError>): JsonElement = buildJsonArray {
+  errors.forEach { error ->
+    addJsonObject {
+      put("path", error.path)
+      put("message", error.message)
+    }
+  }
+}

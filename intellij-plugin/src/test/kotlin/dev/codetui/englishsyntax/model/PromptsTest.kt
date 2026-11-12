@@ -531,4 +531,96 @@ class PromptsTest {
     assertEquals("那宾语呢？", sections[9])
     assertFalse(prompt.contains("\n  \""))
   }
+
+  // ---- 纠正反馈提示词（F2）：逐字对齐 Chrome correctionPrompt / correctionRepairPrompt ----
+
+  /** Chrome analysis-service.ts correctionPrompt 的函数内首行（不在 PROMPT_FIRST_LINES，表恰 5 键）。 */
+  private val chromeCorrectionFirstLine = "Reanalyze the supplied sentence using the reader's correction feedback."
+
+  /** Chrome analysis-service.ts correctionRepairPrompt 的函数内首行。 */
+  private val chromeCorrectionRepairFirstLine =
+    "Repair only the structure of the invalid correction analysis while preserving the entire correction context below."
+
+  private val correctionCore = CoreAnalysis(
+    sentenceId = "s1",
+    components = listOf(CoreComponent(0, 1, GrammarRole.SUBJECT, "该服务")),
+    modelProfileId = "profile-1",
+  )
+
+  /**
+   * 首行是函数内字面量、逐字 = Chrome 同名 prompt 首行（先抄 chrome-plugin 原文再断言），
+   * 绝不进被双端 contracts 钉死的 promptFirstLines——与 buildChatPrompt 同款约定。
+   */
+  @Test
+  fun `correction prompt first lines are function-local literals kept out of the shared first-line table`() {
+    val prompt = buildCorrectionPrompt(sentence("The service works."), correctionCore, "把 works 单独标成谓语")
+    val repair = buildCorrectionPromptRepair(
+      sentence("The service works."),
+      correctionCore,
+      "把 works 单独标成谓语",
+      listOf(ValidationError("components[0]", "bad")),
+      buildJsonObject { put("sentences", buildJsonArray { }) },
+    )
+
+    assertTrue(prompt.startsWith(chromeCorrectionFirstLine))
+    assertTrue(repair.startsWith(chromeCorrectionRepairFirstLine))
+    contractFirstLines.forEach { (key, value) ->
+      val firstLine = value.jsonPrimitive.content
+      assertTrue(firstLine != chromeCorrectionFirstLine, "correction first line leaked into promptFirstLines[$key]")
+      assertTrue(firstLine != chromeCorrectionRepairFirstLine, "correction repair first line leaked into promptFirstLines[$key]")
+    }
+  }
+
+  /**
+   * 六段结构照 Chrome 原文逐段（首行 / 不变式 / CORE_OUTPUT_SHAPE / 句子 / 已核实 core / 反馈），
+   * CORE_OUTPUT_SHAPE 复用双端逐字一致的那份，内嵌 JSON 全部紧凑序列化。
+   */
+  @Test
+  fun `correction prompt embeds sentence core and feedback in six compact sections`() {
+    val input = sentence("The service works.")
+    val feedback = "把 works 单独标成谓语"
+    val prompt = buildCorrectionPrompt(input, correctionCore, feedback)
+
+    val sections = prompt.split("\n\n")
+    assertEquals(6, sections.size)
+    assertEquals(chromeCorrectionFirstLine, sections[0])
+    assertEquals("Keep the sentence ID and Tokens unchanged. Return core-analysis JSON only.", sections[1])
+    // CORE_OUTPUT_SHAPE 复用：第三段与 core/detail prompt 的输出形状行同源（双端逐字一致）。
+    assertTrue(sections[2].contains("Output exactly one JSON object of this shape, not a top-level array:"))
+    assertTrue(sections[2].contains("A component must never contain only punctuation Tokens"))
+    assertTrue(sections[2].contains("Output minified JSON on a single line"))
+    assertEquals("Sentence and Tokens:\n${serializeSentence(input)}", sections[3])
+    assertEquals("Previously verified core analysis:\n${serialize(correctionCore.toJsonElement())}", sections[4])
+    assertEquals("Reader feedback:\n$feedback", sections[5])
+    assertFalse(prompt.contains("\n  \""))
+  }
+
+  /**
+   * 修复轮结构照 Chrome 原文：修复指令 → 完整首轮纠正 prompt（整段内嵌，自带 \n\n 分隔，
+   * 整串按 \n\n 切会超过元素数——按拼接边界断言）→ 平铺 errors（单句无需 RepairErrorGroup
+   * 分组，Chrome 亦如此）→ 非法 JSON → 收尾不变式。
+   */
+  @Test
+  fun `correction repair prompt embeds the whole correction prompt and flat errors`() {
+    val input = sentence("The service works.")
+    val feedback = "把 works 单独标成谓语"
+    val errors = listOf(ValidationError("components[0]", "coverage is incomplete"))
+    val invalidJson = buildJsonObject { put("sentences", buildJsonArray { }) }
+    val prompt = buildCorrectionPromptRepair(input, correctionCore, feedback, errors, invalidJson)
+    val correction = buildCorrectionPrompt(input, correctionCore, feedback)
+
+    assertTrue(prompt.startsWith("${chromeCorrectionRepairFirstLine}\n\n$correction"))
+    val tail = prompt.removePrefix("${chromeCorrectionRepairFirstLine}\n\n$correction")
+    assertEquals(
+      "\n\nValidation errors:\n" + """[{"path":"components[0]","message":"coverage is incomplete"}]""" +
+        "\n\nInvalid JSON:\n" + """{"sentences":[]}""" +
+        "\n\nReturn the repaired core-analysis JSON only. Do not add sentences or change sentence IDs or Tokens.",
+      tail,
+    )
+    // 平铺 errors：不出现 RepairErrorGroup 的分组信封（sentenceId/kind/rawOccurrence 键）。
+    assertFalse(prompt.contains("\"kind\""))
+    assertFalse(prompt.contains("\"rawOccurrence\""))
+    assertFalse(prompt.contains("sentences[0]"))
+    assertFalse(prompt.contains("\n  \""))
+  }
 }

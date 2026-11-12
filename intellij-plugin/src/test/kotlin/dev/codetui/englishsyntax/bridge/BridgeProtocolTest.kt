@@ -369,4 +369,84 @@ class BridgeProtocolTest {
       ),
     )
   }
+
+  // ---- FEEDBACK_REQUEST / FEEDBACK_ERROR：纠正反馈（F2），防伪造门与 CHAT_ASK 同款 ----
+
+  private fun feedbackJson(
+    sentenceId: String = "s-b1-0",
+    feedback: String = "这个 of 短语应该是定语",
+  ): String =
+    """{"version":1,"type":"FEEDBACK_REQUEST","previewId":"p1","generation":2,"sentenceId":"$sentenceId","feedback":"$feedback"}"""
+
+  @Test
+  fun `accepts feedback request within caps and trims the feedback`() {
+    val message = parse(feedbackJson(feedback = "  这个 of 短语应该是定语  ")) as PageMessage.FeedbackRequest
+    assertEquals("p1", message.previewId)
+    assertEquals(2, message.generation)
+    assertEquals("s-b1-0", message.sentenceId)
+    assertEquals("这个 of 短语应该是定语", message.feedback)
+  }
+
+  @Test
+  fun `rejects feedback request with blank or oversized feedback`() {
+    assertNull(parse(feedbackJson(feedback = "")))
+    assertNull(parse(feedbackJson(feedback = "   ")))
+    assertNull(parse(feedbackJson(feedback = "x".repeat(BridgeProtocol.MAX_FEEDBACK_CHARACTERS + 1))))
+    // 原文带空白超长但 trim 后在上限内：合法——上限按 trim 后文本计（CHAT_ASK 同款）。
+    val padded = "  " + "x".repeat(BridgeProtocol.MAX_FEEDBACK_CHARACTERS) + "  "
+    val message = parse(feedbackJson(feedback = padded)) as PageMessage.FeedbackRequest
+    assertEquals(BridgeProtocol.MAX_FEEDBACK_CHARACTERS, message.feedback.length)
+  }
+
+  @Test
+  fun `feedback request whitespace gates follow the explicit javascript class`() {
+    // U+FEFF：JS trim 裁掉、JVM String.trim/isBlank 留下——按 JS 判空拒收（CHAT_ASK 同款分叉钉子）。
+    assertNull(parse(feedbackJson(feedback = "\\uFEFF")))
+    // U+001C–U+001F：JS trim 不剥——保留在文本里按非空计。
+    val kept = parse(feedbackJson(feedback = "修\u001F正")) as PageMessage.FeedbackRequest
+    assertEquals("修\u001F正", kept.feedback)
+  }
+
+  @Test
+  fun `rejects feedback request with extra or missing fields or credentials`() {
+    // 多余键
+    assertNull(
+      parse("""{"version":1,"type":"FEEDBACK_REQUEST","previewId":"p1","generation":2,"sentenceId":"s-b1-0","feedback":"f","extra":1}"""),
+    )
+    // 夹带凭据
+    assertNull(
+      parse("""{"version":1,"type":"FEEDBACK_REQUEST","previewId":"p1","generation":2,"sentenceId":"s-b1-0","feedback":"f","apiKey":"leak"}"""),
+    )
+    // sentenceId 为空 / 缺失
+    assertNull(parse(feedbackJson(sentenceId = "")))
+    assertNull(
+      parse("""{"version":1,"type":"FEEDBACK_REQUEST","previewId":"p1","generation":2,"feedback":"f"}"""),
+    )
+    // 方向混淆：页面伪造的 FEEDBACK_ERROR 不是合法 page 消息
+    assertNull(
+      parse("""{"version":1,"type":"FEEDBACK_ERROR","previewId":"p1","generation":2,"sentenceId":"s","message":"m"}"""),
+    )
+  }
+
+  @Test
+  fun `feedback error host message parses with generation and sentenceId`() {
+    val error = parseHost(
+      """{"version":1,"type":"FEEDBACK_ERROR","previewId":"p1","generation":3,"sentenceId":"s-b1-0","message":"INVALID_MODEL_OUTPUT：components[0] coverage"}""",
+    ) as HostMessage.FeedbackError
+    assertEquals(3, error.generation)
+    assertEquals("s-b1-0", error.sentenceId)
+    assertEquals("INVALID_MODEL_OUTPUT：components[0] coverage", error.message)
+  }
+
+  @Test
+  fun `rejects malformed feedback error host messages`() {
+    // sentenceId 为空
+    assertNull(parseHost("""{"version":1,"type":"FEEDBACK_ERROR","previewId":"p1","generation":0,"sentenceId":"","message":"m"}"""))
+    // 缺 message
+    assertNull(parseHost("""{"version":1,"type":"FEEDBACK_ERROR","previewId":"p1","generation":0,"sentenceId":"s"}"""))
+    // 多余键（不得混入 conversationId/code）
+    assertNull(parseHost("""{"version":1,"type":"FEEDBACK_ERROR","previewId":"p1","generation":0,"sentenceId":"s","message":"m","code":"X"}"""))
+    // 方向混淆：host 侧不存在 FEEDBACK_REQUEST
+    assertNull(parseHost(feedbackJson()))
+  }
 }

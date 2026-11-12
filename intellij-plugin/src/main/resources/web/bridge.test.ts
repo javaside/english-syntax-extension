@@ -4,6 +4,7 @@ import {
   MAX_CHAT_HISTORY_CHARACTERS,
   MAX_CHAT_HISTORY_TURNS,
   MAX_CHAT_QUESTION_CHARACTERS,
+  MAX_FEEDBACK_CHARACTERS,
   parseHostMessage,
   parsePageMessage,
 } from "./bridge";
@@ -349,6 +350,104 @@ describe("parsePageMessage", () => {
       }),
     ).toBeNull();
   });
+
+  // ---- FEEDBACK_REQUEST（F2 纠正反馈）：防伪造门与 CHAT_ASK 同款（与 Kotlin parseFeedbackRequest 镜像）----
+
+  it("accepts feedback request within caps and trims the feedback", () => {
+    const message = parsePageMessage({
+      version: 1,
+      type: "FEEDBACK_REQUEST",
+      previewId: "p1",
+      generation: 2,
+      sentenceId: "s-b1-0",
+      feedback: "  这个 of 短语应该是定语  ",
+    });
+    expect(message).toEqual({
+      version: 1,
+      type: "FEEDBACK_REQUEST",
+      previewId: "p1",
+      generation: 2,
+      sentenceId: "s-b1-0",
+      feedback: "这个 of 短语应该是定语",
+    });
+  });
+
+  it("rejects feedback request with blank or oversized feedback", () => {
+    expect(
+      parsePageMessage({ version: 1, type: "FEEDBACK_REQUEST", previewId: "p1", generation: 2, sentenceId: "s-b1-0", feedback: "" }),
+    ).toBeNull();
+    expect(
+      parsePageMessage({ version: 1, type: "FEEDBACK_REQUEST", previewId: "p1", generation: 2, sentenceId: "s-b1-0", feedback: "   " }),
+    ).toBeNull();
+    expect(
+      parsePageMessage({
+        version: 1,
+        type: "FEEDBACK_REQUEST",
+        previewId: "p1",
+        generation: 2,
+        sentenceId: "s-b1-0",
+        feedback: "x".repeat(MAX_FEEDBACK_CHARACTERS + 1),
+      }),
+    ).toBeNull();
+    // 原文带空白超长但 trim 后在上限内：合法——上限按 trim 后文本计。
+    const padded = `  ${"x".repeat(MAX_FEEDBACK_CHARACTERS)}  `;
+    const message = parsePageMessage({
+      version: 1,
+      type: "FEEDBACK_REQUEST",
+      previewId: "p1",
+      generation: 2,
+      sentenceId: "s-b1-0",
+      feedback: padded,
+    });
+    expect(message && message.type === "FEEDBACK_REQUEST" ? message.feedback.length : -1).toBe(
+      MAX_FEEDBACK_CHARACTERS,
+    );
+  });
+
+  it("rejects feedback request with extra keys, empty sentenceId, credentials, or direction confusion", () => {
+    // 多余键
+    expect(
+      parsePageMessage({
+        version: 1,
+        type: "FEEDBACK_REQUEST",
+        previewId: "p1",
+        generation: 2,
+        sentenceId: "s-b1-0",
+        feedback: "f",
+        extra: 1,
+      }),
+    ).toBeNull();
+    // sentenceId 为空 / 缺失
+    expect(
+      parsePageMessage({ version: 1, type: "FEEDBACK_REQUEST", previewId: "p1", generation: 2, sentenceId: "", feedback: "f" }),
+    ).toBeNull();
+    expect(
+      parsePageMessage({ version: 1, type: "FEEDBACK_REQUEST", previewId: "p1", generation: 2, feedback: "f" }),
+    ).toBeNull();
+    // forbiddenKeys
+    expect(
+      parsePageMessage({
+        version: 1,
+        type: "FEEDBACK_REQUEST",
+        previewId: "p1",
+        generation: 2,
+        sentenceId: "s-b1-0",
+        feedback: "f",
+        apiKey: "leak",
+      }),
+    ).toBeNull();
+    // 方向混淆：页面伪造的 FEEDBACK_ERROR 不是合法 page 消息
+    expect(
+      parsePageMessage({
+        version: 1,
+        type: "FEEDBACK_ERROR",
+        previewId: "p1",
+        generation: 2,
+        sentenceId: "s",
+        message: "m",
+      }),
+    ).toBeNull();
+  });
 });
 
 describe("parseHostMessage", () => {
@@ -618,6 +717,90 @@ describe("parseHostMessage", () => {
           sentenceId: "s",
           history: [],
           question: "q",
+        },
+        3,
+      ),
+    ).toBeNull();
+  });
+
+  // ---- FEEDBACK_ERROR（F2）：与 CHAT_ERROR 平行、按 sentenceId 关联，不混淆会话 ----
+
+  it("accepts feedback error for the current generation and drops stale ones", () => {
+    const error = parseHostMessage(
+      {
+        version: 1,
+        type: "FEEDBACK_ERROR",
+        previewId: "p1",
+        generation: 3,
+        sentenceId: "s-b1-0",
+        message: "INVALID_MODEL_OUTPUT：coverage is incomplete",
+      },
+      3,
+    );
+    expect(error).toEqual({
+      version: 1,
+      type: "FEEDBACK_ERROR",
+      previewId: "p1",
+      generation: 3,
+      sentenceId: "s-b1-0",
+      message: "INVALID_MODEL_OUTPUT：coverage is incomplete",
+    });
+
+    expect(
+      parseHostMessage(
+        {
+          version: 1,
+          type: "FEEDBACK_ERROR",
+          previewId: "p1",
+          generation: 2,
+          sentenceId: "s-b1-0",
+          message: "m",
+        },
+        3,
+      ),
+    ).toBeNull();
+  });
+
+  it("rejects feedback error with extra or missing keys, or direction confusion", () => {
+    // sentenceId 为空
+    expect(
+      parseHostMessage(
+        { version: 1, type: "FEEDBACK_ERROR", previewId: "p1", generation: 3, sentenceId: "", message: "m" },
+        3,
+      ),
+    ).toBeNull();
+    // 缺 message
+    expect(
+      parseHostMessage(
+        { version: 1, type: "FEEDBACK_ERROR", previewId: "p1", generation: 3, sentenceId: "s" },
+        3,
+      ),
+    ).toBeNull();
+    // 多余键（不得混入 conversationId/code）
+    expect(
+      parseHostMessage(
+        {
+          version: 1,
+          type: "FEEDBACK_ERROR",
+          previewId: "p1",
+          generation: 3,
+          sentenceId: "s",
+          message: "m",
+          code: "X",
+        },
+        3,
+      ),
+    ).toBeNull();
+    // 方向混淆：host 侧不存在 FEEDBACK_REQUEST
+    expect(
+      parseHostMessage(
+        {
+          version: 1,
+          type: "FEEDBACK_REQUEST",
+          previewId: "p1",
+          generation: 3,
+          sentenceId: "s",
+          feedback: "f",
         },
         3,
       ),

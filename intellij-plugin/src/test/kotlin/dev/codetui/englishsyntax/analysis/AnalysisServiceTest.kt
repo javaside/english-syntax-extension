@@ -881,4 +881,165 @@ class AnalysisServiceTest {
     assertFalse(message.contains("Model"), "detail failure message leaked the api key value: $message")
     assertTrue(message.contains("[redacted]"), "boundary redaction must have run: $message")
   }
+
+  // ---- 纠正反馈（analyzeWithFeedback）：克隆 Chrome reanalyzeWithFeedback——首轮 + 至多一轮修复、无缓存、USER_RETRY ----
+
+  private val feedbackSentence: SentenceInput get() = sentence("s1", "The service validates every response.")
+  private val feedbackCore = CoreAnalysis(
+    sentenceId = "s1",
+    components = listOf(CoreComponent(0, 1, GrammarRole.SUBJECT, "该服务")),
+    modelProfileId = "profile-1",
+  )
+  /** 首轮结构非法（覆盖不全）但可解析：走修复轮而不是直接判死。 */
+  private val partialCoreRaw =
+    """{"sentences":[{"sentenceId":"s1","components":[{"startToken":0,"endToken":1,"role":"SUBJECT","translation":"部分"}]}]}"""
+
+  @Test
+  fun `feedback correction succeeds on the first pass and wires the correction prompt`() = runBlocking {
+    server.enqueueJson(validCoreRaw("s1"))
+
+    val corrected = service.analyzeWithFeedback(
+      profile(), "doc-1", feedbackSentence, feedbackCore, "请把 every response 标成宾语",
+    )
+
+    assertEquals(1, server.requests.size)
+    assertEquals(listOf("该服务", "校验", "每个响应"), corrected.components.map { it.translation })
+    assertEquals("s1", corrected.sentenceId)
+    val content = server.requests[0].body.getValue("messages").jsonArray.first().jsonObject
+      .getValue("content").jsonPrimitive.content
+    assertTrue(content.startsWith("Reanalyze the supplied sentence using the reader's correction feedback."))
+    assertTrue(content.contains("Reader feedback:\n请把 every response 标成宾语"))
+    assertTrue(content.contains("Previously verified core analysis:"))
+    // 首轮与修复轮共用 core schema（纠正就是 core 分析的替换）。
+    assertTrue(server.requests[0].body.containsKey("response_format"))
+  }
+
+  /**
+   * 无缓存是刻意分叉（spec F2 裁决）：预置该句 core 缓存命中也照样调模型（不读），
+   * 成功后缓存条目数不变（不写）——纠正是一次性探索输入，SQLite 无 correction 槽位。
+   */
+  @Test
+  fun `feedback correction neither reads nor writes the core cache`() = runBlocking {
+    val key = dev.codetui.englishsyntax.cache.createCoreCacheKey(
+      dev.codetui.englishsyntax.cache.CoreCacheKeyInput(
+        "The service validates every response.",
+        dev.codetui.englishsyntax.domain.ContractVersions.CORE_SCHEMA,
+        dev.codetui.englishsyntax.domain.ContractVersions.CORE_PROMPT,
+      ),
+    )
+    cache.putCore(
+      key,
+      "other-profile",
+      json.parseToJsonElement("""{"schemaVersion":${dev.codetui.englishsyntax.domain.ContractVersions.CORE_SCHEMA},"sentenceId":"s1","components":[{"startToken":0,"endToken":1,"role":"SUBJECT","translation":"该服务"},{"startToken":2,"endToken":2,"role":"PREDICATE","translation":"校验"},{"startToken":3,"endToken":5,"role":"OBJECT","translation":"每个响应"}],"modelProfileId":"other-profile"}""") as JsonObject,
+    )
+    val entriesBefore = cache.stats().entries
+    server.enqueueJson(validCoreRaw("s1"))
+
+    val corrected = service.analyzeWithFeedback(
+      profile(), "doc-1", feedbackSentence, feedbackCore, "请把 every response 标成宾语",
+    )
+
+    assertEquals(1, server.requests.size, "预置缓存命中也必须调模型（纠正不读 core 缓存）")
+    assertEquals(entriesBefore, cache.stats().entries, "纠正结果绝不写缓存")
+    assertEquals(3, corrected.components.size)
+  }
+
+  @Test
+  fun `invalid correction gets exactly one repair round and returns the repaired analysis`() = runBlocking {
+    server.enqueueJson(partialCoreRaw)
+    server.enqueueJson(validCoreRaw("s1"))
+
+    val corrected = service.analyzeWithFeedback(
+      profile(), "doc-1", feedbackSentence, feedbackCore, "请把 every response 标成宾语",
+    )
+
+    assertEquals(2, server.requests.size, "首轮 + 至多一轮修复")
+    assertEquals(listOf("该服务", "校验", "每个响应"), corrected.components.map { it.translation })
+    val repairPrompt = server.requests[1].body.getValue("messages").jsonArray.first().jsonObject
+      .getValue("content").jsonPrimitive.content
+    assertTrue(repairPrompt.startsWith("Repair only the structure of the invalid correction analysis"))
+    // 修复轮保留完整纠正上下文（整段内嵌首轮 prompt）。
+    assertTrue(repairPrompt.contains("Reanalyze the supplied sentence using the reader's correction feedback."))
+    assertTrue(repairPrompt.contains("Reader feedback:\n请把 every response 标成宾语"))
+    // 平铺 errors：无 RepairErrorGroup 的 sentenceId/kind 分组信封。
+    assertFalse(repairPrompt.contains("\"kind\""))
+    assertTrue(repairPrompt.contains("\"path\":\"sentences[0].components"))
+    assertEquals(0, cache.stats().entries, "修复成功也不写缓存")
+  }
+
+  @Test
+  fun `correction still invalid after the single repair throws redacted invalid output`() = runBlocking {
+    val credentials = MapCredentialStore()
+    credentials.put("profile-1", CredentialStore.API_KEY_FIELD, "Model")
+    val secretService = newService(credentials = credentials)
+    server.enqueueJson(partialCoreRaw)
+    server.enqueueJson(partialCoreRaw)
+
+    val error = runCatching {
+      secretService.analyzeWithFeedback(profile(), "doc-1", feedbackSentence, feedbackCore, "反馈")
+    }.exceptionOrNull()
+
+    val failure = error as? ExtensionFailure
+    assertNotNull(failure)
+    assertEquals(ErrorCode.INVALID_MODEL_OUTPUT, failure.code)
+    assertEquals(2, server.requests.size, "首轮 + 至多一轮修复，绝无第二轮修复")
+    assertFalse(failure.message.contains("Model"), "failure message leaked the api key value: ${failure.message}")
+    assertTrue(failure.message.contains("[redacted]"), "boundary redaction must have run: ${failure.message}")
+    assertEquals(0, cache.stats().entries, "失败结果不写缓存")
+  }
+
+  /** cacheKey 掺 feedback 文本哈希（chatCacheKey 先例）：否则不同纠正被调度器去重合并成一个在飞请求。 */
+  @Test
+  fun `two different corrections in flight are separate requests`() = runBlocking {
+    server.enqueueJson(validCoreRaw("s1"))
+    server.enqueueJson(validCoreRaw("s1"))
+
+    val first = async {
+      service.analyzeWithFeedback(profile(), "doc-1", feedbackSentence, feedbackCore, "反馈甲")
+    }
+    while (server.requests.isEmpty()) delay(10)
+    val second = async {
+      service.analyzeWithFeedback(profile(), "doc-1", feedbackSentence, feedbackCore, "反馈乙")
+    }
+
+    assertEquals(3, first.await().components.size)
+    assertEquals(3, second.await().components.size)
+    assertEquals(2, server.requests.size, "不同反馈必须各自请求——cacheKey 不含反馈文本时第二问会拿到第一问的结果")
+  }
+
+  /** USER_RETRY 档（Chrome requestModel 同款）：并发 1 时纠正必须插到更早入队的可见 core 请求之前。 */
+  @Test
+  fun `feedback correction outranks a queued visible core request when the slot frees up`() = runBlocking {
+    val singleSlot = newService(scheduler = RequestScheduler(concurrency = 1))
+    val slowSentence = sentence("slow", "Sentence number 1 has words.")
+    val laterSentence = sentence("later", "Sentence number 2 has words.")
+    server.enqueueSlowSse(listOf(validCoreRaw("slow")), gapMillis = 0, tailGapMillis = 600)
+    server.enqueueJson(validCoreRaw("s1"))
+    server.enqueueJson(validCoreRaw("later"))
+
+    val coreJob = async {
+      singleSlot.analyzeCore(
+        profile(), "doc-1", listOf(slowSentence),
+        onStreamedComponent = StreamedComponentSink { _, _ -> },
+      )
+    }
+    while (server.requests.isEmpty()) delay(10)
+    // 更早入队的是第二个 core（ACTIVE_VISIBLE_CORE），更晚入队的纠正必须先出队。
+    val laterJob = async { singleSlot.analyzeCore(profile(), "doc-1", listOf(laterSentence)) }
+    val correctionJob = async {
+      singleSlot.analyzeWithFeedback(profile(), "doc-1", feedbackSentence, feedbackCore, "反馈")
+    }
+
+    assertEquals(1, coreJob.await().result.size)
+    assertEquals(3, correctionJob.await().components.size)
+    assertEquals(1, laterJob.await().result.size)
+
+    assertEquals(3, server.requests.size)
+    val secondPrompt = server.requests[1].body.getValue("messages").jsonArray.first().jsonObject
+      .getValue("content").jsonPrimitive.content
+    assertTrue(secondPrompt.startsWith("Reanalyze the supplied sentence"), "纠正必须排在更早入队的可见 core 之前")
+    val thirdPrompt = server.requests[2].body.getValue("messages").jsonArray.first().jsonObject
+      .getValue("content").jsonPrimitive.content
+    assertTrue(thirdPrompt.startsWith("Analyze the numbered English sentences"))
+  }
 }

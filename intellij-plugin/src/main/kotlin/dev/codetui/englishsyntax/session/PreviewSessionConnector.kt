@@ -74,6 +74,9 @@ object PreviewSessionConnector {
             message.history.map { ChatTurn(it.role, it.content) },
             message.question,
           )
+        // 纠正反馈（F2）：feedback 已在桥的防伪造门 trim 到 1..2000，成功复用 CORE_RESULT、
+        // 失败回 FEEDBACK_ERROR（session 内部处理，无额外载荷过桥）。
+        is PageMessage.FeedbackRequest -> session.launchFeedback(message.sentenceId, message.feedback)
         is PageMessage.RetrySentence -> session.retrySentence(message.sentenceId)
         is PageMessage.PreviewReady, is PageMessage.PreviewRendered -> Unit
       }
