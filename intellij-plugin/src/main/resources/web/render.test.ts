@@ -211,6 +211,36 @@ describe("PreviewRenderer", () => {
     expect(error).not.toContain("模型返回结果无法解析");
   });
 
+  it("failure row survives sibling repaints (persistent failure state)", () => {
+    // 多句块：失败行此前只在触发帧（errorSentenceId 匹配）渲染，兄弟句的
+    // CORE_RESULT 一到就整块重画——失败句变成空 section，原文隐藏、译文没有、
+    // 重试/纠正按钮全丢。失败文案必须存进 record，任何重画都从持久状态渲染
+    // （Chrome 端 sentence-failure 从会话状态渲染，重画不丢）。
+    const { renderer } = setup();
+    renderer.registerSentence("b1", "s2");
+    const tokens = [
+      { id: 0, text: "Classify", leadingWhitespace: "", punctuation: false },
+      { id: 1, text: "the", leadingWhitespace: " ", punctuation: false },
+      { id: 2, text: "request", leadingWhitespace: " ", punctuation: false },
+      { id: 3, text: ".", leadingWhitespace: "", punctuation: true },
+    ];
+    renderer.renderCoreError("s1", "b1", "AUTH_FAILED", "Insufficient Balance", tokens);
+
+    // 兄弟句成功 → 同块整卡重画（无错误 options）：s1 失败行必须原样存活。
+    renderer.renderCoreResult(
+      "s2",
+      "b1",
+      corePayload("s2", [{ startToken: 0, endToken: 3, role: "OBJECT", translation: "分类该请求" }]),
+      tokens,
+    );
+
+    const failure = document.querySelector('.english-syntax-sentence-failure[data-sentence-id="s1"]');
+    expect(failure).not.toBeNull();
+    expect(failure?.querySelector(".english-syntax-original")?.textContent).toBe("Classify the request.");
+    expect(failure?.querySelector(".english-syntax-error")?.textContent).toContain("模型配置鉴权失败");
+    expect(failure?.querySelector(".english-syntax-retry")).not.toBeNull();
+  });
+
   it("INVALID_MODEL_OUTPUT with an empty message keeps the friendly fallback text", () => {
     // 桥上 message 缺失/为空（旧缓存或异常路径）时仍走 ERROR_TEXT，不显示空错误行。
     const { renderer } = setup();
@@ -1107,8 +1137,9 @@ describe("PreviewRenderer", () => {
     });
 
     it("keeps the open row (with draft) across sibling repaints — the row does not live in the rebuilt card", () => {
-      // 失败行是易碎的（只在 errorSentenceId 匹配的那一帧渲染）；输入行的存续只依赖
-      // renderer 状态，兄弟句消息触发的整卡重建既不能吞掉行、也不能丢草稿。
+      // 输入行的存续只依赖 renderer 状态，兄弟句消息触发的整卡重建既不能吞掉行、
+      // 也不能丢草稿（失败行自身已从 record 持久状态渲染，重画不丢——见上方
+      // "failure row survives sibling repaints"）。
       const { renderer } = setupFeedback();
       renderer.registerSentence("b1", "s2");
       hadCoreFailure(renderer);

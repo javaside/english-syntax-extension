@@ -407,16 +407,15 @@ class PreviewSession(
     if (state == SessionState.PAUSED && !allowPaused) return
     val capturedVersion = operationVersion
     val profile = currentProfile ?: run {
-      // 无 Profile：纯缓存查询。命中句置 READY；未命中句置 STALE——对齐 Chrome 纯缓存
-      // 会话的 skipped 语义：保持原文渲染、不计 failed，且 registerFresh 对 STALE 放行，
-      // 配好 profile 后的重扫能把它们重新派发（留 DISCOVERED 会永久滞留、置 FAILED 会被
-      // 计成失败并渲染成失败行，都救不回来）。
+      // 无 Profile：纯缓存查询。整批先置 STALE（miss 句终态——对齐 Chrome 纯缓存会话
+      // 的 skipped 语义：保持原文渲染、不计 failed，且 registerFresh 对 STALE 放行，
+      // 配好 profile 后的重扫能把它们重新派发；留 DISCOVERED 会永久滞留、置 FAILED 会被
+      // 计成失败并渲染成失败行，都救不回来）。命中句随后经 [applyOutcome] 置 READY 并以
+      // CORE_RESULT 下发渲染——对齐 Chrome 把命中 analyses 放进 CORE_RESULT 返回
+      // （service-worker.ts:487-494），浮层的「缓存命中 x/y 句」才有对应译文可看。
+      inputs.forEach { input -> sentences[input.sentenceId]?.phase = SentencePhase.STALE }
       val cached = analysis.lookupCore(inputs)
-      val cachedIds = cached.map { it.sentenceId }.toSet()
-      inputs.forEach { input ->
-        sentences[input.sentenceId]?.phase =
-          if (input.sentenceId in cachedIds) SentencePhase.READY else SentencePhase.STALE
-      }
+      applyOutcome(CoreBatchOutcome(cached, emptyList(), cacheHit = cached.isNotEmpty()))
       sender.send(buildJsonObject {
         put("version", 1)
         put("type", "SESSION_STATE")

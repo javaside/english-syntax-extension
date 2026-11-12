@@ -45,6 +45,13 @@ interface SentenceRecord {
   tokens: TokenPayload[];
   failed: boolean;
   /**
+   * 失败文案（friendlyErrorMessage 的结果）存进 record：失败行此前只在触发帧
+   * （errorSentenceId 匹配）渲染，兄弟句的 CORE_RESULT 一到就整块重画，失败句变
+   * 成空 section——原文隐藏、译文没有、重试/纠正按钮全丢（Chrome 端从会话状态
+   * 渲染失败行，重画不丢）。任何重画都从这份持久状态渲染。
+   */
+  failureMessage: string | null;
+  /**
    * F2：「曾有已核实 core」标志。`renderCoreError` 会把 analysis 置 null——详解失败
    * （A9 quirk）正是这样把成功句打成失败行的，但 Kotlin 侧 record.core 仍在，纠正
    * 以它为底稿。标志必须在置 null **前**捕获，失败行的「纠正」按钮据此保留；
@@ -201,8 +208,8 @@ export class PreviewRenderer {
   readonly #onFeedbackRequest: FeedbackRequestHandler;
   /**
    * F2 内联纠正输入行的常驻状态。行 DOM 挂在卡片（或还原后的原文块）**之后**——
-   * 不参与 #renderCard 的整卡重建，失败行只在 errorSentenceId 匹配的那一帧渲染、
-   * 兄弟句消息一重画就消失，输入行的存续不能依赖它（草稿/焦点随常驻 DOM 天然保留）。
+   * 不参与 #renderCard 的整卡重建（失败行自 #4 修复起从 record 持久状态渲染、重画
+   * 不丢，但输入行的草稿/焦点仍随常驻 DOM 天然保留，不依赖整卡重建）。
    */
   #correction: {
     sentenceId: string;
@@ -333,6 +340,7 @@ export class PreviewRenderer {
     if (tokens.length > 0) entry.record.tokens = tokens;
     entry.record.provisional = null;
     entry.record.failed = false;
+    entry.record.failureMessage = null;
     this.#sentences.set(sentenceId, entry);
     // F2：纠正成功的结果走既有重画；输入行随之移除（卡片已是最新划分）。
     if (this.#correction?.sentenceId === sentenceId) this.#closeCorrection();
@@ -357,16 +365,16 @@ export class PreviewRenderer {
     // 这条路径把成功句打成失败行的，Kotlin 侧 record.core 仍在，「纠正」按钮据此保留。
     if (entry.record.analysis !== null) entry.record.hadCore = true;
     entry.record.failed = true;
+    // 文案随 record 持久化（见 SentenceRecord.failureMessage 注释）：重画不传单帧
+    // options，失败行在任何后续重画中都从这份状态渲染。
+    entry.record.failureMessage = friendlyErrorMessage(code, message);
     entry.record.analysis = null;
     entry.record.provisional = null;
     if (tokens.length > 0) entry.record.tokens = tokens;
     const order = this.#blockSentenceOrder.get(entry.blockId) ?? [];
     if (!order.includes(sentenceId)) order.push(sentenceId);
     this.#blockSentenceOrder.set(entry.blockId, order);
-    this.#repaintBlock(entry.blockId, {
-      errorSentenceId: sentenceId,
-      message: friendlyErrorMessage(code, message),
-    });
+    this.#repaintBlock(entry.blockId);
   }
 
   /**
@@ -383,6 +391,7 @@ export class PreviewRenderer {
       provisional: null,
       tokens: [],
       failed: false,
+      failureMessage: null,
       hadCore: false,
     });
     this.#sentences.set(sentenceId, { blockId, record: record.sentences.get(sentenceId)! });
@@ -517,8 +526,6 @@ export class PreviewRenderer {
   #repaintBlock(
     blockId: string,
     options: {
-      errorSentenceId?: string;
-      message?: string;
       detailStructures?: DetailPayload["structures"];
       detail?: DetailPayload;
     } = {},
@@ -529,12 +536,12 @@ export class PreviewRenderer {
     const hasContent = order.some((id) => {
       const sentence = record.sentences.get(id);
       return (
-        sentence !== undefined && (sentence.analysis !== null || sentence.provisional !== null)
+        sentence !== undefined &&
+        (sentence.analysis !== null || sentence.provisional !== null || sentence.failed)
       );
     });
     if (
       !hasContent &&
-      options.errorSentenceId === undefined &&
       options.detailStructures === undefined
     ) {
       this.#restoreBlock(record);
@@ -557,8 +564,6 @@ export class PreviewRenderer {
     record: BlockRecord,
     order: string[],
     options: {
-      errorSentenceId?: string;
-      message?: string;
       detailStructures?: DetailPayload["structures"];
       detail?: DetailPayload;
     },
@@ -574,12 +579,15 @@ export class PreviewRenderer {
       const section = createElement(owner, "section", "english-syntax-sentence");
       section.dataset.sentenceId = sentenceId;
       const components = sentence.analysis?.components ?? sentence.provisional ?? [];
-      if (sentenceId === options.errorSentenceId) {
-        // 失败句：原文 + 错误 + 重试（Chrome 端 sentence-failure 同款）。
+      if (sentence.failed) {
+        // 失败句：原文 + 错误 + 重试（Chrome 端 sentence-failure 同款）。判据是 record
+        // 的持久失败状态——任何重画（兄弟句 CORE_RESULT、详情开合、纠正成功后的邻居）
+        // 都照常渲染，文案取 renderCoreError 存下的 friendlyErrorMessage 结果。
         const failure = createElement(owner, "div", "english-syntax-sentence-failure");
+        failure.dataset.sentenceId = sentenceId;
         failure.append(
           createElement(owner, "span", "english-syntax-original", this.#originalText(sentenceId)),
-          createElement(owner, "span", "english-syntax-error", options.message ?? "解析失败"),
+          createElement(owner, "span", "english-syntax-error", sentence.failureMessage ?? "解析失败"),
         );
         failure.append(this.#createRetry(owner, sentenceId));
         // F2：曾有核实划分（如详解失败 quirk）的失败行加「纠正」入口——Kotlin 侧
@@ -1011,6 +1019,7 @@ export class PreviewRenderer {
       provisional: null,
       tokens: [],
       failed: false,
+      failureMessage: null,
       hadCore: false,
     });
     this.#sentences.set(sentenceId, { blockId, record: record.sentences.get(sentenceId)! });

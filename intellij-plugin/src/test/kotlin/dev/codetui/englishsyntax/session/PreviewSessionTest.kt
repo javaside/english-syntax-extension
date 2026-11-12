@@ -626,8 +626,10 @@ class PreviewSessionTest {
 
     assertEquals(0, service.analyzeCalls)
     val states = localSender.of("SESSION_STATE")
-    assertEquals(1, states.size)
-    assertEquals("cacheOnly", states[0]["state"]?.jsonPrimitive?.contentOrNull)
+    // 命中句经 applyOutcome 上屏后，SESSION_STATE 会先有一条 running 中间态、再一条
+    // cacheOnly 终态（与 F7 多批口径一致）——终态语义钉在 last() 上。
+    assertTrue(states.size >= 1)
+    assertEquals("cacheOnly", states.last()["state"]?.jsonPrimitive?.contentOrNull)
   }
 
   /**
@@ -682,6 +684,37 @@ class PreviewSessionTest {
 
     assertEquals(1, service.analyzeCalls, "重扫应把 STALE 句重新派发")
     assertEquals(listOf("s-b1-1"), service.lastSentences.map { it.sentenceId })
+  }
+
+  /**
+   * cacheOnly 命中句必须经 CORE_RESULT 下发（对齐 Chrome service-worker.ts:487-494
+   * 把命中 analyses 放进 CORE_RESULT 返回渲染）：此前只置 READY 相位 + 发
+   * SESSION_STATE，页面浮层说「缓存命中 1/4 句」却看不到任何译文。miss 句保持
+   * STALE——不发 CORE_ERROR（skipped 语义，见上）。
+   */
+  @Test
+  fun `cache only hits render through core result`() = runBlocking {
+    val noProfileManager = PreviewSessionManager(scope, service, { null })
+    val localSender = RecordingSender()
+    val session = noProfileManager.obtain("pv-render", localSender) { }
+    service.lookupResults["s-b1-0"] = CoreAnalysis(
+      sentenceId = "s-b1-0",
+      components = listOf(CoreComponent(0, 1, GrammarRole.SUBJECT, "该服务")),
+      modelProfileId = "cached",
+    )
+    session.start()
+    session.onVisibleBlocks(listOf("b1" to "The service validates. Second sentence here."))
+    session.flushBatch(offscreen = false)
+    kotlinx.coroutines.delay(100)
+
+    val results = localSender.of("CORE_RESULT")
+    assertEquals(1, results.size, "命中句恰好一条 CORE_RESULT")
+    assertEquals("s-b1-0", results[0]["sentenceId"]?.jsonPrimitive?.contentOrNull)
+    assertEquals("b1", results[0]["blockId"]?.jsonPrimitive?.contentOrNull)
+    assertTrue(results[0]["analysisJson"]?.jsonPrimitive?.content?.contains("该服务") == true)
+    assertTrue(results[0]["tokensJson"]?.jsonPrimitive?.content?.contains("The") == true)
+    assertEquals(0, localSender.of("CORE_ERROR").size, "miss 句不发 CORE_ERROR（skipped 语义）")
+    assertEquals("cacheOnly", localSender.of("SESSION_STATE").last()["state"]?.jsonPrimitive?.contentOrNull)
   }
 
   @Test

@@ -611,8 +611,8 @@ var EnglishSyntaxPreview = (function(exports) {
 		#onFeedbackRequest;
 		/**
 		* F2 内联纠正输入行的常驻状态。行 DOM 挂在卡片（或还原后的原文块）**之后**——
-		* 不参与 #renderCard 的整卡重建，失败行只在 errorSentenceId 匹配的那一帧渲染、
-		* 兄弟句消息一重画就消失，输入行的存续不能依赖它（草稿/焦点随常驻 DOM 天然保留）。
+		* 不参与 #renderCard 的整卡重建（失败行自 #4 修复起从 record 持久状态渲染、重画
+		* 不丢，但输入行的草稿/焦点仍随常驻 DOM 天然保留，不依赖整卡重建）。
 		*/
 		#correction = null;
 		constructor(onDetailRequest, onFeedbackRequest = () => {}) {
@@ -689,6 +689,7 @@ var EnglishSyntaxPreview = (function(exports) {
 			if (tokens.length > 0) entry.record.tokens = tokens;
 			entry.record.provisional = null;
 			entry.record.failed = false;
+			entry.record.failureMessage = null;
 			this.#sentences.set(sentenceId, entry);
 			if (this.#correction?.sentenceId === sentenceId) this.#closeCorrection();
 			const order = this.#blockSentenceOrder.get(entry.blockId) ?? [];
@@ -702,16 +703,14 @@ var EnglishSyntaxPreview = (function(exports) {
 			if (entry === void 0) return;
 			if (entry.record.analysis !== null) entry.record.hadCore = true;
 			entry.record.failed = true;
+			entry.record.failureMessage = friendlyErrorMessage(code, message);
 			entry.record.analysis = null;
 			entry.record.provisional = null;
 			if (tokens.length > 0) entry.record.tokens = tokens;
 			const order = this.#blockSentenceOrder.get(entry.blockId) ?? [];
 			if (!order.includes(sentenceId)) order.push(sentenceId);
 			this.#blockSentenceOrder.set(entry.blockId, order);
-			this.#repaintBlock(entry.blockId, {
-				errorSentenceId: sentenceId,
-				message: friendlyErrorMessage(code, message)
-			});
+			this.#repaintBlock(entry.blockId);
 		}
 		/**
 		* 惰性注册句子：sentenceId 由 Kotlin 侧权威生成（s-{blockId}-{index}），
@@ -727,6 +726,7 @@ var EnglishSyntaxPreview = (function(exports) {
 				provisional: null,
 				tokens: [],
 				failed: false,
+				failureMessage: null,
 				hadCore: false
 			});
 			this.#sentences.set(sentenceId, {
@@ -850,8 +850,8 @@ var EnglishSyntaxPreview = (function(exports) {
 			const order = (this.#blockSentenceOrder.get(blockId) ?? []).slice().sort(bySourceOrder);
 			if (!order.some((id) => {
 				const sentence = record.sentences.get(id);
-				return sentence !== void 0 && (sentence.analysis !== null || sentence.provisional !== null);
-			}) && options.errorSentenceId === void 0 && options.detailStructures === void 0) {
+				return sentence !== void 0 && (sentence.analysis !== null || sentence.provisional !== null || sentence.failed);
+			}) && options.detailStructures === void 0) {
 				this.#restoreBlock(record);
 				this.#placeCorrectionRow();
 				return;
@@ -876,9 +876,10 @@ var EnglishSyntaxPreview = (function(exports) {
 				const section = createElement(owner, "section", "english-syntax-sentence");
 				section.dataset.sentenceId = sentenceId;
 				const components = sentence.analysis?.components ?? sentence.provisional ?? [];
-				if (sentenceId === options.errorSentenceId) {
+				if (sentence.failed) {
 					const failure = createElement(owner, "div", "english-syntax-sentence-failure");
-					failure.append(createElement(owner, "span", "english-syntax-original", this.#originalText(sentenceId)), createElement(owner, "span", "english-syntax-error", options.message ?? "解析失败"));
+					failure.dataset.sentenceId = sentenceId;
+					failure.append(createElement(owner, "span", "english-syntax-original", this.#originalText(sentenceId)), createElement(owner, "span", "english-syntax-error", sentence.failureMessage ?? "解析失败"));
 					failure.append(this.#createRetry(owner, sentenceId));
 					if (sentence.hadCore) failure.append(this.#createCorrectionButton(owner, sentenceId));
 					container.append(failure);
@@ -1180,6 +1181,7 @@ var EnglishSyntaxPreview = (function(exports) {
 				provisional: null,
 				tokens: [],
 				failed: false,
+				failureMessage: null,
 				hadCore: false
 			});
 			this.#sentences.set(sentenceId, {
