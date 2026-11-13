@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/javaside/english-syntax-extension/actions/workflows/ci.yml/badge.svg)](https://github.com/javaside/english-syntax-extension/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/javaside/english-syntax-extension)](https://github.com/javaside/english-syntax-extension/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/javaside/english-syntax-extension/total?label=downloads)](https://github.com/javaside/english-syntax-extension/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 **[⬇️ 下载最新版](https://github.com/javaside/english-syntax-extension/releases/latest)** · [更新日志](CHANGELOG.md) · [参与贡献](CONTRIBUTING.md)
