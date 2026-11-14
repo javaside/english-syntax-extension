@@ -5,7 +5,13 @@
 [![Downloads](https://img.shields.io/github/downloads/javaside/english-syntax-extension/total?label=downloads)](https://github.com/javaside/english-syntax-extension/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**[⬇️ 下载最新版](https://github.com/javaside/english-syntax-extension/releases/latest)** · [更新日志](CHANGELOG.md) · [参与贡献](CONTRIBUTING.md)
+**[⬇️ 下载最新版](https://github.com/javaside/english-syntax-extension/releases/latest)** · [▶ 视频演示](https://www.douyin.com/video/7682734620672118031) · [更新日志](CHANGELOG.md) · [参与贡献](CONTRIBUTING.md)
+
+![Chrome 扩展实际效果：网页英文段落被替换为句法拆解卡片，点击成分展开详解](docs/images/chrome-syntax-annotation.png)
+
+*Chrome 扩展实际运行效果：原网页里的英文段落被替换为句法拆解卡片——每个成分一行「角色 / 英文原文 / 中文释义」，点击任一成分（图中为定语从句）即懒加载它的内部结构、语法点与整体解释。*
+
+▶ 静图不过瘾？[完整操作演示视频（抖音）](https://www.douyin.com/video/7682734620672118031)。
 
 同一套「英语句法伴读」的两个平台实现，仓库根下两个平级子模块：
 
