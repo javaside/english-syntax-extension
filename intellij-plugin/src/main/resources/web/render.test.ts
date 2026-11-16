@@ -1248,9 +1248,13 @@ describe("PreviewRenderer", () => {
   }
 
   function clickComponent(startToken: number, endToken: number): void {
+    clickComponentFor("s1", startToken, endToken);
+  }
+
+  function clickComponentFor(sentenceId: string, startToken: number, endToken: number): void {
     document
       .querySelector<HTMLButtonElement>(
-        `.english-syntax-component[data-start-token="${startToken}"][data-end-token="${endToken}"]`,
+        `.english-syntax-sentence[data-sentence-id="${sentenceId}"] .english-syntax-component[data-start-token="${startToken}"][data-end-token="${endToken}"]`,
       )
       ?.click();
   }
@@ -1333,6 +1337,8 @@ describe("PreviewRenderer", () => {
     expect(document.querySelector(".english-syntax-detail-back")).toBeNull();
 
     // 失败行(CORE_ERROR)清栈:详解失败把句子打成失败行,面板消失后重开同样无返回按钮。
+    clickComponent(2, 3); // 先关掉上一段遗留的面板(句级 toggle)
+    expect(document.querySelector(".english-syntax-detail")).toBeNull();
     clickComponent(0, 1);
     renderer.renderDetailResult(
       detailPayload("s1", 0, 1, [
@@ -1374,5 +1380,55 @@ describe("PreviewRenderer", () => {
     for (const annotation of annotations) {
       expect(annotation.style.cursor).not.toContain("pointer");
     }
+  });
+
+  it("晚到的详解响应不得重开已关闭的面板、不得覆盖返回后的父级、不得顶掉切换中的新焦点", () => {
+    const { renderer } = drillSetup();
+    const parentDetail = () =>
+      renderer.renderDetailResult(
+        detailPayload("s1", 0, 1, [
+          { startToken: 0, endToken: 0, role: "限定词", explanation: "特指标记" },
+          { startToken: 1, endToken: 1, role: "名词中心", explanation: "短语中心词" },
+        ], "父级详解"),
+      );
+
+    // 关闭后:面板被句级 toggle 关掉,晚到的 DETAIL_RESULT 不得重开。
+    clickComponent(0, 1);
+    clickComponent(2, 3); // 面板开着(loading)时点同句成分 = 句级关闭
+    expect(document.querySelector(".english-syntax-detail")).toBeNull();
+    parentDetail();
+    expect(document.querySelector(".english-syntax-detail")).toBeNull();
+
+    // 返回后:面板回到父级,晚到的子级响应不得把内容跳回去。
+    clickComponent(0, 1);
+    parentDetail();
+    document.querySelectorAll<HTMLElement>(".english-syntax-annotation")[1]!.click();
+    renderer.renderDetailResult(
+      detailPayload("s1", 1, 1, [{ startToken: 1, endToken: 1, role: "名词", explanation: "中心词" }], "子级详解"),
+    );
+    document.querySelector<HTMLButtonElement>(".english-syntax-detail-back")!.click();
+    expect(document.querySelector(".english-syntax-detail")?.textContent).toContain("父级详解");
+    renderer.renderDetailResult(
+      detailPayload("s1", 1, 1, [{ startToken: 1, endToken: 1, role: "名词", explanation: "晚到" }], "晚到的子级详解"),
+    );
+    expect(document.querySelector(".english-syntax-detail")?.textContent).toContain("父级详解");
+    expect(document.querySelector(".english-syntax-detail")?.textContent).not.toContain("晚到的子级详解");
+
+    // 跨句切换中:s2 的 loading 在等,s1 的晚到响应不得把面板拉回 s1。
+    renderer.registerSentence("b1", "s2");
+    renderer.renderCoreResult(
+      "s2",
+      "b1",
+      corePayload("s2", [{ startToken: 0, endToken: 1, role: "SUBJECT", translation: "第二句" }]),
+      drillTokens,
+    );
+    clickComponentFor("s2", 0, 1);
+    expect(document.querySelector(".english-syntax-detail-loading")).not.toBeNull();
+    renderer.renderDetailResult(
+      detailPayload("s1", 2, 3, [{ startToken: 2, endToken: 3, role: "谓语", explanation: "x" }], "晚到的 s1 详解"),
+    );
+    // 面板仍停在 s2 的 loading,s1 的晚到结果被丢弃。
+    expect(document.querySelector(".english-syntax-detail-loading")).not.toBeNull();
+    expect(document.querySelector(".english-syntax-detail")?.textContent).not.toContain("晚到的 s1 详解");
   });
 });

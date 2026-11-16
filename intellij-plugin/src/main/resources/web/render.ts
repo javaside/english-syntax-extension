@@ -507,6 +507,22 @@ export class PreviewRenderer {
     focusEnd?: number,
     detail?: DetailPayload,
   ): void {
+    // focus 匹配守卫:#currentDetail 是面板当前等待/展示的区间(loading 时为等待中,
+    // 返回后为父级区间,关闭/失败行后为 null)。晚到的旧响应(关闭后、返回后、跨句
+    // 切换后)在这里失配被丢弃——不再重开面板或覆盖当前内容。
+    const waiting = this.#currentDetail;
+    const start = focusStart ?? detail?.focus.startToken;
+    const end = focusEnd ?? detail?.focus.endToken;
+    if (
+      waiting === null ||
+      waiting.sentenceId !== sentenceId ||
+      start === undefined ||
+      end === undefined ||
+      waiting.focusStart !== start ||
+      waiting.focusEnd !== end
+    ) {
+      return;
+    }
     const entry = this.#sentences.get(sentenceId);
     if (entry == null) return;
     // 同时只保留一个详解面板：打开新的前先关掉所有已显示的（含加载占位），
@@ -515,8 +531,8 @@ export class PreviewRenderer {
     this.#closeAllDetailPanels();
     this.#currentDetail = {
       sentenceId,
-      focusStart: focusStart ?? detail?.focus.startToken ?? 0,
-      focusEnd: focusEnd ?? detail?.focus.endToken ?? 0,
+      focusStart: start,
+      focusEnd: end,
     };
     this.#repaintBlock(entry.blockId, { detailStructures: structures, detail });
   }
@@ -858,7 +874,12 @@ export class PreviewRenderer {
         back.remove();
         return;
       }
-      // 先登记再重画:渲染面板时要读栈深决定返回按钮去留。
+      // 先把面板寻址改回父级区间(守卫按它放行),再登记 payload、重画。
+      this.#currentDetail = {
+        sentenceId: parent.sentenceId,
+        focusStart: parent.focus.startToken,
+        focusEnd: parent.focus.endToken,
+      };
       this.#currentDetailPayload = parent;
       this.#showDetailPanel(
         parent.sentenceId,
