@@ -1291,6 +1291,57 @@ describe("SyntaxLearningBlock", () => {
     expect(listener).not.toHaveBeenCalled();
   });
 
+  it("流式 span 标注不得共享可点按钮的手型光标与悬停反馈", () => {
+    // affordance 不得说谎:流式是默认开启路径,span 若有 pointer/hover 却点不动,
+    // 每个用户在流式期间都会撞上。可点样式只允许出现在 button.annotation 上。
+    const css = block().host.shadowRoot!.querySelector("style")!.textContent ?? "";
+    const bareAnnotationBlock = /\.annotation\s*\{[^}]*\}/u.exec(css)?.[0] ?? "";
+    expect(bareAnnotationBlock).not.toContain("cursor");
+    expect(bareAnnotationBlock).not.toContain(":hover");
+    expect(bareAnnotationBlock).not.toContain("transition");
+    expect(css).toMatch(/button\.annotation\s*\{[^}]*cursor:\s*pointer/u);
+    expect(css).toMatch(/button\.annotation:hover/u);
+  });
+
+  it("句子重渲染移除面板时返回栈一并清空,重开详解不残留返回按钮", () => {
+    const element = block();
+    document.body.append(element.host);
+    element.renderCore(sentence, tokens, analysis);
+    element.setDetailLoading("sentence-1", { startToken: 0, endToken: 1 });
+    element.renderDetail(
+      detailWithStructures(
+        "sentence-1",
+        0,
+        1,
+        [
+          { startToken: 0, endToken: 0, role: "名词核心", explanation: "短语中心词" },
+          { startToken: 1, endToken: 1, role: "谓语", explanation: "动词" },
+        ],
+        "父级整体讲解",
+      ),
+    );
+    element.setDetailLoading("sentence-1", { startToken: 1, endToken: 1 });
+    element.renderDetail(
+      detailWithStructures(
+        "sentence-1",
+        1,
+        1,
+        [{ startToken: 1, endToken: 1, role: "谓语", explanation: "动词" }],
+        "子级整体讲解",
+      ),
+    );
+    const root = element.host.shadowRoot!;
+    expect(root.querySelector(".detail-back")).not.toBeNull();
+
+    // core 重析重渲染同句:#placeSentenceSection 移除面板,不经 closeDetails——
+    // 栈必须在这里一并清空,否则下一次详解凭空多出返回按钮。
+    element.renderCore(sentence, tokens, analysis);
+    element.setDetailLoading("sentence-1", { startToken: 0, endToken: 0 });
+    element.renderDetail(detailFor("sentence-1", 0, 0));
+    expect(root.querySelector(".detail-back")).toBeNull();
+    expect(root.querySelector(".detail")!.textContent).toContain("针对所选成分的详细语法解析");
+  });
+
   it("返回父级后,晚到的子级响应因 focus 不匹配被丢弃", () => {
     const element = block();
     document.body.append(element.host);

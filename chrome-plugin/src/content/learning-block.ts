@@ -205,7 +205,11 @@ const STYLES = `
   min-inline-size: 0;
   max-inline-size: 100%;
   overflow-wrap: anywhere;
-  /* 完整渲染的标注是 button(可下钻):重置 UA 默认,流式预览的 span 不受影响。 */
+}
+
+/* 可点样式只给完整渲染的 button 标注:流式预览的 span 保持静态观感,
+   光标/悬停反馈不得对不可点元素说谎(affordance)。 */
+button.annotation {
   appearance: none;
   padding: 0;
   border: 0;
@@ -216,7 +220,7 @@ const STYLES = `
   transition: opacity 120ms ease;
 }
 
-.annotation:hover {
+button.annotation:hover {
   opacity: 0.72;
 }
 
