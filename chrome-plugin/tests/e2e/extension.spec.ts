@@ -206,6 +206,41 @@ test("clicking a component lazily loads its detail once and re-clicking toggles 
   expect(harness.fakeModel.recordedOfKind("detail")).toHaveLength(1);
 });
 
+test("drilling into a detail annotation loads a sub-detail in place and the back button restores the parent", async ({
+  harness,
+}) => {
+  await seedLocalProfile(harness);
+  // script 队列按请求顺序消费:core(auto)→ 父级 detail 拆两个子结构(detail-split,
+  // auto 的 detail 恒「区间=focus」单结构,标注区间=父区间,下钻会命中缓存发不出
+  // 真实请求);队列耗尽后下钻 detail 走 auto。
+  harness.fakeModel.script("e2e-model", [{ kind: "auto" }, { kind: "detail-split" }]);
+  const { page } = await startSession(harness, "error-single.html");
+  await expect(learningBlocks(page)).toHaveCount(1, { timeout: 20_000 });
+
+  // 打开父级详解:点第二个成分(多 token 宾语,detail-split 才拆得开)
+  await page.locator(".component").nth(1).click();
+  await expect(page.locator(".detail")).toContainText("按子结构拆分", { timeout: 15_000 });
+  const parentCount = harness.fakeModel.recordedOfKind("detail").length; // = 1
+  const parentPanel = page.locator(".detail");
+  await expect(parentPanel.locator(".annotation")).toHaveCount(2);
+
+  // 下钻:点击面板内第一个标注按钮,以子结构区间为新 focus 真调模型
+  await parentPanel.locator(".annotation").first().click();
+  await expect(parentPanel).toContainText("返回上级", { timeout: 15_000 });
+  expect(harness.fakeModel.recordedOfKind("detail")).toHaveLength(parentCount + 1);
+
+  // 面板原地更新:子级标注与逐条解释同屏,面板仍是唯一一个
+  await expect(parentPanel.locator(".annotation")).toHaveCount(1);
+  await expect(page.locator(".detail")).toHaveCount(1);
+
+  // 返回是纯前端恢复:零请求,父级内容回到面板
+  await parentPanel.locator(".detail-back").click();
+  await expect(parentPanel).not.toContainText("返回上级");
+  await expect(parentPanel).toContainText("按子结构拆分");
+  await expect(parentPanel.locator(".annotation")).toHaveCount(2);
+  expect(harness.fakeModel.recordedOfKind("detail")).toHaveLength(parentCount + 1);
+});
+
 test("a detail panel anchors under its own sentence, moves on other clicks, and restore leaves no artifacts", async ({
   harness,
 }) => {

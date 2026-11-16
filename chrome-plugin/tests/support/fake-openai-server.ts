@@ -34,6 +34,7 @@ export type ScriptedOutcome =
   | { kind: "xss"; payload: string }
   | { kind: "compound" }
   | { kind: "compound-detail" }
+  | { kind: "detail-split" }
   | { kind: "timeout" };
 
 export interface RecordedRequest {
@@ -623,6 +624,9 @@ export class FakeOpenAiServer {
       case "compound-detail":
         await this.respondCompoundDetail(response, sentences, streaming);
         return;
+      case "detail-split":
+        await this.respondDetailSplit(response, sentences, streaming);
+        return;
       case "auto":
         await this.respondAuto(response, kind, sentences, promptText, streaming);
         return;
@@ -765,6 +769,56 @@ export class FakeOpenAiServer {
     const sentence = sentences[0];
     const focus = parseFocus(this.requests.at(-1)?.promptText ?? "");
     await this.json(response, this.validDetailFor(sentence?.sentenceId ?? "", focus), streaming);
+  }
+
+  /**
+   * 下钻 E2E 专用:把 focus 内的非标点 token 均分成两个有序子结构(auto 的 detail
+   * 恒返回「区间=focus」单结构,标注区间与父区间相同,下钻必然命中缓存、发不出
+   * 真实请求)。focus 内不足两个实词时回落 auto 行为。
+   */
+  private async respondDetailSplit(
+    response: ServerResponse,
+    sentences: PromptSentence[],
+    streaming = false,
+  ): Promise<void> {
+    const sentence = sentences[0];
+    const focus = parseFocus(this.requests.at(-1)?.promptText ?? "");
+    const lexical = (sentence?.tokens ?? []).filter(
+      (token) => !token.punctuation && token.id >= focus.startToken && token.id <= focus.endToken,
+    );
+    if (sentence === undefined || lexical.length < 2) {
+      await this.json(response, this.validDetailFor(sentence?.sentenceId ?? "", focus), streaming);
+      return;
+    }
+    const mid = Math.ceil(lexical.length / 2);
+    const firstHalf = lexical.slice(0, mid)!;
+    const secondHalf = lexical.slice(mid)!;
+    await this.writeContent(
+      response,
+      jsonBody({
+        sentenceId: sentence.sentenceId,
+        focus,
+        structures: [
+          {
+            startToken: firstHalf[0]!.id,
+            endToken: firstHalf.at(-1)!.id,
+            role: "修饰语",
+            explanation: "子结构前半:承担修饰功能。",
+            translation: "前半修饰",
+          },
+          {
+            startToken: secondHalf[0]!.id,
+            endToken: secondHalf.at(-1)!.id,
+            role: "中心语",
+            explanation: "子结构后半:承担核心功能。",
+            translation: "后半中心",
+          },
+        ],
+        grammarPoints: ["子结构语法点"],
+        explanation: "这是按子结构拆分的详细语法解析。",
+      }),
+      streaming,
+    );
   }
 
   /** Answer with a chat completion whose message content is the given JSON value. */

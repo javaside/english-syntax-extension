@@ -758,7 +758,7 @@ export class SyntaxLearningBlock {
         sentenceId === undefined
           ? createElement("span", "annotation")
           : createElement("button", "annotation");
-      if (annotation instanceof HTMLButtonElement) {
+      if (annotation instanceof HTMLButtonElement && sentenceId !== undefined) {
         annotation.type = "button";
         const drillFocus: TokenRange = {
           startToken: structure.startToken,
@@ -772,7 +772,7 @@ export class SyntaxLearningBlock {
             new CustomEvent<SyntaxFocusEventDetail>("syntax-detail-request", {
               bubbles: true,
               composed: true,
-              detail: { sentenceId: sentenceId, focus: drillFocus, drillDown: true },
+              detail: { sentenceId, focus: drillFocus, drillDown: true },
             }),
           );
         });
