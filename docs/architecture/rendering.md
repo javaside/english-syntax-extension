@@ -202,6 +202,16 @@ content script 跑在隔离世界,`window.customElements` 是 `null`。所以 `S
 - **流式预览的标注是纯 span,不可点**:流式 structures 是未校验输出,下钻栈只存通过完整校验的 `DetailAnalysis`。
 - 单 token 子结构(单词)同样可下钻——词级讲解(词性/时态/搭配)有教学价值,且模型对单词区间只给词级结构,下钻自然收敛,无需深度限制。
 
+### IntelliJ 预览页的同款下钻(`intellij-plugin/.../web/render.ts`)
+
+桥 `DETAIL_REQUEST` 的 Kotlin 校验只要求区间合法(`start ≥ 0 && end ≥ start`),任意 token 区间天然放行——**桥协议与 Kotlin 侧零改动**,`launchDetailRequest`/提示词/双端同构缓存键/流式 `DETAIL_STREAM` 全复用。web 侧与 Chrome 端的差异:
+
+- **整卡重画模式**:render.ts 的面板每次都随 `#repaintBlock` 重建,下钻 loading 直接复用 `#showDetailLoading`(锚定 fallback:子结构区间找不到 component 时按既有规则落到句子后),没有 Chrome 的「DOM 节点原地保留」。
+- **返回栈** `#detailStack`(存 `DetailPayload`)+「← 返回上级」纯前端弹栈重画,语义与 Chrome 端一致;清栈点是句级 `closeDetail()`(点同句成分 toggle/换代)与 `renderCoreError`(失败行)。
+- **失败呈现走既有失败行**:详解失败经 `CORE_ERROR` 把句子打成失败行(A9 quirk 既有语义),不为下钻单开面板内错误通道;面板消失时栈一并清空。
+- **focus 匹配守卫**:`#showDetailPanel` 按 `#currentDetail`(当前等待/展示区间)比对 sentenceId+区间,失配即丢弃——晚到的 DETAIL_RESULT(关闭后/返回后/跨句切换后)不再重开面板或覆盖当前内容;这是下钻高频切换下补的既有缺口守卫。
+- 平台约束:官方 Markdown 预览页的全局 cursor 规则连 `!important` 的 stylesheet 都压过,按钮的 `cursor:pointer` 必须 JS 内联(component/annotation/返回按钮同款)。
+
 ## 6. 可逆替换(`block-replacement.ts`)
 
 ```
