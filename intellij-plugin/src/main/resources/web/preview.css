@@ -139,7 +139,9 @@ button.english-syntax-component * {
 
 .english-syntax-component:focus-visible,
 .english-syntax-retry:focus-visible,
-.english-syntax-correct:focus-visible {
+.english-syntax-correct:focus-visible,
+.english-syntax-detail-back:focus-visible,
+button.english-syntax-annotation:focus-visible {
   outline: 2px solid currentColor;
   outline-offset: 2px;
 }
@@ -182,6 +184,45 @@ button.english-syntax-component * {
   min-inline-size: 0;
   max-inline-size: 100%;
   overflow-wrap: anywhere;
+}
+
+/* 可下钻样式只给完整渲染的 button 标注:流式预览的 span 保持静态观感,
+   光标/悬停反馈不得对不可点元素说谎(Chrome 端评审钉过的同一条)。 */
+button.english-syntax-annotation {
+  appearance: none;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+}
+
+button.english-syntax-annotation:hover {
+  opacity: 0.72;
+}
+
+/* 面板内下钻的「← 返回上级」:纯前端回退,视觉与 retry/correct 同族(ghost)。 */
+.english-syntax-detail-back {
+  display: block;
+  margin-block-end: 0.5em;
+  border: 1px solid currentColor;
+  border-radius: 0.25em;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.8125rem;
+  padding: 0.15em 0.6em;
+  transition:
+    background-color 120ms ease,
+    transform 80ms ease;
+}
+
+.english-syntax-detail-back:hover:enabled {
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.english-syntax-detail-back:active:enabled {
+  transform: translateY(1px);
 }
 
 .english-syntax-detail-structure {

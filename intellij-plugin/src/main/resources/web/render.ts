@@ -204,6 +204,10 @@ export class PreviewRenderer {
   readonly #sentences = new Map<string, { blockId: string; record: SentenceRecord }>();
   readonly #blockSentenceOrder = new Map<string, string[]>();
   #currentDetail: { sentenceId: string; focusStart: number; focusEnd: number } | null = null;
+  /** 面板内下钻的返回栈:栈顶是「返回时可恢复」的父级详解。面板关闭即清空。 */
+  #detailStack: DetailPayload[] = [];
+  /** 当前面板已完整渲染的详解;loading/流式/失败行为 null(返回层级由栈表达)。 */
+  #currentDetailPayload: DetailPayload | null = null;
   readonly #onDetailRequest: DetailRequestHandler;
   readonly #onFeedbackRequest: FeedbackRequestHandler;
   /**
@@ -370,6 +374,11 @@ export class PreviewRenderer {
     entry.record.failureMessage = friendlyErrorMessage(code, message);
     entry.record.analysis = null;
     entry.record.provisional = null;
+    // 失败行替代详解面板(下钻失败同款路径):面板生命周期结束,焦点与返回栈一并清空,
+    // 晚到的 DETAIL_RESULT 也会因 #currentDetail 为 null 被丢弃。
+    this.#currentDetail = null;
+    this.#detailStack = [];
+    this.#currentDetailPayload = null;
     if (tokens.length > 0) entry.record.tokens = tokens;
     const order = this.#blockSentenceOrder.get(entry.blockId) ?? [];
     if (!order.includes(sentenceId)) order.push(sentenceId);
@@ -402,6 +411,8 @@ export class PreviewRenderer {
   }
 
   renderDetailResult(detail: DetailPayload): void {
+    // 先登记再重画:#placeDetailPanel 渲染面板时要读它决定是否加「← 返回上级」。
+    this.#currentDetailPayload = detail;
     this.#showDetailPanel(detail.sentenceId, detail.structures, detail.focus.startToken, detail.focus.endToken, detail);
   }
 
@@ -469,6 +480,12 @@ export class PreviewRenderer {
     const entry = this.#sentences.get(sentenceId);
     if (entry == null) return;
     this.#closeAllDetailPanels();
+    // 面板内下钻:父级详解压入返回栈(完整渲染过的才压——loading/流式/错误态的
+    // payload 是 null,层级不变,与 Chrome 端 #currentDetail 同款语义)。
+    if (this.#currentDetailPayload !== null) {
+      this.#detailStack.push(this.#currentDetailPayload);
+      this.#currentDetailPayload = null;
+    }
     this.#currentDetail = { sentenceId, focusStart, focusEnd };
     const record = this.#blocks.get(entry.blockId);
     const card = record?.card;
@@ -520,6 +537,9 @@ export class PreviewRenderer {
     if (this.#currentDetail === null) return;
     const entry = this.#sentences.get(this.#currentDetail.sentenceId);
     this.#currentDetail = null;
+    // 句级关闭(点同句成分 toggle/换代):面板没了,返回栈就是孤儿,一并清空。
+    this.#detailStack = [];
+    this.#currentDetailPayload = null;
     if (entry != null) this.#repaintBlock(entry.blockId);
   }
 
@@ -684,7 +704,14 @@ export class PreviewRenderer {
       `.english-syntax-sentence[data-sentence-id="${current.sentenceId}"]`,
     );
     if (sentence === null) return;
-    const panel = this.#renderDetailPanel(sentence.ownerDocument, structures, detail);
+    // 完整渲染(detail 存在)的标注可下钻;流式分片(detail 缺席)是未校验输出,
+    // 标注保持纯 span,点击只属于完整渲染(Chrome 端同款口径)。
+    const panel = this.#renderDetailPanel(
+      sentence.ownerDocument,
+      structures,
+      detail,
+      detail === undefined ? undefined : current.sentenceId,
+    );
     this.#anchorDetail(sentence, panel, current.focusStart, current.focusEnd);
   }
 
@@ -740,17 +767,46 @@ export class PreviewRenderer {
     anchor.after(panel);
   }
 
-  /** 详解面板：标注行（①角色 + 英文摘录）+ 解释列表 + 语法点 + 整体说明。 */
+  /** 详解面板：标注行（①角色 + 英文摘录）+ 解释列表 + 语法点 + 整体说明。
+   * sentenceId 存在 = 完整渲染,标注是可下钻按钮;缺席 = 流式预览,纯 span。 */
   #renderDetailPanel(
     owner: Document,
     structures: DetailPayload["structures"],
     detail?: DetailPayload,
+    sentenceId?: string,
   ): HTMLElement {
     const panel = createElement(owner, "div", "english-syntax-detail");
+    // 下钻中:顶部给「← 返回上级」,纯前端弹栈恢复,零桥消息、零网络。
+    if (this.#detailStack.length > 0) {
+      panel.append(this.#createDetailBack(owner));
+    }
     const annotations = createElement(owner, "div", "english-syntax-detail-annotations");
     for (const [index, structure] of structures.entries()) {
       const label = `${circledNumber(index + 1)} ${structure.role}`;
-      const annotation = createElement(owner, "span", "english-syntax-annotation");
+      const annotation = createElement<HTMLElement>(
+        owner,
+        sentenceId === undefined ? "span" : "button",
+        "english-syntax-annotation",
+      );
+      if (annotation instanceof HTMLButtonElement && sentenceId !== undefined) {
+        annotation.type = "button";
+        const english = this.#structureText(structure);
+        const hint = `查看「${english}」的详细解析`;
+        annotation.setAttribute("aria-label", hint);
+        annotation.title = hint;
+        // 官方预览页的全局 cursor 规则连 !important 的 stylesheet 都压不过——
+        // 与 component 按钮同款,JS 内联到按钮与其全部子元素。
+        annotation.style.setProperty("cursor", "pointer", "important");
+        for (const child of annotation.querySelectorAll("*")) {
+          child.style.setProperty("cursor", "pointer", "important");
+        }
+        const focusStart = structure.startToken;
+        const focusEnd = structure.endToken;
+        annotation.addEventListener("click", () => {
+          this.#showDetailLoading(sentenceId, focusStart, focusEnd);
+          this.requestDetail(sentenceId, focusStart, focusEnd);
+        });
+      }
       annotation.style.setProperty("--english-syntax-role-color", structureColor(structure.role));
       annotation.append(
         createElement(owner, "span", "english-syntax-annotation-role", label),
@@ -787,6 +843,32 @@ export class PreviewRenderer {
       panel.append(createElement(owner, "div", "english-syntax-detail-summary", detail.explanation));
     }
     return panel;
+  }
+
+  /** 「← 返回上级」:弹栈取父级,按既有面板路径重画,不派发任何请求(纯前端)。 */
+  #createDetailBack(owner: Document): HTMLButtonElement {
+    const back = createElement(owner, "button", "english-syntax-detail-back", "← 返回上级");
+    back.type = "button";
+    back.setAttribute("aria-label", "返回上级详解");
+    // 与 component/annotation 按钮同款:官方预览页的 cursor 规则只能靠内联压过。
+    back.style.setProperty("cursor", "pointer", "important");
+    back.addEventListener("click", () => {
+      const parent = this.#detailStack.pop();
+      if (parent === undefined) {
+        back.remove();
+        return;
+      }
+      // 先登记再重画:渲染面板时要读栈深决定返回按钮去留。
+      this.#currentDetailPayload = parent;
+      this.#showDetailPanel(
+        parent.sentenceId,
+        parent.structures,
+        parent.focus.startToken,
+        parent.focus.endToken,
+        parent,
+      );
+    });
+    return back;
   }
 
   #createRetry(owner: Document, sentenceId: string): HTMLButtonElement {

@@ -1228,4 +1228,151 @@ describe("PreviewRenderer", () => {
     // s1（源序靠前）的英文原文行在前。
     expect(sections[0]!.querySelector(".english-syntax-english")?.textContent).toBe("The service");
   });
+
+  // —— 面板内下钻(Task 1) ——
+  const drillTokens = [
+    { id: 0, text: "The", leadingWhitespace: "", punctuation: false },
+    { id: 1, text: "service", leadingWhitespace: " ", punctuation: false },
+    { id: 2, text: "validates", leadingWhitespace: " ", punctuation: false },
+    { id: 3, text: "everything", leadingWhitespace: " ", punctuation: false },
+  ];
+
+  function detailPayload(
+    sentenceId: string,
+    startToken: number,
+    endToken: number,
+    structures: Array<{ startToken: number; endToken: number; role: string; explanation: string }>,
+    explanation: string,
+  ) {
+    return { sentenceId, focus: { startToken, endToken }, structures, grammarPoints: [], explanation };
+  }
+
+  function clickComponent(startToken: number, endToken: number): void {
+    document
+      .querySelector<HTMLButtonElement>(
+        `.english-syntax-component[data-start-token="${startToken}"][data-end-token="${endToken}"]`,
+      )
+      ?.click();
+  }
+
+  function drillSetup() {
+    const subject = setup();
+    subject.renderer.renderCoreResult(
+      "s1",
+      "b1",
+      corePayload("s1", [
+        { startToken: 0, endToken: 1, role: "SUBJECT", translation: "该服务" },
+        { startToken: 2, endToken: 3, role: "PREDICATE", translation: "校验" },
+      ]),
+      drillTokens,
+    );
+    return subject;
+  }
+
+  it("完整渲染的详解标注是按钮,点击以子结构区间再次请求详解并回到 loading", () => {
+    const { renderer, detailRequests } = drillSetup();
+    clickComponent(0, 1);
+    renderer.renderDetailResult(
+      detailPayload("s1", 0, 1, [
+        { startToken: 0, endToken: 0, role: "限定词", explanation: "特指标记" },
+        { startToken: 1, endToken: 1, role: "名词中心", explanation: "短语中心词" },
+      ], "父级详解"),
+    );
+
+    const annotations = [...document.querySelectorAll<HTMLElement>(".english-syntax-annotation")];
+    expect(annotations).toHaveLength(2);
+    // 单 token 子结构也是按钮:单词同样可下钻,无最小词数特判。
+    expect(annotations.map((annotation) => annotation.tagName)).toEqual(["BUTTON", "BUTTON"]);
+    expect(annotations[1]!.style.cursor).toContain("pointer");
+
+    annotations[1]!.click();
+    expect(detailRequests.at(-1)).toEqual(["s1", 1, 1]);
+    expect(document.querySelector(".english-syntax-detail-loading")).not.toBeNull();
+  });
+
+  it("下钻后返回上级纯前端恢复父级;句级关闭与失败行都清空返回栈", () => {
+    const { renderer, detailRequests } = drillSetup();
+    clickComponent(0, 1);
+    renderer.renderDetailResult(
+      detailPayload("s1", 0, 1, [
+        { startToken: 0, endToken: 0, role: "限定词", explanation: "特指标记" },
+        { startToken: 1, endToken: 1, role: "名词中心", explanation: "短语中心词" },
+      ], "父级详解"),
+    );
+
+    const drillIntoChild = () => {
+      document.querySelectorAll<HTMLElement>(".english-syntax-annotation")[1]!.click();
+      renderer.renderDetailResult(
+        detailPayload("s1", 1, 1, [
+          { startToken: 1, endToken: 1, role: "名词", explanation: "中心词" },
+        ], "子级详解"),
+      );
+    };
+    drillIntoChild();
+    const back = document.querySelector<HTMLButtonElement>(".english-syntax-detail-back");
+    expect(back?.textContent).toBe("← 返回上级");
+    expect(document.querySelector(".english-syntax-detail")?.textContent).toContain("子级详解");
+
+    // 返回是纯前端:面板回父级内容,不产生新请求。
+    const requestsBeforeBack = detailRequests.length;
+    back!.click();
+    expect(document.querySelector(".english-syntax-detail")?.textContent).toContain("父级详解");
+    expect(document.querySelector(".english-syntax-detail-back")).toBeNull();
+    expect(detailRequests.length).toBe(requestsBeforeBack);
+
+    // 句级 toggle 关闭(点同句成分)清栈:重开详解不再有返回按钮。
+    drillIntoChild();
+    clickComponent(2, 3); // 面板开着时点同句成分 = 既有句级关闭语义
+    expect(document.querySelector(".english-syntax-detail")).toBeNull();
+    clickComponent(0, 1);
+    renderer.renderDetailResult(
+      detailPayload("s1", 0, 1, [
+        { startToken: 0, endToken: 1, role: "名词短语", explanation: "整体" },
+      ], "重新打开的详解"),
+    );
+    expect(document.querySelector(".english-syntax-detail-back")).toBeNull();
+
+    // 失败行(CORE_ERROR)清栈:详解失败把句子打成失败行,面板消失后重开同样无返回按钮。
+    clickComponent(0, 1);
+    renderer.renderDetailResult(
+      detailPayload("s1", 0, 1, [
+        { startToken: 0, endToken: 0, role: "限定词", explanation: "特指标记" },
+        { startToken: 1, endToken: 1, role: "名词中心", explanation: "短语中心词" },
+      ], "父级详解"),
+    );
+    drillIntoChild();
+    renderer.renderCoreError("s1", "b1", "DETAIL_FAILED", "详解失败", drillTokens);
+    expect(document.querySelector(".english-syntax-detail")).toBeNull();
+    renderer.renderCoreResult(
+      "s1",
+      "b1",
+      corePayload("s1", [
+        { startToken: 0, endToken: 1, role: "SUBJECT", translation: "该服务" },
+        { startToken: 2, endToken: 3, role: "PREDICATE", translation: "校验" },
+      ]),
+      drillTokens,
+    );
+    clickComponent(0, 1);
+    renderer.renderDetailResult(
+      detailPayload("s1", 0, 1, [
+        { startToken: 0, endToken: 1, role: "名词短语", explanation: "整体" },
+      ], "失败行之后的详解"),
+    );
+    expect(document.querySelector(".english-syntax-detail-back")).toBeNull();
+  });
+
+  it("流式预览的标注是纯 span 且无 pointer 光标", () => {
+    const { renderer } = drillSetup();
+    clickComponent(0, 1);
+    renderer.renderDetailStream("s1", 0, 1, [
+      { startToken: 0, endToken: 0, role: "限定词", explanation: "特指标记" },
+      { startToken: 1, endToken: 1, role: "名词中心", explanation: "短语中心词" },
+    ]);
+
+    const annotations = [...document.querySelectorAll<HTMLElement>(".english-syntax-annotation")];
+    expect(annotations.map((annotation) => annotation.tagName)).toEqual(["SPAN", "SPAN"]);
+    for (const annotation of annotations) {
+      expect(annotation.style.cursor).not.toContain("pointer");
+    }
+  });
 });
