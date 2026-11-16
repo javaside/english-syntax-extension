@@ -160,7 +160,9 @@ const STYLES = `
 }
 
 .component:focus-visible,
-.retry:focus-visible {
+.retry:focus-visible,
+.detail-back:focus-visible,
+.annotation:focus-visible {
   outline: 2px solid currentColor;
   outline-offset: 2px;
 }
@@ -203,10 +205,48 @@ const STYLES = `
   min-inline-size: 0;
   max-inline-size: 100%;
   overflow-wrap: anywhere;
+  /* 完整渲染的标注是 button(可下钻):重置 UA 默认,流式预览的 span 不受影响。 */
+  appearance: none;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  transition: opacity 120ms ease;
+}
+
+.annotation:hover {
+  opacity: 0.72;
 }
 
 .detail-structure {
   margin-block: 0.2em;
+}
+
+/* 面板内下钻的「← 返回上级」:纯前端回退,ghost 样式与 .retry 同族。 */
+.detail-back {
+  display: block;
+  margin-block-end: 0.5em;
+  border: 1px solid currentColor;
+  border-radius: 0.25em;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.8125rem;
+  padding: 0.15em 0.6em;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    transform 80ms ease;
+}
+
+.detail-back:hover:enabled {
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.detail-back:active:enabled {
+  transform: translateY(1px);
 }
 
 .grammar-points,
@@ -287,7 +327,9 @@ const STYLES = `
 @media (prefers-reduced-motion: reduce) {
   .component,
   .retry,
-  .chat-ask {
+  .chat-ask,
+  .annotation,
+  .detail-back {
     transition: none;
   }
 }
@@ -308,6 +350,11 @@ const STYLES = `
 export interface SyntaxFocusEventDetail {
   sentenceId: string;
   focus: TokenRange;
+  /**
+   * 面板内下钻:标注点击(或下钻错误态的重试)置位。controller 据此跳过当前块的
+   * 面板关闭,`setDetailLoading` 检测到同句面板即原地转 loading(栈与位置保留)。
+   */
+  drillDown?: true;
 }
 
 // 「问」按钮派发的追问请求 detail 由 chat-panel 单一定义(含 anchor);
@@ -435,6 +482,10 @@ export class SyntaxLearningBlock {
   #resolvedSentenceIds = new Set<string>();
   #tokensBySentence = new Map<string, readonly Token[]>();
   #retryResetTimers = new Map<HTMLButtonElement, ReturnType<typeof setTimeout>>();
+  /** 面板内下钻的返回栈:栈顶是「返回时可恢复」的父级详解。面板关闭即清空。 */
+  #detailStack: DetailAnalysis[] = [];
+  /** 当前面板已完整渲染的详解;loading/错误态为 null(返回层级由栈表达)。 */
+  #currentDetail: DetailAnalysis | null = null;
 
   constructor(ownerDocument: Document = document) {
     this.host = ownerDocument.createElement("div");
@@ -583,6 +634,26 @@ export class SyntaxLearningBlock {
     if (sentence === null) {
       throw new Error(`Cannot render detail for unknown sentence: ${sentenceId}`);
     }
+
+    // 面板内下钻:同句已有面板(且栈与它共存)时原地转 loading——DOM 节点与位置不动,
+    // 父级详解压入返回栈。错误态重试(#currentDetail 为 null)不压栈:层级不变。
+    const existing = this.#sentences.querySelector<HTMLElement>(
+      `.detail[data-sentence-id="${sentenceId}"]`,
+    );
+    if (existing !== null) {
+      if (this.#currentDetail !== null) {
+        this.#detailStack.push(this.#currentDetail);
+        this.#currentDetail = null;
+      }
+      existing.dataset.startToken = String(focus.startToken);
+      existing.dataset.endToken = String(focus.endToken);
+      existing.className = "detail detail-loading";
+      existing.setAttribute("aria-live", "polite");
+      existing.setAttribute("aria-busy", "true");
+      existing.textContent = "正在加载详细解析…";
+      return;
+    }
+
     // Only one explanation panel stays open at a time; opening a new one
     // switches away from whatever was open before.
     this.closeDetails();
@@ -646,6 +717,9 @@ export class SyntaxLearningBlock {
     for (const detail of this.#sentences.querySelectorAll(".detail")) {
       detail.remove();
     }
+    // 面板没了,返回栈就是孤儿:一并清空,重开任何详解都不再出现返回按钮。
+    this.#detailStack = [];
+    this.#currentDetail = null;
   }
 
   /**
@@ -662,11 +736,16 @@ export class SyntaxLearningBlock {
     const tokens = this.#tokensBySentence.get(sentenceId) ?? [];
     detail.className = "detail";
     detail.removeAttribute("aria-busy");
+    // 流式分片是未校验输出:标注画成纯 span(不可下钻),点击只属于完整渲染。
     detail.replaceChildren(this.#annotations(structures, tokens));
   }
 
   /** 标注行:流式预览与完整渲染共用，两处各写一遍必然漂移。 */
-  #annotations(structures: readonly DetailStructure[], tokens: readonly Token[]): HTMLElement {
+  #annotations(
+    structures: readonly DetailStructure[],
+    tokens: readonly Token[],
+    sentenceId?: string,
+  ): HTMLElement {
     const annotations = createElement("div", "detail-annotations");
     for (const [index, structure] of structures.entries()) {
       const english = annotationEnglish(tokens, structure);
@@ -674,7 +753,30 @@ export class SyntaxLearningBlock {
       if (english === undefined || english === "") {
         continue;
       }
-      const annotation = createElement("span", "annotation");
+      // 完整渲染(带 sentenceId)的标注是可下钻按钮;流式预览是纯 span。
+      const annotation = createElement<HTMLElement>(
+        sentenceId === undefined ? "span" : "button",
+        "annotation",
+      );
+      if (annotation instanceof HTMLButtonElement) {
+        annotation.type = "button";
+        const drillFocus: TokenRange = {
+          startToken: structure.startToken,
+          endToken: structure.endToken,
+        };
+        const label = `查看「${english}」的详细解析`;
+        annotation.setAttribute("aria-label", label);
+        annotation.title = label;
+        annotation.addEventListener("click", () => {
+          this.dispatchEvent(
+            new CustomEvent<SyntaxFocusEventDetail>("syntax-detail-request", {
+              bubbles: true,
+              composed: true,
+              detail: { sentenceId: sentenceId, focus: drillFocus, drillDown: true },
+            }),
+          );
+        });
+      }
       annotation.style.setProperty("--syntax-role-color", structureColor(structure.role));
       annotation.append(
         createElement("span", "annotation-role", structureLabel(index, structure.role)),
@@ -700,13 +802,22 @@ export class SyntaxLearningBlock {
     if (detail === null) {
       return;
     }
+    this.#currentDetail = detailAnalysis;
     detail.className = "detail";
     detail.removeAttribute("aria-busy");
     detail.replaceChildren();
 
+    // 下钻中:顶部给「← 返回上级」,纯前端弹栈恢复,零网络依赖。
+    if (this.#detailStack.length > 0) {
+      detail.append(this.#createDetailBack());
+    }
     if (detailAnalysis.structures.length > 0) {
       const tokens = this.#tokensBySentence.get(detailAnalysis.sentenceId) ?? [];
-      const annotations = this.#annotations(detailAnalysis.structures, tokens);
+      const annotations = this.#annotations(
+        detailAnalysis.structures,
+        tokens,
+        detailAnalysis.sentenceId,
+      );
       if (annotations.childElementCount > 0) {
         detail.append(annotations);
       }
@@ -726,6 +837,27 @@ export class SyntaxLearningBlock {
       );
     }
     detail.append(createElement("div", "detail-summary", detailAnalysis.explanation));
+  }
+
+  /** 「← 返回上级」:弹栈取父级,面板区间改回父 focus 后按既有路径重画,不派发事件。 */
+  #createDetailBack(): HTMLButtonElement {
+    const back = createElement("button", "detail-back", "← 返回上级");
+    back.type = "button";
+    back.addEventListener("click", () => {
+      const parent = this.#detailStack.pop();
+      if (parent === undefined) {
+        back.remove();
+        return;
+      }
+      const panel = this.#sentences.querySelector<HTMLElement>(
+        `.detail[data-sentence-id="${parent.sentenceId}"]`,
+      );
+      if (panel === null) return;
+      panel.dataset.startToken = String(parent.focus.startToken);
+      panel.dataset.endToken = String(parent.focus.endToken);
+      this.renderDetail(parent);
+    });
+    return back;
   }
 
   /** 句头追问入口按钮:点击派发 syntax-chat-request(冒泡 + composed,详情请求同款)。 */
@@ -768,7 +900,13 @@ export class SyntaxLearningBlock {
         new CustomEvent<SyntaxFocusEventDetail>("syntax-reanalyze-request", {
           bubbles: true,
           composed: true,
-          detail: eventDetail(sentenceId, focus),
+          // 下钻错误态的重试带 drillDown:controller 的重试链路会把事件 detail 原样
+          // 转给 requestDetail,面板因此原地重载、返回栈保留。click 时判栈(创建时
+          // 面板尚在渲染中,栈状态未必与点击时一致)。
+          detail: {
+            ...eventDetail(sentenceId, focus),
+            ...(this.#detailStack.length > 0 ? { drillDown: true as const } : {}),
+          },
         }),
       );
     });
@@ -781,10 +919,16 @@ export class SyntaxLearningBlock {
     if (detail === null) {
       return;
     }
+    // 错误态没有可恢复的当前内容(#currentDetail 保持 null),但下钻层级仍在栈里:
+    // 保留「← 返回上级」,用户可以退回已核实的父级内容。
+    this.#currentDetail = null;
     detail.className = "detail detail-error";
     detail.removeAttribute("aria-busy");
     detail.replaceChildren(createElement("span", "error-message", message));
     detail.append(this.#createRetry(sentenceId, focus));
+    if (this.#detailStack.length > 0) {
+      detail.prepend(this.#createDetailBack());
+    }
     this.#resolvedSentenceIds.add(sentenceId);
   }
 
@@ -937,8 +1081,18 @@ export class SyntaxLearningBlock {
     if (existing !== null) {
       // 面板不再是句子的子节点，replaceWith 不会顺带清掉它:留着会变成一张
       // 指向旧成分区间的孤儿面板。
+      let removedDetail = false;
       for (const detail of this.#sentences.querySelectorAll<HTMLElement>(".detail")) {
-        if (detail.dataset.sentenceId === sentenceId) detail.remove();
+        if (detail.dataset.sentenceId === sentenceId) {
+          detail.remove();
+          removedDetail = true;
+        }
+      }
+      // 这里移除面板不经 closeDetails:面板生命周期结束,返回栈同样清空,
+      // 否则下一次详解会凭空多出返回按钮。
+      if (removedDetail) {
+        this.#detailStack = [];
+        this.#currentDetail = null;
       }
       existing.replaceWith(section);
       return;

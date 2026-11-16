@@ -70,6 +70,24 @@ function detailFor(sentenceId: string, startToken: number, endToken: number): De
   };
 }
 
+/** 下钻用:带自定义子结构划分与独有整体文案的详解(文案用于断言返回恢复)。 */
+function detailWithStructures(
+  sentenceId: string,
+  startToken: number,
+  endToken: number,
+  structures: DetailAnalysis["structures"],
+  explanation = "针对所选成分的详细语法解析",
+): DetailAnalysis {
+  return {
+    sentenceId,
+    focus: { startToken, endToken },
+    structures,
+    grammarPoints: ["一般现在时"],
+    explanation,
+    modelProfileId: "profile-1",
+  };
+}
+
 function sectionOrder(element: SyntaxLearningBlock): Array<string | undefined> {
   return [
     ...element.host.shadowRoot!.querySelectorAll<HTMLElement>(".sentences > [data-sentence-id]"),
@@ -1171,5 +1189,196 @@ describe("SyntaxLearningBlock", () => {
     expect(detail.parentElement).toBe(section.parentElement);
     // 仍然要能按句子与区间找回来（renderDetail 与再次点击关闭都依赖这个）
     expect(detail.getAttribute("data-sentence-id")).toBe("sentence-1");
+  });
+
+  it("完整渲染的详解标注是按钮,点击以子结构区间派发带 drillDown 的 syntax-detail-request", () => {
+    const element = block();
+    document.body.append(element.host);
+    element.renderCore(sentence, tokens, analysis);
+    element.setDetailLoading("sentence-1", { startToken: 0, endToken: 1 });
+    element.renderDetail(
+      detailWithStructures("sentence-1", 0, 1, [
+        { startToken: 0, endToken: 0, role: "名词核心", explanation: "短语中心词" },
+        { startToken: 1, endToken: 1, role: "后置修饰", explanation: "介词短语" },
+      ]),
+    );
+
+    const events: unknown[] = [];
+    element.addEventListener("syntax-detail-request", (event) => {
+      events.push((event as CustomEvent).detail);
+    });
+
+    const annotations = [
+      ...element.host.shadowRoot!.querySelectorAll<HTMLButtonElement>(".annotation"),
+    ];
+    expect(annotations).toHaveLength(2);
+    // 单 token 子结构也是按钮(单词也有讲解价值,无最小词数特判)
+    expect(annotations.map((annotation) => annotation.tagName)).toEqual(["BUTTON", "BUTTON"]);
+    annotations[1]!.click();
+
+    expect(events).toEqual([
+      { sentenceId: "sentence-1", focus: { startToken: 1, endToken: 1 }, drillDown: true },
+    ]);
+  });
+
+  it("同句已有面板时 setDetailLoading 原地转 loading 不重建;closeDetails 清空返回栈", () => {
+    const element = block();
+    document.body.append(element.host);
+    element.renderCore(sentence, tokens, analysis);
+    element.setDetailLoading("sentence-1", { startToken: 0, endToken: 1 });
+    element.renderDetail(detailWithStructures("sentence-1", 0, 1, [
+      { startToken: 0, endToken: 0, role: "名词核心", explanation: "短语中心词" },
+    ], "父级整体讲解"));
+    const panel = element.host.shadowRoot!.querySelector<HTMLElement>(".detail")!;
+
+    // 下钻:面板 DOM 节点原地保留,dataset 区间更新为子结构,内容转 loading
+    element.setDetailLoading("sentence-1", { startToken: 1, endToken: 1 });
+    const drilling = element.host.shadowRoot!.querySelector<HTMLElement>(".detail")!;
+    expect(drilling).toBe(panel);
+    expect(drilling.dataset.startToken).toBe("1");
+    expect(drilling.dataset.endToken).toBe("1");
+    expect(drilling.classList.contains("detail-loading")).toBe(true);
+    expect(drilling.textContent).toContain("正在加载");
+
+    // 子级渲染:顶部出现返回上级
+    element.renderDetail(
+      detailWithStructures("sentence-1", 1, 1, [
+        { startToken: 1, endToken: 1, role: "介词", explanation: "引导后置修饰" },
+      ], "子级整体讲解"),
+    );
+    const root = element.host.shadowRoot!;
+    expect(root.querySelector(".detail-back")?.textContent).toBe("← 返回上级");
+    expect(root.querySelector(".detail")!.textContent).toContain("子级整体讲解");
+
+    // 返回:恢复父级内容与区间,返回按钮随栈清空消失
+    root.querySelector<HTMLButtonElement>(".detail-back")!.click();
+    const restored = root.querySelector<HTMLElement>(".detail")!;
+    expect(restored.dataset.startToken).toBe("0");
+    expect(restored.textContent).toContain("父级整体讲解");
+    expect(root.querySelector(".detail-back")).toBeNull();
+
+    // closeDetails 之后重新打开任何详解,栈不残留(无返回按钮)
+    element.closeDetails();
+    element.setDetailLoading("sentence-1", { startToken: 0, endToken: 0 });
+    element.renderDetail(detailFor("sentence-1", 0, 0));
+    expect(root.querySelector(".detail-back")).toBeNull();
+  });
+
+  it("流式预览的标注是纯 span,不派发事件", () => {
+    const element = block();
+    document.body.append(element.host);
+    element.renderCore(sentence, tokens, analysis);
+    element.setDetailLoading("sentence-1", { startToken: 0, endToken: 1 });
+    element.renderDetailStructures("sentence-1", { startToken: 0, endToken: 1 }, [
+      { startToken: 0, endToken: 0, role: "名词核心", explanation: "短语中心词" },
+    ]);
+
+    const listener = vi.fn();
+    element.addEventListener("syntax-detail-request", listener);
+    const annotations = [...element.host.shadowRoot!.querySelectorAll<HTMLElement>(".annotation")];
+    expect(annotations.map((annotation) => annotation.tagName)).toEqual(["SPAN"]);
+    annotations[0]!.click();
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it("返回父级后,晚到的子级响应因 focus 不匹配被丢弃", () => {
+    const element = block();
+    document.body.append(element.host);
+    element.renderCore(sentence, tokens, analysis);
+    element.setDetailLoading("sentence-1", { startToken: 0, endToken: 1 });
+    element.renderDetail(detailWithStructures("sentence-1", 0, 1, [
+      { startToken: 0, endToken: 0, role: "名词核心", explanation: "短语中心词" },
+      { startToken: 1, endToken: 1, role: "后置修饰", explanation: "介词短语" },
+    ], "父级整体讲解"));
+    element.setDetailLoading("sentence-1", { startToken: 1, endToken: 1 });
+    element.renderDetail(
+      detailWithStructures("sentence-1", 1, 1, [
+        { startToken: 1, endToken: 1, role: "介词", explanation: "引导后置修饰" },
+      ], "子级整体讲解"),
+    );
+    element.host.shadowRoot!.querySelector<HTMLButtonElement>(".detail-back")!.click();
+
+    // 晚到的子级重试响应:面板 dataset 已回到父 focus,不得重开或覆盖
+    element.renderDetail(
+      detailWithStructures("sentence-1", 1, 1, [
+        { startToken: 1, endToken: 1, role: "介词", explanation: "晚到的响应" },
+      ], "晚到的整体讲解"),
+    );
+    const detail = element.host.shadowRoot!.querySelector<HTMLElement>(".detail")!;
+    expect(detail.dataset.startToken).toBe("0");
+    expect(detail.textContent).toContain("父级整体讲解");
+    expect(detail.textContent).not.toContain("晚到的整体讲解");
+  });
+
+  it("未经过 setDetailLoading 的下钻点击不污染返回栈", () => {
+    const element = block();
+    document.body.append(element.host);
+    element.renderCore(sentence, tokens, analysis);
+    element.setDetailLoading("sentence-1", { startToken: 0, endToken: 1 });
+    const parent = detailWithStructures("sentence-1", 0, 1, [
+      { startToken: 0, endToken: 0, role: "名词核心", explanation: "短语中心词" },
+      { startToken: 1, endToken: 1, role: "后置修饰", explanation: "介词短语" },
+    ], "父级整体讲解");
+    // 模拟 controller 因会话暂停拒绝请求:UI 停在父级,重复渲染不产生栈
+    element.renderDetail(parent);
+    element.renderDetail(parent);
+    expect(element.host.shadowRoot!.querySelector(".detail-back")).toBeNull();
+
+    // 之后一次正常下钻 → 一次返回即到根(栈深度恰为 1)
+    element.setDetailLoading("sentence-1", { startToken: 1, endToken: 1 });
+    element.renderDetail(
+      detailWithStructures("sentence-1", 1, 1, [
+        { startToken: 1, endToken: 1, role: "介词", explanation: "引导后置修饰" },
+      ], "子级整体讲解"),
+    );
+    element.host.shadowRoot!.querySelector<HTMLButtonElement>(".detail-back")!.click();
+    expect(element.host.shadowRoot!.querySelector(".detail-back")).toBeNull();
+    expect(element.host.shadowRoot!.querySelector(".detail")!.textContent).toContain(
+      "父级整体讲解",
+    );
+  });
+
+  it("下钻失败的错误面板保留返回上级,重试带 drillDown 原地,返回不派发任何事件", () => {
+    const element = block();
+    document.body.append(element.host);
+    element.renderCore(sentence, tokens, analysis);
+    element.setDetailLoading("sentence-1", { startToken: 0, endToken: 1 });
+    element.renderDetail(detailWithStructures("sentence-1", 0, 1, [
+      { startToken: 0, endToken: 0, role: "名词核心", explanation: "短语中心词" },
+      { startToken: 1, endToken: 1, role: "后置修饰", explanation: "介词短语" },
+    ], "父级整体讲解"));
+    element.setDetailLoading("sentence-1", { startToken: 1, endToken: 1 });
+    element.renderError("sentence-1", { startToken: 1, endToken: 1 }, "暂时无法解析");
+
+    const root = element.host.shadowRoot!;
+    expect(root.querySelector(".detail")!.textContent).toContain("暂时无法解析");
+    expect(root.querySelector(".detail-back")).not.toBeNull();
+
+    // 错误态重试走下钻路径:事件 detail 带 drillDown,面板与栈保留
+    const detailRequests = vi.fn();
+    const reanalyzeRequests: unknown[] = [];
+    element.addEventListener("syntax-detail-request", detailRequests);
+    element.addEventListener("syntax-reanalyze-request", (event) => {
+      reanalyzeRequests.push((event as CustomEvent).detail);
+    });
+    root.querySelector<HTMLButtonElement>(".retry")!.click();
+    expect(reanalyzeRequests).toEqual([
+      { sentenceId: "sentence-1", focus: { startToken: 1, endToken: 1 }, drillDown: true },
+    ]);
+
+    // 重试又失败:层级不变,一次返回即到根
+    element.renderError("sentence-1", { startToken: 1, endToken: 1 }, "仍然失败");
+    detailRequests.mockClear();
+    const reanalyzeListener = vi.fn();
+    element.addEventListener("syntax-reanalyze-request", reanalyzeListener);
+    root.querySelector<HTMLButtonElement>(".detail-back")!.click();
+
+    // 返回是纯前端恢复:两种事件都零派发
+    expect(detailRequests).not.toHaveBeenCalled();
+    expect(reanalyzeListener).not.toHaveBeenCalled();
+    const detail = root.querySelector<HTMLElement>(".detail")!;
+    expect(detail.dataset.startToken).toBe("0");
+    expect(detail.textContent).toContain("父级整体讲解");
+    expect(root.querySelector(".detail-back")).toBeNull();
   });
 });
