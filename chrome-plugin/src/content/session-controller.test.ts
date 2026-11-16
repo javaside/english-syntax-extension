@@ -664,6 +664,95 @@ describe("SessionController", () => {
     ]);
   });
 
+  it("drillDown 请求保留当前块面板、其余块照旧关闭,并携带子结构 focus", async () => {
+    document.body.innerHTML =
+      '<main><p id="p1">Readers understand grammar.</p><p id="p2">Writers compose prose.</p></main>';
+    const first = document.querySelector("#p1")!;
+    const second = document.querySelector("#p2")!;
+    const transport = new FakeTransport((message) =>
+      Promise.resolve(
+        message.type === "ANALYZE_DETAIL"
+          ? {
+              version: 1,
+              requestId: message.requestId,
+              type: "DETAIL_RESULT",
+              analysis: { ...detail(message.sentence.sentenceId), focus: message.focus },
+            }
+          : {
+              version: 1,
+              requestId: message.requestId,
+              type: "CORE_RESULT",
+              analyses:
+                message.type === "ANALYZE_CORE"
+                  ? message.sentences.map((sentence) => core(sentence.sentenceId))
+                  : [],
+            },
+      ),
+    );
+    const subject = harness(undefined, transport, {
+      scan: () => [
+        { id: "block-1", element: first, text: "Readers understand grammar." },
+        { id: "block-2", element: second, text: "Writers compose prose." },
+      ],
+      // order 是块内序号:带上 blockId 避免两块生成重复的 sentenceId
+      createSentenceId: ({ blockId, order }) => Promise.resolve(`${blockId}-sentence-${order + 1}`),
+    });
+    await subject.controller.start();
+    // viewport 是会话级单例,两个候选都 observe 在同一实例上,按下标逐个触发
+    subject.viewport.emit(0);
+    subject.viewport.emit(1);
+    await vi.waitFor(() => expect(subject.controller.status.ready).toBe(2));
+
+    // 打开父级详解(普通路径:两块面板都会被关一遍)
+    await subject.controller.requestDetail({
+      sentenceId: "block-1-sentence-1",
+      focus: { startToken: 0, endToken: 1 },
+    });
+    const closedFirst = subject.learningBlocks[0]!.closedDetails;
+    const closedSecond = subject.learningBlocks[1]!.closedDetails;
+
+    // 下钻:当前块面板保留(不再 closeDetails),其余块照旧全关
+    await subject.controller.requestDetail({
+      sentenceId: "block-1-sentence-1",
+      focus: { startToken: 0, endToken: 0 },
+      drillDown: true,
+    });
+
+    expect(subject.learningBlocks[0]!.closedDetails).toBe(closedFirst);
+    expect(subject.learningBlocks[1]!.closedDetails).toBe(closedSecond + 1);
+    const drillRequest = subject.transport.sent
+      .filter((message) => message.type === "ANALYZE_DETAIL")
+      .at(-1);
+    expect(drillRequest?.type === "ANALYZE_DETAIL" && drillRequest.focus).toEqual({
+      startToken: 0,
+      endToken: 0,
+    });
+    // 子级详解正常渲染进当前块
+    expect(subject.learningBlocks[0]!.details).toHaveLength(2);
+    expect(subject.learningBlocks[0]!.details.at(-1)?.focus).toEqual({
+      startToken: 0,
+      endToken: 0,
+    });
+  });
+
+  it("非 drillDown 请求行为不变:当前块面板照旧关闭", async () => {
+    const subject = harness();
+    await startAndEmit(subject);
+
+    await subject.controller.requestDetail({
+      sentenceId: "sentence-1",
+      focus: { startToken: 0, endToken: 1 },
+    });
+    const closedFirst = subject.learningBlocks[0]!.closedDetails;
+
+    await subject.controller.requestDetail({
+      sentenceId: "sentence-1",
+      focus: { startToken: 0, endToken: 0 },
+    });
+
+    expect(subject.learningBlocks[0]!.closedDetails).toBe(closedFirst + 1);
+  });
+
   it("pauses new visible work, resumes it, and stop cancels and restores", async () => {
     const subject = harness();
     await subject.controller.start();

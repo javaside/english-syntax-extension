@@ -1226,9 +1226,15 @@ describe("SyntaxLearningBlock", () => {
     document.body.append(element.host);
     element.renderCore(sentence, tokens, analysis);
     element.setDetailLoading("sentence-1", { startToken: 0, endToken: 1 });
-    element.renderDetail(detailWithStructures("sentence-1", 0, 1, [
-      { startToken: 0, endToken: 0, role: "名词核心", explanation: "短语中心词" },
-    ], "父级整体讲解"));
+    element.renderDetail(
+      detailWithStructures(
+        "sentence-1",
+        0,
+        1,
+        [{ startToken: 0, endToken: 0, role: "名词核心", explanation: "短语中心词" }],
+        "父级整体讲解",
+      ),
+    );
     const panel = element.host.shadowRoot!.querySelector<HTMLElement>(".detail")!;
 
     // 下钻:面板 DOM 节点原地保留,dataset 区间更新为子结构,内容转 loading
@@ -1242,9 +1248,13 @@ describe("SyntaxLearningBlock", () => {
 
     // 子级渲染:顶部出现返回上级
     element.renderDetail(
-      detailWithStructures("sentence-1", 1, 1, [
-        { startToken: 1, endToken: 1, role: "介词", explanation: "引导后置修饰" },
-      ], "子级整体讲解"),
+      detailWithStructures(
+        "sentence-1",
+        1,
+        1,
+        [{ startToken: 1, endToken: 1, role: "介词", explanation: "引导后置修饰" }],
+        "子级整体讲解",
+      ),
     );
     const root = element.host.shadowRoot!;
     expect(root.querySelector(".detail-back")?.textContent).toBe("← 返回上级");
@@ -1286,23 +1296,39 @@ describe("SyntaxLearningBlock", () => {
     document.body.append(element.host);
     element.renderCore(sentence, tokens, analysis);
     element.setDetailLoading("sentence-1", { startToken: 0, endToken: 1 });
-    element.renderDetail(detailWithStructures("sentence-1", 0, 1, [
-      { startToken: 0, endToken: 0, role: "名词核心", explanation: "短语中心词" },
-      { startToken: 1, endToken: 1, role: "后置修饰", explanation: "介词短语" },
-    ], "父级整体讲解"));
+    element.renderDetail(
+      detailWithStructures(
+        "sentence-1",
+        0,
+        1,
+        [
+          { startToken: 0, endToken: 0, role: "名词核心", explanation: "短语中心词" },
+          { startToken: 1, endToken: 1, role: "后置修饰", explanation: "介词短语" },
+        ],
+        "父级整体讲解",
+      ),
+    );
     element.setDetailLoading("sentence-1", { startToken: 1, endToken: 1 });
     element.renderDetail(
-      detailWithStructures("sentence-1", 1, 1, [
-        { startToken: 1, endToken: 1, role: "介词", explanation: "引导后置修饰" },
-      ], "子级整体讲解"),
+      detailWithStructures(
+        "sentence-1",
+        1,
+        1,
+        [{ startToken: 1, endToken: 1, role: "介词", explanation: "引导后置修饰" }],
+        "子级整体讲解",
+      ),
     );
     element.host.shadowRoot!.querySelector<HTMLButtonElement>(".detail-back")!.click();
 
     // 晚到的子级重试响应:面板 dataset 已回到父 focus,不得重开或覆盖
     element.renderDetail(
-      detailWithStructures("sentence-1", 1, 1, [
-        { startToken: 1, endToken: 1, role: "介词", explanation: "晚到的响应" },
-      ], "晚到的整体讲解"),
+      detailWithStructures(
+        "sentence-1",
+        1,
+        1,
+        [{ startToken: 1, endToken: 1, role: "介词", explanation: "晚到的响应" }],
+        "晚到的整体讲解",
+      ),
     );
     const detail = element.host.shadowRoot!.querySelector<HTMLElement>(".detail")!;
     expect(detail.dataset.startToken).toBe("0");
@@ -1315,10 +1341,16 @@ describe("SyntaxLearningBlock", () => {
     document.body.append(element.host);
     element.renderCore(sentence, tokens, analysis);
     element.setDetailLoading("sentence-1", { startToken: 0, endToken: 1 });
-    const parent = detailWithStructures("sentence-1", 0, 1, [
-      { startToken: 0, endToken: 0, role: "名词核心", explanation: "短语中心词" },
-      { startToken: 1, endToken: 1, role: "后置修饰", explanation: "介词短语" },
-    ], "父级整体讲解");
+    const parent = detailWithStructures(
+      "sentence-1",
+      0,
+      1,
+      [
+        { startToken: 0, endToken: 0, role: "名词核心", explanation: "短语中心词" },
+        { startToken: 1, endToken: 1, role: "后置修饰", explanation: "介词短语" },
+      ],
+      "父级整体讲解",
+    );
     // 模拟 controller 因会话暂停拒绝请求:UI 停在父级,重复渲染不产生栈
     element.renderDetail(parent);
     element.renderDetail(parent);
@@ -1327,9 +1359,13 @@ describe("SyntaxLearningBlock", () => {
     // 之后一次正常下钻 → 一次返回即到根(栈深度恰为 1)
     element.setDetailLoading("sentence-1", { startToken: 1, endToken: 1 });
     element.renderDetail(
-      detailWithStructures("sentence-1", 1, 1, [
-        { startToken: 1, endToken: 1, role: "介词", explanation: "引导后置修饰" },
-      ], "子级整体讲解"),
+      detailWithStructures(
+        "sentence-1",
+        1,
+        1,
+        [{ startToken: 1, endToken: 1, role: "介词", explanation: "引导后置修饰" }],
+        "子级整体讲解",
+      ),
     );
     element.host.shadowRoot!.querySelector<HTMLButtonElement>(".detail-back")!.click();
     expect(element.host.shadowRoot!.querySelector(".detail-back")).toBeNull();
@@ -1343,10 +1379,18 @@ describe("SyntaxLearningBlock", () => {
     document.body.append(element.host);
     element.renderCore(sentence, tokens, analysis);
     element.setDetailLoading("sentence-1", { startToken: 0, endToken: 1 });
-    element.renderDetail(detailWithStructures("sentence-1", 0, 1, [
-      { startToken: 0, endToken: 0, role: "名词核心", explanation: "短语中心词" },
-      { startToken: 1, endToken: 1, role: "后置修饰", explanation: "介词短语" },
-    ], "父级整体讲解"));
+    element.renderDetail(
+      detailWithStructures(
+        "sentence-1",
+        0,
+        1,
+        [
+          { startToken: 0, endToken: 0, role: "名词核心", explanation: "短语中心词" },
+          { startToken: 1, endToken: 1, role: "后置修饰", explanation: "介词短语" },
+        ],
+        "父级整体讲解",
+      ),
+    );
     element.setDetailLoading("sentence-1", { startToken: 1, endToken: 1 });
     element.renderError("sentence-1", { startToken: 1, endToken: 1 }, "暂时无法解析");
 

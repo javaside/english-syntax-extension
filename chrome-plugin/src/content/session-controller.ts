@@ -651,8 +651,11 @@ export class SessionController {
       return;
     }
     // Only one explanation panel is open at a time across the whole page, so
-    // every open panel closes when this one opens.
+    // every open panel closes when this one opens — except a drill-down: the
+    // panel already showing this sentence upgrades in place (stack preserved),
+    // only the other blocks' panels close.
     for (const block of this.blocks.values()) {
+      if (detail.drillDown === true && block === located.block) continue;
       block.learningBlock.closeDetails();
     }
     located.block.learningBlock.setDetailLoading(detail.sentenceId, detail.focus);

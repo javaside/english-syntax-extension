@@ -754,10 +754,10 @@ export class SyntaxLearningBlock {
         continue;
       }
       // 完整渲染(带 sentenceId)的标注是可下钻按钮;流式预览是纯 span。
-      const annotation = createElement<HTMLElement>(
-        sentenceId === undefined ? "span" : "button",
-        "annotation",
-      );
+      const annotation: HTMLElement =
+        sentenceId === undefined
+          ? createElement("span", "annotation")
+          : createElement("button", "annotation");
       if (annotation instanceof HTMLButtonElement) {
         annotation.type = "button";
         const drillFocus: TokenRange = {
