@@ -411,8 +411,8 @@ export class PreviewRenderer {
   }
 
   renderDetailResult(detail: DetailPayload): void {
-    // 先登记再重画:#placeDetailPanel 渲染面板时要读它决定是否加「← 返回上级」。
-    this.#currentDetailPayload = detail;
+    // payload 的登记在 #showDetailPanel 守卫**之后**(由它赋值):守卫丢弃的晚到响应
+    // 不得污染 #currentDetailPayload,否则后续下钻会把陈旧层级压进返回栈。
     this.#showDetailPanel(detail.sentenceId, detail.structures, detail.focus.startToken, detail.focus.endToken, detail);
   }
 
@@ -480,10 +480,16 @@ export class PreviewRenderer {
     const entry = this.#sentences.get(sentenceId);
     if (entry == null) return;
     this.#closeAllDetailPanels();
-    // 面板内下钻:父级详解压入返回栈(完整渲染过的才压——loading/流式/错误态的
-    // payload 是 null,层级不变,与 Chrome 端 #currentDetail 同款语义)。
+    // 面板内下钻:父级详解压入返回栈——仅当目标是**同句**(真下钻);跨句新开时
+    // 上一句的栈是孤儿,直接清空(Chrome 端 closeDetails 同款语义,「返回」是
+    // 下钻的父级,不是跨句浏览历史)。loading/流式/错误态的 payload 是 null,
+    // 层级不变。
     if (this.#currentDetailPayload !== null) {
-      this.#detailStack.push(this.#currentDetailPayload);
+      if (this.#currentDetailPayload.sentenceId === sentenceId) {
+        this.#detailStack.push(this.#currentDetailPayload);
+      } else {
+        this.#detailStack = [];
+      }
       this.#currentDetailPayload = null;
     }
     this.#currentDetail = { sentenceId, focusStart, focusEnd };
@@ -534,6 +540,10 @@ export class PreviewRenderer {
       focusStart: start,
       focusEnd: end,
     };
+    // 守卫已放行,这里才是当前面板内容的权威登记点(流式不带 detail,payload 保持 null)。
+    if (detail !== undefined) {
+      this.#currentDetailPayload = detail;
+    }
     this.#repaintBlock(entry.blockId, { detailStructures: structures, detail });
   }
 
@@ -566,6 +576,13 @@ export class PreviewRenderer {
       detail?: DetailPayload;
     } = {},
   ): void {
+    // 重画不携带详解(CORE_*/换代/还原)= 面板随整卡重建销毁——焦点、返回栈与当前
+    // payload 一并清空,「面板不在 = 栈必空」;#showDetailLoading 不走重画,不受影响。
+    if (options.detailStructures === undefined && options.detail === undefined) {
+      this.#currentDetail = null;
+      this.#detailStack = [];
+      this.#currentDetailPayload = null;
+    }
     const record = this.#blocks.get(blockId);
     if (record === undefined) return;
     const order = (this.#blockSentenceOrder.get(blockId) ?? []).slice().sort(bySourceOrder);
@@ -810,12 +827,7 @@ export class PreviewRenderer {
         const hint = `查看「${english}」的详细解析`;
         annotation.setAttribute("aria-label", hint);
         annotation.title = hint;
-        // 官方预览页的全局 cursor 规则连 !important 的 stylesheet 都压不过——
-        // 与 component 按钮同款,JS 内联到按钮与其全部子元素。
         annotation.style.setProperty("cursor", "pointer", "important");
-        for (const child of annotation.querySelectorAll("*")) {
-          child.style.setProperty("cursor", "pointer", "important");
-        }
         const focusStart = structure.startToken;
         const focusEnd = structure.endToken;
         annotation.addEventListener("click", () => {
@@ -835,6 +847,13 @@ export class PreviewRenderer {
         annotation.append(
           translationElement(owner, "english-syntax-annotation-translation", structure.translation),
         );
+      }
+      if (annotation instanceof HTMLButtonElement) {
+        // 官方预览页的全局 cursor 规则连 !important 的 stylesheet 都压不过——子元素
+        // 内联必须等全部 append 完成后做(component 按钮同款顺序,悬停标签文字也一致)。
+        for (const child of annotation.querySelectorAll("*")) {
+          child.style.setProperty("cursor", "pointer", "important");
+        }
       }
       annotations.append(annotation);
     }
@@ -874,13 +893,12 @@ export class PreviewRenderer {
         back.remove();
         return;
       }
-      // 先把面板寻址改回父级区间(守卫按它放行),再登记 payload、重画。
+      // 先把面板寻址改回父级区间(守卫按它放行);payload 由 #showDetailPanel 登记。
       this.#currentDetail = {
         sentenceId: parent.sentenceId,
         focusStart: parent.focus.startToken,
         focusEnd: parent.focus.endToken,
       };
-      this.#currentDetailPayload = parent;
       this.#showDetailPanel(
         parent.sentenceId,
         parent.structures,
@@ -1110,6 +1128,10 @@ export class PreviewRenderer {
   restoreAll(): void {
     // F2：清卡是「我方主动 restore」，纠正行随之收走（行钉在卡片/原文块之后）。
     this.#closeCorrection();
+    // 卡片全清 = 详解面板(挂在卡内)全部销毁:焦点与返回栈一并清空(面板不在 = 栈必空)。
+    this.#currentDetail = null;
+    this.#detailStack = [];
+    this.#currentDetailPayload = null;
     for (const record of this.#blocks.values()) this.#restoreBlock(record);
   }
 

@@ -607,6 +607,10 @@ var EnglishSyntaxPreview = (function(exports) {
 		#sentences = /* @__PURE__ */ new Map();
 		#blockSentenceOrder = /* @__PURE__ */ new Map();
 		#currentDetail = null;
+		/** 面板内下钻的返回栈:栈顶是「返回时可恢复」的父级详解。面板关闭即清空。 */
+		#detailStack = [];
+		/** 当前面板已完整渲染的详解;loading/流式/失败行为 null(返回层级由栈表达)。 */
+		#currentDetailPayload = null;
 		#onDetailRequest;
 		#onFeedbackRequest;
 		/**
@@ -706,6 +710,9 @@ var EnglishSyntaxPreview = (function(exports) {
 			entry.record.failureMessage = friendlyErrorMessage(code, message);
 			entry.record.analysis = null;
 			entry.record.provisional = null;
+			this.#currentDetail = null;
+			this.#detailStack = [];
+			this.#currentDetailPayload = null;
 			if (tokens.length > 0) entry.record.tokens = tokens;
 			const order = this.#blockSentenceOrder.get(entry.blockId) ?? [];
 			if (!order.includes(sentenceId)) order.push(sentenceId);
@@ -805,6 +812,11 @@ var EnglishSyntaxPreview = (function(exports) {
 			const entry = this.#sentences.get(sentenceId);
 			if (entry == null) return;
 			this.#closeAllDetailPanels();
+			if (this.#currentDetailPayload !== null) {
+				if (this.#currentDetailPayload.sentenceId === sentenceId) this.#detailStack.push(this.#currentDetailPayload);
+				else this.#detailStack = [];
+				this.#currentDetailPayload = null;
+			}
 			this.#currentDetail = {
 				sentenceId,
 				focusStart,
@@ -820,14 +832,19 @@ var EnglishSyntaxPreview = (function(exports) {
 			this.#anchorDetail(sentence, panel, focusStart, focusEnd);
 		}
 		#showDetailPanel(sentenceId, structures, focusStart, focusEnd, detail) {
+			const waiting = this.#currentDetail;
+			const start = focusStart ?? detail?.focus.startToken;
+			const end = focusEnd ?? detail?.focus.endToken;
+			if (waiting === null || waiting.sentenceId !== sentenceId || start === void 0 || end === void 0 || waiting.focusStart !== start || waiting.focusEnd !== end) return;
 			const entry = this.#sentences.get(sentenceId);
 			if (entry == null) return;
 			this.#closeAllDetailPanels();
 			this.#currentDetail = {
 				sentenceId,
-				focusStart: focusStart ?? detail?.focus.startToken ?? 0,
-				focusEnd: focusEnd ?? detail?.focus.endToken ?? 0
+				focusStart: start,
+				focusEnd: end
 			};
+			if (detail !== void 0) this.#currentDetailPayload = detail;
 			this.#repaintBlock(entry.blockId, {
 				detailStructures: structures,
 				detail
@@ -842,9 +859,16 @@ var EnglishSyntaxPreview = (function(exports) {
 			if (this.#currentDetail === null) return;
 			const entry = this.#sentences.get(this.#currentDetail.sentenceId);
 			this.#currentDetail = null;
+			this.#detailStack = [];
+			this.#currentDetailPayload = null;
 			if (entry != null) this.#repaintBlock(entry.blockId);
 		}
 		#repaintBlock(blockId, options = {}) {
+			if (options.detailStructures === void 0 && options.detail === void 0) {
+				this.#currentDetail = null;
+				this.#detailStack = [];
+				this.#currentDetailPayload = null;
+			}
 			const record = this.#blocks.get(blockId);
 			if (record === void 0) return;
 			const order = (this.#blockSentenceOrder.get(blockId) ?? []).slice().sort(bySourceOrder);
@@ -936,7 +960,7 @@ var EnglishSyntaxPreview = (function(exports) {
 			if (current === null) return;
 			const sentence = card.querySelector(`.english-syntax-sentence[data-sentence-id="${current.sentenceId}"]`);
 			if (sentence === null) return;
-			const panel = this.#renderDetailPanel(sentence.ownerDocument, structures, detail);
+			const panel = this.#renderDetailPanel(sentence.ownerDocument, structures, detail, detail === void 0 ? void 0 : current.sentenceId);
 			this.#anchorDetail(sentence, panel, current.focusStart, current.focusEnd);
 		}
 		/**
@@ -974,16 +998,32 @@ var EnglishSyntaxPreview = (function(exports) {
 			}
 			anchor.after(panel);
 		}
-		/** 详解面板：标注行（①角色 + 英文摘录）+ 解释列表 + 语法点 + 整体说明。 */
-		#renderDetailPanel(owner, structures, detail) {
+		/** 详解面板：标注行（①角色 + 英文摘录）+ 解释列表 + 语法点 + 整体说明。
+		* sentenceId 存在 = 完整渲染,标注是可下钻按钮;缺席 = 流式预览,纯 span。 */
+		#renderDetailPanel(owner, structures, detail, sentenceId) {
 			const panel = createElement(owner, "div", "english-syntax-detail");
+			if (this.#detailStack.length > 0) panel.append(this.#createDetailBack(owner));
 			const annotations = createElement(owner, "div", "english-syntax-detail-annotations");
 			for (const [index, structure] of structures.entries()) {
 				const label = `${circledNumber(index + 1)} ${structure.role}`;
-				const annotation = createElement(owner, "span", "english-syntax-annotation");
+				const annotation = createElement(owner, sentenceId === void 0 ? "span" : "button", "english-syntax-annotation");
+				if (annotation instanceof HTMLButtonElement && sentenceId !== void 0) {
+					annotation.type = "button";
+					const hint = `查看「${this.#structureText(structure)}」的详细解析`;
+					annotation.setAttribute("aria-label", hint);
+					annotation.title = hint;
+					annotation.style.setProperty("cursor", "pointer", "important");
+					const focusStart = structure.startToken;
+					const focusEnd = structure.endToken;
+					annotation.addEventListener("click", () => {
+						this.#showDetailLoading(sentenceId, focusStart, focusEnd);
+						this.requestDetail(sentenceId, focusStart, focusEnd);
+					});
+				}
 				annotation.style.setProperty("--english-syntax-role-color", structureColor(structure.role));
 				annotation.append(createElement(owner, "span", "english-syntax-annotation-role", label), createElement(owner, "span", "english-syntax-annotation-english", this.#structureText(structure)));
 				if (structure.translation !== void 0 && structure.translation.trim().length > 0) annotation.append(translationElement(owner, "english-syntax-annotation-translation", structure.translation));
+				if (annotation instanceof HTMLButtonElement) for (const child of annotation.querySelectorAll("*")) child.style.setProperty("cursor", "pointer", "important");
 				annotations.append(annotation);
 			}
 			panel.append(annotations);
@@ -997,6 +1037,27 @@ var EnglishSyntaxPreview = (function(exports) {
 			if (detail?.grammarPoints?.length) panel.append(createElement(owner, "div", "english-syntax-grammar-points", detail.grammarPoints.join("、")));
 			if (detail?.explanation) panel.append(createElement(owner, "div", "english-syntax-detail-summary", detail.explanation));
 			return panel;
+		}
+		/** 「← 返回上级」:弹栈取父级,按既有面板路径重画,不派发任何请求(纯前端)。 */
+		#createDetailBack(owner) {
+			const back = createElement(owner, "button", "english-syntax-detail-back", "← 返回上级");
+			back.type = "button";
+			back.setAttribute("aria-label", "返回上级详解");
+			back.style.setProperty("cursor", "pointer", "important");
+			back.addEventListener("click", () => {
+				const parent = this.#detailStack.pop();
+				if (parent === void 0) {
+					back.remove();
+					return;
+				}
+				this.#currentDetail = {
+					sentenceId: parent.sentenceId,
+					focusStart: parent.focus.startToken,
+					focusEnd: parent.focus.endToken
+				};
+				this.#showDetailPanel(parent.sentenceId, parent.structures, parent.focus.startToken, parent.focus.endToken, parent);
+			});
+			return back;
 		}
 		#createRetry(owner, sentenceId) {
 			const retry = createElement(owner, "button", "english-syntax-retry", "重新解析");
@@ -1170,6 +1231,9 @@ var EnglishSyntaxPreview = (function(exports) {
 		}
 		restoreAll() {
 			this.#closeCorrection();
+			this.#currentDetail = null;
+			this.#detailStack = [];
+			this.#currentDetailPayload = null;
 			for (const record of this.#blocks.values()) this.#restoreBlock(record);
 		}
 		/** 测试辅助：注册句子（生产路径由会话层把分词结果喂进来）。 */

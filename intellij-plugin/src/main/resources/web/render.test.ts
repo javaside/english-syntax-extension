@@ -1431,4 +1431,159 @@ describe("PreviewRenderer", () => {
     expect(document.querySelector(".english-syntax-detail-loading")).not.toBeNull();
     expect(document.querySelector(".english-syntax-detail")?.textContent).not.toContain("晚到的 s1 详解");
   });
+
+  it("被守卫丢弃的晚到响应不得污染返回栈:关闭/返回后重开或再下钻都恢复正确层级", () => {
+    const { renderer } = drillSetup();
+    const parent = () =>
+      renderer.renderDetailResult(
+        detailPayload("s1", 0, 1, [
+          { startToken: 0, endToken: 0, role: "限定词", explanation: "特指标记" },
+          { startToken: 1, endToken: 1, role: "名词中心", explanation: "短语中心词" },
+        ], "父级详解"),
+      );
+
+    // 关闭 → 晚到的 DETAIL_RESULT 到达(被守卫丢弃)→ 重开新详解:不得带返回按钮。
+    clickComponent(0, 1);
+    parent();
+    clickComponent(2, 3); // 句级关闭
+    renderer.renderDetailResult(
+      detailPayload("s1", 0, 1, [{ startToken: 0, endToken: 1, role: "名词短语", explanation: "x" }], "晚到的父级"),
+    );
+    expect(document.querySelector(".english-syntax-detail")).toBeNull();
+    clickComponent(0, 1);
+    renderer.renderDetailResult(
+      detailPayload("s1", 0, 1, [
+        { startToken: 0, endToken: 0, role: "限定词", explanation: "整体" },
+        { startToken: 1, endToken: 1, role: "名词", explanation: "重开" },
+      ], "重新打开的详解"),
+    );
+    expect(document.querySelector(".english-syntax-detail")?.textContent).toContain("重新打开的详解");
+    expect(document.querySelector(".english-syntax-detail-back")).toBeNull();
+
+    // 返回父级 → 晚到的子级响应到达(被守卫丢弃)→ 再下钻孙级 → 返回必须回到父级(不是子级)。
+    const drillChild = () => {
+      document.querySelectorAll<HTMLElement>(".english-syntax-annotation")[1]!.click();
+      renderer.renderDetailResult(
+        detailPayload("s1", 1, 1, [{ startToken: 1, endToken: 1, role: "名词", explanation: "中心词", text: "service" }], "子级详解"),
+      );
+    };
+    drillChild();
+    document.querySelector<HTMLButtonElement>(".english-syntax-detail-back")!.click();
+    expect(document.querySelector(".english-syntax-detail")?.textContent).toContain("重新打开的详解");
+    renderer.renderDetailResult(
+      detailPayload("s1", 1, 1, [{ startToken: 1, endToken: 1, role: "名词", explanation: "晚到" }], "晚到的子级详解"),
+    );
+    // 晚到被丢弃后下钻孙级:栈顶应是父级,返回直达父级。
+    document.querySelectorAll<HTMLElement>(".english-syntax-annotation")[1]!.click();
+    renderer.renderDetailResult(
+      detailPayload("s1", 1, 1, [{ startToken: 1, endToken: 1, role: "名词", explanation: "孙级" }], "孙级详解"),
+    );
+    document.querySelector<HTMLButtonElement>(".english-syntax-detail-back")!.click();
+    expect(document.querySelector(".english-syntax-detail")?.textContent).toContain("重新打开的详解");
+  });
+
+  it("标注按钮的子元素同样带内联 pointer:悬停标签文字不得出现非 pointer 光标", () => {
+    const { renderer } = drillSetup();
+    clickComponent(0, 1);
+    renderer.renderDetailResult(
+      detailPayload("s1", 0, 1, [
+        { startToken: 0, endToken: 0, role: "限定词", explanation: "特指标记" },
+        { startToken: 1, endToken: 1, role: "名词中心", explanation: "短语中心词" },
+      ], "父级详解"),
+    );
+    const annotation = document.querySelector<HTMLButtonElement>(".english-syntax-annotation")!;
+    const children = [...annotation.querySelectorAll<HTMLElement>("*")];
+    expect(children.length).toBeGreaterThan(0);
+    for (const child of children) {
+      expect(child.style.cursor).toContain("pointer");
+    }
+  });
+
+  it("跨句新开详解不压栈:返回按钮不得跨句复活", () => {
+    const { renderer } = drillSetup();
+    renderer.registerSentence("b1", "s2");
+    renderer.renderCoreResult(
+      "s2",
+      "b1",
+      corePayload("s2", [{ startToken: 0, endToken: 1, role: "SUBJECT", translation: "第二句" }]),
+      drillTokens,
+    );
+    // s1 开面板(父级)
+    clickComponent(0, 1);
+    renderer.renderDetailResult(
+      detailPayload("s1", 0, 1, [
+        { startToken: 0, endToken: 0, role: "限定词", explanation: "特指标记" },
+        { startToken: 1, endToken: 1, role: "名词中心", explanation: "短语中心词" },
+      ], "s1 的详解"),
+    );
+    // 直接点 s2 的成分(跨句新开,不是下钻):s2 面板不得带返回按钮。
+    clickComponentFor("s2", 0, 1);
+    renderer.renderDetailResult(
+      detailPayload("s2", 0, 1, [{ startToken: 0, endToken: 1, role: "主语", explanation: "x" }], "s2 的详解"),
+    );
+    expect(document.querySelector(".english-syntax-detail")?.textContent).toContain("s2 的详解");
+    expect(document.querySelector(".english-syntax-detail-back")).toBeNull();
+  });
+
+  it("RESTORE_ALL 与兄弟句重画销毁面板后,重开详解不残留返回栈", () => {
+    const { renderer } = drillSetup();
+    // 下钻一层(栈=[父级])
+    clickComponent(0, 1);
+    renderer.renderDetailResult(
+      detailPayload("s1", 0, 1, [
+        { startToken: 0, endToken: 0, role: "限定词", explanation: "特指标记" },
+        { startToken: 1, endToken: 1, role: "名词中心", explanation: "短语中心词" },
+      ], "父级详解"),
+    );
+    document.querySelectorAll<HTMLElement>(".english-syntax-annotation")[1]!.click();
+    renderer.renderDetailResult(
+      detailPayload("s1", 1, 1, [{ startToken: 1, endToken: 1, role: "名词", explanation: "中心词" }], "子级详解"),
+    );
+    expect(document.querySelector(".english-syntax-detail-back")).not.toBeNull();
+
+    // 兄弟句 CORE_RESULT 整卡重画:面板随卡片销毁,栈必须一并清空。
+    renderer.registerSentence("b1", "s2");
+    renderer.renderCoreResult(
+      "s2",
+      "b1",
+      corePayload("s2", [{ startToken: 0, endToken: 1, role: "SUBJECT", translation: "第二句" }]),
+      drillTokens,
+    );
+    expect(document.querySelector(".english-syntax-detail")).toBeNull();
+    clickComponent(0, 1);
+    renderer.renderDetailResult(
+      detailPayload("s1", 0, 1, [{ startToken: 0, endToken: 1, role: "名词短语", explanation: "整体" }], "重开详解"),
+    );
+    expect(document.querySelector(".english-syntax-detail-back")).toBeNull();
+
+    // RESTORE_ALL(停止/恢复原文)后同样清空。
+    clickComponent(2, 3); // 句级关闭
+    clickComponent(0, 1);
+    renderer.renderDetailResult(
+      detailPayload("s1", 0, 1, [
+        { startToken: 0, endToken: 0, role: "限定词", explanation: "特指标记" },
+        { startToken: 1, endToken: 1, role: "名词中心", explanation: "短语中心词" },
+      ], "父级详解"),
+    );
+    document.querySelectorAll<HTMLElement>(".english-syntax-annotation")[1]!.click();
+    renderer.renderDetailResult(
+      detailPayload("s1", 1, 1, [{ startToken: 1, endToken: 1, role: "名词", explanation: "中心词" }], "子级详解"),
+    );
+    renderer.restoreAll();
+    clickComponent(0, 1);
+    renderer.renderCoreResult(
+      "s1",
+      "b1",
+      corePayload("s1", [
+        { startToken: 0, endToken: 1, role: "SUBJECT", translation: "该服务" },
+        { startToken: 2, endToken: 3, role: "PREDICATE", translation: "校验" },
+      ]),
+      drillTokens,
+    );
+    clickComponent(0, 1);
+    renderer.renderDetailResult(
+      detailPayload("s1", 0, 1, [{ startToken: 0, endToken: 1, role: "名词短语", explanation: "整体" }], "停止后重开详解"),
+    );
+    expect(document.querySelector(".english-syntax-detail-back")).toBeNull();
+  });
 });
