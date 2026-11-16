@@ -791,8 +791,8 @@ export class FakeOpenAiServer {
       return;
     }
     const mid = Math.ceil(lexical.length / 2);
-    const firstHalf = lexical.slice(0, mid)!;
-    const secondHalf = lexical.slice(mid)!;
+    const firstHalf = lexical.slice(0, mid);
+    const secondHalf = lexical.slice(mid);
     await this.writeContent(
       response,
       jsonBody({
