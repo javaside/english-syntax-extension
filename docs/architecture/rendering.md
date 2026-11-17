@@ -198,7 +198,7 @@ content script 跑在隔离世界,`window.customElements` 是 `null`。所以 `S
 
 - **原地升级**:`requestDetail` 看到 `drillDown` 跳过当前块的面板关闭(其余块照旧全关),`setDetailLoading` 检测到同句已有面板时不走「关闭 + 重建」,而是把面板 DOM 节点**原地**转为 loading——位置不动,dataset 区间改写为子结构区间。晚到的旧响应因 focus 不匹配被既有守卫丢弃。
 - **返回栈**:下钻时父级 `DetailAnalysis` 压入 learning-block 的 `#detailStack`;面板顶部出现「← 返回上级」,点击弹栈**纯前端重画**(零网络依赖),逐级回退。`closeDetails()` 与 `#placeSentenceSection()` 移除面板时清栈——面板没了栈就是孤儿。
-- **错误态**:下钻失败的面板保留返回按钮(可退回已核实的父级),其「重新解析」事件也带 `drillDown`(controller 的重试链路把事件 detail 原样转给 `requestDetail`),重试原地重载、栈不增长。
+- **错误态**:下钻失败的面板保留返回按钮(可退回已核实的父级),其「重新解析」事件也带 `drillDown`(controller 的重试链路把事件 detail 原样转给 `requestDetail`),重试原地重载、栈不增长。「重新解析」是**纯重试**(直接重发 detail 请求)——曾经的「重试前弹 `window.prompt` 收集纠正描述」已在 2026-11-16 移除:格式错误场景用户没见过任何解析结果,无从描述纠正,且纠正通道(`REANALYZE_WITH_FEEDBACK`)修的是 core 划分、与详解失败错位;显式纠正入口只属于预留的 `syntax-correction-request` 事件(IntelliJ 侧的「纠正」按钮 + 内联输入行即该形态)。
 - **流式预览的标注是纯 span,不可点**:流式 structures 是未校验输出,下钻栈只存通过完整校验的 `DetailAnalysis`。
 - 单 token 子结构(单词)同样可下钻——词级讲解(词性/时态/搭配)有教学价值,且模型对单词区间只给词级结构,下钻自然收敛,无需深度限制。
 

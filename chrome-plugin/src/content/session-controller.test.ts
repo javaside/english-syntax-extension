@@ -1119,10 +1119,10 @@ describe("SessionController", () => {
     );
   });
 
-  it("collects production correction feedback from the retry interaction", async () => {
-    const subject = harness(undefined, undefined, {
-      requestFeedback: () => "Readers is the subject.",
-    });
+  it("re-requests detail directly on retry without prompting for correction feedback", async () => {
+    // 详解失败后的「重新解析」就是纯重试:不再弹纠正 prompt(纠正通道只属于
+    // 显式 syntax-correction-request 入口;prompt 在错误态场景无从答起)。
+    const subject = harness();
     await startAndEmit(subject);
 
     document.dispatchEvent(
@@ -1132,10 +1132,10 @@ describe("SessionController", () => {
     );
 
     await vi.waitFor(() => expect(subject.transport.sent).toHaveLength(2));
-    expect(subject.transport.sent[1]).toMatchObject({
-      type: "REANALYZE_WITH_FEEDBACK",
-      feedback: "Readers is the subject.",
-    });
+    expect(subject.transport.sent[1]).toMatchObject({ type: "ANALYZE_DETAIL" });
+    expect(
+      subject.transport.sent.filter(({ type }) => type === "REANALYZE_WITH_FEEDBACK"),
+    ).toHaveLength(0);
   });
 
   it("retries a failed sentence as core analysis without requiring prior core", async () => {
@@ -1213,10 +1213,8 @@ describe("SessionController", () => {
     );
   });
 
-  it("暂停时带纠错反馈的重试同样恢复按钮并提示", async () => {
-    const subject = harness(undefined, undefined, {
-      requestFeedback: () => "Readers is the subject.",
-    });
+  it("暂停时的重试同样恢复按钮并提示", async () => {
+    const subject = harness();
     await startAndEmit(subject);
     subject.controller.pause();
 

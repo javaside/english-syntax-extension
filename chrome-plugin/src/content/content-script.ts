@@ -542,7 +542,6 @@ export class ContentScriptRouter {
       transport,
       hoverTarget: this.options.hoverTarget,
       onStatus: (status) => this.options.relayStatus?.(documentId, status),
-      requestFeedback: () => window.prompt("请描述需要纠正的语法解析；取消则重试详细解析"),
     });
     this.controllers.set(documentId, controller);
     return controller;

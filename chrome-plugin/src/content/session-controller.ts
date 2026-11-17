@@ -143,7 +143,6 @@ export interface SessionControllerOptions {
   clearTimeout?: (timer: ReturnType<typeof setTimeout>) => void;
   onTransition?: (sentenceId: string, phase: SentencePhase) => void;
   onStatus?: (status: SessionStatus) => void;
-  requestFeedback?: (sentenceId: string) => string | null | Promise<string | null>;
   /** 测试注入：返回当前鼠标悬停的最深元素；默认走 `resolveHoverTarget`(只查悬停链)。 */
   hoverTarget?: () => Element | null;
   /** 攒批窗口:视口一次放出的多个段落在这段时间内合并成一条请求。 */
@@ -1231,15 +1230,13 @@ export class SessionController {
     }
   };
 
+  /**
+   * 详解错误态的「重新解析」是纯重试:直接重发 detail。纠正通道只属于显式
+   * `syntax-correction-request` 入口——曾经的「重试前弹 prompt 收集纠正描述」
+   * 在错误场景无从答起(用户还没见过任何解析结果),2026-11-16 真机反馈后移除。
+   */
   private async resolveRetryInteraction(detail: SyntaxFocusEventDetail): Promise<void> {
-    const feedback = await Promise.resolve(
-      this.options.requestFeedback?.(detail.sentenceId) ?? null,
-    );
-    if (feedback !== null && feedback.trim().length > 0) {
-      await this.submitCorrection(detail.sentenceId, feedback);
-    } else {
-      await this.requestDetail(detail);
-    }
+    await this.requestDetail(detail);
   }
 
   private readonly handleExplicitCorrectionEvent = (event: Event): void => {
