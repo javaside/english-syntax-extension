@@ -1,5 +1,7 @@
 import { GRAMMAR_LABELS, GrammarRole } from "../shared/grammar";
 import type { SyntaxChatRequestEventDetail } from "./chat-panel";
+import { createSpeaker, defaultSynthesis } from "./speech";
+import type { Speaker, SpeakerHooks } from "./speech";
 import type {
   CoreAnalysis,
   DetailAnalysis,
@@ -45,6 +47,22 @@ const CHAT_ASK_ICON =
   '<circle cx="8" cy="7" r="0.95" fill="currentColor"/>' +
   '<circle cx="10.6" cy="7" r="0.95" fill="currentColor"/>' +
   "</svg>";
+
+/**
+ * 句头/面板条目朗读按钮的喇叭图标(扬声器 + 一道声波弧):与追问图标同款
+ * 内联 SVG、currentColor 描边,明暗主题零适配。
+ */
+const SPEAKER_ICON =
+  '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false">' +
+  '<path d="M8.5 2.9 4.8 5.7H2.9a.9.9 0 0 0-.9.9v2.8a.9.9 0 0 0 .9.9h1.9l3.7 2.8a.55.55 0 0 0 .9-.44V3.34a.55.55 0 0 0-.9-.44z" ' +
+  'fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>' +
+  '<path d="M11.4 5.6a3.4 3.4 0 0 1 0 4.8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>' +
+  "</svg>";
+
+/** 朗读按钮的构造选项;默认从宿主环境取 speechSynthesis,不可用时按钮整体隐藏。 */
+export interface SyntaxLearningBlockOptions {
+  speakerFactory?: (hooks: SpeakerHooks) => Speaker | null;
+}
 
 const STYLES = `
 :host {
@@ -291,7 +309,8 @@ button.annotation:hover {
 /* 句头追问入口:聊天气泡图标按钮,只出现在有 core 分析的句区头部。
    2026-11-09 真机反馈:文字「问」太扎眼——换成无文字的小图标,平时半透明,
    悬停句区(或键盘聚焦)才完全显现,悬停有「追问这句」提示。 */
-.chat-ask {
+.chat-ask,
+.speak {
   appearance: none;
   display: inline-flex;
   align-items: center;
@@ -311,27 +330,39 @@ button.annotation:hover {
 }
 
 .sentence:hover .chat-ask,
-.chat-ask:focus-visible {
+.chat-ask:focus-visible,
+.sentence:hover .speak,
+.speak:focus-visible {
   opacity: 1;
 }
 
-.chat-ask:hover:enabled {
+.chat-ask:hover:enabled,
+.speak:hover:enabled {
   background: color-mix(in srgb, currentColor 12%, transparent);
 }
 
-.chat-ask:focus-visible {
+.chat-ask:focus-visible,
+.speak:focus-visible {
   outline: 2px solid currentColor;
   outline-offset: 2px;
 }
 
-.chat-ask svg {
+.chat-ask svg,
+.speak svg {
   display: block;
+}
+
+/* 朗读中:常显 + 轻底色,不再依赖悬停即可见。 */
+.speak[aria-pressed="true"] {
+  opacity: 1;
+  background: color-mix(in srgb, currentColor 12%, transparent);
 }
 
 @media (prefers-reduced-motion: reduce) {
   .component,
   .retry,
   .chat-ask,
+  .speak,
   .annotation,
   .detail-back {
     transition: none;
@@ -490,14 +521,25 @@ export class SyntaxLearningBlock {
   #detailStack: DetailAnalysis[] = [];
   /** 当前面板已完整渲染的详解;loading/错误态为 null(返回层级由栈表达)。 */
   #currentDetail: DetailAnalysis | null = null;
+  /**
+   * 朗读门面:宿主无 speechSynthesis(happy-dom 等)时为 null,所有朗读按钮
+   * 都不渲染。生命周期与卡片一致——它是唯一发声通道,不随面板重画销毁。
+   */
+  readonly #speaker: Speaker | null;
 
-  constructor(ownerDocument: Document = document) {
+  constructor(
+    ownerDocument: Document = document,
+    options?: SyntaxLearningBlockOptions,
+  ) {
     this.host = ownerDocument.createElement("div");
     this.host.dataset.syntaxLearningBlock = "";
     const root = this.host.attachShadow({ mode: "open" });
     const style = createElement("style", undefined, STYLES);
     this.#sentences = createElement("div", "sentences");
     root.append(style, this.#sentences);
+    this.#speaker =
+      options?.speakerFactory?.({ onEnd: () => this.#resetSpeakButtons() }) ??
+      createSpeaker(defaultSynthesis(), { onEnd: () => this.#resetSpeakButtons() });
   }
 
   dispatchEvent(event: Event): boolean {
@@ -557,6 +599,13 @@ export class SyntaxLearningBlock {
     sentenceElement.setAttribute("aria-label", sentence);
     // 句头「问」按钮:该句已有 core 分析(renderCore 已跑)才存在,失败/跳过句不渲染。
     sentenceElement.append(this.#createChatAsk(analysis.sentenceId));
+    // 句头朗读按钮同款条件;整句文本走 annotationEnglish 全区间口径(尾标点省略)。
+    const speak = this.#createSpeakButton(() =>
+      annotationEnglish(tokens, { startToken: 0, endToken: tokens.length - 1 }),
+    );
+    if (speak !== null) {
+      sentenceElement.append(speak);
+    }
 
     const coordinateClauseTotal = analysis.components.filter(
       (component) => component.role === GrammarRole.COORDINATE_CLAUSE,
@@ -891,6 +940,49 @@ export class SyntaxLearningBlock {
       );
     });
     return ask;
+  }
+
+  /**
+   * 朗读按钮(句头与面板条目共用工厂):`#speaker` 不可用或文本不可重建时不
+   * 挂。语义:朗读中再点同一按钮 = 停止(toggle);点新按钮 = 复位其余按下态、
+   * 立即接管朗读。按下态走 aria-pressed——结束回调(`#resetSpeakButtons`)
+   * 按 DOM 查询复位,不缓存节点引用,面板下钻重画后旧节点残留无害。
+   */
+  #createSpeakButton(getText: () => string | undefined): HTMLButtonElement | null {
+    if (this.#speaker === null || getText() === undefined) {
+      return null;
+    }
+    const speak = createElement("button", "speak");
+    speak.type = "button";
+    speak.dataset.syntaxSpeak = "";
+    speak.setAttribute("aria-pressed", "false");
+    const label = "朗读这句";
+    speak.setAttribute("aria-label", label);
+    speak.title = label;
+    speak.innerHTML = SPEAKER_ICON;
+    speak.addEventListener("click", () => {
+      const speaker = this.#speaker;
+      if (speaker === null) return;
+      if (speak.getAttribute("aria-pressed") === "true" && speaker.isSpeaking()) {
+        speaker.stop();
+        return;
+      }
+      const text = getText();
+      if (text === undefined) return;
+      this.#resetSpeakButtons();
+      speak.setAttribute("aria-pressed", "true");
+      speaker.speak(text);
+    });
+    return speak;
+  }
+
+  /** 朗读结束/停止的统一复位:按 DOM 现查,幂等(晚到事件重复触发无害)。 */
+  #resetSpeakButtons(): void {
+    for (const button of this.#sentences.querySelectorAll<HTMLElement>(
+      '.speak[aria-pressed="true"]',
+    )) {
+      button.setAttribute("aria-pressed", "false");
+    }
   }
 
   #createRetry(sentenceId: string, focus: TokenRange): HTMLButtonElement {

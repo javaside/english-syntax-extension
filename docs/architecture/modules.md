@@ -56,6 +56,7 @@
 | `hover-target.ts`          | 「鼠标指着谁」:查 `:is(:hover)` 取链尾(裸 `:hover` 在 quirks 页面恒为空集),链空才用记着的最后指针位置 `elementFromPoint` 兜底。装载即挂,冷启动快捷键才有坐标 |
 | `viewport-observer.ts`     | `IntersectionObserver`(`rootMargin: 100%`)包一层,不支持时退回 scroll/resize + rAF 轮询;`isVisible()` 供优先级判定                                            |
 | `learning-block.ts`        | Shadow DOM 卡片:三行成分、角色配色、并列分句编号、标点归属、详解面板的插入位置与内容、失败 / 跳过 / 重试的渲染                                               |
+| `speech.ts`                | 朗读门面:`speechSynthesis` 窄封装(依赖注入、en-US 保底 + 本地语音优先挑选、打断 / 停止语义、晚到 onend 守卫);环境无语音返回 null,UI 隐藏朗读按钮                 |
 | `block-replacement.ts`     | **可逆替换**:给原元素加一个唯一 hide class + 注入对应 `display:none` 样式,卡片插在其后;`restore()` 精确还原(包括原本没有 `class` 属性时删掉空 `class`)       |
 | `block-activity-marker.ts` | 段落"正在解析"的蓝色竖条。**用 data 属性 + inset box-shadow**,不用 class、不用 border                                                                        |
 | `block-diagnosis.ts`       | 段落诊断**证据采集**:`resolveDiagnosisTarget()` 按 spec D1 三优先级定落点(选区锚点 → 右键落点 → `body`,扩展自身元素上溯并排除 `<html>` 上的 ready 标记),`diagnoseElement()` 汇集 inventory/explicit/逐门判定/文本度量/分句分词/请求可行性/会话快照成 `BlockDiagnosis`(URL 去 query/fragment、outerHTML 截断 200 + 脱敏表单值属性);判定全部调生产函数,不复制判据 |

@@ -5,6 +5,7 @@ import { CORE_SCHEMA_VERSION } from "../shared/versions";
 import { GrammarRole } from "../shared/grammar";
 import type { CoreAnalysis, DetailAnalysis, Token } from "../shared/grammar";
 import { SyntaxLearningBlock } from "./learning-block";
+import type { Speaker, SpeakerHooks } from "./speech";
 
 const sentence = "Learners read books.";
 const tokens: Token[] = [
@@ -1475,5 +1476,118 @@ describe("SyntaxLearningBlock", () => {
     expect(detail.dataset.startToken).toBe("0");
     expect(detail.textContent).toContain("父级整体讲解");
     expect(root.querySelector(".detail-back")).toBeNull();
+  });
+});
+
+/** 朗读门面 fake:记录 speak/stop,朗读中状态由测试驱动,hooks 供手动触发 onEnd。 */
+class FakeSpeaker implements Speaker {
+  readonly spoken: string[] = [];
+  stopCount = 0;
+  speaking = false;
+  hooks: SpeakerHooks | undefined;
+
+  speak(text: string): void {
+    this.spoken.push(text);
+    this.speaking = true;
+  }
+
+  stop(): void {
+    this.stopCount += 1;
+    this.speaking = false;
+    this.hooks?.onEnd?.();
+  }
+
+  isSpeaking(): boolean {
+    return this.speaking;
+  }
+}
+
+function speakingBlock(): { element: SyntaxLearningBlock; speaker: FakeSpeaker } {
+  const speaker = new FakeSpeaker();
+  const element = new SyntaxLearningBlock(undefined, {
+    speakerFactory: (hooks) => {
+      speaker.hooks = hooks;
+      return speaker;
+    },
+  });
+  return { element, speaker };
+}
+
+describe("句头整句朗读", () => {
+  beforeEach(() => {
+    document.body.replaceChildren();
+  });
+
+  it("renderCore 的句区头部有朗读按钮,位于追问按钮之后;失败/跳过句没有", () => {
+    const { element } = speakingBlock();
+    element.setExpectedSentenceIds(["sentence-1", "sentence-2", "sentence-3"]);
+    element.renderCore(sentence, tokens, analysisFor("sentence-1"));
+    element.renderFailure("sentence-2", "A failed sentence.", "解析失败");
+    element.renderSkipped("sentence-3", "A skipped sentence.");
+
+    const core = element.host.shadowRoot!.querySelector('[data-sentence-id="sentence-1"]')!;
+    const speak = core.querySelector<HTMLButtonElement>("[data-syntax-speak]");
+    expect(speak).not.toBeNull();
+    expect(speak!.previousElementSibling?.hasAttribute("data-syntax-chat-ask")).toBe(true);
+    for (const id of ["sentence-2", "sentence-3"]) {
+      const section = element.host.shadowRoot!.querySelector(`[data-sentence-id="${id}"]`)!;
+      expect(section.querySelector("[data-syntax-speak]")).toBeNull();
+    }
+  });
+
+  it("环境无 speechSynthesis(默认工厂返回 null)时整卡不渲染朗读按钮", () => {
+    const element = new SyntaxLearningBlock();
+    element.setExpectedSentenceIds(["sentence-1"]);
+    element.renderCore(sentence, tokens, analysis);
+    expect(element.host.shadowRoot!.querySelector("[data-syntax-speak]")).toBeNull();
+  });
+
+  it("点击朗读整句:文本为去尾标点的原文,按钮进入按下态", () => {
+    const { element, speaker } = speakingBlock();
+    element.setExpectedSentenceIds(["sentence-1"]);
+    element.renderCore(sentence, tokens, analysis);
+
+    const speak = element.host.shadowRoot!.querySelector<HTMLButtonElement>(
+      "[data-syntax-speak]",
+    )!;
+    speak.click();
+    expect(speaker.spoken).toEqual(["Learners read books"]);
+    expect(speak.getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("朗读中再点同一按钮:stop 并经 onEnd 复位按下态", () => {
+    const { element, speaker } = speakingBlock();
+    element.setExpectedSentenceIds(["sentence-1"]);
+    element.renderCore(sentence, tokens, analysis);
+
+    const speak = element.host.shadowRoot!.querySelector<HTMLButtonElement>(
+      "[data-syntax-speak]",
+    )!;
+    speak.click();
+    speaker.speaking = true;
+    speak.click();
+    expect(speaker.stopCount).toBe(1);
+    expect(speak.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("点另一句的喇叭:旧按钮立即复位、新按钮接管朗读", () => {
+    const { element, speaker } = speakingBlock();
+    element.setExpectedSentenceIds(["sentence-1", "sentence-2"]);
+    element.renderCore(sentence, tokens, analysisFor("sentence-1"));
+    element.renderCore(compoundSentence, compoundTokens, analysisFor("sentence-2"));
+
+    const root = element.host.shadowRoot!;
+    const first = root.querySelector<HTMLButtonElement>(
+      '[data-sentence-id="sentence-1"] [data-syntax-speak]',
+    )!;
+    const second = root.querySelector<HTMLButtonElement>(
+      '[data-sentence-id="sentence-2"] [data-syntax-speak]',
+    )!;
+    first.click();
+    speaker.speaking = true;
+    second.click();
+    expect(speaker.spoken).toEqual(["Learners read books", "The sun rose and the birds sang"]);
+    expect(first.getAttribute("aria-pressed")).toBe("false");
+    expect(second.getAttribute("aria-pressed")).toBe("true");
   });
 });
