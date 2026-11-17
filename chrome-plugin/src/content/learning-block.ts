@@ -225,6 +225,18 @@ const STYLES = `
   overflow-wrap: anywhere;
 }
 
+/* 条目 wrapper:下钻标注 + 朗读按钮竖排,按钮在标注下方居中,不与下钻区域重叠。 */
+.annotation-item {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  margin-inline-end: 0.75em;
+}
+
+.annotation-item .speak {
+  margin-block-start: 0.15em;
+}
+
 /* 可点样式只给完整渲染的 button 标注:流式预览的 span 保持静态观感,
    光标/悬停反馈不得对不可点元素说谎(affordance)。 */
 button.annotation {
@@ -332,7 +344,9 @@ button.annotation:hover {
 .sentence:hover .chat-ask,
 .chat-ask:focus-visible,
 .sentence:hover .speak,
-.speak:focus-visible {
+.speak:focus-visible,
+.detail:hover .speak,
+.annotation-item:hover .speak {
   opacity: 1;
 }
 
@@ -843,7 +857,17 @@ export class SyntaxLearningBlock {
       ) {
         annotation.append(translationElement("annotation-translation", structure.translation));
       }
-      annotations.append(annotation);
+      // wrapper 让朗读按钮与下钻标注成为兄弟(标注本身是 button,嵌套 button 非法)。
+      // 朗读只属于完整渲染:流式 structures 未校验,与「流式不下钻」同原则。
+      const item = createElement("div", "annotation-item");
+      item.append(annotation);
+      if (sentenceId !== undefined) {
+        const speak = this.#createSpeakButton(() => english);
+        if (speak !== null) {
+          item.append(speak);
+        }
+      }
+      annotations.append(item);
     }
     return annotations;
   }

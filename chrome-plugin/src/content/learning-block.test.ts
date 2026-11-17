@@ -1591,3 +1591,111 @@ describe("句头整句朗读", () => {
     expect(second.getAttribute("aria-pressed")).toBe("true");
   });
 });
+
+describe("详解面板条目朗读", () => {
+  beforeEach(() => {
+    document.body.replaceChildren();
+  });
+
+  it("完整渲染:annotation-item 包下钻标注与兄弟朗读按钮,点击朗读条目英文", () => {
+    const { element, speaker } = speakingBlock();
+    element.setExpectedSentenceIds(["sentence-1"]);
+    element.renderCore(compoundSentence, compoundTokens, analysisFor("sentence-1"));
+    element.setDetailLoading("sentence-1", { startToken: 0, endToken: 6 });
+    element.renderDetail(
+      detailWithStructures("sentence-1", 0, 6, [
+        { startToken: 0, endToken: 2, role: "并列分句", explanation: "第一分句" },
+        { startToken: 4, endToken: 6, role: "并列分句", explanation: "第二分句" },
+      ]),
+    );
+
+    const items = [
+      ...element.host.shadowRoot!.querySelectorAll<HTMLElement>(".annotation-item"),
+    ];
+    expect(items).toHaveLength(2);
+    for (const item of items) {
+      const annotation = item.querySelector(".annotation");
+      const speak = item.querySelector<HTMLButtonElement>("button.speak");
+      expect(annotation).not.toBeNull();
+      expect(speak).not.toBeNull();
+      // 喇叭必须是与下钻按钮并列的兄弟:button 里嵌 button 是非法 HTML。
+      expect(annotation!.querySelector("button")).toBeNull();
+      expect(speak!.previousElementSibling).toBe(annotation);
+    }
+    items[0]!.querySelector<HTMLButtonElement>("button.speak")!.click();
+    expect(speaker.spoken).toEqual(["The sun rose"]);
+  });
+
+  it("流式预览:annotation 是纯 span 且不挂朗读按钮(未校验内容不朗读)", () => {
+    const { element } = speakingBlock();
+    element.setExpectedSentenceIds(["sentence-1"]);
+    element.renderCore(compoundSentence, compoundTokens, analysisFor("sentence-1"));
+    element.setDetailLoading("sentence-1", { startToken: 0, endToken: 6 });
+    element.renderDetailStructures("sentence-1", { startToken: 0, endToken: 6 }, [
+      { startToken: 0, endToken: 2, role: "并列分句", explanation: "" },
+    ]);
+
+    const root = element.host.shadowRoot!;
+    const item = root.querySelector(".annotation-item");
+    expect(item).not.toBeNull();
+    expect(item!.querySelector(".annotation")!.tagName).toBe("SPAN");
+    expect(item!.querySelector("button.speak")).toBeNull();
+  });
+
+  it("下钻重画后:新面板喇叭全部未按下,点击朗读子结构区间文本", () => {
+    const { element, speaker } = speakingBlock();
+    element.setExpectedSentenceIds(["sentence-1"]);
+    element.renderCore(compoundSentence, compoundTokens, analysisFor("sentence-1"));
+    element.setDetailLoading("sentence-1", { startToken: 0, endToken: 6 });
+    element.renderDetail(
+      detailWithStructures("sentence-1", 0, 6, [
+        { startToken: 0, endToken: 2, role: "并列分句", explanation: "第一分句" },
+        { startToken: 4, endToken: 6, role: "并列分句", explanation: "第二分句" },
+      ]),
+    );
+
+    const root = element.host.shadowRoot!;
+    root.querySelector<HTMLButtonElement>(".annotation-item button.speak")!.click();
+    expect(
+      root.querySelector<HTMLButtonElement>(".annotation-item button.speak")!.getAttribute(
+        "aria-pressed",
+      ),
+    ).toBe("true");
+
+    // 模拟 controller 的下钻链路:同句面板原地转 loading 后渲染子结构详解。
+    element.setDetailLoading("sentence-1", { startToken: 0, endToken: 2 });
+    element.renderDetail(
+      detailWithStructures("sentence-1", 0, 2, [
+        { startToken: 0, endToken: 0, role: "主语", explanation: "名词短语中心" },
+        { startToken: 1, endToken: 2, role: "谓语", explanation: "不及物动词" },
+      ]),
+    );
+
+    const speaks = [
+      ...root.querySelectorAll<HTMLButtonElement>(".annotation-item button.speak"),
+    ];
+    expect(speaks).toHaveLength(2);
+    for (const speak of speaks) {
+      expect(speak.getAttribute("aria-pressed")).toBe("false");
+    }
+    speaks[1]!.click();
+    expect(speaker.spoken).toEqual(["The sun rose", "sun rose"]);
+  });
+
+  it("环境无语音:面板条目不渲染朗读按钮,wrapper 与下钻标注不受影响", () => {
+    const element = new SyntaxLearningBlock();
+    element.setExpectedSentenceIds(["sentence-1"]);
+    element.renderCore(compoundSentence, compoundTokens, analysisFor("sentence-1"));
+    element.setDetailLoading("sentence-1", { startToken: 0, endToken: 6 });
+    element.renderDetail(
+      detailWithStructures("sentence-1", 0, 6, [
+        { startToken: 0, endToken: 2, role: "并列分句", explanation: "第一分句" },
+      ]),
+    );
+
+    const root = element.host.shadowRoot!;
+    expect(root.querySelector(".annotation-item")).not.toBeNull();
+    expect(root.querySelector(".annotation-item > .annotation")).not.toBeNull();
+    expect(root.querySelector(".annotation-item button.speak")).toBeNull();
+  });
+});
