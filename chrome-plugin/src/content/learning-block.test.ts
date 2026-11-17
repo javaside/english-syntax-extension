@@ -1542,6 +1542,42 @@ describe("句头整句朗读", () => {
     expect(element.host.shadowRoot!.querySelector("[data-syntax-speak]")).toBeNull();
   });
 
+  it("注入返回 null 的工厂优先于环境语音:即使宿主有 speechSynthesis 也不出按钮", () => {
+    // 环境有语音时默认路径会产出真 speaker——?? 回落会吞掉注入工厂的 null,
+    // 禁用意图被静默推翻。stub 宿主语音后钉住:工厂说了算。
+    const originalSynth = window.speechSynthesis;
+    const originalCtor = window.SpeechSynthesisUtterance;
+    window.speechSynthesis = {
+      getVoices: () => [],
+      speak: () => undefined,
+      cancel: () => undefined,
+    } as unknown as SpeechSynthesis;
+    window.SpeechSynthesisUtterance = class {
+      text: string;
+      constructor(text: string) {
+        this.text = text;
+      }
+    } as unknown as typeof SpeechSynthesisUtterance;
+    try {
+      const element = new SyntaxLearningBlock(undefined, {
+        speakerFactory: () => null,
+      });
+      element.setExpectedSentenceIds(["sentence-1"]);
+      element.renderCore(sentence, tokens, analysis);
+      expect(element.host.shadowRoot!.querySelector("[data-syntax-speak]")).toBeNull();
+
+      // 同一 stub 下不注入工厂走默认路径,按钮应该渲染——证明 stub 真的
+      // 让默认路径产出了 speaker,上一条断言测的是工厂的 null 而非环境。
+      const fallback = new SyntaxLearningBlock();
+      fallback.setExpectedSentenceIds(["sentence-1"]);
+      fallback.renderCore(sentence, tokens, analysis);
+      expect(fallback.host.shadowRoot!.querySelector("[data-syntax-speak]")).not.toBeNull();
+    } finally {
+      window.speechSynthesis = originalSynth;
+      window.SpeechSynthesisUtterance = originalCtor;
+    }
+  });
+
   it("点击朗读整句:文本为去尾标点的原文,按钮进入按下态", () => {
     const { element, speaker } = speakingBlock();
     element.setExpectedSentenceIds(["sentence-1"]);

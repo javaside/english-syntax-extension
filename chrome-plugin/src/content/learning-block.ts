@@ -548,9 +548,13 @@ export class SyntaxLearningBlock {
     const style = createElement("style", undefined, STYLES);
     this.#sentences = createElement("div", "sentences");
     root.append(style, this.#sentences);
+    // 工厂注入即以它的返回值为准(含 null = 显式禁用朗读),不回落默认——
+    // `??` 会把工厂的 null 吞成「环境语音照常」,禁用意图被静默推翻。
+    const hooks: SpeakerHooks = { onEnd: () => this.#resetSpeakButtons() };
     this.#speaker =
-      options?.speakerFactory?.({ onEnd: () => this.#resetSpeakButtons() }) ??
-      createSpeaker(defaultSynthesis(), { onEnd: () => this.#resetSpeakButtons() });
+      options?.speakerFactory === undefined
+        ? createSpeaker(defaultSynthesis(), hooks)
+        : options.speakerFactory(hooks);
   }
 
   dispatchEvent(event: Event): boolean {

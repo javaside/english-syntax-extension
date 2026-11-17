@@ -115,9 +115,11 @@ export function createSpeaker(
   };
   return {
     speak(text: string): void {
-      if (current !== null) {
-        synth.cancel();
-      }
+      // 无条件 cancel:页面每个段落块各有一个 Speaker,却共享同一个
+      // window.speechSynthesis——只在「自己有 current」时 cancel,会让别的
+      // 块的新朗读被 Web Speech API 排队而非立即接管。被取消 utterance 的
+      // 晚到 onend 由各自守卫丢弃。
+      synth.cancel();
       const utterance = synth.createUtterance(text);
       utterance.lang = "en-US";
       const voice = pickEnglishVoice(synth.getVoices());

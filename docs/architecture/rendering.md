@@ -208,7 +208,8 @@ content script 跑在隔离世界,`window.customElements` 是 `null`。所以 `S
 
 - **句头**:core 成功句才有,紧跟「问」按钮(`data-syntax-speak` 定位,`.chat-ask` 同款图标按钮族:半透明、悬停句区/面板显现、reduced-motion 关过渡);朗读文本 = `annotationEnglish` 全区间口径(尾标点省略)。
 - **面板条目**:标注外套 `.annotation-item` wrapper——标注本身是可下钻的 `<button>`,嵌套 button 非法,朗读按钮只能是**兄弟**;点击朗读该条目的 `annotationEnglish` 文本,下钻到词级即单词发音。流式预览的 wrapper 内只有 span 标注、**不挂**朗读按钮(未校验内容不朗读,与流式不下钻同原则)。
-- **打断/toggle 语义**:按下态走 `aria-pressed`——朗读中再点同一按钮 = 停止;点新按钮 = 复位其余按下态、立即接管。结束回调按 DOM 现查复位(`#resetSpeakButtons`),不缓存节点引用,面板下钻重画后旧节点残留无害。
+- **打断/toggle 语义**:按下态走 `aria-pressed`——朗读中再点同一按钮 = 停止;点新按钮 = 复位其余按下态、立即接管(**跨块同样成立**:每块一个 Speaker 共享同一 `speechSynthesis`,`speak` 无条件 `cancel`,别的块的朗读被立即打断而非排队)。结束回调按 DOM 现查复位(`#resetSpeakButtons`),不缓存节点引用,面板下钻重画后旧节点残留无害。
+- **面板关闭/下钻返回/STOP 还原时不停读**(刻意):发音查证是几秒短音频,按下态随 DOM 销毁自然消失,音频播完即止;`closeDetails()` 里停读反而会误伤句头整句朗读。
 
 ### IntelliJ 预览页的同款下钻(`intellij-plugin/.../web/render.ts`)
 

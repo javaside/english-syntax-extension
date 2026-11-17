@@ -85,14 +85,14 @@ describe("createSpeaker", () => {
     const synth = new FakeSynthesis();
     const ends: number[] = [];
     const speaker = createSpeaker(synth, { onEnd: () => ends.push(1) });
-    speaker!.speak("a");
+    speaker!.speak("a"); // 无条件 cancel 一次(跨块接管语义)
     speaker!.stop();
     expect(ends).toHaveLength(1);
-    expect(synth.cancelCount).toBe(1);
+    expect(synth.cancelCount).toBe(2);
     expect(speaker!.isSpeaking()).toBe(false);
     speaker!.stop();
     expect(ends).toHaveLength(1);
-    expect(synth.cancelCount).toBe(1);
+    expect(synth.cancelCount).toBe(2);
   });
 
   it("晚到的旧 onend 被守卫丢弃;当前朗读的 onend 才触发 onEnd", () => {
@@ -119,6 +119,19 @@ describe("createSpeaker", () => {
     synth.spoken[0]!.onerror?.();
     expect(ends).toHaveLength(1);
     expect(speaker!.isSpeaking()).toBe(false);
+  });
+
+  it("跨块接管:另一 speaker 在同一 synth 上 speak 时无条件 cancel 排队朗读", () => {
+    // 页面每个段落块各建一个 Speaker,底层共享同一个 window.speechSynthesis:
+    // 块 A 朗读中点块 B 的喇叭,B 自己 current === null——若只在「自己有 current」
+    // 时 cancel,新 utterance 会被 Web Speech API 排队,A 播完才轮到 B。
+    const synth = new FakeSynthesis();
+    const a = createSpeaker(synth)!;
+    const b = createSpeaker(synth)!;
+    a.speak("block a sentence");
+    b.speak("block b sentence");
+    expect(synth.cancelCount).toBe(2); // a 起读与 b 接管各 cancel 一次
+    expect(synth.spoken.map((u) => u.text)).toEqual(["block a sentence", "block b sentence"]);
   });
 });
 

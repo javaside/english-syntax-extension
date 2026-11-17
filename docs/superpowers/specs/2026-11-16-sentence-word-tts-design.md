@@ -43,7 +43,7 @@
 
 ## 交付物
 
-- 新模块 `chrome-plugin/src/content/speech.ts`:朗读门面(挑语音、voiceschanged、speak/cancel、依赖注入)。
+- 新模块 `chrome-plugin/src/content/speech.ts`:朗读门面(挑语音、每次 `speak` 惰性 `getVoices()`、speak/cancel、依赖注入)。
 - `chrome-plugin/src/content/learning-block.ts`:句子小喇叭 + 面板条目小喇叭 + 朗读中视觉态。
 - 测试:`speech.ts` 单测、`learning-block.test.ts` 小喇叭行为(注入 mock)、E2E 探针一条。
 - 文档同步:`modules.md`(新文件)、`rendering.md`(卡片/面板结构)。
