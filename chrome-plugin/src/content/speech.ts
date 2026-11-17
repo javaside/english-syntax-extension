@@ -53,9 +53,96 @@ export interface SpeakerHooks {
 }
 
 /**
- * 英文语音挑选(spec:en-US 保底、本地优先):
- * `lang === "en-US"` > 其他 `en-*`;同档 `localService === true` 优先;再按
- * `name` 字典序稳定排序。无 en 语音返回 undefined(调用方退回 lang 保底)。
+ * 已知高质量本地语音名(小写、包含匹配——兼容 "Eddy (英语（美国）)"、"Microsoft
+ * Aria Online (Natural)" 一类带前缀/后缀的完整名)。macOS 现代系统语音
+ * (Samantha/Ava/Eddy/Flo…)、Windows Natural 语音(Aria/Jenny/Guy…)、以及各平台
+ * enhanced/premium 变体。
+ */
+const PREMIUM_LOCAL_VOICE_NAMES = [
+  "samantha",
+  "ava",
+  "zoe",
+  "serena",
+  "allison",
+  "susan",
+  "joana",
+  "luciana",
+  "paulina",
+  "daniel",
+  "karen",
+  "moira",
+  "tessa",
+  "fiona",
+  "nicky",
+  "deirdre",
+  "eddy",
+  "flo",
+  "reed",
+  "rocko",
+  "sandy",
+  "shelley",
+  "grandma",
+  "grandpa",
+  "aria",
+  "jenny",
+  "guy",
+  "michelle",
+  "ana",
+  "zira",
+  "david",
+  "brian",
+  "emma",
+  "ava ",
+];
+
+/**
+ * novelty 效果音与老式 MacinTalk 语音(Bad News/Bells/Boing/Whisper…与
+ * Albert/Fred/Junior/Kathy/Ralph):嘶哑或机器人声,不适合发音查证。2026-11-16
+ * 真机实测:「本地优先 + 名字字典序」在 macOS 上选中了 Albert——这就是朗读
+ * 嘶哑的根因。
+ */
+const NOVELTY_OR_LEGACY_VOICE_NAMES = [
+  "albert",
+  "fred",
+  "junior",
+  "kathy",
+  "ralph",
+  "princess",
+  "zarvox",
+  "trinoids",
+  "whisper",
+  "wobble",
+  "bubbles",
+  "bahh",
+  "bells",
+  "boing",
+  "cellos",
+  "organ",
+  "jester",
+  "superstar",
+  "bad news",
+  "good news",
+  "hysterical",
+  "deranged",
+];
+
+const nameMatches = (name: string, candidates: readonly string[]): boolean => {
+  const lower = name.toLowerCase();
+  return candidates.some((candidate) => lower.includes(candidate));
+};
+
+/**
+ * 英文语音挑选(发音查证:音质优先):
+ * 1. `Google ` 前缀(Chrome 网络语音,质量最好,需联网);
+ * 2. 白名单优质语音(macOS 现代系统语音 / Windows Natural 等);
+ * 3. 名单外的网络语音;
+ * 4. 名单外的本地语音;
+ * 5. novelty/老式黑名单垫底。
+ * **名单判定只看名字,不看 `localService`**——macOS Chrome 首次 `getVoices()`
+ * 返回的 `localService` 全是 false 占位值,`voiceschanged` 之后才刷新,标志位
+ * 在点击时机不可信。质量档压过语言档(清晰的 en-GB 优于嘶哑的 en-US);同档
+ * 内 en-US 优先,再按 name 字典序稳定排序。无 en 语音返回 undefined(退回
+ * lang 保底)。
  */
 export function pickEnglishVoice(
   voices: readonly SpeechSynthesisVoiceLike[],
@@ -64,13 +151,22 @@ export function pickEnglishVoice(
   if (english.length === 0) {
     return undefined;
   }
-  // 两段式(不可用单一加法权重表达):en-US 整体压倒其他 en,localService 只在
-  // 同语言档内优先——否则 en-GB 本地会反超 en-US 网络,与既定口径冲突。
+  const qualityRank = (v: SpeechSynthesisVoiceLike): number => {
+    if (v.name.startsWith("Google ")) {
+      return 0;
+    }
+    if (nameMatches(v.name, PREMIUM_LOCAL_VOICE_NAMES)) {
+      return 1;
+    }
+    if (nameMatches(v.name, NOVELTY_OR_LEGACY_VOICE_NAMES)) {
+      return 4;
+    }
+    return v.localService ? 3 : 2;
+  };
   const langRank = (v: SpeechSynthesisVoiceLike): number => (v.lang === "en-US" ? 0 : 1);
-  const localRank = (v: SpeechSynthesisVoiceLike): number => (v.localService ? 0 : 1);
   return [...english].sort(
     (a, b) =>
-      langRank(a) - langRank(b) || localRank(a) - localRank(b) || a.name.localeCompare(b.name),
+      qualityRank(a) - qualityRank(b) || langRank(a) - langRank(b) || a.name.localeCompare(b.name),
   )[0];
 }
 

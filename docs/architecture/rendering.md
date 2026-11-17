@@ -204,7 +204,7 @@ content script 跑在隔离世界,`window.customElements` 是 `null`。所以 `S
 
 ### 朗读(`speech.ts`,发音查证)
 
-句头与详解面板条目各配小喇叭,点击经 content script 本地 `speechSynthesis` 朗读——**零协议/零权限/零设置**,不发任何消息给 SW。`speech.ts` 是窄封装门面(依赖注入供测试):`utterance.lang` 固定 `en-US` 保底发声,`pickEnglishVoice` 两段式挑选(en-US 整体压倒其他 en、`localService` 只在同语言档内优先);`speak` 先 `cancel` 旧朗读再起新的,`stop` **同步**回调 `onEnd`,被打断 utterance 晚到的 onend/onerror 被守卫丢弃(只有「当前」朗读的结束事件才清态)。宿主无 `speechSynthesis`(happy-dom 等)时 `createSpeaker` 返回 null,所有朗读按钮不渲染(不留死按钮)。
+句头与详解面板条目各配小喇叭,点击经 content script 本地 `speechSynthesis` 朗读——**零协议/零权限/零设置**,不发任何消息给 SW。`speech.ts` 是窄封装门面(依赖注入供测试):`utterance.lang` 固定 `en-US` 保底发声,`pickEnglishVoice` 按音质分档挑选(`Google ` 前缀 > 白名单现代语音 > 名单外网络 > 名单外本地 > novelty/老式黑名单垫底;名单只看名字——macOS 首次 `getVoices()` 的 `localService` 全是 false 占位,不可信;质量档压过语言档,清晰 en-GB 优于嘶哑 en-US);`speak` 先 `cancel` 旧朗读再起新的,`stop` **同步**回调 `onEnd`,被打断 utterance 晚到的 onend/onerror 被守卫丢弃(只有「当前」朗读的结束事件才清态)。宿主无 `speechSynthesis`(happy-dom 等)时 `createSpeaker` 返回 null,所有朗读按钮不渲染(不留死按钮)。
 
 - **句头**:core 成功句才有,紧跟「问」按钮(`data-syntax-speak` 定位,`.chat-ask` 同款图标按钮族:半透明、悬停句区/面板显现、reduced-motion 关过渡);朗读文本 = `annotationEnglish` 全区间口径(尾标点省略)。
 - **面板条目**:标注外套 `.annotation-item` wrapper——标注本身是可下钻的 `<button>`,嵌套 button 非法,朗读按钮只能是**兄弟**;点击朗读该条目的 `annotationEnglish` 文本,下钻到词级即单词发音。流式预览的 wrapper 内只有 span 标注、**不挂**朗读按钮(未校验内容不朗读,与流式不下钻同原则)。

@@ -67,7 +67,7 @@ describe("createSpeaker", () => {
     ];
     const speaker = createSpeaker(synth);
     speaker!.speak("hi");
-    expect(synth.spoken[0]!.voice?.name).toBe("Samantha");
+    expect(synth.spoken[0]!.voice?.name).toBe("Google US English");
   });
 
   it("打断:speak 新文本先 cancel 旧朗读再 speak,期间 isSpeaking 为 true", () => {
@@ -136,19 +136,72 @@ describe("createSpeaker", () => {
 });
 
 describe("pickEnglishVoice", () => {
-  it("排序:en-US 本地 > en-US 网络 > 其他 en 本地;同档按 name 字典序", () => {
+  it("质量分档:Google > 白名单 > 未知网络 > 未知本地 > novelty 黑名单", () => {
     const voices = [
-      voice("en-GB", "Daniel", true),
-      voice("en-US", "Google US English", false),
       voice("en-US", "Samantha", true),
+      voice("en-US", "Albert", true),
+      voice("en-US", "Google US English", false),
+      voice("en-US", "Novel Netvoice X1", false),
+      voice("en-US", "Unheard Local Y2", true),
       voice("zh-CN", "Tingting", true),
-      voice("en-US", "Ava", true),
     ];
-    expect(pickEnglishVoice(voices)?.name).toBe("Ava");
-    expect(pickEnglishVoice(voices.filter((v) => v.name !== "Ava"))?.name).toBe("Samantha");
+    expect(pickEnglishVoice(voices)?.name).toBe("Google US English");
+    expect(pickEnglishVoice(voices.filter((v) => !v.name.startsWith("Google ")))?.name).toBe(
+      "Samantha",
+    );
+    const unknownOnly = voices.filter(
+      (v) => v.lang === "en-US" && (v.name.startsWith("Novel") || v.name.startsWith("Unheard")),
+    );
+    expect(pickEnglishVoice(unknownOnly)?.name).toBe("Novel Netvoice X1");
+    expect(pickEnglishVoice([voices[1]!, voices[4]!, voice("en-US", "Bells", true)])?.name).toBe(
+      "Unheard Local Y2",
+    );
+  });
+
+  it("质量档压过语言档:en-GB 白名单语音优于 en-US novelty 语音", () => {
     expect(
-      pickEnglishVoice(voices.filter((v) => v.name !== "Ava" && v.name !== "Samantha"))?.name,
-    ).toBe("Google US English");
+      pickEnglishVoice([voice("en-US", "Whisper", true), voice("en-GB", "Daniel", true)])?.name,
+    ).toBe("Daniel");
+  });
+
+  it("本机实测列表缩样:macOS 语音堆里选中 Samantha 而非 Albert/Bad News", () => {
+    const macList = [
+      "Albert",
+      "Bad News",
+      "Bahh",
+      "Bells",
+      "Boing",
+      "Bubbles",
+      "Cellos",
+      "Fred",
+      "Jester",
+      "Junior",
+      "Organ",
+      "Ralph",
+      "Samantha",
+      "Superstar",
+      "Trinoids",
+      "Whisper",
+      "Wobble",
+    ].map((name) => voice("en-US", name, true));
+    expect(pickEnglishVoice(macList)?.name).toBe("Samantha");
+  });
+
+  it("localService 全 false 的未激活快照:名单判定照常,Samantha 仍胜 Albert", () => {
+    // macOS Chrome 首次 getVoices() 返回占位 localService=false,voiceschanged
+    // 之后才刷新——档位判定不得依赖这个标志。
+    expect(
+      pickEnglishVoice([voice("en-US", "Albert", false), voice("en-US", "Samantha", false)])?.name,
+    ).toBe("Samantha");
+  });
+
+  it("白名单命中带区域后缀的名字(如 Eddy (英语（美国）))", () => {
+    expect(
+      pickEnglishVoice([
+        voice("en-US", "Albert", true),
+        voice("en-US", "Eddy (英语（美国）)", true),
+      ])?.name,
+    ).toContain("Eddy");
   });
 
   it("无 en 语音或空列表返回 undefined", () => {
