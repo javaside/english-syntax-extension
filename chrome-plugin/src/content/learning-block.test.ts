@@ -1710,6 +1710,53 @@ describe("详解面板条目朗读", () => {
     expect(speaker.spoken).toEqual(["The sun rose", "sun rose"]);
   });
 
+  it("面板焦点朗读:面板顶部喇叭读当前 focus 区间文本,下钻/返回随层级换文本", () => {
+    const { element, speaker } = speakingBlock();
+    element.setExpectedSentenceIds(["sentence-1"]);
+    element.renderCore(compoundSentence, compoundTokens, analysisFor("sentence-1"));
+    element.setDetailLoading("sentence-1", { startToken: 0, endToken: 6 });
+    element.renderDetail(
+      detailWithStructures("sentence-1", 0, 6, [
+        { startToken: 0, endToken: 2, role: "并列分句", explanation: "第一分句" },
+        { startToken: 4, endToken: 6, role: "并列分句", explanation: "第二分句" },
+      ]),
+    );
+
+    const root = element.host.shadowRoot!;
+    const detail = root.querySelector('.detail[data-sentence-id="sentence-1"]')!;
+    const focusSpeak = detail.querySelector<HTMLButtonElement>("[data-syntax-detail-speak]");
+    expect(focusSpeak).not.toBeNull();
+    focusSpeak!.click();
+    expect(speaker.spoken).toEqual(["The sun rose and the birds sang"]);
+
+    // 下钻重画:面板喇叭变为子层级区间文本。
+    element.setDetailLoading("sentence-1", { startToken: 0, endToken: 2 });
+    element.renderDetail(
+      detailWithStructures("sentence-1", 0, 2, [
+        { startToken: 0, endToken: 0, role: "主语", explanation: "名词短语中心" },
+      ]),
+    );
+    const drilledSpeak = root.querySelector<HTMLButtonElement>("[data-syntax-detail-speak]");
+    drilledSpeak!.click();
+    expect(speaker.spoken[1]).toBe("The sun rose");
+  });
+
+  it("流式预览与错误态的面板不渲染焦点朗读按钮", () => {
+    const { element } = speakingBlock();
+    element.setExpectedSentenceIds(["sentence-1"]);
+    element.renderCore(compoundSentence, compoundTokens, analysisFor("sentence-1"));
+
+    element.setDetailLoading("sentence-1", { startToken: 0, endToken: 6 });
+    element.renderDetailStructures("sentence-1", { startToken: 0, endToken: 6 }, [
+      { startToken: 0, endToken: 2, role: "并列分句", explanation: "" },
+    ]);
+    const root = element.host.shadowRoot!;
+    expect(root.querySelector("[data-syntax-detail-speak]")).toBeNull();
+
+    element.renderError("sentence-1", { startToken: 0, endToken: 6 }, "模型失败");
+    expect(root.querySelector("[data-syntax-detail-speak]")).toBeNull();
+  });
+
   it("环境无语音:面板条目不渲染朗读按钮,wrapper 与下钻标注不受影响", () => {
     const element = new SyntaxLearningBlock();
     element.setExpectedSentenceIds(["sentence-1"]);

@@ -85,6 +85,12 @@ test.describe("sentence and word speaking", () => {
     });
     expect(nested).toBe(0);
 
+    // 面板焦点朗读:面板顶部喇叭读当前详解区间,点击进入按下态。
+    const focusSpeak = page.locator(".detail > [data-syntax-detail-speak]");
+    await expect(focusSpeak).toBeVisible();
+    await focusSpeak.click();
+    await expect(focusSpeak).toHaveAttribute("aria-pressed", "true");
+
     // 接管语义:句头喇叭朗读中,点面板条目喇叭——条目接管、句头复位。
     const sentenceSpeak = page.locator("[data-syntax-speak]").first();
     await sentenceSpeak.click();
@@ -94,5 +100,6 @@ test.describe("sentence and word speaking", () => {
     await entrySpeak.click();
     await expect(entrySpeak).toHaveAttribute("aria-pressed", "true");
     await expect(sentenceSpeak).toHaveAttribute("aria-pressed", "false");
+    await expect(focusSpeak).toHaveAttribute("aria-pressed", "false");
   });
 });

@@ -237,6 +237,12 @@ const STYLES = `
   margin-block-start: 0.15em;
 }
 
+/* 面板焦点朗读:面板顶部独立一行,悬停面板或朗读中显现(其余态同 .speak)。 */
+.detail > .speak {
+  display: flex;
+  margin-block-end: 0.4em;
+}
+
 /* 可点样式只给完整渲染的 button 标注:流式预览的 span 保持静态观感,
    光标/悬停反馈不得对不可点元素说谎(affordance)。 */
 button.annotation {
@@ -889,6 +895,16 @@ export class SyntaxLearningBlock {
     if (this.#detailStack.length > 0) {
       detail.append(this.#createDetailBack());
     }
+    // 面板焦点朗读:读当前详解区间(下钻/返回随 renderDetail 重画自动换层级)。
+    const focusText = annotationEnglish(
+      this.#tokensBySentence.get(detailAnalysis.sentenceId) ?? [],
+      detailAnalysis.focus,
+    );
+    const focusSpeak = this.#createSpeakButton(() => focusText, "朗读所选成分");
+    if (focusSpeak !== null) {
+      focusSpeak.dataset.syntaxDetailSpeak = "";
+      detail.append(focusSpeak);
+    }
     if (detailAnalysis.structures.length > 0) {
       const tokens = this.#tokensBySentence.get(detailAnalysis.sentenceId) ?? [];
       const annotations = this.#annotations(
@@ -973,7 +989,10 @@ export class SyntaxLearningBlock {
    * 立即接管朗读。按下态走 aria-pressed——结束回调(`#resetSpeakButtons`)
    * 按 DOM 查询复位,不缓存节点引用,面板下钻重画后旧节点残留无害。
    */
-  #createSpeakButton(getText: () => string | undefined): HTMLButtonElement | null {
+  #createSpeakButton(
+    getText: () => string | undefined,
+    label = "朗读这句",
+  ): HTMLButtonElement | null {
     if (this.#speaker === null || getText() === undefined) {
       return null;
     }
@@ -981,7 +1000,6 @@ export class SyntaxLearningBlock {
     speak.type = "button";
     speak.dataset.syntaxSpeak = "";
     speak.setAttribute("aria-pressed", "false");
-    const label = "朗读这句";
     speak.setAttribute("aria-label", label);
     speak.title = label;
     speak.innerHTML = SPEAKER_ICON;
