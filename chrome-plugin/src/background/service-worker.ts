@@ -123,6 +123,7 @@ function errorResponse(
   requestId: string,
   code: ExtensionErrorCode,
   details?: Record<string, string | number | boolean>,
+  cause?: string,
 ): Extract<ResponseMessage, { type: "ERROR" }> {
   return {
     version: MESSAGE_VERSION,
@@ -130,7 +131,10 @@ function errorResponse(
     type: "ERROR",
     error: {
       code,
-      message: ERROR_MESSAGES[code],
+      // cause 是上游真实原因(已脱敏)。「模型输出不是合法 JSON」一类的通用文案
+      // 会盖掉真凶(实测:两轮修复后的逐条校验错误 vs 正文解析错误完全不同路),
+      // 排查只能靠猜——通用文案定位「哪类问题」,cause 定位「具体哪条」。
+      message: cause === undefined ? ERROR_MESSAGES[code] : `${ERROR_MESSAGES[code]}（${cause}）`,
       retryable: code === "RATE_LIMITED" || code === "NETWORK_ERROR" || code === "REQUEST_TIMEOUT",
       ...(details === undefined ? {} : { details }),
     },
@@ -645,6 +649,14 @@ export function registerServiceWorker(
           } catch (error) {
             const code = errorCode(error);
             if (code === "AUTH_FAILED") pauseProfile(profile);
+            if (code === "INVALID_MODEL_OUTPUT" && error instanceof ModelRequestError) {
+              return errorResponse(
+                request.requestId,
+                code,
+                undefined,
+                redactProfileSecrets(error.message, profile),
+              );
+            }
             return errorResponse(request.requestId, code);
           }
         }

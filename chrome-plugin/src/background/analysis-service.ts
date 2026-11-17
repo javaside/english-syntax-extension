@@ -584,6 +584,71 @@ function validateCachedDetail(
   return validation.ok ? validation.value : undefined;
 }
 
+/**
+ * detail 响应的**本地结构修复**:排序/裁界/去重叠/替换回显键/截超量语法点。
+ * 这些都是本地可判的结构错误,模型修复轮对它们无能为力——2026-11-16 真机实测
+ * deepseek-v4-pro 流式稳定输出乱序+重叠+越界的 structures,修复轮甚至更糟
+ * (乱序×3 + 越界),表现为「重试永远 INVALID_MODEL_OUTPUT」。
+ *
+ * 保守边界:structures 非数组、或全部条目不可救时返回 undefined,照旧交给模型
+ * 修复轮;构造出的对象仍要过一遍 `validateDetail`(字段级烂输出让修复轮兜),
+ * 通过才采用——本函数只负责把「结构合法但顺序/边界乱」的输出救回来。
+ */
+function sanitizeDetailResponse(raw: unknown, input: DetailInput): unknown {
+  if (!isRecord(raw) || !Array.isArray(raw.structures)) {
+    return undefined;
+  }
+  const focus = input.focus;
+  const clamped: Array<Record<string, unknown>> = [];
+  for (const structure of raw.structures) {
+    if (!isRecord(structure)) continue;
+    const { startToken, endToken, role, explanation, translation } = structure;
+    // typeof 先把 unknown 收窄成 number(Number.isInteger 的签名不做类型守卫)。
+    if (typeof startToken !== "number" || typeof endToken !== "number") continue;
+    if (!Number.isInteger(startToken) || !Number.isInteger(endToken)) continue;
+    // 反转区间无意义;与 focus 不相交的条目(模型把冒号后文也拆进来了)直接丢。
+    if (startToken > endToken) continue;
+    const from = Math.max(startToken, focus.startToken);
+    const to = Math.min(endToken, focus.endToken);
+    if (from > to) continue;
+    clamped.push({ startToken: from, endToken: to, role, explanation, translation });
+  }
+  if (clamped.length === 0) {
+    return undefined;
+  }
+  clamped.sort(
+    (a, b) =>
+      (a.startToken as number) - (b.startToken as number) ||
+      (a.endToken as number) - (b.endToken as number),
+  );
+  // 贪心去重叠:排序后保留每段新区间的第一条,与已保留区间重叠的丢弃。
+  const disjoint: Array<Record<string, unknown>> = [];
+  let previousEnd = focus.startToken - 1;
+  for (const structure of clamped) {
+    if ((structure.startToken as number) <= previousEnd) continue;
+    disjoint.push(structure);
+    previousEnd = structure.endToken as number;
+  }
+  if (disjoint.length === 0) {
+    return undefined;
+  }
+  const grammarPoints = Array.isArray(raw.grammarPoints)
+    ? raw.grammarPoints
+        .filter(
+          (point): point is string =>
+            typeof point === "string" && point.trim().length > 0 && point.length <= 300,
+        )
+        .slice(0, 12)
+    : [];
+  return {
+    sentenceId: input.sentence.sentenceId,
+    focus: { startToken: focus.startToken, endToken: focus.endToken },
+    structures: disjoint,
+    grammarPoints,
+    explanation: typeof raw.explanation === "string" ? raw.explanation : "",
+  };
+}
+
 /** 形状门的数组分支:≤10 条、每条非空且 ≤500 字符;类型谓词让返回值免于 any[]。 */
 function isSuggestionList(value: unknown): value is string[] {
   return (
@@ -905,6 +970,12 @@ export class CachedAnalysisService implements AnalysisService {
       this.detailStreamHandler(input),
     );
     let validation = validateDetail(raw, input.sentence, input.focus, input.profile.id);
+    if (!validation.ok) {
+      const sanitized = sanitizeDetailResponse(raw, input);
+      if (sanitized !== undefined) {
+        validation = validateDetail(sanitized, input.sentence, input.focus, input.profile.id);
+      }
+    }
     if (!validation.ok) {
       const repairRaw = await this.requestModel(
         input.profile,

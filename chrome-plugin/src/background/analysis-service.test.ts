@@ -754,6 +754,80 @@ describe("CachedAnalysisService isolated analysis modes", () => {
     expect(cache.detail.size).toBe(2);
   });
 
+  it("detail 结构性错误先本地规范化解掉:乱序/重叠/回显错/多余键/超量语法点,不进修复轮", async () => {
+    // 真机回归(deepseek-v4-pro 流式):模型稳定输出乱序+重叠+越界的 structures,
+    // 模型修复轮也救不回(INVALID_MODEL_OUTPUT 死循环)。排序/裁界/去重叠是本地
+    // 可判的结构修复,不该花一轮模型请求。
+    const focus = { startToken: 0, endToken: 1 };
+    const messy = {
+      sentenceId: "wrong-sentence",
+      focus: { startToken: 0, endToken: 2 },
+      structures: [
+        { startToken: 1, endToken: 2, role: "谓语", explanation: "动词部分" },
+        { startToken: 0, endToken: 0, role: "主语", explanation: "名词部分" },
+        { startToken: 0, endToken: 1, role: "整体", explanation: "与主语重叠,应被丢弃" },
+        { startToken: 5, endToken: 6, role: "越界", explanation: "超出 token 界,应被丢弃" },
+      ],
+      grammarPoints: Array.from({ length: 15 }, (_, index) => `语法点${index}`),
+      explanation: "详细说明。",
+      extraField: "unknown",
+    };
+    const { adapter, service } = harness([messy]);
+
+    const outcome = await service.analyzeDetail(
+      {
+        profile,
+        documentId: "document-1",
+        sentence: sentenceOne,
+        core: coreAnalysis(sentenceOne),
+        focus,
+      },
+      new AbortController().signal,
+    );
+
+    expect(adapter.completeJson).toHaveBeenCalledTimes(1);
+    expect(outcome.cacheHit).toBe(false);
+    expect(outcome.result.sentenceId).toBe(sentenceOne.sentenceId);
+    expect(outcome.result.focus).toEqual(focus);
+    // 排序后贪心:0..0 保留、0..1 与其重叠被丢、1..2 裁到 focus 界内成 1..1。
+    expect(
+      outcome.result.structures.map((structure) => [structure.startToken, structure.endToken]),
+    ).toEqual([
+      [0, 0],
+      [1, 1],
+    ]);
+    expect(outcome.result.grammarPoints).toHaveLength(12);
+  });
+
+  it("structures 全部不可救时仍走模型修复轮", async () => {
+    const focus = { startToken: 0, endToken: 1 };
+    const allBad = {
+      sentenceId: sentenceOne.sentenceId,
+      focus,
+      structures: [
+        { startToken: 9, endToken: 8, role: "反转", explanation: "start > end" },
+        { startToken: 5, endToken: 6, role: "越界", explanation: "token 界外" },
+      ],
+      grammarPoints: ["一般现在时"],
+      explanation: "详细说明。",
+    };
+    const { adapter, service } = harness([allBad, rawDetail(focus)]);
+
+    const outcome = await service.analyzeDetail(
+      {
+        profile,
+        documentId: "document-1",
+        sentence: sentenceOne,
+        core: coreAnalysis(sentenceOne),
+        focus,
+      },
+      new AbortController().signal,
+    );
+
+    expect(adapter.completeJson).toHaveBeenCalledTimes(2);
+    expect(outcome.result.structures).toHaveLength(1);
+  });
+
   it("treats stale detail focus as a miss and stamps the current profile", async () => {
     const focus = { startToken: 1, endToken: 2 };
     const { adapter, cache, service } = harness([rawDetail(focus), rawDetail(focus)]);

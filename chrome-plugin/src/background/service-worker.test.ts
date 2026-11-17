@@ -1151,6 +1151,52 @@ describe("service worker orchestration", () => {
     expect(analyses[0]!.modelProfileId).toBe("profile-a");
   });
 
+  it("ANALYZE_DETAIL 的 INVALID_MODEL_OUTPUT 附带脱敏后的真实原因", async () => {
+    // 通用文案「模型输出不是合法 JSON」盖真凶(正文解析失败 vs 逐条校验失败完全
+    // 不同路),2026-11-16 真机排查只能靠猜;cause 透传上游 message(脱敏)。
+    const analyzeDetail = vi
+      .fn<AnalysisService["analyzeDetail"]>()
+      .mockRejectedValue(
+        new ModelRequestError(
+          "INVALID_MODEL_OUTPUT",
+          "模型输出经两轮修复后仍不合格：SECRET-A structures: must be ordered",
+          false,
+        ),
+      );
+    const subject = chromeMock();
+    registerServiceWorker(dependencies({ analyzeDetail }), subject.api);
+    const requestCore = {
+      schemaVersion: CORE_SCHEMA_VERSION,
+      sentenceId: sentence.sentenceId,
+      components: [
+        { startToken: 0, endToken: 0, role: GrammarRole.SUBJECT, translation: "学习者" },
+      ],
+      modelProfileId: "profile-a",
+    };
+
+    const response = await dispatch(
+      subject.events.runtime.onMessage.listeners[0]!,
+      pageRequest({
+        type: "ANALYZE_DETAIL",
+        sentence,
+        core: requestCore,
+        focus: { startToken: 0, endToken: 0 },
+      }),
+    );
+
+    expect(response).toMatchObject({
+      type: "ERROR",
+      error: {
+        code: "INVALID_MODEL_OUTPUT",
+        message: expect.stringContaining("must be ordered"),
+      },
+    });
+    expect((response as { error: { message: string } }).error.message).toContain(
+      "模型输出不是合法 JSON",
+    );
+    expect(JSON.stringify(response)).not.toMatch(/SECRET-A/);
+  });
+
   it("ANALYZE_DETAIL returns NO_CACHE on a miss and DETAIL_RESULT on a hit", async () => {
     const requestCore = {
       schemaVersion: CORE_SCHEMA_VERSION,

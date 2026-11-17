@@ -725,3 +725,10 @@
 **症状** 模型层抛一次非取消异常(或 PasswordSafe 抖动一次)后,会话「假死」:崩溃句永远停在 QUEUED(无 CORE_ERROR 终态,JS 侧 settledBlocks 凑不满),新块再也不派发;测试里表现为 `manager.sessionJobForTest(...)` 不再 isActive、后续 `analyzeCalls` 不增。
 
 **守护测试** `PreviewSessionTest`:`retry model crash folds to network error and keeps the session dispatching`(重试崩→NETWORK_ERROR 终态+会话活)、`pause bookkeeping failure during dispatch does not brick the session`、`retry pause bookkeeping failure is isolated and a later failure records the pause`(隔离只丢当次、PasswordSafe 恢复后照常记账)。
+
+## 模型修复轮救不了结构性错误,detail 先本地 sanitize(2026-11-16)
+
+- **规则**:`validateDetail` 失败后先走 `sanitizeDetailResponse`(排序/裁界/去重叠/替换回显键),二次校验通过即采用;只有不可救才进模型修复轮。SW 的 INVALID_MODEL_OUTPUT 错误透传上游真实 message。
+- **为什么**:乱序/越界/重叠是本地可判、本地可修的结构错误,模型修复轮对它们没有额外信息优势。真机实测 deepseek-v4-pro 流式对详解稳定输出多形态病态(乱序+越界、逐 token 滑动重叠、```json 栅栏),修复轮输出甚至更糟——temperature 0 下同一 prompt 稳定复现,表现为「重试永远失败」。
+- **症状**:详解面板报 INVALID_MODEL_OUTPUT,怎么重试都一样;SW 通用文案「模型输出不是合法 JSON」盖掉真实原因(正文解析失败 vs 逐条校验失败完全不同路),排查只能靠猜。
+- **守护测试**:`analysis-service.test.ts` 的「detail 结构性错误先本地规范化解掉」(不进修复轮)与「structures 全部不可救时仍走模型修复轮」;`service-worker.test.ts` 的「INVALID_MODEL_OUTPUT 附带脱敏后的真实原因」。真机复现脚本:`.superpowers/acceptance/detail-invalid-json-repro{,2,3}.ts`(gitignored)。
