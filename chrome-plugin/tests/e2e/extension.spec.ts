@@ -147,7 +147,8 @@ test("starting on an article analyzes only viewport-adjacent blocks into three-r
     }
     for (const rowKind of sentence.rowKinds) {
       // chat-ask:句头「问」按钮(追问对话入口,Task 5 起 core 成功句必有)
-      expect(["component", "punctuation", "chat-ask"]).toContain(rowKind);
+      // speak:句头朗读按钮(发音查证,与「问」同款图标按钮族)
+      expect(["component", "punctuation", "chat-ask", "speak"]).toContain(rowKind);
     }
   }
 });

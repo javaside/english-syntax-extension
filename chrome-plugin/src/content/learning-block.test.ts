@@ -1547,9 +1547,7 @@ describe("句头整句朗读", () => {
     element.setExpectedSentenceIds(["sentence-1"]);
     element.renderCore(sentence, tokens, analysis);
 
-    const speak = element.host.shadowRoot!.querySelector<HTMLButtonElement>(
-      "[data-syntax-speak]",
-    )!;
+    const speak = element.host.shadowRoot!.querySelector<HTMLButtonElement>("[data-syntax-speak]")!;
     speak.click();
     expect(speaker.spoken).toEqual(["Learners read books"]);
     expect(speak.getAttribute("aria-pressed")).toBe("true");
@@ -1560,9 +1558,7 @@ describe("句头整句朗读", () => {
     element.setExpectedSentenceIds(["sentence-1"]);
     element.renderCore(sentence, tokens, analysis);
 
-    const speak = element.host.shadowRoot!.querySelector<HTMLButtonElement>(
-      "[data-syntax-speak]",
-    )!;
+    const speak = element.host.shadowRoot!.querySelector<HTMLButtonElement>("[data-syntax-speak]")!;
     speak.click();
     speaker.speaking = true;
     speak.click();
@@ -1609,9 +1605,7 @@ describe("详解面板条目朗读", () => {
       ]),
     );
 
-    const items = [
-      ...element.host.shadowRoot!.querySelectorAll<HTMLElement>(".annotation-item"),
-    ];
+    const items = [...element.host.shadowRoot!.querySelectorAll<HTMLElement>(".annotation-item")];
     expect(items).toHaveLength(2);
     for (const item of items) {
       const annotation = item.querySelector(".annotation");
@@ -1657,9 +1651,9 @@ describe("详解面板条目朗读", () => {
     const root = element.host.shadowRoot!;
     root.querySelector<HTMLButtonElement>(".annotation-item button.speak")!.click();
     expect(
-      root.querySelector<HTMLButtonElement>(".annotation-item button.speak")!.getAttribute(
-        "aria-pressed",
-      ),
+      root
+        .querySelector<HTMLButtonElement>(".annotation-item button.speak")!
+        .getAttribute("aria-pressed"),
     ).toBe("true");
 
     // 模拟 controller 的下钻链路:同句面板原地转 loading 后渲染子结构详解。
@@ -1671,9 +1665,7 @@ describe("详解面板条目朗读", () => {
       ]),
     );
 
-    const speaks = [
-      ...root.querySelectorAll<HTMLButtonElement>(".annotation-item button.speak"),
-    ];
+    const speaks = [...root.querySelectorAll<HTMLButtonElement>(".annotation-item button.speak")];
     expect(speaks).toHaveLength(2);
     for (const speak of speaks) {
       expect(speak.getAttribute("aria-pressed")).toBe("false");

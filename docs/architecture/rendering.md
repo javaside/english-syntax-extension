@@ -202,6 +202,14 @@ content script 跑在隔离世界,`window.customElements` 是 `null`。所以 `S
 - **流式预览的标注是纯 span,不可点**:流式 structures 是未校验输出,下钻栈只存通过完整校验的 `DetailAnalysis`。
 - 单 token 子结构(单词)同样可下钻——词级讲解(词性/时态/搭配)有教学价值,且模型对单词区间只给词级结构,下钻自然收敛,无需深度限制。
 
+### 朗读(`speech.ts`,发音查证)
+
+句头与详解面板条目各配小喇叭,点击经 content script 本地 `speechSynthesis` 朗读——**零协议/零权限/零设置**,不发任何消息给 SW。`speech.ts` 是窄封装门面(依赖注入供测试):`utterance.lang` 固定 `en-US` 保底发声,`pickEnglishVoice` 两段式挑选(en-US 整体压倒其他 en、`localService` 只在同语言档内优先);`speak` 先 `cancel` 旧朗读再起新的,`stop` **同步**回调 `onEnd`,被打断 utterance 晚到的 onend/onerror 被守卫丢弃(只有「当前」朗读的结束事件才清态)。宿主无 `speechSynthesis`(happy-dom 等)时 `createSpeaker` 返回 null,所有朗读按钮不渲染(不留死按钮)。
+
+- **句头**:core 成功句才有,紧跟「问」按钮(`data-syntax-speak` 定位,`.chat-ask` 同款图标按钮族:半透明、悬停句区/面板显现、reduced-motion 关过渡);朗读文本 = `annotationEnglish` 全区间口径(尾标点省略)。
+- **面板条目**:标注外套 `.annotation-item` wrapper——标注本身是可下钻的 `<button>`,嵌套 button 非法,朗读按钮只能是**兄弟**;点击朗读该条目的 `annotationEnglish` 文本,下钻到词级即单词发音。流式预览的 wrapper 内只有 span 标注、**不挂**朗读按钮(未校验内容不朗读,与流式不下钻同原则)。
+- **打断/toggle 语义**:按下态走 `aria-pressed`——朗读中再点同一按钮 = 停止;点新按钮 = 复位其余按下态、立即接管。结束回调按 DOM 现查复位(`#resetSpeakButtons`),不缓存节点引用,面板下钻重画后旧节点残留无害。
+
 ### IntelliJ 预览页的同款下钻(`intellij-plugin/.../web/render.ts`)
 
 桥 `DETAIL_REQUEST` 的 Kotlin 校验只要求区间合法(`start ≥ 0 && end ≥ start`),任意 token 区间天然放行——**桥协议与 Kotlin 侧零改动**,`launchDetailRequest`/提示词/双端同构缓存键/流式 `DETAIL_STREAM` 全复用。web 侧与 Chrome 端的差异:

@@ -59,6 +59,10 @@ E2E 配置:`fullyParallel: false`、`workers: 1`(共享持久化 profile 的权�
 
 Playwright 点不开 Chrome 原生右键菜单,所以复刻 SW 右键菜单分支的两个动作:`chrome.scripting.executeScript` 注入 content script(manifest 没有声明式 `content_scripts`,各手势都先注入)+ `chrome.tabs.sendMessage` 下发 `DIAGNOSE_BLOCK`。落点靠对目标段落发一次真实右键(`click({ button: "right" })` 不打开原生菜单,但会派发 contextmenu DOM 事件 + 在点击处放下折叠光标)——D1 的选区锚点优先、contextmenu 捕获监听次之,两条路都解析到被右键的段落,断言落点不是 body 兜底。两例:有 profile 时 `recordedOfKind("diagnosis")` 探针 ≥1、面板含本地证据与 `english-dominant` 门、复制出的 markdown 含 `## 概述` / `## 模型解释` 与模型应答本体;无 profile 时面板嵌 `CONFIG_MISSING`、`recorded()` 恒 0、报告只含本地段。剪贴板断言需要 `harness.context.grantPermissions(["clipboard-read", "clipboard-write"])`——`test.use` 的 permissions 只作用于 Playwright 默认 context,E2E 的页面在 harness 的持久化 context 里;无头环境下 `writeText` 的 user-activation 判定不稳定,clipboard-write 走权限路径才不会误触面板的 textarea 降级。
 
+### 朗读 E2E(`chrome-plugin/tests/e2e/speak.spec.ts`)
+
+断言口径是**挂载与按下态切换,不 mock 语音、不断言音频与墙钟**:点击后立即断言 `aria-pressed`,第二击的「停止」依赖 `stop()` 的同步 onEnd 回调,与音频进度无关(真 Chrome 下 speak 真被调用,无音频输出的环境只是不发声)。两例:句头喇叭 toggle(false → true → false);点成分开面板后 `.annotation-item` 内喇叭存在、标注内部无嵌套 button(兄弟契约)、句头朗读中被条目喇叭接管复位。
+
 ### E2E harness(`chrome-plugin/tests/e2e/fixtures.ts`)
 
 worker 级 fixture 做一次构建,然后:

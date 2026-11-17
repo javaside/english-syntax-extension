@@ -541,10 +541,7 @@ export class SyntaxLearningBlock {
    */
   readonly #speaker: Speaker | null;
 
-  constructor(
-    ownerDocument: Document = document,
-    options?: SyntaxLearningBlockOptions,
-  ) {
+  constructor(ownerDocument: Document = document, options?: SyntaxLearningBlockOptions) {
     this.host = ownerDocument.createElement("div");
     this.host.dataset.syntaxLearningBlock = "";
     const root = this.host.attachShadow({ mode: "open" });

@@ -25,7 +25,8 @@ export interface SpeechSynthesisVoiceLike {
 export interface SpeechSynthesisUtteranceLike {
   readonly text: string;
   lang: string;
-  voice?: SpeechSynthesisVoiceLike;
+  /** 真实 DOM 属性可空(清空语音即 null);未挑选语音时不赋值(undefined)。 */
+  voice?: SpeechSynthesisVoiceLike | null;
   onend: (() => void) | null;
   onerror: (() => void) | null;
 }
@@ -88,8 +89,14 @@ export function defaultSynthesis(): SpeechSynthesisLike | undefined {
   const synth = window.speechSynthesis;
   return {
     getVoices: () => synth.getVoices(),
-    createUtterance: (text) => new window.SpeechSynthesisUtterance(text),
-    speak: (utterance) => synth.speak(utterance),
+    // 双跳断言受控:真实例的 onend/onerror 是带事件参数的 DOM 签名,窄接口
+    // 裁成无参 guard——赋值方向(实现→DOM)与调用方向(DOM→guard,事件实参被
+    // 忽略)在运行时都安全,纯类型层面的逆变不兼容只能在这里收口。
+    createUtterance: (text) =>
+      new window.SpeechSynthesisUtterance(text) as unknown as SpeechSynthesisUtteranceLike,
+    // 断言受控:传入方经 createUtterance 拿到的就是真 SpeechSynthesisUtterance
+    // (唯一入口),窄接口只是把完整类型裁到门面所需。
+    speak: (utterance) => synth.speak(utterance as SpeechSynthesisUtterance),
     cancel: () => synth.cancel(),
   };
 }
