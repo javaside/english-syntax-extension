@@ -104,6 +104,23 @@ export type DetailRequestHandler = (
 /** F2 纠正提交回调：feedback 已 trim 且 1..MAX_FEEDBACK_CHARACTERS（构造方负责发桥消息）。 */
 export type FeedbackRequestHandler = (sentenceId: string, feedback: string) => void;
 
+/** 朗读回调（构造方负责发桥消息）：text 为最终朗读文本；stop 停止当前朗读。 */
+export interface TtsRequestHandlers {
+  speak: (sentenceId: string, text: string) => void;
+  stop: () => void;
+}
+
+/** 朗读按钮文本上限（与桥门 MAX_TTS_TEXT_CHARACTERS 同源）：超长的句子不挂喇叭。 */
+const MAX_SPEAK_TEXT_CHARACTERS = 2000;
+
+/** 句头/面板条目朗读按钮的喇叭图标（Chrome 端 SPEAKER_ICON 同款形状）。 */
+const SPEAKER_ICON =
+  '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false">' +
+  '<path d="M8.5 2.9 4.8 5.7H2.9a.9.9 0 0 0-.9.9v2.8a.9.9 0 0 0 .9.9h1.9l3.7 2.8a.55.55 0 0 0 .9-.44V3.34a.55.55 0 0 0-.9-.44z" ' +
+  'fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>' +
+  '<path d="M11.4 5.6a3.4 3.4 0 0 1 0 4.8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>' +
+  "</svg>";
+
 /**
  * 失败行「纠正」按钮派发的 DOM 事件名（冒泡 + composed；bootstrap-entry 在 document
  * 级接住并回调 openCorrection——CHAT_ASK_REQUEST_EVENT 同款委托先例）。点击**不发**
@@ -210,6 +227,7 @@ export class PreviewRenderer {
   #currentDetailPayload: DetailPayload | null = null;
   readonly #onDetailRequest: DetailRequestHandler;
   readonly #onFeedbackRequest: FeedbackRequestHandler;
+  readonly #onTtsRequest: TtsRequestHandlers | undefined;
   /**
    * F2 内联纠正输入行的常驻状态。行 DOM 挂在卡片（或还原后的原文块）**之后**——
    * 不参与 #renderCard 的整卡重建（失败行自 #4 修复起从 record 持久状态渲染、重画
@@ -224,9 +242,11 @@ export class PreviewRenderer {
   constructor(
     onDetailRequest: DetailRequestHandler,
     onFeedbackRequest: FeedbackRequestHandler = () => {},
+    onTtsRequest?: TtsRequestHandlers,
   ) {
     this.#onDetailRequest = onDetailRequest;
     this.#onFeedbackRequest = onFeedbackRequest;
+    this.#onTtsRequest = onTtsRequest;
   }
 
   /**
@@ -654,6 +674,11 @@ export class PreviewRenderer {
         // 只有 core 成功句给追问入口——流式暂定卡的分析尚未核实，失败句没有已核实划分
         // 可讨论。整卡重建时随之重建，点击走 document 级事件委托（bootstrap 接手开面板）。
         section.append(this.#createChatAsk(owner, sentenceId));
+        const speak = this.#createSpeakButton(owner, sentenceId, () => {
+          const tokens = this.#sentences.get(sentenceId)?.record.tokens ?? [];
+          return this.#tokensText(tokens, 0, tokens.length - 1);
+        }, "朗读这句");
+        if (speak !== null) section.append(speak);
       }
       const coordinateClauseTotal = components.filter(
         (component) => component.role === "COORDINATE_CLAUSE",
@@ -744,6 +769,8 @@ export class PreviewRenderer {
       structures,
       detail,
       detail === undefined ? undefined : current.sentenceId,
+      current.focusStart,
+      current.focusEnd,
     );
     this.#anchorDetail(sentence, panel, current.focusStart, current.focusEnd);
   }
@@ -807,11 +834,24 @@ export class PreviewRenderer {
     structures: DetailPayload["structures"],
     detail?: DetailPayload,
     sentenceId?: string,
+    focusStart?: number,
+    focusEnd?: number,
   ): HTMLElement {
     const panel = createElement(owner, "div", "english-syntax-detail");
     // 下钻中:顶部给「← 返回上级」,纯前端弹栈恢复,零桥消息、零网络。
     if (this.#detailStack.length > 0) {
       panel.append(this.#createDetailBack(owner));
+    }
+    // 面板焦点朗读:读当前详解区间(按 tokens 重建,尾标点省略);下钻/返回随重画换层级。
+    if (sentenceId !== undefined && focusStart !== undefined && focusEnd !== undefined) {
+      const tokens = this.#sentences.get(sentenceId)?.record.tokens ?? [];
+      const focusSpeak = this.#createSpeakButton(
+        owner,
+        sentenceId,
+        () => this.#tokensText(tokens, focusStart, focusEnd),
+        "朗读所选成分",
+      );
+      if (focusSpeak !== null) panel.append(focusSpeak);
     }
     const annotations = createElement(owner, "div", "english-syntax-detail-annotations");
     for (const [index, structure] of structures.entries()) {
@@ -855,7 +895,21 @@ export class PreviewRenderer {
           child.style.setProperty("cursor", "pointer", "important");
         }
       }
-      annotations.append(annotation);
+      // wrapper 让朗读按钮与下钻标注成为兄弟(标注本身是 button,嵌套非法;Chrome 端
+      // annotation-item 同款)。朗读只属于完整渲染——流式 structures 未校验。
+      const item = createElement(owner, "div", "english-syntax-annotation-item");
+      item.append(annotation);
+      if (sentenceId !== undefined) {
+        const english = this.#structureText(structure);
+        const entrySpeak = this.#createSpeakButton(
+          owner,
+          sentenceId,
+          () => (english.length > 0 && english.length <= 2000 ? english : undefined),
+          "朗读所选成分",
+        );
+        if (entrySpeak !== null) item.append(entrySpeak);
+      }
+      annotations.append(item);
     }
     panel.append(annotations);
     for (const [index, structure] of structures.entries()) {
@@ -1064,6 +1118,80 @@ export class PreviewRenderer {
       );
     });
     return ask;
+  }
+
+  /**
+   * 朗读按钮（Chrome 端 #createSpeakButton 同款语义）：无回调/文本缺失/超 2000 字符
+   * 时不挂。点击：按下且朗读中=stop；否则复位其余按下态、置位、speak。按下态走
+   * aria-pressed,朗读中=页面存在任一按下按钮（DOM 现查,不缓存节点）。
+   */
+  #createSpeakButton(
+    owner: Document,
+    sentenceId: string,
+    getText: () => string | undefined,
+    label: string,
+  ): HTMLButtonElement | null {
+    if (this.#onTtsRequest === undefined) return null;
+    const text = getText();
+    if (text === undefined || text.length > MAX_SPEAK_TEXT_CHARACTERS) return null;
+    const speak = createElement(owner, "button", "english-syntax-speak");
+    speak.type = "button";
+    speak.dataset.englishSyntaxSpeak = "";
+    speak.dataset.sentenceId = sentenceId;
+    speak.setAttribute("aria-pressed", "false");
+    speak.setAttribute("aria-label", label);
+    speak.title = label;
+    speak.innerHTML = SPEAKER_ICON;
+    speak.style.setProperty("cursor", "pointer", "important");
+    speak.addEventListener("click", () => {
+      const tts = this.#onTtsRequest;
+      if (tts === undefined) return;
+      if (speak.getAttribute("aria-pressed") === "true" && this.#isSpeaking()) {
+        this.#resetSpeakButtons();
+        tts.stop();
+        return;
+      }
+      const current = getText();
+      if (current === undefined || current.length > MAX_SPEAK_TEXT_CHARACTERS) return;
+      this.#resetSpeakButtons();
+      speak.setAttribute("aria-pressed", "true");
+      tts.speak(sentenceId, current);
+    });
+    return speak;
+  }
+
+  #isSpeaking(): boolean {
+    return document.querySelector('[data-english-syntax-speak][aria-pressed="true"]') !== null;
+  }
+
+  #resetSpeakButtons(): void {
+    for (const button of document.querySelectorAll<HTMLElement>(
+      '[data-english-syntax-speak][aria-pressed="true"]',
+    )) {
+      button.setAttribute("aria-pressed", "false");
+    }
+  }
+
+  /** TTS_ERROR 回执：复位该句的按下态（generation 门已在桥侧把关）。 */
+  speakFailed(sentenceId: string): void {
+    for (const button of document.querySelectorAll<HTMLElement>(
+      `[data-english-syntax-speak][data-sentence-id="${sentenceId}"][aria-pressed="true"]`,
+    )) {
+      button.setAttribute("aria-pressed", "false");
+    }
+  }
+
+  /** 按 token 区间重建朗读文本（首 token 去前导空白、区间末尾标点省略——Chrome annotationEnglish 口径）。 */
+  #tokensText(tokens: readonly TokenPayload[], startToken: number, endToken: number): string | undefined {
+    if (startToken < 0 || endToken >= tokens.length || startToken > endToken) return undefined;
+    let english = "";
+    for (let index = startToken; index <= endToken; index += 1) {
+      const token = tokens[index];
+      if (token === undefined) return undefined;
+      if (token.punctuation && index === endToken) continue;
+      english += (index === startToken ? "" : token.leadingWhitespace) + token.text;
+    }
+    return english;
   }
 
   #originalText(sentenceId: string): string {

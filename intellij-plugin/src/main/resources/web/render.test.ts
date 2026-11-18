@@ -1587,3 +1587,171 @@ describe("PreviewRenderer", () => {
     expect(document.querySelector(".english-syntax-detail-back")).toBeNull();
   });
 });
+
+// ---- 朗读：三层喇叭（句头整句 / 面板条目 / 面板焦点），Chrome 端同款语义 ----
+
+function speakSetup(sentences: string[] = ["s1"]) {
+  const speaks: Array<[string, string]> = [];
+  const stops: number[] = [];
+  const renderer = new PreviewRenderer(
+    () => {},
+    () => {},
+    {
+      speak: (sentenceId: string, text: string) => speaks.push([sentenceId, text]),
+      stop: () => stops.push(stops.length),
+    },
+  );
+  const element = paragraph("speak-p1");
+  renderer.registerBlock("b1", element);
+  for (const sentenceId of sentences) renderer.registerSentence("b1", sentenceId);
+  const tokens = [
+    { id: 0, text: "Learners", start: 0, end: 8, leadingWhitespace: "", punctuation: false },
+    { id: 1, text: "read", start: 9, end: 13, leadingWhitespace: " ", punctuation: false },
+    { id: 2, text: "books", start: 14, end: 19, leadingWhitespace: " ", punctuation: false },
+    { id: 3, text: ".", start: 19, end: 20, leadingWhitespace: "", punctuation: true },
+  ];
+  for (const sentenceId of sentences) {
+    renderer.renderCoreResult(
+      sentenceId,
+      "b1",
+      corePayload(sentenceId, [
+        { startToken: 0, endToken: 2, role: "SUBJECT", translation: "学习者们", text: "Learners read books" },
+      ]),
+      tokens,
+    );
+  }
+  return { renderer, speaks, stops };
+}
+
+describe("PreviewRenderer 朗读", () => {
+  beforeEach(() => {
+    document.body.replaceChildren();
+  });
+
+  function clickComponentFor(sentenceId: string, startToken: number, endToken: number): void {
+    document
+      .querySelector<HTMLButtonElement>(
+        `.english-syntax-sentence[data-sentence-id="${sentenceId}"] .english-syntax-component[data-start-token="${startToken}"][data-end-token="${endToken}"]`,
+      )
+      ?.click();
+  }
+
+  it("句头喇叭在追问按钮之后,失败句不出现;点击朗读整句(尾标点省略)并置按下态", () => {
+    const { speaks } = speakSetup(["s1"]);
+    const sentence = document.querySelector(".english-syntax-sentence");
+    const ask = sentence?.querySelector<HTMLElement>(".english-syntax-chat-ask");
+    const speak = sentence?.querySelector<HTMLButtonElement>("[data-english-syntax-speak]");
+    expect(speak).not.toBeNull();
+    expect(ask?.nextElementSibling).toBe(speak);
+    expect(speak?.getAttribute("aria-label")).toBe("朗读这句");
+    speak?.click();
+    expect(speaks).toEqual([["s1", "Learners read books"]]);
+    expect(speak?.getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("按下时再点同一喇叭=停;点另一句喇叭=接管且不发 stop", () => {
+    const { speaks, stops } = speakSetup(["s1", "s2"]);
+    const buttons = document.querySelectorAll<HTMLButtonElement>("[data-english-syntax-speak]");
+    const first = buttons[0]!;
+    const second = buttons[1]!;
+    first.click();
+    second.click();
+    expect(speaks).toHaveLength(2);
+    expect(stops).toHaveLength(0);
+    expect(first.getAttribute("aria-pressed")).toBe("false");
+    expect(second.getAttribute("aria-pressed")).toBe("true");
+    second.click();
+    expect(stops).toHaveLength(1);
+    expect(second.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("面板条目有兄弟喇叭读 structure 文本;流式预览不挂", () => {
+    const { renderer, speaks } = speakSetup(["s1"]);
+    clickComponentFor("s1", 0, 2);
+    renderer.renderDetailStream("s1", 0, 2, [
+      { startToken: 0, endToken: 1, role: "主语", explanation: "名词", text: "Learners" },
+    ]);
+    // 流式:wrapper 内是纯 span,无喇叭。
+    let item = document.querySelector(".english-syntax-annotation-item");
+    expect(item?.querySelector(".english-syntax-annotation")?.tagName).toBe("SPAN");
+    expect(item?.querySelector("[data-english-syntax-speak]")).toBeNull();
+
+    renderer.renderDetailResult({
+      sentenceId: "s1",
+      focus: { startToken: 0, endToken: 2 },
+      structures: [
+        { startToken: 0, endToken: 1, role: "主语", explanation: "名词", text: "Learners" },
+        { startToken: 1, endToken: 2, role: "谓语", explanation: "动宾", text: " read books" },
+      ],
+      grammarPoints: [],
+      explanation: "整体说明",
+    } as never);
+    const items = document.querySelectorAll(".english-syntax-annotation-item");
+    expect(items).toHaveLength(2);
+    for (const item of items) {
+      const annotation = item.querySelector(".english-syntax-annotation");
+      expect(annotation?.querySelector("button")).toBeNull();
+      expect(item.querySelector("[data-english-syntax-speak]")).not.toBeNull();
+    }
+    (items[0]!.querySelector("[data-english-syntax-speak]") as HTMLButtonElement).click();
+    expect(speaks[0]?.[1]).toBe("Learners");
+  });
+
+  it("面板焦点喇叭读当前详解区间文本", () => {
+    const { renderer, speaks } = speakSetup(["s1"]);
+    clickComponentFor("s1", 0, 2);
+    renderer.renderDetailResult({
+      sentenceId: "s1",
+      focus: { startToken: 0, endToken: 2 },
+      structures: [{ startToken: 0, endToken: 2, role: "整体", explanation: "短语", text: "whatever" }],
+      grammarPoints: [],
+      explanation: "说明",
+    } as never);
+    const focusSpeak = document.querySelector<HTMLButtonElement>(".english-syntax-detail > [data-english-syntax-speak]");
+    expect(focusSpeak?.getAttribute("aria-label")).toBe("朗读所选成分");
+    focusSpeak?.click();
+    // 焦点文本按 tokens 区间重建(尾标点省略),不用 structure.text。
+    expect(speaks[0]?.[1]).toBe("Learners read books");
+  });
+
+  it("整句文本超过 2000 字符时不挂句头喇叭", () => {
+    const speaks: Array<[string, string]> = [];
+    const renderer = new PreviewRenderer(() => {}, () => {}, {
+      speak: (sentenceId: string, text: string) => speaks.push([sentenceId, text]),
+      stop: () => {},
+    });
+    const element = paragraph("speak-long");
+    renderer.registerBlock("b1", element);
+    renderer.registerSentence("b1", "s1");
+    const longText = `${"word ".repeat(500)}end`;
+    renderer.renderCoreResult(
+      "s1",
+      "b1",
+      corePayload("s1", [
+        { startToken: 0, endToken: 0, role: "SUBJECT", translation: "长句", text: longText },
+      ]),
+      [{ id: 0, text: longText, start: 0, end: longText.length, leadingWhitespace: "", punctuation: false }],
+    );
+    expect(document.querySelector("[data-english-syntax-speak]")).toBeNull();
+  });
+
+  it("speakFailed 复位该句按下态", () => {
+    const { renderer } = speakSetup(["s1"]);
+    const speak = document.querySelector<HTMLButtonElement>("[data-english-syntax-speak]")!;
+    speak.click();
+    expect(speak.getAttribute("aria-pressed")).toBe("true");
+    renderer.speakFailed("s1");
+    expect(speak.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("未提供朗读回调时整卡不渲染喇叭", () => {
+    const renderer = new PreviewRenderer(() => {});
+    const element = paragraph("speak-none");
+    renderer.registerBlock("b1", element);
+    renderer.registerSentence("b1", "s1");
+    renderer.renderCoreResult("s1", "b1", corePayload("s1", [
+      { startToken: 0, endToken: 0, role: "SUBJECT", translation: "主", text: "It works" },
+    ]));
+    expect(document.querySelector("[data-english-syntax-speak]")).toBeNull();
+  });
+});
