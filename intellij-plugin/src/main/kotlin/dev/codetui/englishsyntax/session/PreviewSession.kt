@@ -930,6 +930,8 @@ class PreviewSession(
     operationVersion += 1
     sentences.clear()
     pendingBatch.clear()
+    // 关面板/编辑器(disposePreview)路径:长文本朗读不得成为无停止入口的幽灵进程。
+    runCatching { speaker.shutdown() }
   }
 
   /** 源 Token JSON：JCEF 按覆盖间隙恢复破折号、逗号等未覆盖标点。 */

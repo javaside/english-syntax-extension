@@ -306,6 +306,15 @@ class PreviewSessionTest {
   }
 
   @Test
+  fun `dispose shuts down the speaker`() {
+    val speaker = FakeSpeaker()
+    val session = ttsSession(speaker)
+    session.start()
+    session.dispose()
+    assertEquals(1, speaker.shutdowns)
+  }
+
+  @Test
   fun `stopSpeech stops the speaker`() {
     val speaker = FakeSpeaker()
     val session = ttsSession(speaker)

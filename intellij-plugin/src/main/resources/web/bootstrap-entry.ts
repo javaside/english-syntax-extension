@@ -486,8 +486,10 @@ function handleHostMessage(hostJson: unknown): void {
       s.renderer.renderFeedbackError(message.sentenceId, message.message);
       return;
     case "TTS_ERROR":
-      // 朗读失败:复位该句按下态(generation 等值门已在 parseHostMessage 顶部把关)。
+      // 朗读失败:复位该句按下态 + 状态浮层明示原因(「未安装语音命令」类降级必须
+      // 可见,不留点了没反应的死按钮假象);generation 等值门已在 parseHostMessage 顶部把关。
       s.renderer.speakFailed(message.sentenceId);
+      flashStatus(message.message);
       return;
     default:
       break;

@@ -2,6 +2,7 @@ package dev.codetui.englishsyntax.tts
 
 import java.io.BufferedReader
 import java.io.InputStreamReader
+import java.util.concurrent.TimeUnit
 
 /**
  * 朗读进程的最小控制面（测试 seam：生产实现包 [Process]）。
@@ -46,6 +47,8 @@ class ProcessSpeechSpeaker(
   private var current: ManagedProcess? = null
   private var macVoice: String? = null
   private var macVoiceResolved = false
+  /** available 结果缓存:可用性在进程生命周期内基本不变,别让每次点击都 fork which。 */
+  private val availableCache = mutableMapOf<String, Boolean>()
 
   /** 新朗读先销毁旧进程（会话内单声道、新朗读接管）。 */
   override fun speak(text: String) {
@@ -89,16 +92,19 @@ class ProcessSpeechSpeaker(
         "powershell"
       }
       else -> {
-        if (executor.available("spd-say")) "spd-say"
-        else if (executor.available("espeak")) "espeak"
+        if (isAvailable("spd-say")) "spd-say"
+        else if (isAvailable("espeak")) "espeak"
         else throw SpeechUnavailableException("未安装系统语音命令：请安装 spd-say 或 espeak（如 sudo apt install speech-dispatcher espeak）")
       }
     }
   }
 
   private fun checkAvailable(command: String, message: String) {
-    if (!executor.available(command)) throw SpeechUnavailableException(message)
+    if (!isAvailable(command)) throw SpeechUnavailableException(message)
   }
+
+  private fun isAvailable(command: String): Boolean =
+    availableCache.getOrPut(command) { executor.available(command) }
 
   private fun macVoice(): String {
     if (!macVoiceResolved) {
@@ -157,7 +163,8 @@ class ProcessCommandExecutor : CommandExecutor {
   override fun available(command: String): Boolean =
     runCatching {
       val probe = if (System.getProperty("os.name").contains("Windows")) "where" else "which"
-      ProcessBuilder(listOf(probe, command)).start().waitFor() == 0
+      // 有界等待:PATH 含挂载点/网络盘时 which 可能长挂,别把调用方锁死。
+      ProcessBuilder(listOf(probe, command)).start().waitFor(2, TimeUnit.SECONDS)
     }.getOrDefault(false)
 
   override fun readLines(command: String, args: List<String>): List<String> =

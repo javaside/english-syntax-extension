@@ -2063,6 +2063,7 @@ var EnglishSyntaxPreview = (function(exports) {
 				return;
 			case "TTS_ERROR":
 				s.renderer.speakFailed(message.sentenceId);
+				flashStatus(message.message);
 				return;
 		}
 		s.renderer.handleHostMessage(message);
