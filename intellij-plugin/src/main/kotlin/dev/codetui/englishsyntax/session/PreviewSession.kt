@@ -128,6 +128,15 @@ class PreviewSession(
     replay.forEach { enqueueSentences(listOf(it), offscreen = false) }
   }
 
+  /**
+   * 朗读接线(Task 3 实装:调 SpeechSpeaker,失败回 TTS_ERROR;当前为满足
+   * connector 的 sealed when 穷尽性而存在的桩)。
+   */
+  fun launchTts(sentenceId: String, text: String): Unit = Unit
+
+  /** 停止当前朗读(Task 3 实装)。 */
+  fun stopSpeech(): Unit = Unit
+
   fun stop() {
     state = SessionState.STOPPED
     operationVersion += 1

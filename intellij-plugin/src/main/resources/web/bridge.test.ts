@@ -34,6 +34,114 @@ function chatAsk(
   };
 }
 
+// ---- TTS_SPEAK / TTS_STOP / TTS_ERROR：朗读桥门（FEEDBACK_REQUEST 同款；与 Kotlin parseTtsSpeak/parseTtsStop 镜像）----
+
+function ttsSpeak(
+  overrides: Partial<{ sentenceId: string; text: string }> = {},
+) {
+  return {
+    version: 1,
+    type: "TTS_SPEAK" as const,
+    previewId: "p1",
+    generation: 2,
+    sentenceId: "s-b1-0",
+    text: "The part that matters",
+    ...overrides,
+  };
+}
+
+describe("parsePageMessage TTS 桥门", () => {
+  it("accepts tts speak within caps and trims the text", () => {
+    const message = parsePageMessage(ttsSpeak({ text: "  The part that matters  " }));
+    expect(message).toEqual({
+      version: 1,
+      type: "TTS_SPEAK",
+      previewId: "p1",
+      generation: 2,
+      sentenceId: "s-b1-0",
+      text: "The part that matters",
+    });
+  });
+
+  it("rejects tts speak with blank, oversized, or padded-over-cap text", () => {
+    expect(parsePageMessage(ttsSpeak({ text: "" }))).toBeNull();
+    expect(parsePageMessage(ttsSpeak({ text: "   " }))).toBeNull();
+    expect(parsePageMessage(ttsSpeak({ text: "x".repeat(2001) }))).toBeNull();
+    // trim 后在上限内：合法（上限按 trim 后文本计，FEEDBACK 同款）。
+    const padded = parsePageMessage(ttsSpeak({ text: `  ${"x".repeat(2000)}  ` }));
+    expect(padded && padded.type === "TTS_SPEAK" ? padded.text.length : -1).toBe(2000);
+  });
+
+  it("rejects tts speak with extra keys, empty sentenceId, credentials, or direction confusion", () => {
+    expect(parsePageMessage({ ...ttsSpeak(), extra: 1 })).toBeNull();
+    expect(parsePageMessage({ ...ttsSpeak(), apiKey: "leak" })).toBeNull();
+    expect(parsePageMessage(ttsSpeak({ sentenceId: "" }))).toBeNull();
+    // 页面伪造的 TTS_ERROR 不是合法 page 消息。
+    expect(
+      parsePageMessage({
+        version: 1,
+        type: "TTS_ERROR",
+        previewId: "p1",
+        generation: 2,
+        sentenceId: "s-b1-0",
+        message: "m",
+      }),
+    ).toBeNull();
+  });
+
+  it("accepts bare tts stop and rejects it with a forged text payload", () => {
+    const message = parsePageMessage({
+      version: 1,
+      type: "TTS_STOP",
+      previewId: "p1",
+      generation: 2,
+    });
+    expect(message).toEqual({ version: 1, type: "TTS_STOP", previewId: "p1", generation: 2 });
+    expect(
+      parsePageMessage({ version: 1, type: "TTS_STOP", previewId: "p1", generation: 2, text: "x" }),
+    ).toBeNull();
+  });
+});
+
+describe("parseHostMessage TTS_ERROR", () => {
+  it("parses tts error with generation gate and sentenceId", () => {
+    const message = parseHostMessage(
+      {
+        version: 1,
+        type: "TTS_ERROR",
+        previewId: "p1",
+        generation: 3,
+        sentenceId: "s-b1-0",
+        message: "未找到可用的系统语音命令",
+      },
+      3,
+    );
+    expect(message).toEqual({
+      version: 1,
+      type: "TTS_ERROR",
+      previewId: "p1",
+      generation: 3,
+      sentenceId: "s-b1-0",
+      message: "未找到可用的系统语音命令",
+    });
+    expect(
+      parseHostMessage(
+        {
+          version: 1,
+          type: "TTS_ERROR",
+          previewId: "p1",
+          generation: 2,
+          sentenceId: "s-b1-0",
+          message: "stale",
+        },
+        3,
+      ),
+    ).toBeNull();
+    // TTS_SPEAK 不是 host 消息（方向混淆）。
+    expect(parseHostMessage(ttsSpeak(), 2)).toBeNull();
+  });
+});
+
 describe("parsePageMessage", () => {
   it("accepts minimal preview ready", () => {
     const message = parsePageMessage({

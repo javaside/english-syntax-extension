@@ -78,6 +78,8 @@ object PreviewSessionConnector {
         // 失败回 FEEDBACK_ERROR（session 内部处理，无额外载荷过桥）。
         is PageMessage.FeedbackRequest -> session.launchFeedback(message.sentenceId, message.feedback)
         is PageMessage.RetrySentence -> session.retrySentence(message.sentenceId)
+        is PageMessage.TtsSpeak -> session.launchTts(message.sentenceId, message.text)
+        is PageMessage.TtsStop -> session.stopSpeech()
         is PageMessage.PreviewReady, is PageMessage.PreviewRendered -> Unit
       }
     }

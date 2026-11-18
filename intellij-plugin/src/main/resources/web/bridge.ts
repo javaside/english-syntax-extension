@@ -16,6 +16,9 @@ export const MAX_CHAT_QUESTION_CHARACTERS = 2000;
 // 纠正反馈入站上限（与 Kotlin BridgeProtocol.MAX_FEEDBACK_CHARACTERS 同步；CHAT_ASK question 同值同款）。
 export const MAX_FEEDBACK_CHARACTERS = 2000;
 
+// 朗读文本入站上限（与 Kotlin BridgeProtocol.MAX_TTS_TEXT_CHARACTERS 同步；feedback/question 同值同款）。
+export const MAX_TTS_TEXT_CHARACTERS = 2000;
+
 export interface PageMessageBase {
   version: number;
   previewId: string;
@@ -92,6 +95,21 @@ export interface FeedbackRequestPageMessage extends PageMessageBase {
   feedback: string;
 }
 
+/**
+ * 朗读（JS→Kotlin）：text 为待朗读英文，trim 后 1..MAX_TTS_TEXT_CHARACTERS 在
+ * parse 里结构化校验（feedback 同款防伪造门）。失败结果走 TTS_ERROR host 消息。
+ */
+export interface TtsSpeakPageMessage extends PageMessageBase {
+  type: "TTS_SPEAK";
+  sentenceId: string;
+  text: string;
+}
+
+/** 停止当前朗读（JS→Kotlin）。 */
+export interface TtsStopPageMessage extends PageMessageBase {
+  type: "TTS_STOP";
+}
+
 // CHAT_* 三条 host 消息均带 generation（parseHostMessage 顶部的等值门槛自动过滤
 // 旧代次）与 conversationId（面板侧第二道防线按它丢弃非本会话的迟到消息）。
 // CHAT_STREAM.text 是「截至目前的完整回答」而非增量——全量替换渲染，重试安全。
@@ -125,6 +143,13 @@ export interface FeedbackErrorHostMessage extends PageMessageBase {
   message: string;
 }
 
+/** 朗读失败（命令不存在/进程异常）：复位该句按下态并提示，无 code 字段。 */
+export interface TtsErrorHostMessage extends PageMessageBase {
+  type: "TTS_ERROR";
+  sentenceId: string;
+  message: string;
+}
+
 export type PageMessage =
   | PreviewReady
   | VisibleBlocks
@@ -133,7 +158,9 @@ export type PageMessage =
   | PreviewRendered
   | ParseBlock
   | ChatAskPageMessage
-  | FeedbackRequestPageMessage;
+  | FeedbackRequestPageMessage
+  | TtsSpeakPageMessage
+  | TtsStopPageMessage;
 
 export type HostMessage =
   | ({ type: "SESSION_STATE"; state: string; ready: number; discovered: number; failed: number } & PageMessageBase)
@@ -146,7 +173,8 @@ export type HostMessage =
   | ChatStreamHostMessage
   | ChatResultHostMessage
   | ChatErrorHostMessage
-  | FeedbackErrorHostMessage;
+  | FeedbackErrorHostMessage
+  | TtsErrorHostMessage;
 
 const FORBIDDEN_KEYS = new Set(["apiKey", "headers", "baseUrl"]);
 
@@ -175,6 +203,8 @@ const PAGE_KEYS_BY_TYPE: Readonly<Record<string, readonly string[]>> = {
   PARSE_BLOCK: ["version", "type", "previewId", "generation", "blockId", "text"],
   CHAT_ASK: ["version", "type", "previewId", "generation", "conversationId", "sentenceId", "history", "question"],
   FEEDBACK_REQUEST: ["version", "type", "previewId", "generation", "sentenceId", "feedback"],
+  TTS_SPEAK: ["version", "type", "previewId", "generation", "sentenceId", "text"],
+  TTS_STOP: ["version", "type", "previewId", "generation"],
 };
 
 /** JS → Kotlin 方向：白名单校验后返回封闭联合，或 null 表示拒绝。 */
@@ -318,6 +348,31 @@ export function parsePageMessage(value: unknown): PageMessage | null {
         feedback,
       };
     }
+    case "TTS_SPEAK": {
+      // 防伪造门（与 Kotlin parseTtsSpeak 镜像）：六键白名单 + trim 后 1..2000。
+      if (!hasOnlyKeys(value, PAGE_KEYS_BY_TYPE.TTS_SPEAK!)) return null;
+      if (!isNonEmptyString(value.sentenceId)) return null;
+      if (typeof value.text !== "string") return null;
+      const text = value.text.trim();
+      if (text.length === 0 || text.length > MAX_TTS_TEXT_CHARACTERS) return null;
+      return {
+        version: BRIDGE_VERSION,
+        type: "TTS_SPEAK",
+        previewId: value.previewId,
+        generation: value.generation,
+        sentenceId: value.sentenceId,
+        text,
+      };
+    }
+    case "TTS_STOP": {
+      if (!hasOnlyKeys(value, PAGE_KEYS_BY_TYPE.TTS_STOP!)) return null;
+      return {
+        version: BRIDGE_VERSION,
+        type: "TTS_STOP",
+        previewId: value.previewId,
+        generation: value.generation,
+      };
+    }
     default:
       return null;
   }
@@ -335,6 +390,7 @@ const HOST_KEYS_BY_TYPE: Readonly<Record<string, readonly string[]>> = {
   CHAT_RESULT: ["version", "type", "previewId", "generation", "conversationId", "answer"],
   CHAT_ERROR: ["version", "type", "previewId", "generation", "conversationId", "message"],
   FEEDBACK_ERROR: ["version", "type", "previewId", "generation", "sentenceId", "message"],
+  TTS_ERROR: ["version", "type", "previewId", "generation", "sentenceId", "message"],
 };
 
 /** Kotlin → JS 方向：同款白名单 + generation 复检。 */
@@ -486,6 +542,17 @@ export function parseHostMessage(value: unknown, currentGeneration: number): Hos
       return {
         version: BRIDGE_VERSION,
         type: "FEEDBACK_ERROR",
+        previewId: value.previewId,
+        generation: value.generation,
+        sentenceId: value.sentenceId,
+        message: value.message,
+      };
+    case "TTS_ERROR":
+      if (!isNonEmptyString(value.sentenceId)) return null;
+      if (typeof value.message !== "string") return null;
+      return {
+        version: BRIDGE_VERSION,
+        type: "TTS_ERROR",
         previewId: value.previewId,
         generation: value.generation,
         sentenceId: value.sentenceId,

@@ -372,6 +372,65 @@ class BridgeProtocolTest {
 
   // ---- FEEDBACK_REQUEST / FEEDBACK_ERROR：纠正反馈（F2），防伪造门与 CHAT_ASK 同款 ----
 
+  // ---- TTS_SPEAK / TTS_STOP / TTS_ERROR：朗读桥门（与 web/bridge.test.ts 的 TTS 组镜像）----
+
+  private fun ttsSpeakJson(sentenceId: String = "s-b1-0", text: String = "The part that matters"): String =
+    "{\"version\":1,\"type\":\"TTS_SPEAK\",\"previewId\":\"p1\",\"generation\":2,\"sentenceId\":\"$sentenceId\",\"text\":\"$text\"}"
+
+  @Test
+  fun `accepts tts speak within caps and trims the text`() {
+    val message = parse(ttsSpeakJson(text = "  The part that matters  ")) as PageMessage.TtsSpeak
+    assertEquals("p1", message.previewId)
+    assertEquals(2, message.generation)
+    assertEquals("s-b1-0", message.sentenceId)
+    assertEquals("The part that matters", message.text)
+  }
+
+  @Test
+  fun `rejects tts speak with blank or oversized text`() {
+    assertNull(parse(ttsSpeakJson(text = "")))
+    assertNull(parse(ttsSpeakJson(text = "   ")))
+    assertNull(parse(ttsSpeakJson(text = "x".repeat(BridgeProtocol.MAX_TTS_TEXT_CHARACTERS + 1))))
+    val padded = "  " + "x".repeat(BridgeProtocol.MAX_TTS_TEXT_CHARACTERS) + "  "
+    val message = parse(ttsSpeakJson(text = padded)) as PageMessage.TtsSpeak
+    assertEquals(BridgeProtocol.MAX_TTS_TEXT_CHARACTERS, message.text.length)
+  }
+
+  @Test
+  fun `tts speak whitespace gates follow the explicit javascript class`() {
+    assertNull(parse(ttsSpeakJson(text = "\\uFEFF")))
+    val kept = parse(ttsSpeakJson(text = "a\\u001Fb")) as PageMessage.TtsSpeak
+    assertEquals("a\u001Fb", kept.text)
+  }
+
+  @Test
+  fun `rejects tts speak with extra fields, empty sentenceId, or direction confusion`() {
+    assertNull(parse("{\"version\":1,\"type\":\"TTS_SPEAK\",\"previewId\":\"p1\",\"generation\":2,\"sentenceId\":\"s-b1-0\",\"text\":\"t\",\"extra\":1}"))
+    assertNull(parse("{\"version\":1,\"type\":\"TTS_SPEAK\",\"previewId\":\"p1\",\"generation\":2,\"sentenceId\":\"s-b1-0\",\"text\":\"t\",\"apiKey\":\"leak\"}"))
+    assertNull(parse(ttsSpeakJson(sentenceId = "")))
+    assertNull(parse("{\"version\":1,\"type\":\"TTS_SPEAK\",\"previewId\":\"p1\",\"generation\":2,\"text\":\"t\"}"))
+    assertNull(parse("{\"version\":1,\"type\":\"TTS_ERROR\",\"previewId\":\"p1\",\"generation\":2,\"sentenceId\":\"s\",\"message\":\"m\"}"))
+  }
+
+  @Test
+  fun `accepts bare tts stop and rejects it with a forged text payload`() {
+    val message = parse("{\"version\":1,\"type\":\"TTS_STOP\",\"previewId\":\"p1\",\"generation\":2}") as PageMessage.TtsStop
+    assertEquals("p1", message.previewId)
+    assertEquals(2, message.generation)
+    assertNull(parse("{\"version\":1,\"type\":\"TTS_STOP\",\"previewId\":\"p1\",\"generation\":2,\"text\":\"x\"}"))
+  }
+
+  @Test
+  fun `tts error host message parses with generation and sentenceId`() {
+    val error = parseHost(
+      "{\"version\":1,\"type\":\"TTS_ERROR\",\"previewId\":\"p1\",\"generation\":3,\"sentenceId\":\"s-b1-0\",\"message\":\"未找到可用的系统语音命令\"}",
+    ) as HostMessage.TtsError
+    assertEquals("s-b1-0", error.sentenceId)
+    assertEquals("未找到可用的系统语音命令", error.message)
+    assertNull(parseHost(ttsSpeakJson()))
+  }
+
+
   private fun feedbackJson(
     sentenceId: String = "s-b1-0",
     feedback: String = "这个 of 短语应该是定语",

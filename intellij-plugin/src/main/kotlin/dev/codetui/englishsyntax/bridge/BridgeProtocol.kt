@@ -87,6 +87,20 @@ sealed interface PageMessage {
     val sentenceId: String,
     val feedback: String,
   ) : PageMessage
+
+  /** 朗读一句/一个成分（JS→Kotlin）：text 为 trim 后 1..[MAX_TTS_TEXT_CHARACTERS]。 */
+  data class TtsSpeak(
+    override val previewId: String,
+    override val generation: Int,
+    val sentenceId: String,
+    val text: String,
+  ) : PageMessage
+
+  /** 停止当前朗读（JS→Kotlin）。 */
+  data class TtsStop(
+    override val previewId: String,
+    override val generation: Int,
+  ) : PageMessage
 }
 
 /** Kotlin → JS 的封闭消息集合。 */
@@ -186,6 +200,14 @@ sealed interface HostMessage {
     val sentenceId: String,
     val message: String,
   ) : HostMessage
+
+  /** 朗读失败（命令不存在/进程异常）：复位该句按下态并提示，无 code 字段。 */
+  data class TtsError(
+    override val previewId: String,
+    override val generation: Int,
+    val sentenceId: String,
+    val message: String,
+  ) : HostMessage
 }
 
 /**
@@ -208,6 +230,9 @@ object BridgeProtocol {
 
   // 纠正反馈入站上限（与 CHAT_ASK 的 question 同值同款）：trim 后 1..2000。
   const val MAX_FEEDBACK_CHARACTERS = 2000
+
+  // 朗读文本入站上限（与 web/bridge.ts 的 MAX_TTS_TEXT_CHARACTERS 同步；feedback/question 同值同款）。
+  const val MAX_TTS_TEXT_CHARACTERS = 2000
 
   private val forbiddenKeys = setOf("apiKey", "headers", "baseUrl")
 
@@ -269,6 +294,8 @@ object BridgeProtocol {
       }
 
       "CHAT_ASK" -> parseChatAsk(value, previewId, generation)
+      "TTS_SPEAK" -> parseTtsSpeak(value, previewId, generation)
+      "TTS_STOP" -> parseTtsStop(value, previewId, generation)
 
       "FEEDBACK_REQUEST" -> parseFeedbackRequest(value, previewId, generation)
 
@@ -332,6 +359,23 @@ object BridgeProtocol {
     val feedback = trimJsWhitespace(value.string("feedback") ?: return null)
     if (feedback.isEmpty() || feedback.length > MAX_FEEDBACK_CHARACTERS) return null
     return PageMessage.FeedbackRequest(previewId, generation, sentenceId, feedback)
+  }
+
+  /**
+   * TTS_SPEAK 的防伪造门（feedback 同款）：六键白名单 + sentenceId 非空 +
+   * text trim 后 1..2000（trimJsWhitespace 与 JS .trim() 同一字符集）。
+   */
+  private fun parseTtsSpeak(value: JsonObject, previewId: String, generation: Int): PageMessage.TtsSpeak? {
+    if (!hasOnlyKeys(value, "version", "type", "previewId", "generation", "sentenceId", "text")) return null
+    val sentenceId = value.string("sentenceId")?.takeIf { it.isNotEmpty() } ?: return null
+    val text = trimJsWhitespace(value.string("text") ?: return null)
+    if (text.isEmpty() || text.length > MAX_TTS_TEXT_CHARACTERS) return null
+    return PageMessage.TtsSpeak(previewId, generation, sentenceId, text)
+  }
+
+  private fun parseTtsStop(value: JsonObject, previewId: String, generation: Int): PageMessage.TtsStop? {
+    if (!hasOnlyKeys(value, "version", "type", "previewId", "generation")) return null
+    return PageMessage.TtsStop(previewId, generation)
   }
 
   /** Kotlin → JS 侧同样守卫：host 消息也可能被篡改后回注，generation 必须非负。 */
@@ -407,6 +451,11 @@ object BridgeProtocol {
         if (!hasOnlyKeys(value, "version", "type", "previewId", "generation", "sentenceId", "message")) return null
         val sentenceId = value.string("sentenceId")?.takeIf { it.isNotEmpty() } ?: return null
         HostMessage.FeedbackError(previewId, generation, sentenceId, value.string("message") ?: return null)
+      }
+      "TTS_ERROR" -> {
+        if (!hasOnlyKeys(value, "version", "type", "previewId", "generation", "sentenceId", "message")) return null
+        val sentenceId = value.string("sentenceId")?.takeIf { it.isNotEmpty() } ?: return null
+        HostMessage.TtsError(previewId, generation, sentenceId, value.string("message") ?: return null)
       }
       else -> null
     }
