@@ -1184,16 +1184,10 @@ describe("service worker orchestration", () => {
       }),
     );
 
-    expect(response).toMatchObject({
-      type: "ERROR",
-      error: {
-        code: "INVALID_MODEL_OUTPUT",
-        message: expect.stringContaining("must be ordered"),
-      },
-    });
-    expect((response as { error: { message: string } }).error.message).toContain(
-      "模型输出不是合法 JSON",
-    );
+    const error = (response as { error: { code: string; message: string } }).error;
+    expect(error.code).toBe("INVALID_MODEL_OUTPUT");
+    expect(error.message).toContain("模型输出不是合法 JSON");
+    expect(error.message).toContain("must be ordered");
     expect(JSON.stringify(response)).not.toMatch(/SECRET-A/);
   });
 
