@@ -10,7 +10,7 @@
 
 ## 上传物
 
-`chrome-plugin/release/english-syntax-extension-v1.5.0.zip`（19 个文件，已排除 source map）。本文所有命令都在 `chrome-plugin/` 里跑，产物相对路径也在 `chrome-plugin/` 下。
+`chrome-plugin/release/english-syntax-extension-v1.6.0.zip`（19 个文件，已排除 source map）。本文所有命令都在 `chrome-plugin/` 里跑，产物相对路径也在 `chrome-plugin/` 下。
 
 用 `npm run package` 生成。zip 里必须是**扩展根目录直接展开**，不能多套一层文件夹——当前打包脚本已保证这点，并会校验 `manifest.json` 与 `content-script.js` 在包内。
 
@@ -48,8 +48,9 @@ DeepSeek、OpenAI 或任何兼容 /chat/completions 的接口。多套配置可�
 同一句话只解析一次，跨页面、跨会话复用。缓存可导出分享，也可随时清空。没有配
 置模型时进入纯缓存模式，仍能显示已缓存的解析。
 
-■ 解析不对可以纠正
-对某句的拆解不满意，写一句说明让它重新解析，结果按你的反馈单独缓存。
+■ 听发音
+遇到不会读的词，点开它的详细解析一路下钻到单词，点小喇叭就能听读音；句子
+也能整句朗读，用浏览器本地语音，不联网、不额外收费。
 
 ■ 隐私
 不收集任何数据，开发者收不到你的任何信息——没有服务器，也没有统计代码。API
