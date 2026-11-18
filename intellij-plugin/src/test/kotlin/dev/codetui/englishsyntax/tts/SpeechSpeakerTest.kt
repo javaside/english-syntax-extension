@@ -34,7 +34,7 @@ class SpeechSpeakerTest {
   @Test
   fun `second speak destroys the first process and starts with the new text`() {
     val executor = FakeExecutor(voiceLines = listOf("Samantha            en_US    # Hello"))
-    val speaker = SpeechSpeaker(executor, osName = "Mac OS X")
+    val speaker = ProcessSpeechSpeaker(executor, osName = "Mac OS X")
     speaker.speak("first sentence")
     speaker.speak("second sentence")
     assertEquals(true, executor.processes[0].destroyed)
@@ -45,7 +45,7 @@ class SpeechSpeakerTest {
   @Test
   fun `stop and shutdown destroy the current process`() {
     val executor = FakeExecutor(voiceLines = listOf("Samantha            en_US"))
-    val speaker = SpeechSpeaker(executor, osName = "Mac OS X")
+    val speaker = ProcessSpeechSpeaker(executor, osName = "Mac OS X")
     speaker.speak("hello")
     speaker.stop()
     assertEquals(true, executor.processes[0].destroyed)
@@ -62,7 +62,7 @@ class SpeechSpeakerTest {
         "Samantha            en_US    # default",
       ),
     )
-    val speaker = SpeechSpeaker(executor, osName = "Mac OS X")
+    val speaker = ProcessSpeechSpeaker(executor, osName = "Mac OS X")
     speaker.speak("hi")
     assertEquals(listOf("-v", "Samantha", "--", "hi"), executor.started[0].second)
   }
@@ -70,16 +70,16 @@ class SpeechSpeakerTest {
   @Test
   fun `missing platform command throws speech unavailable`() {
     val executor = FakeExecutor(availableCommands = emptySet())
-    val speaker = SpeechSpeaker(executor, osName = "Mac OS X")
+    val speaker = ProcessSpeechSpeaker(executor, osName = "Mac OS X")
     assertThrows(SpeechUnavailableException::class.java) { speaker.speak("hi") }
-    val linux = SpeechSpeaker(executor, osName = "Linux")
+    val linux = ProcessSpeechSpeaker(executor, osName = "Linux")
     assertThrows(SpeechUnavailableException::class.java) { linux.speak("hi") }
   }
 
   @Test
   fun `windows speak escapes single quotes and calls powershell`() {
     val executor = FakeExecutor(availableCommands = setOf("powershell"))
-    val speaker = SpeechSpeaker(executor, osName = "Windows 11")
+    val speaker = ProcessSpeechSpeaker(executor, osName = "Windows 11")
     speaker.speak("it's fine")
     val (command, args) = executor.started[0]
     assertEquals("powershell", command)
@@ -92,7 +92,7 @@ class SpeechSpeakerTest {
   @Test
   fun `linux falls back from spd-say to espeak`() {
     val executor = FakeExecutor(availableCommands = setOf("espeak"))
-    val speaker = SpeechSpeaker(executor, osName = "Linux")
+    val speaker = ProcessSpeechSpeaker(executor, osName = "Linux")
     speaker.speak("hello")
     assertEquals("espeak", executor.started[0].first)
     assertEquals(listOf("hello"), executor.started[0].second)

@@ -68,6 +68,9 @@ class PreviewSession(
   private val now: () -> Long = System::currentTimeMillis,
   /** F6 AUTH_FAILED 暂停表；默认「永不暂停」的空表（未接线时门直通，测试用）。 */
   private val pauseRegistry: ProfilePauseRegistry = ProfilePauseRegistry { null },
+  /** 每会话一个朗读执行器（多预览各自独立,spec 裁决）；测试注入 fake。 */
+  private val speaker: dev.codetui.englishsyntax.tts.SpeechSpeaker =
+    dev.codetui.englishsyntax.tts.ProcessSpeechSpeaker(),
 ) {
   var state: SessionState = SessionState.STOPPED
     private set
@@ -129,13 +132,38 @@ class PreviewSession(
   }
 
   /**
-   * 朗读接线(Task 3 实装:调 SpeechSpeaker,失败回 TTS_ERROR;当前为满足
-   * connector 的 sealed when 穷尽性而存在的桩)。
+   * 朗读一句话/成分：同步执行（系统命令 fork 即返回）；失败回 TTS_ERROR 复位
+   * 页面按钮并明示原因（与 CHAT_ERROR 同款不设 STOPPED 静默门）。异常绝不逸散。
    */
-  fun launchTts(sentenceId: String, text: String): Unit = Unit
+  fun launchTts(sentenceId: String, text: String) {
+    try {
+      speaker.speak(text)
+    } catch (error: dev.codetui.englishsyntax.tts.SpeechUnavailableException) {
+      deliverTtsError(sentenceId, error.message ?: "朗读失败")
+    } catch (error: Exception) {
+      LOGGER.warn("launchTts: speech failed", error)
+      deliverTtsError(sentenceId, "朗读失败：${error.message ?: "未知错误"}")
+    }
+  }
 
-  /** 停止当前朗读(Task 3 实装)。 */
-  fun stopSpeech(): Unit = Unit
+  fun stopSpeech() {
+    runCatching { speaker.stop() }
+  }
+
+  private fun deliverTtsError(sentenceId: String, message: String) {
+    runCatching {
+      sender.send(
+        buildJsonObject {
+          put("version", 1)
+          put("type", "TTS_ERROR")
+          put("previewId", previewId)
+          put("generation", generation)
+          put("sentenceId", sentenceId)
+          put("message", message)
+        },
+      )
+    }.onFailure { LOGGER.warn("launchTts: failed to deliver TTS_ERROR: ${'$'}{it.message}") }
+  }
 
   fun stop() {
     state = SessionState.STOPPED
@@ -144,6 +172,8 @@ class PreviewSession(
     sentences.clear()
     pendingBatch.clear()
     pausedBlocks.clear()
+    // 会话停止 = 页面卡片全清,朗读进程随之收声(按钮已随 DOM 消失,不停成孤儿进程)。
+    runCatching { speaker.shutdown() }
     scope.launch {
       analysis.cancelDocument(documentId)
       // chat 走「<documentId>:chat」独立命名空间（cancelDocument 精确匹配）：不追加这行，
@@ -192,6 +222,7 @@ class PreviewSession(
   }
 
   fun onGenerationChanged(newGeneration: Int) {
+    runCatching { speaker.shutdown() }
     if (newGeneration <= generation) return
     generation = newGeneration
     operationVersion += 1

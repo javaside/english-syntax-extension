@@ -29,19 +29,26 @@ class SpeechUnavailableException(message: String) : RuntimeException(message)
  * 进程式系统 TTS 执行器：macOS `say` / Windows `System.Speech` / Linux `spd-say`（回落 `espeak`）。
  * 参数数组直传 ProcessBuilder、不经 shell——文本无注入面。
  */
-class SpeechSpeaker(
+/** 朗读执行器 seam：会话与测试面向它,生产实现是 [ProcessSpeechSpeaker]。 */
+interface SpeechSpeaker {
+  fun speak(text: String)
+  fun stop()
+  fun shutdown()
+}
+
+class ProcessSpeechSpeaker(
   private val executor: CommandExecutor = ProcessCommandExecutor(),
   private val osName: String = System.getProperty("os.name"),
   private val voiceListReader: () -> List<String> = {
     executor.readLines("say", listOf("-v", "?"))
   },
-) {
+) : SpeechSpeaker {
   private var current: ManagedProcess? = null
   private var macVoice: String? = null
   private var macVoiceResolved = false
 
   /** 新朗读先销毁旧进程（会话内单声道、新朗读接管）。 */
-  fun speak(text: String) {
+  override fun speak(text: String) {
     synchronized(this) {
       val command = resolveCommand()
       val args = when {
@@ -59,7 +66,7 @@ class SpeechSpeaker(
     }
   }
 
-  fun stop() {
+  override fun stop() {
     synchronized(this) {
       current?.destroy()
       current = null
@@ -67,7 +74,7 @@ class SpeechSpeaker(
   }
 
   /** 全停（会话终止/换代）：与 [stop] 同义,语义上留给生命周期钩子。 */
-  fun shutdown() = stop()
+  override fun shutdown() = stop()
 
   private fun resolveCommand(): String {
     val mac = osName.contains("Mac", ignoreCase = true)

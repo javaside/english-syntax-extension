@@ -243,6 +243,76 @@ class PreviewSessionTest {
 
   private fun session(): PreviewSession = manager.obtain("pv1", sender) { scanRequests += 1 }
 
+  private class FakeSpeaker : dev.codetui.englishsyntax.tts.SpeechSpeaker {
+    val spoken = mutableListOf<String>()
+    var stops = 0
+    var shutdowns = 0
+    var failure: RuntimeException? = null
+
+    override fun speak(text: String) {
+      failure?.let { throw it }
+      spoken += text
+    }
+
+    override fun stop() {
+      stops += 1
+    }
+
+    override fun shutdown() {
+      shutdowns += 1
+    }
+  }
+
+  private fun ttsSession(speaker: FakeSpeaker): PreviewSession =
+    PreviewSession(
+      previewId = "pv1",
+      scope = scope,
+      analysis = service,
+      sender = sender,
+      blockRequester = { scanRequests += 1 },
+      speaker = speaker,
+    )
+
+  @Test
+  fun `launchTts speaks via the speaker`() {
+    val speaker = FakeSpeaker()
+    val session = ttsSession(speaker)
+    session.launchTts("s-b1-0", "The part that matters")
+    assertEquals(listOf("The part that matters"), speaker.spoken)
+  }
+
+  @Test
+  fun `tts failure delivers TTS_ERROR with sentenceId and does not throw`() {
+    val speaker = FakeSpeaker()
+    speaker.failure = dev.codetui.englishsyntax.tts.SpeechUnavailableException("未安装系统语音命令")
+    val session = ttsSession(speaker)
+    session.launchTts("s-b1-0", "hello")
+    val errors = sender.of("TTS_ERROR")
+    assertEquals(1, errors.size)
+    assertEquals("s-b1-0", errors[0]["sentenceId"]?.jsonPrimitive?.contentOrNull)
+    assertEquals("未安装系统语音命令", errors[0]["message"]?.jsonPrimitive?.contentOrNull)
+  }
+
+  @Test
+  fun `stop and onGenerationChanged shut down the speaker`() {
+    val speaker = FakeSpeaker()
+    val session = ttsSession(speaker)
+    session.start()
+    session.stop()
+    assertEquals(1, speaker.shutdowns)
+    session.start()
+    session.onGenerationChanged(7)
+    assertEquals(2, speaker.shutdowns)
+  }
+
+  @Test
+  fun `stopSpeech stops the speaker`() {
+    val speaker = FakeSpeaker()
+    val session = ttsSession(speaker)
+    session.stopSpeech()
+    assertEquals(1, speaker.stops)
+  }
+
   @Test
   fun `start requests a scan`() {
     val session = session()
