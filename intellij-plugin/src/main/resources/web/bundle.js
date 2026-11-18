@@ -733,6 +733,7 @@ var EnglishSyntaxPreview = (function(exports) {
 			if (entry.record.analysis !== null) entry.record.hadCore = true;
 			entry.record.failed = true;
 			entry.record.failureMessage = friendlyErrorMessage(code, message);
+			entry.record.failureCode = code;
 			entry.record.analysis = null;
 			entry.record.provisional = null;
 			this.#currentDetail = null;
@@ -930,7 +931,7 @@ var EnglishSyntaxPreview = (function(exports) {
 					failure.dataset.sentenceId = sentenceId;
 					failure.append(createElement(owner, "span", "english-syntax-original", this.#originalText(sentenceId)), createElement(owner, "span", "english-syntax-error", sentence.failureMessage ?? "解析失败"));
 					failure.append(this.#createRetry(owner, sentenceId));
-					if (sentence.hadCore) failure.append(this.#createCorrectionButton(owner, sentenceId));
+					if (sentence.hadCore && sentence.failureCode !== "INVALID_MODEL_OUTPUT") failure.append(this.#createCorrectionButton(owner, sentenceId));
 					container.append(failure);
 					continue;
 				}

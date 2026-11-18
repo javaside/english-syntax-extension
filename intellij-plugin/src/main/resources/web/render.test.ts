@@ -1755,3 +1755,38 @@ describe("PreviewRenderer 朗读", () => {
     expect(document.querySelector("[data-english-syntax-speak]")).toBeNull();
   });
 });
+
+// ---- INVALID_MODEL_OUTPUT 失败行不给「纠正」入口(格式错误无从纠正,对齐 Chrome 裁决) ----
+
+describe("PreviewRenderer 纠正入口与格式错误", () => {
+  beforeEach(() => {
+    document.body.replaceChildren();
+  });
+
+  function failureSetup(code: string): void {
+    const renderer = new PreviewRenderer(() => {});
+    const element = document.createElement("p");
+    element.textContent = "The service validates every response.";
+    document.body.append(element);
+    renderer.registerBlock("b1", element);
+    renderer.registerSentence("b1", "s1");
+    renderer.renderCoreResult("s1", "b1", corePayload("s1", [
+      { startToken: 0, endToken: 1, role: "SUBJECT", translation: "主", text: "The service" },
+    ]));
+    // 详解失败 quirk:core 已核实后整句被打成失败行。
+    renderer.renderCoreError("s1", "b1", code, "raw message");
+  }
+
+  it("INVALID_MODEL_OUTPUT 的失败行只有重新解析,没有纠正按钮", () => {
+    failureSetup("INVALID_MODEL_OUTPUT");
+    const failure = document.querySelector(".english-syntax-sentence-failure, [data-sentence-id=\"s1\"]");
+    expect(failure?.querySelector(".english-syntax-correct")).toBeNull();
+    expect(failure?.querySelector(".english-syntax-retry, button")).not.toBeNull();
+  });
+
+  it("其它错误的 hadCore 失败行照常保留纠正入口", () => {
+    failureSetup("NETWORK_ERROR");
+    const failure = document.querySelector("[data-sentence-id=\"s1\"]");
+    expect(failure?.querySelector(".english-syntax-correct")).not.toBeNull();
+  });
+});

@@ -732,3 +732,10 @@
 - **为什么**:乱序/越界/重叠是本地可判、本地可修的结构错误,模型修复轮对它们没有额外信息优势。真机实测 deepseek-v4-pro 流式对详解稳定输出多形态病态(乱序+越界、逐 token 滑动重叠、```json 栅栏),修复轮输出甚至更糟——temperature 0 下同一 prompt 稳定复现,表现为「重试永远失败」。
 - **症状**:详解面板报 INVALID_MODEL_OUTPUT,怎么重试都一样;SW 通用文案「模型输出不是合法 JSON」盖掉真实原因(正文解析失败 vs 逐条校验失败完全不同路),排查只能靠猜。
 - **守护测试**:`analysis-service.test.ts` 的「detail 结构性错误先本地规范化解掉」(不进修复轮)与「structures 全部不可救时仍走模型修复轮」;`service-worker.test.ts` 的「INVALID_MODEL_OUTPUT 附带脱敏后的真实原因」。真机复现脚本:`.superpowers/acceptance/detail-invalid-json-repro{,2,3}.ts`(gitignored)。
+
+## detail 本地结构修复必须双端同构(2026-11-18 补 IntelliJ)
+
+- **规则**:Chrome `analysis-service.ts` 的 `sanitizeDetailResponse` 与 Kotlin `AnalysisService.kt` 的同名私有函数逐条同构(排序/裁界/贪心去重叠/替换回显键/截 grammarPoints,产物必须重过 validateDetail)。修一端必须同步另一端。
+- **为什么**:2026-11-16 只修了 Chrome 端,2026-11-18 真机在 IDEA 插件复现同款「重试永远 INVALID_MODEL_OUTPUT: structures must be ordered and non-overlapping」——双端不一致等于一半用户裸奔。
+- **症状**:详解/解析失败行显示「Model output remained invalid after two repairs: structures: must be ordered and non-overlapping」,重试无效。
+- **守护测试**:`AnalysisServiceTest` 的「detail structural errors are sanitized locally without a repair round」与「still enters the repair round」(与 Chrome analysis-service.test.ts 同构);`render.test.ts` 的「INVALID_MODEL_OUTPUT 失败行不给纠正入口」。另注意 Kotlin `buildJsonObject` 的 put 返回旧值——`?.let { put(...) } ?: put("")` 会把真值覆盖成空串(elvis 陷阱,本条修复时踩过)。

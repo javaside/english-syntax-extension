@@ -49,6 +49,8 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.int
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonArray
@@ -365,6 +367,15 @@ class AnalysisService(
       },
     )
     var validation = validateDetail(raw, sentence, focus, profile.id)
+    if (validation is ValidationResult.Invalid) {
+      // 本地结构修复先于模型修复轮(Chrome 端 sanitizeDetailResponse 同款,2026-11-18
+      // 补双端对齐):排序/裁界/去重叠/替换回显键是本地可判的结构错误,模型修复轮对
+      // 它们无能为力(v4-pro 实测乱序+重叠+越界稳定复现,修复轮甚至更糟)。
+      val sanitized = sanitizeDetailResponse(raw, sentence, focus)
+      if (sanitized != null) {
+        validation = validateDetail(sanitized, sentence, focus, profile.id)
+      }
+    }
     if (validation is ValidationResult.Invalid) {
       val repairRaw = request(
         profile,
@@ -721,6 +732,65 @@ class AnalysisService(
      * failures 的边界，镜像 Chrome SW）按 profile 密钥脱敏后再外发；日志同步用脱敏
      * 后的文本，避免把密钥写进 idea.log。
      */
+    /**
+     * detail 响应的本地结构修复(Chrome 端 sanitizeDetailResponse 逐条同构):替换
+     * sentenceId/focus 回显键、structures 裁到 focus 界内(不相交丢弃、相交裁剪)、
+     * 按 startToken 排序、贪心去重叠、grammarPoints 截 12 条。产物必须再过一遍
+     * [validateDetail] 才被采用;structures 非数组或全部条目不可救返回 null(照旧
+     * 进模型修复轮)。
+     */
+    private fun sanitizeDetailResponse(raw: JsonElement, sentence: SentenceInput, focus: TokenRange): JsonElement? {
+      val envelope = raw as? JsonObject ?: return null
+      val structures = envelope["structures"] as? JsonArray ?: return null
+      val clamped = mutableListOf<JsonObject>()
+      for (structure in structures) {
+        val item = structure as? JsonObject ?: continue
+        val start = (item["startToken"] as? JsonPrimitive)?.intOrNull ?: continue
+        val end = (item["endToken"] as? JsonPrimitive)?.intOrNull ?: continue
+        if (start > end) continue
+        val from = maxOf(start, focus.startToken)
+        val to = minOf(end, focus.endToken)
+        if (from > to) continue
+        clamped.add(
+          buildJsonObject {
+            put("startToken", from)
+            put("endToken", to)
+            item["role"]?.let { put("role", it) }
+            item["explanation"]?.let { put("explanation", it) }
+            item["translation"]?.let { put("translation", it) }
+          },
+        )
+      }
+      if (clamped.isEmpty()) return null
+      clamped.sortWith(compareBy({ (it["startToken"] as JsonPrimitive).int }, { (it["endToken"] as JsonPrimitive).int }))
+      val disjoint = mutableListOf<JsonObject>()
+      var previousEnd = focus.startToken - 1
+      for (structure in clamped) {
+        val start = (structure["startToken"] as JsonPrimitive).int
+        if (start <= previousEnd) continue
+        disjoint += structure
+        previousEnd = (structure["endToken"] as JsonPrimitive).int
+      }
+      if (disjoint.isEmpty()) return null
+      val grammarPoints = (envelope["grammarPoints"] as? JsonArray)
+        ?.filterIsInstance<JsonPrimitive>()
+        ?.filter { it.content.isNotBlank() && it.content.length <= 300 }
+        ?.take(12)
+        ?: emptyList()
+      return buildJsonObject {
+        put("sentenceId", sentence.sentenceId)
+        put("focus", buildJsonObject {
+          put("startToken", focus.startToken)
+          put("endToken", focus.endToken)
+        })
+        put("structures", buildJsonArray { disjoint.forEach { add(it) } })
+        put("grammarPoints", buildJsonArray { grammarPoints.forEach { add(it) } })
+        // 别用 ?.let { put(it) } ?: put(""):buildJsonObject 的 put 返回被替换的旧值
+        // (首次添加为 null),elvis 会被误触发把真值覆盖成空串。
+        put("explanation", envelope["explanation"] ?: JsonPrimitive(""))
+      }
+    }
+
     private fun invalidOutput(errors: List<ValidationError>, secrets: List<String>): ExtensionFailure {
       val summary = errors.joinToString("; ") { "${it.path.ifEmpty { "output" }}: ${it.message}" }
       val message = redactSecrets(

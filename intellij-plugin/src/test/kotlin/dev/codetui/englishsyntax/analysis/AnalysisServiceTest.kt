@@ -499,9 +499,7 @@ class AnalysisServiceTest {
       modelProfileId = "profile-1",
     )
     val overlapping = """{"sentenceId":"s1","focus":{"startToken":2,"endToken":9},"structures":[{"startToken":2,"endToken":9,"role":"宾语从句","explanation":"整个从句"},{"startToken":2,"endToken":3,"role":"引导词","explanation":"重复内部"}],"grammarPoints":[],"explanation":"解析"}"""
-    val repaired = """{"sentenceId":"s1","focus":{"startToken":2,"endToken":9},"structures":[{"startToken":2,"endToken":3,"role":"引导词","explanation":"疑问词短语"},{"startToken":4,"endToken":5,"role":"主语","explanation":"名词短语"},{"startToken":6,"endToken":9,"role":"谓语","explanation":"谓语部分"}],"grammarPoints":[],"explanation":"解析"}"""
     server.enqueueSse(listOf(overlapping))
-    server.enqueueJson(repaired)
     val streamed = mutableListOf<List<DetailStructure>>()
 
     val outcome = service.analyzeDetail(
@@ -514,7 +512,55 @@ class AnalysisServiceTest {
     )
 
     assertEquals(listOf(1), streamed.map { it.size })
-    assertEquals(3, outcome.result.structures.size)
+    // 2026-11-18 起,嵌套重叠这类结构病态由本地 sanitize 解掉(排序后贪心保留
+    // start,end 较小者——与 Chrome 端 sanitizeDetailResponse 同构),不再花一轮
+    // 模型修复——修复轮只属于本地不可救的输出。
+    assertEquals(1, server.requests.size)
+    assertEquals(listOf(TokenRange(2, 3)), outcome.result.structures.map { TokenRange(it.startToken, it.endToken) })
+  }
+
+  /** 与 Chrome 端「detail 结构性错误先本地规范化解掉」逐条同构(2026-11-18 补双端对齐)。 */
+  @Test
+  fun `detail structural errors are sanitized locally without a repair round`() = runBlocking {
+    val sentence = sentence("s1", "The service validates every response.")
+    val core = CoreAnalysis(
+      sentenceId = "s1",
+      components = listOf(CoreComponent(0, 5, GrammarRole.SUBJECT, "整句")),
+      modelProfileId = "profile-1",
+    )
+    // 乱序 + 与前条重叠 + 越出 focus + 回显错 + 多余键:本地可判可修的结构病态,
+    // 模型修复轮对它们无能为力(v4-pro 实测修复轮甚至更糟)。
+    val messy = """{"sentenceId":"wrong","focus":{"startToken":0,"endToken":5},"structures":[{"startToken":1,"endToken":1,"role":"谓语","explanation":"动词"},{"startToken":0,"endToken":0,"role":"主语","explanation":"限定词"},{"startToken":0,"endToken":1,"role":"整体","explanation":"与前条重叠"},{"startToken":4,"endToken":5,"role":"越界","explanation":"超出 focus"}],"grammarPoints":["一般现在时"],"explanation":"解析","extra":1}"""
+    server.enqueueJson(messy)
+
+    val outcome = service.analyzeDetail(profile(), "doc-1", sentence, core, TokenRange(0, 1))
+
+    assertEquals(1, server.requests.size) // 未进模型修复轮
+    assertEquals("s1", outcome.result.sentenceId)
+    assertEquals(TokenRange(0, 1), outcome.result.focus)
+    assertEquals(
+      listOf(TokenRange(0, 0), TokenRange(1, 1)),
+      outcome.result.structures.map { TokenRange(it.startToken, it.endToken) },
+    )
+  }
+
+  @Test
+  fun `detail with unsalvageable structures still enters the repair round`() = runBlocking {
+    val sentence = sentence("s1", "The service validates every response.")
+    val core = CoreAnalysis(
+      sentenceId = "s1",
+      components = listOf(CoreComponent(0, 5, GrammarRole.SUBJECT, "整句")),
+      modelProfileId = "profile-1",
+    )
+    val allBad = """{"sentenceId":"s1","focus":{"startToken":0,"endToken":1},"structures":[{"startToken":9,"endToken":8,"role":"反转","explanation":"start大于end"},{"startToken":4,"endToken":5,"role":"越界","explanation":"focus 界外"}],"grammarPoints":[],"explanation":"解析"}"""
+    val repaired = """{"sentenceId":"s1","focus":{"startToken":0,"endToken":1},"structures":[{"startToken":0,"endToken":1,"role":"主语","explanation":"名词短语"}],"grammarPoints":[],"explanation":"解析"}"""
+    server.enqueueJson(allBad)
+    server.enqueueJson(repaired)
+
+    val outcome = service.analyzeDetail(profile(), "doc-1", sentence, core, TokenRange(0, 1))
+
+    assertEquals(2, server.requests.size)
+    assertEquals(1, outcome.result.structures.size)
   }
 
   @Test

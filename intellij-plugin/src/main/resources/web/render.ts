@@ -58,6 +58,8 @@ interface SentenceRecord {
    * 全新 core 失败句从未有过核实划分，不设纠正入口。
    */
   hadCore: boolean;
+  /** 最近一次失败的错误码:INVALID_MODEL_OUTPUT 的失败行不给「纠正」入口(格式错误无从纠正)。 */
+  failureCode?: string;
 }
 
 interface TokenPayload {
@@ -392,6 +394,7 @@ export class PreviewRenderer {
     // 文案随 record 持久化（见 SentenceRecord.failureMessage 注释）：重画不传单帧
     // options，失败行在任何后续重画中都从这份状态渲染。
     entry.record.failureMessage = friendlyErrorMessage(code, message);
+    entry.record.failureCode = code;
     entry.record.analysis = null;
     entry.record.provisional = null;
     // 失败行替代详解面板(下钻失败同款路径):面板生命周期结束,焦点与返回栈一并清空,
@@ -665,7 +668,11 @@ export class PreviewRenderer {
         failure.append(this.#createRetry(owner, sentenceId));
         // F2：曾有核实划分（如详解失败 quirk）的失败行加「纠正」入口——Kotlin 侧
         // record.core 仍在，纠正以它为底稿；全新 core 失败没有可纠正的划分，不设按钮。
-        if (sentence.hadCore) failure.append(this.#createCorrectionButton(owner, sentenceId));
+        // INVALID_MODEL_OUTPUT 除外:格式错误的失败行用户没见过任何解析结果,无从
+        // 「描述需要纠正的划分」(Chrome 端 2026-11-16 同款裁决,重试是唯一合理动作)。
+        if (sentence.hadCore && sentence.failureCode !== "INVALID_MODEL_OUTPUT") {
+          failure.append(this.#createCorrectionButton(owner, sentenceId));
+        }
         container.append(failure);
         continue;
       }
