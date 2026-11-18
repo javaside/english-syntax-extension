@@ -116,6 +116,14 @@ var EnglishSyntaxPreview = (function(exports) {
 			"generation",
 			"sentenceId",
 			"message"
+		],
+		TTS_ERROR: [
+			"version",
+			"type",
+			"previewId",
+			"generation",
+			"sentenceId",
+			"message"
 		]
 	};
 	/** Kotlin → JS 方向：同款白名单 + generation 复检。 */
@@ -254,6 +262,17 @@ var EnglishSyntaxPreview = (function(exports) {
 				return {
 					version: 1,
 					type: "FEEDBACK_ERROR",
+					previewId: value.previewId,
+					generation: value.generation,
+					sentenceId: value.sentenceId,
+					message: value.message
+				};
+			case "TTS_ERROR":
+				if (!isNonEmptyString(value.sentenceId)) return null;
+				if (typeof value.message !== "string") return null;
+				return {
+					version: 1,
+					type: "TTS_ERROR",
 					previewId: value.previewId,
 					generation: value.generation,
 					sentenceId: value.sentenceId,
@@ -553,6 +572,10 @@ var EnglishSyntaxPreview = (function(exports) {
 		};
 		return indexOf(sentenceIdA) - indexOf(sentenceIdB);
 	}
+	/** 朗读按钮文本上限（与桥门 MAX_TTS_TEXT_CHARACTERS 同源）：超长的句子不挂喇叭。 */
+	const MAX_SPEAK_TEXT_CHARACTERS = 2e3;
+	/** 句头/面板条目朗读按钮的喇叭图标（Chrome 端 SPEAKER_ICON 同款形状）。 */
+	const SPEAKER_ICON = "<svg viewBox=\"0 0 16 16\" width=\"14\" height=\"14\" aria-hidden=\"true\" focusable=\"false\"><path d=\"M8.5 2.9 4.8 5.7H2.9a.9.9 0 0 0-.9.9v2.8a.9.9 0 0 0 .9.9h1.9l3.7 2.8a.55.55 0 0 0 .9-.44V3.34a.55.55 0 0 0-.9-.44z\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linejoin=\"round\"/><path d=\"M11.4 5.6a3.4 3.4 0 0 1 0 4.8\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/></svg>";
 	/**
 	* 失败行「纠正」按钮派发的 DOM 事件名（冒泡 + composed；bootstrap-entry 在 document
 	* 级接住并回调 openCorrection——CHAT_ASK_REQUEST_EVENT 同款委托先例）。点击**不发**
@@ -613,15 +636,17 @@ var EnglishSyntaxPreview = (function(exports) {
 		#currentDetailPayload = null;
 		#onDetailRequest;
 		#onFeedbackRequest;
+		#onTtsRequest;
 		/**
 		* F2 内联纠正输入行的常驻状态。行 DOM 挂在卡片（或还原后的原文块）**之后**——
 		* 不参与 #renderCard 的整卡重建（失败行自 #4 修复起从 record 持久状态渲染、重画
 		* 不丢，但输入行的草稿/焦点仍随常驻 DOM 天然保留，不依赖整卡重建）。
 		*/
 		#correction = null;
-		constructor(onDetailRequest, onFeedbackRequest = () => {}) {
+		constructor(onDetailRequest, onFeedbackRequest = () => {}, onTtsRequest) {
 			this.#onDetailRequest = onDetailRequest;
 			this.#onFeedbackRequest = onFeedbackRequest;
+			this.#onTtsRequest = onTtsRequest;
 		}
 		/**
 		* 注册（或重新注册）一个块。**重新注册必须连旧句子一起丢掉**：`#sentences` 是
@@ -909,7 +934,14 @@ var EnglishSyntaxPreview = (function(exports) {
 					container.append(failure);
 					continue;
 				}
-				if (sentence.analysis !== null && components.length > 0) section.append(this.#createChatAsk(owner, sentenceId));
+				if (sentence.analysis !== null && components.length > 0) {
+					section.append(this.#createChatAsk(owner, sentenceId));
+					const speak = this.#createSpeakButton(owner, sentenceId, () => {
+						const tokens = this.#sentences.get(sentenceId)?.record.tokens ?? [];
+						return this.#tokensText(tokens, 0, tokens.length - 1);
+					}, "朗读这句");
+					if (speak !== null) section.append(speak);
+				}
 				const coordinateClauseTotal = components.filter((component) => component.role === "COORDINATE_CLAUSE").length;
 				let coordinateClauseIndex = 0;
 				let nextToken = 0;
@@ -960,7 +992,7 @@ var EnglishSyntaxPreview = (function(exports) {
 			if (current === null) return;
 			const sentence = card.querySelector(`.english-syntax-sentence[data-sentence-id="${current.sentenceId}"]`);
 			if (sentence === null) return;
-			const panel = this.#renderDetailPanel(sentence.ownerDocument, structures, detail, detail === void 0 ? void 0 : current.sentenceId);
+			const panel = this.#renderDetailPanel(sentence.ownerDocument, structures, detail, detail === void 0 ? void 0 : current.sentenceId, current.focusStart, current.focusEnd);
 			this.#anchorDetail(sentence, panel, current.focusStart, current.focusEnd);
 		}
 		/**
@@ -1000,9 +1032,14 @@ var EnglishSyntaxPreview = (function(exports) {
 		}
 		/** 详解面板：标注行（①角色 + 英文摘录）+ 解释列表 + 语法点 + 整体说明。
 		* sentenceId 存在 = 完整渲染,标注是可下钻按钮;缺席 = 流式预览,纯 span。 */
-		#renderDetailPanel(owner, structures, detail, sentenceId) {
+		#renderDetailPanel(owner, structures, detail, sentenceId, focusStart, focusEnd) {
 			const panel = createElement(owner, "div", "english-syntax-detail");
 			if (this.#detailStack.length > 0) panel.append(this.#createDetailBack(owner));
+			if (sentenceId !== void 0 && focusStart !== void 0 && focusEnd !== void 0) {
+				const tokens = this.#sentences.get(sentenceId)?.record.tokens ?? [];
+				const focusSpeak = this.#createSpeakButton(owner, sentenceId, () => this.#tokensText(tokens, focusStart, focusEnd), "朗读所选成分");
+				if (focusSpeak !== null) panel.append(focusSpeak);
+			}
 			const annotations = createElement(owner, "div", "english-syntax-detail-annotations");
 			for (const [index, structure] of structures.entries()) {
 				const label = `${circledNumber(index + 1)} ${structure.role}`;
@@ -1024,7 +1061,14 @@ var EnglishSyntaxPreview = (function(exports) {
 				annotation.append(createElement(owner, "span", "english-syntax-annotation-role", label), createElement(owner, "span", "english-syntax-annotation-english", this.#structureText(structure)));
 				if (structure.translation !== void 0 && structure.translation.trim().length > 0) annotation.append(translationElement(owner, "english-syntax-annotation-translation", structure.translation));
 				if (annotation instanceof HTMLButtonElement) for (const child of annotation.querySelectorAll("*")) child.style.setProperty("cursor", "pointer", "important");
-				annotations.append(annotation);
+				const item = createElement(owner, "div", "english-syntax-annotation-item");
+				item.append(annotation);
+				if (sentenceId !== void 0) {
+					const english = this.#structureText(structure);
+					const entrySpeak = this.#createSpeakButton(owner, sentenceId, () => english.length > 0 && english.length <= 2e3 ? english : void 0, "朗读所选成分");
+					if (entrySpeak !== null) item.append(entrySpeak);
+				}
+				annotations.append(item);
 			}
 			panel.append(annotations);
 			for (const [index, structure] of structures.entries()) {
@@ -1191,6 +1235,62 @@ var EnglishSyntaxPreview = (function(exports) {
 				}));
 			});
 			return ask;
+		}
+		/**
+		* 朗读按钮（Chrome 端 #createSpeakButton 同款语义）：无回调/文本缺失/超 2000 字符
+		* 时不挂。点击：按下且朗读中=stop；否则复位其余按下态、置位、speak。按下态走
+		* aria-pressed,朗读中=页面存在任一按下按钮（DOM 现查,不缓存节点）。
+		*/
+		#createSpeakButton(owner, sentenceId, getText, label) {
+			if (this.#onTtsRequest === void 0) return null;
+			const text = getText();
+			if (text === void 0 || text.length > MAX_SPEAK_TEXT_CHARACTERS) return null;
+			const speak = createElement(owner, "button", "english-syntax-speak");
+			speak.type = "button";
+			speak.dataset.englishSyntaxSpeak = "";
+			speak.dataset.sentenceId = sentenceId;
+			speak.setAttribute("aria-pressed", "false");
+			speak.setAttribute("aria-label", label);
+			speak.title = label;
+			speak.innerHTML = SPEAKER_ICON;
+			speak.style.setProperty("cursor", "pointer", "important");
+			speak.addEventListener("click", () => {
+				const tts = this.#onTtsRequest;
+				if (tts === void 0) return;
+				if (speak.getAttribute("aria-pressed") === "true" && this.#isSpeaking()) {
+					this.#resetSpeakButtons();
+					tts.stop();
+					return;
+				}
+				const current = getText();
+				if (current === void 0 || current.length > MAX_SPEAK_TEXT_CHARACTERS) return;
+				this.#resetSpeakButtons();
+				speak.setAttribute("aria-pressed", "true");
+				tts.speak(sentenceId, current);
+			});
+			return speak;
+		}
+		#isSpeaking() {
+			return document.querySelector("[data-english-syntax-speak][aria-pressed=\"true\"]") !== null;
+		}
+		#resetSpeakButtons() {
+			for (const button of document.querySelectorAll("[data-english-syntax-speak][aria-pressed=\"true\"]")) button.setAttribute("aria-pressed", "false");
+		}
+		/** TTS_ERROR 回执：复位该句的按下态（generation 门已在桥侧把关）。 */
+		speakFailed(sentenceId) {
+			for (const button of document.querySelectorAll(`[data-english-syntax-speak][data-sentence-id="${sentenceId}"][aria-pressed="true"]`)) button.setAttribute("aria-pressed", "false");
+		}
+		/** 按 token 区间重建朗读文本（首 token 去前导空白、区间末尾标点省略——Chrome annotationEnglish 口径）。 */
+		#tokensText(tokens, startToken, endToken) {
+			if (startToken < 0 || endToken >= tokens.length || startToken > endToken) return void 0;
+			let english = "";
+			for (let index = startToken; index <= endToken; index += 1) {
+				const token = tokens[index];
+				if (token === void 0) return void 0;
+				if (token.punctuation && index === endToken) continue;
+				english += (index === startToken ? "" : token.leadingWhitespace) + token.text;
+			}
+			return english;
 		}
 		#originalText(sentenceId) {
 			return (this.#sentences.get(sentenceId)?.record.tokens ?? []).map(({ leadingWhitespace, text }) => leadingWhitespace + text).join("");
@@ -1764,6 +1864,25 @@ var EnglishSyntaxPreview = (function(exports) {
 					sentenceId,
 					feedback: trimmed
 				});
+			}, {
+				speak: (sentenceId, text) => {
+					postToHost({
+						version: 1,
+						type: "TTS_SPEAK",
+						previewId: state?.previewId ?? "",
+						generation: state?.generation ?? 0,
+						sentenceId,
+						text
+					});
+				},
+				stop: () => {
+					postToHost({
+						version: 1,
+						type: "TTS_STOP",
+						previewId: state?.previewId ?? "",
+						generation: state?.generation ?? 0
+					});
+				}
 			}),
 			previewId: "",
 			generation: 0,
@@ -1941,6 +2060,9 @@ var EnglishSyntaxPreview = (function(exports) {
 				return;
 			case "FEEDBACK_ERROR":
 				s.renderer.renderFeedbackError(message.sentenceId, message.message);
+				return;
+			case "TTS_ERROR":
+				s.renderer.speakFailed(message.sentenceId);
 				return;
 		}
 		s.renderer.handleHostMessage(message);

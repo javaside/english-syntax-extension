@@ -246,6 +246,28 @@ function ensureState(): RuntimeState {
         feedback: trimmed,
       });
     },
+    // 朗读回调:renderer 已按 trim/长度把关,这里照 FEEDBACK_REQUEST 模式构造
+    // TTS_SPEAK/TTS_STOP(键集与 Kotlin parseTtsSpeak/parseTtsStop 白名单逐字一致)。
+    {
+      speak: (sentenceId, text) => {
+        postToHost({
+          version: BRIDGE_VERSION,
+          type: "TTS_SPEAK",
+          previewId: state?.previewId ?? "",
+          generation: state?.generation ?? 0,
+          sentenceId,
+          text,
+        });
+      },
+      stop: () => {
+        postToHost({
+          version: BRIDGE_VERSION,
+          type: "TTS_STOP",
+          previewId: state?.previewId ?? "",
+          generation: state?.generation ?? 0,
+        });
+      },
+    },
   );
   state = { renderer, previewId: "", generation: 0, autoScan: true, visibility: null, observer: null };
   return state;
@@ -462,6 +484,10 @@ function handleHostMessage(hostJson: unknown): void {
       // （卡片不动）是 renderer 的职责，这里显式转发后 return——不落回底部对
       // renderer.handleHostMessage 的统一调用（那里虽有镜像 case，双跑会重复消费）。
       s.renderer.renderFeedbackError(message.sentenceId, message.message);
+      return;
+    case "TTS_ERROR":
+      // 朗读失败:复位该句按下态(generation 等值门已在 parseHostMessage 顶部把关)。
+      s.renderer.speakFailed(message.sentenceId);
       return;
     default:
       break;

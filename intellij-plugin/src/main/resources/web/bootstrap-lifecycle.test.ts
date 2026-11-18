@@ -968,3 +968,70 @@ describe("bootstrap-entry F2 纠正反馈接线", () => {
     expect(document.querySelectorAll(".english-syntax-component").length).toBeGreaterThan(0);
   });
 });
+
+describe("bootstrap-entry 朗读接线", () => {
+  async function renderCard(previewId: string): Promise<string> {
+    const paragraph = document.createElement("p");
+    paragraph.id = `${previewId}-p`;
+    paragraph.textContent = "The service validates every response.";
+    document.body.append(paragraph);
+    (window as unknown as Record<string, unknown>).__englishSyntaxInitialize?.(previewId, 0);
+    await flush();
+    const blocksMessage = posted.find((m) => m.type === "VISIBLE_BLOCKS");
+    const blocks = ((blocksMessage as { blocks?: Array<{ blockId: string }> })?.blocks) ?? [];
+    const blockId = blocks[0]!.blockId;
+    posted.length = 0;
+    const hostMessage = (window as unknown as Record<string, unknown>).__englishSyntaxMessage as (
+      message: Record<string, unknown>,
+    ) => void;
+    hostMessage(coreResultMessage(previewId, 0, blockId));
+    await flush();
+    return blockId;
+  }
+
+  it("句头喇叭点击 → TTS_SPEAK 六键;再点 → TTS_STOP 五键", async () => {
+    const blockId = await renderCard("pvtts");
+    const speak = document.querySelector<HTMLButtonElement>("[data-english-syntax-speak]");
+    expect(speak).not.toBeNull();
+    speak!.click();
+    await flush();
+    const speakMessage = posted.find((m) => m.type === "TTS_SPEAK");
+    expect(speakMessage).toBeDefined();
+    expect(Object.keys(speakMessage!).sort()).toEqual([
+      "generation",
+      "previewId",
+      "sentenceId",
+      "text",
+      "type",
+      "version",
+    ]);
+    posted.length = 0;
+    // 按下态点击 → TTS_STOP。
+    speak!.click();
+    await flush();
+    const stopMessage = posted.find((m) => m.type === "TTS_STOP");
+    expect(stopMessage).toBeDefined();
+    expect(Object.keys(stopMessage!).sort()).toEqual(["generation", "previewId", "type", "version"]);
+    void blockId;
+  });
+
+  it("TTS_ERROR(generation 等值) → 复位该句按下态", async () => {
+    await renderCard("pvtts2");
+    const speak = document.querySelector<HTMLButtonElement>("[data-english-syntax-speak]")!;
+    speak.click();
+    await flush();
+    expect(speak.getAttribute("aria-pressed")).toBe("true");
+    ((window as unknown as Record<string, unknown>).__englishSyntaxMessage as (
+      message: Record<string, unknown>,
+    ) => void)({
+      version: 1,
+      type: "TTS_ERROR",
+      previewId: "pvtts2",
+      generation: 0,
+      sentenceId: speak.dataset.sentenceId!,
+      message: "未安装系统语音命令",
+    });
+    await flush();
+    expect(speak.getAttribute("aria-pressed")).toBe("false");
+  });
+});
