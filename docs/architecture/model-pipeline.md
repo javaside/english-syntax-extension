@@ -303,6 +303,15 @@ raw → validateCoreBatch（解析前预丢弃纯标点成分）
 
 纯缓存模式没有 profile,也就没有可脱敏的密钥,直接返回。
 
+## 12. 云端朗读合成(语音源,双端)
+
+朗读的云端语音(OpenAI 兼容 `/v1/audio/speech`,如硅基流动)是**模型调度器之外的旁路**:合成快、无 schema、无修复轮,双端各自内联处理。默认关、失败回落本地系统语音、双双失败才报错——未配置时行为与 1.7.0 逐字节一致。
+
+- **配置独立于模型 profile**(LLM 与 TTS 常不同家):Chrome 存 `chrome.storage.local` 键 `tts-source.v1`(config-repository 的 `loadTtsSource`/`saveTtsSource`),**apiKey 只存 SW 侧,永不下发 content**——会话快照只带 `tts: { enabled }`,content 只需知道选哪个 Speaker 实现。IDEA 存 `ProfileState` 的 `tts*` 字段(非密钥)+ PasswordSafe(`TtsSourceRepository`,固定条目 `tts-source`),密钥不进明文 XML。
+- **Chrome**:content 每 documentId 一个 `CloudSpeaker` 单例(裁决:Audio 元素没有 speechSynthesis 的全局 cancel 副作用,跨块接管靠单例),`speak` 发 `TTS_SYNTHESIZE` → SW 内联 fetch(`response_format: "mp3"`,10s 超时,voice 拼模型前缀 `Model:anna`)→ `TTS_AUDIO`(base64)→ `Audio(dataUri)` 播放;**代际作废**:新 speak/stop 使在途请求作废,晚到音频丢弃。快照 `tts.enabled` 置位才装配单例,禁用 = 每块本地 speaker(现状)。显式手势会话(选中/悬停/右键)不走 START_SESSION,保持本地语音(裁决:扩协议面成本不成比例)。
+- **IntelliJ**:`CloudSpeechSpeaker`(speak 即返,后台协程合成——调用链在 JBCefJSQuery 泵上,阻塞会停摆桥消息)包装 `ProcessSpeechSpeaker` 兜底;配置懒读 + 5 秒缓存(PasswordSafe 是 suspend+IO,装配链在 EDT 摸不到),`HttpTtsFetcher`(java.net.http,`response_format: "wav"`,内存 AudioInputStream 直开 Clip)。`PreviewSession` 恒构造云端包装,未配置/禁用直走本地——设置改动最迟 5 秒后生效,装配链零改动。云端+本地双失败才异步 `TTS_ERROR`(按最近一次 `launchTts` 的 sentenceId 归句)。
+- **无缓存**:P0 重复点击现拉(裁决);无重试、无修复轮。
+
 ## IntelliJ 插件的模型链路(Kotlin 侧)
 
 与 Chrome 端同一骨架,差异点:

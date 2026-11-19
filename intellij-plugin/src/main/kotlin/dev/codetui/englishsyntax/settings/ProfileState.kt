@@ -55,5 +55,11 @@ class ProfileState : SimplePersistentStateComponent<ProfileState.Data>(Data()) {
     var activeProfileId by string()
     var cacheLimitMb by property(50)
     var streamRendering by property(true)
+
+    /** 云端朗读语音源(非密钥部分);apiKey 只进 PasswordSafe,永不进本 XML。 */
+    var ttsEnabled by property(false)
+    var ttsBaseUrl by string("https://api.siliconflow.cn/v1")
+    var ttsModel by string("FunAudioLLM/CosyVoice2-0.5B")
+    var ttsVoice by string("anna")
   }
 }

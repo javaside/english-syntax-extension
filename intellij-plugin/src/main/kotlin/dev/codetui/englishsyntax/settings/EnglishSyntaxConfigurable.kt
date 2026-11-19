@@ -13,6 +13,7 @@ import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.ui.dsl.builder.AlignX
 import com.intellij.ui.dsl.builder.bindIntText
 import com.intellij.ui.dsl.builder.bindSelected
+import com.intellij.ui.dsl.builder.bindItem
 import com.intellij.ui.dsl.builder.bindText
 import com.intellij.ui.dsl.builder.panel
 import dev.codetui.englishsyntax.AnalysisServiceService
@@ -25,6 +26,9 @@ import kotlinx.coroutines.runBlocking
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.UUID
+
+/** 硅基流动预置音色(与 Chrome options 页同表;请求时拼模型前缀,这里只存短名)。 */
+private val TTS_VOICES = listOf("anna", "alex", "benjamin", "charles", "david", "diana")
 
 class EnglishSyntaxConfigurable(
   private val repository: ProfileRepository = service(),
@@ -41,6 +45,8 @@ class EnglishSyntaxConfigurable(
     service<PreviewSessionManagerService>().manager.refreshProfile()
   },
   private val pauseControl: PauseControl = ServicePauseControl(),
+  /** 云端朗读语音源(独立于 profile);null = 用时才构造(默认构造走 service(),测试环境会 NPE)。 */
+  private val ttsRepository: TtsSourceRepository? = null,
 ) : BoundConfigurable(EnglishSyntaxBundle.message("settings.display.name")) {
 
   data class CacheSummary(val entries: Int, val estimatedBytes: Long)
@@ -195,6 +201,11 @@ class EnglishSyntaxConfigurable(
     var apiKey: String = "",
     var cacheLimitMb: Int = 50,
     var streamRendering: Boolean = true,
+    var ttsEnabled: Boolean = false,
+    var ttsBaseUrl: String = "https://api.siliconflow.cn/v1",
+    var ttsModel: String = "FunAudioLLM/CosyVoice2-0.5B",
+    var ttsVoice: String = "anna",
+    var ttsApiKey: String = "",
   )
 
   val form = Form()
@@ -207,6 +218,9 @@ class EnglishSyntaxConfigurable(
   /** 状态反馈可见组件；createPanel 时绑定。 */
   private var statusLabel: javax.swing.JLabel? = null
   private var cacheStatusLabel: javax.swing.JLabel? = null
+
+  /** 注入优先;默认实现要 service(),拖到真正读写配置时才构造。 */
+  private fun tts(): TtsSourceRepository = ttsRepository ?: TtsSourceRepository()
 
   private fun setStatus(text: String) {
     actionStatus = text
@@ -273,6 +287,26 @@ class EnglishSyntaxConfigurable(
       }
       row {
         checkBox(EnglishSyntaxBundle.message("settings.streamRendering")).bindSelected(form::streamRendering)
+      }
+    }
+    group(EnglishSyntaxBundle.message("settings.tts.group")) {
+      row {
+        checkBox(EnglishSyntaxBundle.message("settings.tts.enabled")).bindSelected(form::ttsEnabled)
+      }
+      row(EnglishSyntaxBundle.message("settings.tts.baseUrl")) {
+        textField().bindText(form::ttsBaseUrl).align(AlignX.FILL)
+      }
+      row(EnglishSyntaxBundle.message("settings.tts.apiKey")) {
+        passwordField().bindText(form::ttsApiKey).align(AlignX.FILL)
+      }
+      row(EnglishSyntaxBundle.message("settings.tts.model")) {
+        textField().bindText(form::ttsModel).align(AlignX.FILL)
+      }
+      row(EnglishSyntaxBundle.message("settings.tts.voice")) {
+        comboBox(TTS_VOICES).bindItem(
+          { form.ttsVoice },
+          { form.ttsVoice = it ?: TTS_VOICES.first() },
+        ).align(AlignX.FILL)
       }
     }
     row {
@@ -461,6 +495,14 @@ class EnglishSyntaxConfigurable(
     }
     form.cacheLimitMb = profileState.state.cacheLimitMb
     form.streamRendering = profileState.state.streamRendering
+    // 生产 service() 恒可用;runCatching 只为无平台的单测环境兜底(回落表单默认)。
+    val tts = runCatching { runBlocking { tts().load() } }.getOrNull()
+    form.ttsEnabled = tts?.enabled ?: false
+    form.ttsBaseUrl = tts?.baseUrl ?: form.ttsBaseUrl
+    form.ttsModel = tts?.model ?: form.ttsModel
+    form.ttsVoice = tts?.voice ?: form.ttsVoice
+    // IDEA 沿用 profile 的密钥回显现状(Chrome 端不回显是它自己的取舍)。
+    form.ttsApiKey = tts?.apiKey ?: ""
     baseline = form.copy()
     actionStatus = ""
   }
@@ -488,6 +530,20 @@ class EnglishSyntaxConfigurable(
       )
       profileState.state.cacheLimitMb = form.cacheLimitMb
       profileState.state.streamRendering = form.streamRendering
+      // 语音源是独立可选配置:保存失败不连坐 profile 保存,单独提示。
+      // (生产 service() 恒可用,catch 兜的也是 PasswordSafe 一类真实 IO 失败。)
+      runCatching {
+        tts().save(
+          dev.codetui.englishsyntax.tts.TtsSourceConfig(
+            enabled = form.ttsEnabled,
+            baseUrl = form.ttsBaseUrl,
+            apiKey = "",
+            model = form.ttsModel,
+            voice = form.ttsVoice,
+          ),
+          apiKey = form.ttsApiKey,
+        )
+      }.onFailure { setStatus("Speech source not saved: ${it.message}") }
       baseline = form.copy()
       // F5（apply 路径）：保存的正是当前激活 profile 时，已开会话的快照需要刷新——
       // 只改 baseUrl/model 等字段不换激活也算 profile 变更；保存非激活 profile 不触发。

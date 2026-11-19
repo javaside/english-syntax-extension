@@ -237,3 +237,9 @@ tag `v*` 触发,`permissions: contents: write`:
 - `core-prompt-parity.json` 用生产 `buildCorePrompt()` 重算;`core-evaluation-traces.json` 的每轮 messages(首轮 `buildCorePrompt`、repair 轮走生产 `AnalysisService` 重放,顺带校验 `subsetSentenceIds` 未漂移)与 `run.hashes.messages`/`run.hashes.prompt`/`report` 同步重算,provider raw、corpus 与 tokenizer 哈希不动——重算脚本留在 `.superpowers/acceptance/`(不提交)。
 - `validator-messages.json` 补 `coordinated-fragment-heads`(接受)与 `fragment-head-swallowing-conjunction`(拒绝)两例并改 `duplicate-fragment-head` 的期望文案;`core-gold-annotations.json` 新增 `fragment-coordinated-heads` 句子、改写 convention 13 的并列口径,TS 端 `core-gold-annotations.test.ts` 与 Kotlin 端 `CoreGoldAnnotationsTest` 各增一条机器断言。
 - 真机验收:`CORE_EVAL_ROOT=<worktree>/chrome-plugin node .superpowers/acceptance/run-core-gold-evaluation.mjs --corpus <单句 corpus> --mode pipeline`,对比修复前后同一句的 `final.status` 与首轮 validatorErrors。
+
+### 云端朗读的测试(2026-11-19 起)
+
+- 假 OpenAI 服务器(`fake-openai-server.ts`)带 `/v1/audio/speech` 端点:`tts-speech` 类请求记录 model/voice(已拼模型前缀)/input/鉴权头,恒回 45 帧静音 mp3——**不能只回 1 帧**,headless Chromium 会判 `duration=null` 直接 error,`onended` 不来、按钮复位断言必红。
+- Chrome E2E(`speak.spec.ts` 的 cloud tts source 组):seed `tts-source` 后点喇叭断言合成 fetch=1、音频自然播完按钮经 onended 广播复位;禁用用例断言零合成请求。`fixtures.ts` 的 `seedTtsSource` 经 SW 可信上下文写 `tts-source.v1`。
+- IDEA:`CloudSpeechSpeakerTest`(speak 即返/回落/双失败/取消/接管/5s 缓存,ClipFactory seam)、`HttpTtsFetcherTest`(本地 HTTP 服务器钉请求形态:voice 前缀、Bearer、wav、非 2xx 抛错)、`TtsSourceRepositoryTest`(持久化往返 + 密钥不进序列化状态)、`EnglishSyntaxConfigurableTtsTest`(表单回填与保存)。

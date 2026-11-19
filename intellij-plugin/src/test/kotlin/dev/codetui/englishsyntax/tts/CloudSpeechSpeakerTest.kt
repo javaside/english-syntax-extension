@@ -119,6 +119,7 @@ class CloudSpeechSpeakerTest {
       scope = scope,
     )
     subject.speak("first")
+    runBlocking { awaitUntil { fallback.spoken == listOf("first") } }
     val disabled = speaker(
       fallback = fallback,
       configProvider = { config.copy(enabled = false) },
@@ -129,6 +130,7 @@ class CloudSpeechSpeakerTest {
       scope = scope,
     )
     disabled.speak("second")
+    runBlocking { awaitUntil { fallback.spoken.size == 2 } }
 
     assertEquals(listOf("first", "second"), fallback.spoken)
     assertEquals(0, fetchCalls)

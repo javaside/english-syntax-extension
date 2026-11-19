@@ -6,6 +6,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.put
 import java.io.ByteArrayInputStream
 import javax.sound.sampled.AudioSystem
 import javax.sound.sampled.Clip
@@ -61,6 +62,37 @@ object JavaClipFactory : ClipFactory {
     }
   }
 }
+
+/**
+ * 生产 fetcher：OpenAI 兼容 `POST /v1/audio/speech`（wav）。与
+ * [dev.codetui.englishsyntax.model.OpenAiCompatibleClient] 同栈（java.net.http），
+ * 10 秒超时；voice 拼模型前缀（硅基流动约定，与 Chrome SW 侧一致）。
+ * 阻塞 IO 包在 Dispatchers.IO 里（协程取消经 runInterruptible 传导）。
+ */
+suspend fun HttpTtsFetcher(config: TtsSourceConfig, text: String): ByteArray =
+  kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+    val body = kotlinx.serialization.json.buildJsonObject {
+      put("model", config.model)
+      put("input", text)
+      put("voice", "${config.model}:${config.voice}")
+      put("response_format", "wav")
+    }.toString()
+    val request = java.net.http.HttpRequest.newBuilder()
+      .uri(java.net.URI.create("${config.baseUrl.trimEnd('/')}/audio/speech"))
+      .timeout(java.time.Duration.ofSeconds(10))
+      .header("Content-Type", "application/json")
+      .header("Authorization", "Bearer ${config.apiKey}")
+      .POST(java.net.http.HttpRequest.BodyPublishers.ofString(body))
+      .build()
+    val response = java.net.http.HttpClient.newBuilder()
+      .connectTimeout(java.time.Duration.ofSeconds(10))
+      .build()
+      .send(request, java.net.http.HttpResponse.BodyHandlers.ofByteArray())
+    if (response.statusCode() !in 200..299) {
+      throw java.io.IOException("语音源返回 HTTP ${response.statusCode()}")
+    }
+    response.body() ?: throw java.io.IOException("语音源返回空体")
+  }
 
 /**
  * 云端朗读 Speaker（spec 2026-11-18）：
