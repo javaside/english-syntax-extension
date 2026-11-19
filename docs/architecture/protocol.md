@@ -39,6 +39,8 @@
 | `DIAGNOSE_BLOCK`            | SW 自发(右键菜单)    | `selectionText?`                            | 菜单监听器经 `sendPageCommand` 下发;`route()` 里穷尽性拒绝 | ❌    | ❌       |
 | `EXPLAIN_DIAGNOSIS`         | 页面(有 tabId)       | `diagnosis`                                 | 诊断模型解释请求;回 `DIAGNOSIS_RESULT`                   | ❌    | ❌       |
 | `CHAT_ASK`                  | content              | `conversationId`、`context`、`history[]`、`question` | 追问对话一轮提问:无缓存、无修复轮,流式推 `CHAT_STREAM`,回 `CHAT_RESULT`;SW 兜底校验 question trim 后 1..2000、history ≤6 项且总字符 ≤8000,违者 `MALFORMED_MESSAGE`,无 profile 回 `CONFIG_MISSING`(无缓存兜底),鉴权暂停直接 `AUTH_FAILED` | ❌ | ❌ |
+| `TTS_SYNTHESIZE`     | content              | `text`                                      | 云端朗读合成(content 的 CloudSpeaker 发起,配置与密钥只存 SW)  | ❌    | ❌       |
+| `TTS_AUDIO`        | SW → content         | `audioBase64`、`mime`                       | 云端合成的音频(base64 mp3)                                    | ❌    | ❌       |
 | `TEST_PROFILE`              | options              | `profileId`                                 | 探测端点能力;**成功即解除鉴权暂停**                      | —     | —        |
 | `GET_CACHE_STATS`           | options              | —                                           | 缓存统计                                                 | —     | —        |
 | `CLEAR_CACHE`               | options              | —                                           | 清空三个 store                                           | —     | —        |

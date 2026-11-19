@@ -2220,7 +2220,7 @@ describe("ContentScriptRouter", () => {
     });
 
     expect(response).toMatchObject({ type: "SESSION_STATUS" });
-    expect(start).toHaveBeenCalledWith({ prefetchDetail: true });
+    expect(start).toHaveBeenCalledWith({ prefetchDetail: true, tts: false });
   });
 
   it("routes a visible-area reanalysis request to the document controller", async () => {

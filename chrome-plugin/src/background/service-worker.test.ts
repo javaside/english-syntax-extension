@@ -105,6 +105,8 @@ const profiles: ModelProfile[] = [
   },
 ];
 
+let ttsSource: { enabled: boolean; baseUrl: string; apiKey: string; model: string; voice: string } | undefined;
+
 function dependencies(
   analysisOverrides: Partial<AnalysisService> = {},
   availableProfiles: ModelProfile[] = profiles,
@@ -156,6 +158,7 @@ function dependencies(
         return Promise.resolve();
       }),
       getPrefetchDetail: vi.fn(() => Promise.resolve(prefetchDetail)),
+      loadTtsSource: vi.fn(() => Promise.resolve(ttsSource)),
       getStreamRendering: vi.fn(() => Promise.resolve(true)),
     },
     analysisService,
@@ -2172,5 +2175,45 @@ describe("SPA 导航结束会话", () => {
       7,
       expect.objectContaining({ type: "STOP_SESSION" }),
     );
+  });
+});
+
+describe("TTS_SYNTHESIZE", () => {
+  beforeEach(() => {
+    ttsSource = undefined;
+  });
+
+  it("synthesizes via the configured tts source with prefixed voice and returns TTS_AUDIO", async () => {
+    ttsSource = { enabled: true, baseUrl: "https://api.siliconflow.cn/v1", apiKey: "sk-tts", model: "FunAudioLLM/CosyVoice2-0.5B", voice: "anna" };
+    const fetchCalls: Array<{ url: string; init: RequestInit }> = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: URL | RequestInfo, init?: RequestInit) => {
+      fetchCalls.push({ url: String(url), init: init ?? {} });
+      return new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { "content-type": "audio/mpeg" } });
+    }) as typeof fetch;
+    const subject = chromeMock();
+    registerServiceWorker(dependencies(), subject.api);
+    try {
+      const response = await dispatch(subject.events.runtime.onMessage.listeners[0]!, {
+        version: 1, requestId: "tts-1", type: "TTS_SYNTHESIZE", tabId: 7, documentId: "d1", text: "The part that matters",
+      });
+      expect(fetchCalls).toHaveLength(1);
+      expect(fetchCalls[0]!.url).toBe("https://api.siliconflow.cn/v1/audio/speech");
+      const body = JSON.parse(String(fetchCalls[0]!.init.body)) as Record<string, unknown>;
+      expect(body).toMatchObject({ model: "FunAudioLLM/CosyVoice2-0.5B", voice: "FunAudioLLM/CosyVoice2-0.5B:anna", input: "The part that matters", response_format: "mp3" });
+      expect((fetchCalls[0]!.init.headers as Record<string, string>).Authorization).toBe("Bearer sk-tts");
+      expect(response).toMatchObject({ type: "TTS_AUDIO", mime: "audio/mpeg" });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("returns CONFIG_MISSING when no tts source is configured", async () => {
+    const subject = chromeMock();
+    registerServiceWorker(dependencies(), subject.api);
+    const response = await dispatch(subject.events.runtime.onMessage.listeners[0]!, {
+      version: 1, requestId: "tts-2", type: "TTS_SYNTHESIZE", tabId: 7, documentId: "d1", text: "hello",
+    });
+    expect(response).toMatchObject({ type: "ERROR", error: { code: "CONFIG_MISSING" } });
   });
 });

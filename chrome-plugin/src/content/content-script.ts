@@ -32,7 +32,7 @@ interface RoutedController {
   /** 诊断等页面侧一次性请求复用会话通道（S5）：绝不能另开 transport/端口。 */
   readonly transport: RuntimeTransport;
   diagnosisSnapshot(element: Element | null): SessionDiagnosisSnapshot;
-  start(options?: { prefetchDetail?: boolean }): Promise<void>;
+  start(options?: { prefetchDetail?: boolean; tts?: boolean }): Promise<void>;
   pause(): void;
   resume(): void;
   stop(): void;
@@ -202,6 +202,8 @@ export function isRuntimeResponse(value: unknown, requestId: string): value is R
   switch (value.type) {
     case "ACK":
       return typeof value.acknowledgedType === "string";
+    case "TTS_AUDIO":
+      return typeof value.audioBase64 === "string" && typeof value.mime === "string";
     case "SESSION_STATUS":
       return isSessionStatus(value.status);
     case "CORE_RESULT":
@@ -473,7 +475,8 @@ export class ContentScriptRouter {
       request.type === "ANALYZE_DETAIL" ||
       request.type === "REANALYZE_WITH_FEEDBACK" ||
       request.type === "EXPLAIN_DIAGNOSIS" ||
-      request.type === "CHAT_ASK"
+      request.type === "CHAT_ASK" ||
+      request.type === "TTS_SYNTHESIZE"
     ) {
       return invalidMessage(request.requestId);
     }
@@ -483,7 +486,7 @@ export class ContentScriptRouter {
       const controller = this.controller(request.tabId, request.documentId);
       switch (request.type) {
         case "START_SESSION":
-          await controller.start({ prefetchDetail: request.prefetchDetail === true });
+          await controller.start({ prefetchDetail: request.prefetchDetail === true, tts: request.tts === true });
           return statusResponse(request.requestId, controller.status);
         case "PAUSE_SESSION":
           controller.pause();

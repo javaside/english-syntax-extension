@@ -108,8 +108,41 @@ function validateProfile(profile: ModelProfile): ModelProfile {
   return structuredClone({ ...profile, baseUrl: normalizeBaseUrl(profile.baseUrl) });
 }
 
+const TTS_SOURCE_KEY = "tts-source.v1";
+
+/** 云端朗读语音源(独立于模型 profile——LLM 与 TTS 常不同家)。 */
+export interface TtsSourceConfig {
+  enabled: boolean;
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  voice: string;
+}
+
 export class ConfigRepository {
   constructor(private readonly storage: StorageArea = chrome.storage.local) {}
+
+
+  async loadTtsSource(): Promise<TtsSourceConfig | undefined> {
+    const stored = (await this.storage.get(TTS_SOURCE_KEY))[TTS_SOURCE_KEY];
+    const record = stored as Record<string, unknown> | undefined | null;
+    if (
+      record === null ||
+      record === undefined ||
+      typeof record.enabled !== "boolean" ||
+      typeof record.baseUrl !== "string" ||
+      typeof record.apiKey !== "string" ||
+      typeof record.model !== "string" ||
+      typeof record.voice !== "string"
+    ) {
+      return undefined;
+    }
+    return record as unknown as TtsSourceConfig;
+  }
+
+  async saveTtsSource(config: TtsSourceConfig): Promise<void> {
+    await this.storage.set({ [TTS_SOURCE_KEY]: config });
+  }
 
   async saveProfile(profile: ModelProfile): Promise<void> {
     const validated = validateProfile(profile);

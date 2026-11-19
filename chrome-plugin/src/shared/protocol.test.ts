@@ -543,3 +543,14 @@ describe("chat 追问消息守卫", () => {
     expect(isRequestMessage({ ...chatAsk, extra: true })).toBe(false);
   });
 });
+
+// ---- TTS_SYNTHESIZE / TTS_AUDIO(云端朗读,spec 2026-11-18) ----
+
+describe("TTS 消息协议", () => {
+  it("accepts TTS_SYNTHESIZE with text within caps and rejects blank/oversized/extra keys", () => {
+    expect(isRequestMessage({ version: 1, requestId: "r1", type: "TTS_SYNTHESIZE", tabId: 1, documentId: "d1", text: "  hello  " })).toBe(true);
+    expect(isRequestMessage({ version: 1, requestId: "r1", type: "TTS_SYNTHESIZE", tabId: 1, documentId: "d1", text: "" })).toBe(false);
+    expect(isRequestMessage({ version: 1, requestId: "r1", type: "TTS_SYNTHESIZE", tabId: 1, documentId: "d1", text: "x".repeat(2001) })).toBe(false);
+    expect(isRequestMessage({ version: 1, requestId: "r1", type: "TTS_SYNTHESIZE", tabId: 1, documentId: "d1", text: "ok", extra: 1 })).toBe(false);
+  });
+});

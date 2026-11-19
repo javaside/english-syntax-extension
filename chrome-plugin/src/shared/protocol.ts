@@ -33,7 +33,8 @@ export interface SentenceInput {
 }
 
 export type RequestMessage =
-  | (PageRequestBase & { type: "START_SESSION"; prefetchDetail?: true })
+  | (PageRequestBase & { type: "START_SESSION"; prefetchDetail?: true; tts?: true })
+  | (PageRequestBase & { type: "TTS_SYNTHESIZE"; text: string })
   | (PageRequestBase & { type: "PAUSE_SESSION" })
   | (PageRequestBase & { type: "STOP_SESSION" })
   | (PageRequestBase & { type: "GET_SESSION_STATUS" })
@@ -313,6 +314,7 @@ export function isChatStreamPush(value: unknown): value is ChatStreamPush {
 
 export type ResponseMessage =
   | (MessageBase & { type: "ACK"; acknowledgedType: RequestMessage["type"] })
+  | (MessageBase & { type: "TTS_AUDIO"; audioBase64: string; mime: string })
   | (MessageBase & { type: "SESSION_STATUS"; status: SessionStatus })
   // error：批级失败（如鉴权失败）时仍携带已取得的缓存命中；未命中句由 content 按该错误标失败。
   // failures：逐句失败原因，未携带时 content 沿用通用兜底文案。
@@ -509,9 +511,18 @@ export function isRequestMessage(value: unknown): value is RequestMessage {
       return hasOnlyKeys(value, pageOnlyKeys) && hasPageContext(value);
     case "START_SESSION":
       return (
-        hasOnlyKeys(value, [...pageOnlyKeys, "prefetchDetail"]) &&
+        hasOnlyKeys(value, [...pageOnlyKeys, "prefetchDetail", "tts"]) &&
         hasPageContext(value) &&
-        (value.prefetchDetail === undefined || value.prefetchDetail === true)
+        (value.prefetchDetail === undefined || value.prefetchDetail === true) &&
+        (value.tts === undefined || value.tts === true)
+      );
+    case "TTS_SYNTHESIZE":
+      return (
+        hasOnlyKeys(value, [...pageOnlyKeys, "text"]) &&
+        hasPageContext(value) &&
+        typeof value.text === "string" &&
+        value.text.trim().length > 0 &&
+        value.text.trim().length <= 2000
       );
     case "PREFETCH_SENTENCE_DETAILS":
       return (

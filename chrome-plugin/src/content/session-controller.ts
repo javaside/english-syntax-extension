@@ -382,7 +382,7 @@ export class SessionController {
     };
   }
 
-  async start(options?: { prefetchDetail?: boolean; scan?: boolean }): Promise<void> {
+  async start(options?: { prefetchDetail?: boolean; tts?: boolean; scan?: boolean }): Promise<void> {
     const wantScan = options?.scan !== false;
     if (this.state === "running") {
       // 轻量会话（快捷键冷启动）后用户点图标：补建预载器并补做全页扫描，升级为完整会话。

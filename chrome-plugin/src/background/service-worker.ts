@@ -49,6 +49,7 @@ interface ConfigPort {
   setActiveProfile(profileId: string): Promise<void>;
   getPrefetchDetail(): Promise<boolean>;
   getStreamRendering(): Promise<boolean>;
+  loadTtsSource(): Promise<import("./config-repository").TtsSourceConfig | undefined>;
 }
 
 interface SchedulerPort {
@@ -118,6 +119,54 @@ const ERROR_MESSAGES: Record<ExtensionErrorCode, string> = {
   REQUEST_CANCELLED: "请求已取消",
   NO_CACHE: "该成分暂无缓存详解，配置模型后可获取",
 };
+
+/** OpenAI 兼容 /v1/audio/speech 合成(mp3);10s 超时,失败映射既有错误码。 */
+async function synthesizeSpeech(
+  source: { baseUrl: string; apiKey: string; model: string; voice: string },
+  text: string,
+): Promise<{ audioBase64: string; mime: string }> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10_000);
+  try {
+    const response = await fetch(`${source.baseUrl.replace(/\/$/u, "")}/audio/speech`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${source.apiKey}` },
+      body: JSON.stringify({
+        model: source.model,
+        input: text,
+        voice: `${source.model}:${source.voice}`,
+        response_format: "mp3",
+      }),
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      const detail = (await response.text()).slice(0, 200);
+      if (response.status === 401 || response.status === 403) {
+        throw new ModelRequestError("AUTH_FAILED", detail, false, { status: response.status });
+      }
+      throw new ModelRequestError("NETWORK_ERROR", `语音源返回 HTTP ${response.status}`, true, {
+        status: response.status,
+      });
+    }
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    let binary = "";
+    for (const byte of bytes) binary += String.fromCharCode(byte);
+    return { audioBase64: btoa(binary), mime: response.headers.get("content-type") ?? "audio/mpeg" };
+  } catch (error) {
+    if (error instanceof ModelRequestError) throw error;
+    if (controller.signal.aborted) {
+      throw new ModelRequestError("REQUEST_TIMEOUT", "语音合成超时", true);
+    }
+    throw new ModelRequestError("NETWORK_ERROR", "语音合成请求失败", true);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function asModelRequestErrorOrNetwork(error: unknown): ModelRequestError {
+  if (error instanceof ModelRequestError) return error;
+  return new ModelRequestError("NETWORK_ERROR", "语音合成失败", true);
+}
 
 function errorResponse(
   requestId: string,
@@ -398,7 +447,7 @@ export function registerServiceWorker(
     tabId: number,
     documentId: string,
     body:
-      | { type: "START_SESSION"; prefetchDetail?: true }
+      | { type: "START_SESSION"; prefetchDetail?: true; tts?: true }
       | { type: "PARSE_SELECTION"; selectionText: string }
       | { type: "PARSE_CONTEXT_BLOCK" }
       | { type: "PARSE_HOVERED_BLOCK" }
@@ -660,6 +709,30 @@ export function registerServiceWorker(
             return errorResponse(request.requestId, code);
           }
         }
+        case "TTS_SYNTHESIZE": {
+          // 云端朗读合成:content 的 CloudSpeaker 发起,配置与密钥只存在 SW 侧。
+          const ttsSource = await dependencies.configRepository.loadTtsSource();
+          if (ttsSource === undefined || !ttsSource.enabled) {
+            return errorResponse(request.requestId, "CONFIG_MISSING");
+          }
+          try {
+            const audio = await synthesizeSpeech(ttsSource, request.text);
+            return {
+              version: MESSAGE_VERSION,
+              requestId: request.requestId,
+              type: "TTS_AUDIO",
+              audioBase64: audio.audioBase64,
+              mime: audio.mime,
+            };
+          } catch (error) {
+            const failure = asModelRequestErrorOrNetwork(error);
+            return errorResponse(
+              request.requestId,
+              failure.code,
+              failure.details,
+            );
+          }
+        }
         case "CHAT_ASK": {
           // 协议守卫已拦掉形状不对的入站(role 枚举/content 非空/上下文形状都在
           // isRequestMessage 的 CHAT_ASK case 里),这里兜底判它刻意不查的数量上限。
@@ -829,9 +902,12 @@ export function registerServiceWorker(
           const status = emptyStatus("running", profile?.id);
           activeTabs.set(request.tabId, { documentId, status });
           persistActiveTabs();
+          const ttsEnabled =
+            (await dependencies.configRepository.loadTtsSource())?.enabled === true;
           await sendPageCommand(request.tabId, documentId, {
             type: "START_SESSION",
             ...(prefetchDetail ? { prefetchDetail: true } : {}),
+            ...(ttsEnabled ? { tts: true } : {}),
           });
           return {
             version: MESSAGE_VERSION,
