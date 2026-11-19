@@ -254,8 +254,11 @@ export interface CloudSpeakerHandle extends Speaker {
 export type CloudSynthesisResult = { audioBase64: string; mime: string } | { error: string };
 
 export interface CloudSpeakerOptions {
-  /** 云端失败时的本地兜底(常驻一个;缺省时失败即静默复位)。 */
-  localFallback?: Speaker;
+  /**
+   * 云端失败时的本地兜底构造器。onEnd 由 CloudSpeaker 接线:回落自然结束 =
+   * 朗读结束,广播复位各块按钮——没有这根线,本地音播完按钮永远卡在按下态。
+   */
+  createLocalFallback?: (hooks: SpeakerHooks) => Speaker | null;
   /** 回落发生时通知一次(UI 提示用)。 */
   onFallbackNotice?: (reason: string) => void;
   /** 测试注入 Audio 构造。 */
@@ -266,20 +269,35 @@ export interface CloudSpeakerOptions {
  * 云端朗读 Speaker(每 documentId 单例,spec 2026-11-18 裁决):speak 发合成请求,
  * 回来后 Audio 播放,onended/onerror 复位按下态。**代际作废**:新 speak/stop 使
  * 在途请求作废——晚到的音频直接丢弃,绝不叠声、绝不误复位新朗读。失败回落
- * localFallback(本地永远有声)。
+ * localFallback(本地永远有声);回落在播时 isSpeaking 为真,stop/接管都会先停
+ * 掉它——停止语义与纯本地 Speaker 完全一致。
  */
 export function createCloudSpeaker(
   synthesize: (text: string) => Promise<CloudSynthesisResult>,
   options: CloudSpeakerOptions = {},
 ): Speaker {
   const createAudio = options.createAudio ?? (() => new Audio());
-  const localFallback = options.localFallback;
   let generation = 0;
   let audio: HTMLAudioElement | null = null;
+  let fallbackActive = false;
   // 单例被多个块共享:每个块的 hooks 注册进集合,结束事件广播(复位幂等,DOM 现查)。
   const hooksSet = new Set<SpeakerHooks>();
   const settle = (): void => {
     for (const hooks of hooksSet) hooks.onEnd?.();
+  };
+  const localFallback =
+    options.createLocalFallback?.({
+      onEnd: () => {
+        // 守卫:被 stop()/新 speak() 主动停掉的回落不再广播(那两处自己收口),
+        // 只有「回落自然播完」才复位。
+        if (!fallbackActive) return;
+        fallbackActive = false;
+        settle();
+      },
+    }) ?? undefined;
+  const takeOverFallback = (): void => {
+    fallbackActive = false;
+    localFallback?.stop();
   };
   const speaker: Speaker = {
     speak(text: string): void {
@@ -287,14 +305,17 @@ export function createCloudSpeaker(
       const mine = generation;
       audio?.pause();
       audio = null;
+      takeOverFallback();
       void synthesize(text).then((result) => {
         if (mine !== generation) return; // 晚到作废
         if ("error" in result) {
           options.onFallbackNotice?.(result.error);
           if (localFallback !== undefined) {
+            fallbackActive = true;
             localFallback.speak(text);
             return;
           }
+          settle(); // 无本地兜底:失败也复位,别让按钮卡在按下态
           return;
         }
         const element = createAudio();
@@ -307,6 +328,7 @@ export function createCloudSpeaker(
           if (mine !== generation) return;
           options.onFallbackNotice?.("audio-decode");
           if (localFallback !== undefined) {
+            fallbackActive = true;
             localFallback.speak(text);
             return;
           }
@@ -320,10 +342,11 @@ export function createCloudSpeaker(
       generation += 1;
       audio?.pause();
       audio = null;
+      takeOverFallback();
       settle();
     },
     isSpeaking(): boolean {
-      return audio !== null;
+      return audio !== null || fallbackActive;
     },
   };
   (speaker as CloudSpeakerHandle).registerHooks = (hooks: SpeakerHooks): void => {

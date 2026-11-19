@@ -6,6 +6,7 @@ import {
   createSpeaker,
   pickEnglishVoice,
   type Speaker,
+  type SpeakerHooks,
   type SpeechSynthesisLike,
   type SpeechSynthesisUtteranceLike,
   type SpeechSynthesisVoiceLike,
@@ -298,13 +299,103 @@ describe("createCloudSpeaker", () => {
       async () => ({ error: "NETWORK_ERROR" as const }),
       {
         createAudio: () => new FakeAudio() as unknown as HTMLAudioElement,
-        localFallback: local,
+        createLocalFallback: () => local,
         onFallbackNotice: (reason) => notices.push(reason),
       },
     );
     speaker.speak("hello");
     await vi.waitFor(() => expect(local.spoken).toEqual(["hello"]));
     expect(notices).toHaveLength(1);
+  });
+
+  it("回落期间 isSpeaking 为真;本地音播完经 hooks 广播复位", async () => {
+    let fallbackHooks: SpeakerHooks | undefined;
+    const ends: number[] = [];
+    const speaker = createCloudSpeaker(
+      async () => ({ error: "AUTH_FAILED" as const }),
+      {
+        createAudio: () => new FakeAudio() as unknown as HTMLAudioElement,
+        createLocalFallback: (hooks) => {
+          fallbackHooks = hooks;
+          return new FakeSpeaker();
+        },
+      },
+    );
+    const handle = speaker as ReturnType<typeof createCloudSpeaker>;
+    handle.registerHooks({ onEnd: () => ends.push(1) });
+
+    speaker.speak("hello");
+    await vi.waitFor(() => expect(speaker.isSpeaking()).toBe(true));
+    expect(ends).toHaveLength(0);
+
+    fallbackHooks!.onEnd?.();
+    expect(ends).toHaveLength(1);
+    expect(speaker.isSpeaking()).toBe(false);
+  });
+
+  it("stop() 同步停掉回落中的本地语音并复位按下态", async () => {
+    const local = new FakeSpeaker();
+    const ends: number[] = [];
+    const speaker = createCloudSpeaker(
+      async () => ({ error: "NETWORK_ERROR" as const }),
+      {
+        createAudio: () => new FakeAudio() as unknown as HTMLAudioElement,
+        createLocalFallback: () => local,
+      },
+    );
+    (speaker as ReturnType<typeof createCloudSpeaker>).registerHooks({
+      onEnd: () => ends.push(1),
+    });
+
+    speaker.speak("hello");
+    await vi.waitFor(() => expect(local.spoken).toEqual(["hello"]));
+    expect(local.speaking).toBe(true);
+    speaker.stop();
+
+    expect(local.speaking).toBe(false);
+    expect(ends).toHaveLength(1);
+    expect(speaker.isSpeaking()).toBe(false);
+  });
+
+  it("新的 speak 接管回落中的本地语音(先停再发云端请求)", async () => {
+    const local = new FakeSpeaker();
+    let calls = 0;
+    const speaker = createCloudSpeaker(
+      async () => {
+        calls += 1;
+        return calls === 1
+          ? ({ error: "NETWORK_ERROR" } as const)
+          : { audioBase64: "c2Vjb25k", mime: "audio/mpeg" };
+      },
+      {
+        createAudio: () => new FakeAudio() as unknown as HTMLAudioElement,
+        createLocalFallback: () => local,
+      },
+    );
+
+    speaker.speak("first");
+    await vi.waitFor(() => expect(local.spoken).toEqual(["first"]));
+    speaker.speak("second");
+    await vi.waitFor(() => expect(FakeAudio.instances).toHaveLength(1));
+
+    // 第一次回落音已被新 speak 接管停掉;云端音频接管播放。
+    expect(local.speaking).toBe(false);
+    expect(FakeAudio.instances[0]!.src).toContain("c2Vjb25k");
+  });
+
+  it("无本地兜底时云端失败直接复位,按钮不卡按下态", async () => {
+    const ends: number[] = [];
+    const speaker = createCloudSpeaker(
+      async () => ({ error: "NETWORK_ERROR" as const }),
+      { createAudio: () => new FakeAudio() as unknown as HTMLAudioElement },
+    );
+    (speaker as ReturnType<typeof createCloudSpeaker>).registerHooks({
+      onEnd: () => ends.push(1),
+    });
+
+    speaker.speak("hello");
+    await vi.waitFor(() => expect(ends).toHaveLength(1));
+    expect(speaker.isSpeaking()).toBe(false);
   });
 
   it("stop() invalidates the in-flight request", async () => {

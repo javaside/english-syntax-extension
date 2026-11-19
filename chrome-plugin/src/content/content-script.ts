@@ -221,9 +221,10 @@ function cloudSpeakerFor(
       }
       return { error: response?.error?.code ?? "NETWORK_ERROR" };
     };
-    const localFallback = createSpeaker(defaultSynthesis()) ?? undefined;
     cloudSpeakerSingleton = createCloudSpeaker(synth, {
-      localFallback,
+      // 本地兜底:onEnd 由 CloudSpeaker 接线——回落播完广播复位各块按钮,
+      // stop/接管也会先停掉它(与纯本地 Speaker 的停止语义一致)。
+      createLocalFallback: (hooks) => createSpeaker(defaultSynthesis(), hooks),
       onFallbackNotice: (reason) => {
         // 云端失败已回落本地出声;提示走 console(P0 不加 UI 面,pill 提示留增强)。
         console.info(`[句法学习] 云端语音源不可用(${reason}),已回落本地语音`);
