@@ -105,7 +105,8 @@ const profiles: ModelProfile[] = [
   },
 ];
 
-let ttsSource: { enabled: boolean; baseUrl: string; apiKey: string; model: string; voice: string } | undefined;
+let ttsSource:
+  { enabled: boolean; baseUrl: string; apiKey: string; model: string; voice: string } | undefined;
 
 function dependencies(
   analysisOverrides: Partial<AnalysisService> = {},
@@ -2184,24 +2185,48 @@ describe("TTS_SYNTHESIZE", () => {
   });
 
   it("synthesizes via the configured tts source with prefixed voice and returns TTS_AUDIO", async () => {
-    ttsSource = { enabled: true, baseUrl: "https://api.siliconflow.cn/v1", apiKey: "sk-tts", model: "FunAudioLLM/CosyVoice2-0.5B", voice: "anna" };
+    ttsSource = {
+      enabled: true,
+      baseUrl: "https://api.siliconflow.cn/v1",
+      apiKey: "sk-tts",
+      model: "FunAudioLLM/CosyVoice2-0.5B",
+      voice: "anna",
+    };
     const fetchCalls: Array<{ url: string; init: RequestInit }> = [];
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async (url: URL | RequestInfo, init?: RequestInit) => {
-      fetchCalls.push({ url: String(url), init: init ?? {} });
-      return new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { "content-type": "audio/mpeg" } });
-    }) as typeof fetch;
+    globalThis.fetch = (url: URL | RequestInfo, init?: RequestInit) => {
+      const urlString = typeof url === "string" ? url : url instanceof URL ? url.href : url.url;
+      fetchCalls.push({ url: urlString, init: init ?? {} });
+      return Promise.resolve(
+        new Response(new Uint8Array([1, 2, 3]), {
+          status: 200,
+          headers: { "content-type": "audio/mpeg" },
+        }),
+      );
+    };
     const subject = chromeMock();
     registerServiceWorker(dependencies(), subject.api);
     try {
       const response = await dispatch(subject.events.runtime.onMessage.listeners[0]!, {
-        version: 1, requestId: "tts-1", type: "TTS_SYNTHESIZE", tabId: 7, documentId: "d1", text: "The part that matters",
+        version: 1,
+        requestId: "tts-1",
+        type: "TTS_SYNTHESIZE",
+        tabId: 7,
+        documentId: "d1",
+        text: "The part that matters",
       });
       expect(fetchCalls).toHaveLength(1);
       expect(fetchCalls[0]!.url).toBe("https://api.siliconflow.cn/v1/audio/speech");
-      const body = JSON.parse(String(fetchCalls[0]!.init.body)) as Record<string, unknown>;
-      expect(body).toMatchObject({ model: "FunAudioLLM/CosyVoice2-0.5B", voice: "FunAudioLLM/CosyVoice2-0.5B:anna", input: "The part that matters", response_format: "mp3" });
-      expect((fetchCalls[0]!.init.headers as Record<string, string>).Authorization).toBe("Bearer sk-tts");
+      const body = JSON.parse(fetchCalls[0]!.init.body as string) as Record<string, unknown>;
+      expect(body).toMatchObject({
+        model: "FunAudioLLM/CosyVoice2-0.5B",
+        voice: "FunAudioLLM/CosyVoice2-0.5B:anna",
+        input: "The part that matters",
+        response_format: "mp3",
+      });
+      expect((fetchCalls[0]!.init.headers as Record<string, string>).Authorization).toBe(
+        "Bearer sk-tts",
+      );
       expect(response).toMatchObject({ type: "TTS_AUDIO", mime: "audio/mpeg" });
     } finally {
       globalThis.fetch = originalFetch;
@@ -2212,7 +2237,12 @@ describe("TTS_SYNTHESIZE", () => {
     const subject = chromeMock();
     registerServiceWorker(dependencies(), subject.api);
     const response = await dispatch(subject.events.runtime.onMessage.listeners[0]!, {
-      version: 1, requestId: "tts-2", type: "TTS_SYNTHESIZE", tabId: 7, documentId: "d1", text: "hello",
+      version: 1,
+      requestId: "tts-2",
+      type: "TTS_SYNTHESIZE",
+      tabId: 7,
+      documentId: "d1",
+      text: "hello",
     });
     expect(response).toMatchObject({ type: "ERROR", error: { code: "CONFIG_MISSING" } });
   });

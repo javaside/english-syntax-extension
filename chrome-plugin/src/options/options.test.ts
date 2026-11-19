@@ -48,6 +48,8 @@ function dependencies(overrides: Partial<OptionsDependencies> = {}): OptionsDepe
     getStreamRendering: vi.fn(() => Promise.resolve(true)),
     setStreamRendering: vi.fn(() => Promise.resolve()),
     setPrefetchDetail: vi.fn(() => Promise.resolve()),
+    getTtsSource: vi.fn(() => Promise.resolve(undefined)),
+    saveTtsSource: vi.fn(() => Promise.resolve()),
     ...overrides,
   };
 }
@@ -618,6 +620,117 @@ describe("detail prefetch toggle", () => {
     toggle.dispatchEvent(new Event("change"));
 
     expect(setStreamRendering).toHaveBeenCalledWith(true);
+  });
+});
+
+describe("朗读语音源设置", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const storedTtsSource = {
+    enabled: true,
+    baseUrl: "https://api.siliconflow.cn/v1",
+    apiKey: "sk-tts-secret",
+    model: "FunAudioLLM/CosyVoice2-0.5B",
+    voice: "benjamin",
+  };
+
+  it("renders preset voices and the stored config, masking the saved key", async () => {
+    await createOptionsPage(
+      root(),
+      dependencies({
+        getTtsSource: vi.fn(() => Promise.resolve({ ...storedTtsSource })),
+      }),
+    );
+
+    const toggle = document.querySelector<HTMLInputElement>("[data-tts-enabled]")!;
+    expect(toggle.type).toBe("checkbox");
+    expect(toggle.checked).toBe(true);
+    expect(inputByLabel("语音服务地址").value).toBe("https://api.siliconflow.cn/v1");
+    // 已保存的密钥不回显:字段为空,占位符说明留空沿用。
+    expect(inputByLabel("语音密钥").value).toBe("");
+    expect(inputByLabel("语音密钥").placeholder).toContain("留空");
+    expect(inputByLabel("语音模型").value).toBe("FunAudioLLM/CosyVoice2-0.5B");
+
+    const voice = document.querySelector<HTMLSelectElement>("[data-tts-voice]")!;
+    expect([...voice.options].map((option) => option.value)).toEqual([
+      "anna",
+      "alex",
+      "benjamin",
+      "charles",
+      "david",
+      "diana",
+    ]);
+    expect(voice.value).toBe("benjamin");
+    expect(document.body.textContent).not.toContain("sk-tts-secret");
+  });
+
+  it("prefills the SiliconFlow defaults when no source is stored", async () => {
+    await createOptionsPage(root(), dependencies());
+
+    expect(inputByLabel("语音服务地址").value).toBe("https://api.siliconflow.cn/v1");
+    expect(inputByLabel("语音模型").value).toBe("FunAudioLLM/CosyVoice2-0.5B");
+    expect(inputByLabel("语音密钥").placeholder).toContain("必填");
+    expect(document.querySelector<HTMLInputElement>("[data-tts-enabled]")!.checked).toBe(false);
+    expect(document.querySelector<HTMLSelectElement>("[data-tts-voice]")!.value).toBe("anna");
+  });
+
+  it("saves an enabled source after requesting its origin permission, keeping the stored key", async () => {
+    const subject = dependencies({
+      getTtsSource: vi.fn(() => Promise.resolve({ ...storedTtsSource })),
+    });
+    await createOptionsPage(root(), subject);
+
+    const toggle = document.querySelector<HTMLInputElement>("[data-tts-enabled]")!;
+    toggle.checked = true;
+    // 尾斜杠与多余空白:保存前归一化,权限申请只覆盖规范化 origin。
+    inputByLabel("语音服务地址").value = " https://api.siliconflow.cn/v1/ ";
+    document.querySelector<HTMLButtonElement>("[data-action='save-tts']")!.click();
+
+    await vi.waitFor(() => expect(subject.saveTtsSource).toHaveBeenCalledOnce());
+    expect(subject.requestPermission).toHaveBeenCalledTimes(1);
+    expect(subject.requestPermission).toHaveBeenCalledWith("https://api.siliconflow.cn/*");
+    expect(subject.saveTtsSource).toHaveBeenCalledWith({
+      enabled: true,
+      baseUrl: "https://api.siliconflow.cn/v1",
+      apiKey: "sk-tts-secret",
+      model: "FunAudioLLM/CosyVoice2-0.5B",
+      voice: "benjamin",
+    });
+    expect(document.querySelector<HTMLElement>("[data-tts-result]")?.textContent ?? "").toContain(
+      "语音源配置已保存",
+    );
+    expect(document.body.textContent).not.toContain("sk-tts-secret");
+  });
+
+  it("saves a disabled source without requesting any host permission", async () => {
+    const subject = dependencies();
+    await createOptionsPage(root(), subject);
+
+    document.querySelector<HTMLButtonElement>("[data-action='save-tts']")!.click();
+
+    await vi.waitFor(() => expect(subject.saveTtsSource).toHaveBeenCalledOnce());
+    expect(subject.requestPermission).not.toHaveBeenCalled();
+    expect(subject.saveTtsSource).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }));
+  });
+
+  it("blocks saving an enabled source when the origin permission is denied", async () => {
+    const subject = dependencies({
+      requestPermission: vi.fn(() => Promise.resolve(false)),
+    });
+    await createOptionsPage(root(), subject);
+
+    const toggle = document.querySelector<HTMLInputElement>("[data-tts-enabled]")!;
+    toggle.checked = true;
+    document.querySelector<HTMLButtonElement>("[data-action='save-tts']")!.click();
+
+    await vi.waitFor(() =>
+      expect(document.querySelector("[data-tts-result]")?.textContent).toContain(
+        "未获得语音源地址访问权限",
+      ),
+    );
+    expect(subject.saveTtsSource).not.toHaveBeenCalled();
   });
 });
 

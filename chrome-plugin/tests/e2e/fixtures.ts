@@ -82,6 +82,15 @@ export interface ModelProfileSeed {
   disableReasoning?: true;
 }
 
+/** 云端朗读语音源(config-repository 的 tts-source.v1 键形状)。 */
+export interface TtsSourceSeed {
+  enabled: boolean;
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  voice: string;
+}
+
 export interface ExtensionHarness {
   context: BrowserContext;
   serviceWorker: Worker;
@@ -92,6 +101,8 @@ export interface ExtensionHarness {
   popupUrl: string;
   /** Persist model profiles and select an active one via the trusted extension context. */
   seedProfiles(profiles: ModelProfileSeed[], activeProfileId: string): Promise<void>;
+  /** Persist the cloud TTS source so START_SESSION snapshots carry its enabled flag. */
+  seedTtsSource(seed: TtsSourceSeed): Promise<void>;
   /** Return the numeric tab id for an already-open page URL. */
   tabIdFor(url: string): Promise<number>;
   /** Dispatch a trusted-UI request into the service worker as if sent by the popup. */
@@ -167,6 +178,11 @@ export const test = base.extend<{ harness: ExtensionHarness }, WorkerScope>({
           },
           { profiles, activeProfileId },
         );
+      },
+      async seedTtsSource(seed) {
+        await serviceWorker.evaluate(async (source: TtsSourceSeed) => {
+          await chrome.storage.local.set({ "tts-source.v1": source });
+        }, seed);
       },
       async tabIdFor(url) {
         return serviceWorker.evaluate(async (target: string) => {

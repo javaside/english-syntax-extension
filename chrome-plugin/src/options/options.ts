@@ -2,6 +2,7 @@ import {
   ConfigRepository,
   type ModelProfile,
   type PublicModelProfile,
+  type TtsSourceConfig,
 } from "../background/config-repository";
 import { hostPermissionPattern, normalizeBaseUrl } from "../background/base-url";
 import { AnalysisCache } from "../background/analysis-cache";
@@ -17,6 +18,10 @@ import type { CacheStats, ResponseMessage } from "../shared/protocol";
 import { MESSAGE_VERSION } from "../shared/versions";
 
 const CACHE_LIMITS = [10, 50, 100, 200] as const;
+/** 硅基流动预置音色(spec 2026-11-18:请求时拼模型前缀,这里只存短名)。 */
+const TTS_VOICES = ["anna", "alex", "benjamin", "charles", "david", "diana"] as const;
+const TTS_DEFAULT_BASE_URL = "https://api.siliconflow.cn/v1";
+const TTS_DEFAULT_MODEL = "FunAudioLLM/CosyVoice2-0.5B";
 const FORBIDDEN_HEADERS = new Set([
   "authorization",
   "host",
@@ -54,6 +59,8 @@ export interface OptionsDependencies {
   setPrefetchDetail: (enabled: boolean) => Promise<void>;
   getStreamRendering: () => Promise<boolean>;
   setStreamRendering: (enabled: boolean) => Promise<void>;
+  getTtsSource: () => Promise<TtsSourceConfig | undefined>;
+  saveTtsSource: (config: TtsSourceConfig) => Promise<void>;
 }
 
 function element<K extends keyof HTMLElementTagNameMap>(
@@ -67,7 +74,7 @@ function element<K extends keyof HTMLElementTagNameMap>(
   return node;
 }
 
-function field(labelText: string, input: HTMLInputElement): HTMLDivElement {
+function field(labelText: string, input: HTMLElement): HTMLDivElement {
   const wrapper = element("div", "options-page__field");
   const label = element("label", "options-page__label", labelText);
   label.htmlFor = input.id;
@@ -223,6 +230,57 @@ export async function createOptionsPage(
   );
   profileSection.append(profileHeading, savedLabel, savedSelect, form);
 
+  // 「朗读语音源」节:云端神经 TTS(OpenAI 兼容 /v1/audio/speech),默认关。
+  const ttsSection = element("section", "options-page__panel");
+  ttsSection.setAttribute("aria-labelledby", "options-tts-heading");
+  const ttsHeading = element("h2", "options-page__section-title", "朗读语音源");
+  ttsHeading.id = "options-tts-heading";
+  const ttsEnabledLabel = element("label", "options-page__label");
+  const ttsEnabledInput = element("input");
+  ttsEnabledInput.type = "checkbox";
+  ttsEnabledInput.dataset.ttsEnabled = "";
+  ttsEnabledLabel.append(ttsEnabledInput, document.createTextNode(" 使用云端语音朗读"));
+  const ttsHint = element(
+    "p",
+    "options-page__hint",
+    "配置 OpenAI 兼容语音合成端点（如硅基流动）后，朗读改用云端神经语音，音质远超系统语音；云端失败自动回落本地语音。默认关闭，关闭时与现状完全一致。配置在下次「开始学习」时生效。",
+  );
+  const ttsBaseUrlInput = input("options-tts-base-url", "url");
+  ttsBaseUrlInput.placeholder = TTS_DEFAULT_BASE_URL;
+  const ttsApiKeyInput = input("options-tts-api-key", "password");
+  ttsApiKeyInput.autocomplete = "off";
+  ttsApiKeyInput.placeholder = API_KEY_REQUIRED_HINT;
+  const ttsModelInput = input("options-tts-model");
+  ttsModelInput.placeholder = TTS_DEFAULT_MODEL;
+  const ttsVoiceSelect = element("select", "options-page__select");
+  ttsVoiceSelect.id = "options-tts-voice";
+  ttsVoiceSelect.dataset.ttsVoice = "";
+  for (const voice of TTS_VOICES) {
+    const option = element("option", undefined, voice);
+    option.value = voice;
+    ttsVoiceSelect.append(option);
+  }
+  const ttsResult = element("p", "options-page__result");
+  ttsResult.dataset.ttsResult = "";
+  ttsResult.setAttribute("role", "status");
+  ttsResult.setAttribute("aria-live", "polite");
+  const ttsSaveButton = element("button", "options-page__primary", "保存语音源");
+  ttsSaveButton.type = "button";
+  ttsSaveButton.dataset.action = "save-tts";
+  const ttsActions = element("div", "options-page__actions");
+  ttsActions.append(ttsSaveButton);
+  ttsSection.append(
+    ttsHeading,
+    ttsEnabledLabel,
+    ttsHint,
+    field("语音服务地址", ttsBaseUrlInput),
+    field("语音密钥", ttsApiKeyInput),
+    field("语音模型", ttsModelInput),
+    field("音色", ttsVoiceSelect),
+    ttsActions,
+    ttsResult,
+  );
+
   const cacheSection = element("section", "options-page__panel");
   cacheSection.setAttribute("aria-labelledby", "options-cache-heading");
   const cacheHeading = element("h2", "options-page__section-title", "分析缓存");
@@ -294,7 +352,7 @@ export async function createOptionsPage(
     importInput,
     clearStatus,
   );
-  root.append(heading, intro, warning, profileSection, cacheSection);
+  root.append(heading, intro, warning, profileSection, ttsSection, cacheSection);
 
   const addHeaderRow = (name = "", value = ""): void => {
     const row = element("div", "options-page__header-row");
@@ -519,6 +577,44 @@ export async function createOptionsPage(
   prefetchInput.addEventListener("change", () => {
     void dependencies.setPrefetchDetail(prefetchInput.checked);
   });
+  ttsSaveButton.addEventListener("click", () => {
+    void (async () => {
+      ttsSaveButton.disabled = true;
+      ttsSaveButton.textContent = "保存中…";
+      try {
+        const stored = await dependencies.getTtsSource();
+        const config: TtsSourceConfig = {
+          enabled: ttsEnabledInput.checked,
+          baseUrl: normalizeBaseUrl(ttsBaseUrlInput.value),
+          // 密钥不回显:留空表示沿用已存 Key(与模型配置同款约定)。
+          apiKey: ttsApiKeyInput.value || stored?.apiKey || "",
+          model: ttsModelInput.value.trim(),
+          voice: ttsVoiceSelect.value,
+        };
+        if (config.enabled && config.model === "") {
+          throw new Error("TTS model is required when enabled");
+        }
+        // 只有启用才申请 optional host 权限:禁用状态 SW 永不发请求,不弹权限框。
+        if (
+          config.enabled &&
+          !(await dependencies.requestPermission(hostPermissionPattern(config.baseUrl)))
+        ) {
+          ttsResult.textContent = "未获得语音源地址访问权限，请允许后重试。";
+          return;
+        }
+        await dependencies.saveTtsSource(config);
+        ttsApiKeyInput.value = "";
+        ttsApiKeyInput.placeholder = API_KEY_SAVED_HINT;
+        ttsResult.textContent =
+          "语音源配置已保存，下次「开始学习」时生效；朗读失败会自动回落本地语音。";
+      } catch {
+        ttsResult.textContent = "语音源配置无效，请检查服务地址与模型名称。";
+      } finally {
+        ttsSaveButton.disabled = false;
+        ttsSaveButton.textContent = "保存语音源";
+      }
+    })();
+  });
   clearButton.addEventListener("click", () => {
     if (!dependencies.confirm("确定清空全部分析缓存吗？此操作不会删除模型配置。")) return;
     void dependencies.clearCache().then(async () => {
@@ -590,6 +686,21 @@ export async function createOptionsPage(
   cacheLimit.value = String(limit);
   prefetchInput.checked = await dependencies.getPrefetchDetail();
   streamInput.checked = await dependencies.getStreamRendering();
+  // 未存过配置时预填硅基流动默认值(用户零输入即可上手);存过则回填,密钥除外。
+  const storedTts = await dependencies.getTtsSource();
+  ttsEnabledInput.checked = storedTts?.enabled === true;
+  ttsBaseUrlInput.value = storedTts?.baseUrl ?? TTS_DEFAULT_BASE_URL;
+  ttsModelInput.value = storedTts?.model ?? TTS_DEFAULT_MODEL;
+  if (storedTts !== undefined && !(TTS_VOICES as readonly string[]).includes(storedTts.voice)) {
+    // 历史配置里的音色不在预置表:追加为选项,避免保存时被静默改写。
+    const option = element("option", undefined, storedTts.voice);
+    option.value = storedTts.voice;
+    ttsVoiceSelect.append(option);
+  }
+  ttsVoiceSelect.value = storedTts?.voice ?? "anna";
+  if (storedTts?.apiKey) {
+    ttsApiKeyInput.placeholder = API_KEY_SAVED_HINT;
+  }
 }
 
 function runtimeDependencies(): OptionsDependencies {
@@ -663,6 +774,8 @@ function runtimeDependencies(): OptionsDependencies {
     setPrefetchDetail: (enabled) => repository.setPrefetchDetail(enabled),
     getStreamRendering: () => repository.getStreamRendering(),
     setStreamRendering: (enabled) => repository.setStreamRendering(enabled),
+    getTtsSource: () => repository.loadTtsSource(),
+    saveTtsSource: (config) => repository.saveTtsSource(config),
   };
 }
 

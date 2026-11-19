@@ -257,9 +257,9 @@ describe("createCloudSpeaker", () => {
     const sent: string[] = [];
     const ends: number[] = [];
     const speaker = createCloudSpeaker(
-      async (text) => {
+      (text) => {
         sent.push(text);
-        return { audioBase64: "aGVsbG8=", mime: "audio/mpeg" };
+        return Promise.resolve({ audioBase64: "aGVsbG8=", mime: "audio/mpeg" });
       },
       { createAudio: () => new FakeAudio() as unknown as HTMLAudioElement },
     );
@@ -295,14 +295,11 @@ describe("createCloudSpeaker", () => {
   it("falls back to the local speaker when the cloud request fails", async () => {
     const local = new FakeSpeaker();
     const notices: string[] = [];
-    const speaker = createCloudSpeaker(
-      async () => ({ error: "NETWORK_ERROR" as const }),
-      {
-        createAudio: () => new FakeAudio() as unknown as HTMLAudioElement,
-        createLocalFallback: () => local,
-        onFallbackNotice: (reason) => notices.push(reason),
-      },
-    );
+    const speaker = createCloudSpeaker(() => Promise.resolve({ error: "NETWORK_ERROR" }), {
+      createAudio: () => new FakeAudio() as unknown as HTMLAudioElement,
+      createLocalFallback: () => local,
+      onFallbackNotice: (reason) => notices.push(reason),
+    });
     speaker.speak("hello");
     await vi.waitFor(() => expect(local.spoken).toEqual(["hello"]));
     expect(notices).toHaveLength(1);
@@ -311,18 +308,14 @@ describe("createCloudSpeaker", () => {
   it("回落期间 isSpeaking 为真;本地音播完经 hooks 广播复位", async () => {
     let fallbackHooks: SpeakerHooks | undefined;
     const ends: number[] = [];
-    const speaker = createCloudSpeaker(
-      async () => ({ error: "AUTH_FAILED" as const }),
-      {
-        createAudio: () => new FakeAudio() as unknown as HTMLAudioElement,
-        createLocalFallback: (hooks) => {
-          fallbackHooks = hooks;
-          return new FakeSpeaker();
-        },
+    const speaker = createCloudSpeaker(() => Promise.resolve({ error: "AUTH_FAILED" }), {
+      createAudio: () => new FakeAudio() as unknown as HTMLAudioElement,
+      createLocalFallback: (hooks) => {
+        fallbackHooks = hooks;
+        return new FakeSpeaker();
       },
-    );
-    const handle = speaker as ReturnType<typeof createCloudSpeaker>;
-    handle.registerHooks({ onEnd: () => ends.push(1) });
+    });
+    speaker.registerHooks({ onEnd: () => ends.push(1) });
 
     speaker.speak("hello");
     await vi.waitFor(() => expect(speaker.isSpeaking()).toBe(true));
@@ -336,14 +329,11 @@ describe("createCloudSpeaker", () => {
   it("stop() 同步停掉回落中的本地语音并复位按下态", async () => {
     const local = new FakeSpeaker();
     const ends: number[] = [];
-    const speaker = createCloudSpeaker(
-      async () => ({ error: "NETWORK_ERROR" as const }),
-      {
-        createAudio: () => new FakeAudio() as unknown as HTMLAudioElement,
-        createLocalFallback: () => local,
-      },
-    );
-    (speaker as ReturnType<typeof createCloudSpeaker>).registerHooks({
+    const speaker = createCloudSpeaker(() => Promise.resolve({ error: "NETWORK_ERROR" }), {
+      createAudio: () => new FakeAudio() as unknown as HTMLAudioElement,
+      createLocalFallback: () => local,
+    });
+    speaker.registerHooks({
       onEnd: () => ends.push(1),
     });
 
@@ -361,11 +351,11 @@ describe("createCloudSpeaker", () => {
     const local = new FakeSpeaker();
     let calls = 0;
     const speaker = createCloudSpeaker(
-      async () => {
+      () => {
         calls += 1;
         return calls === 1
-          ? ({ error: "NETWORK_ERROR" } as const)
-          : { audioBase64: "c2Vjb25k", mime: "audio/mpeg" };
+          ? Promise.resolve({ error: "NETWORK_ERROR" })
+          : Promise.resolve({ audioBase64: "c2Vjb25k", mime: "audio/mpeg" });
       },
       {
         createAudio: () => new FakeAudio() as unknown as HTMLAudioElement,
@@ -385,11 +375,10 @@ describe("createCloudSpeaker", () => {
 
   it("无本地兜底时云端失败直接复位,按钮不卡按下态", async () => {
     const ends: number[] = [];
-    const speaker = createCloudSpeaker(
-      async () => ({ error: "NETWORK_ERROR" as const }),
-      { createAudio: () => new FakeAudio() as unknown as HTMLAudioElement },
-    );
-    (speaker as ReturnType<typeof createCloudSpeaker>).registerHooks({
+    const speaker = createCloudSpeaker(() => Promise.resolve({ error: "NETWORK_ERROR" }), {
+      createAudio: () => new FakeAudio() as unknown as HTMLAudioElement,
+    });
+    speaker.registerHooks({
       onEnd: () => ends.push(1),
     });
 
@@ -401,9 +390,10 @@ describe("createCloudSpeaker", () => {
   it("stop() invalidates the in-flight request", async () => {
     let release: ((value: { audioBase64: string; mime: string }) => void) | undefined;
     const speaker = createCloudSpeaker(
-      () => new Promise((resolve) => {
-        release = resolve;
-      }),
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
       { createAudio: () => new FakeAudio() as unknown as HTMLAudioElement },
     );
     speaker.speak("pending");

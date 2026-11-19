@@ -103,3 +103,77 @@ test.describe("sentence and word speaking", () => {
     await expect(focusSpeak).toHaveAttribute("aria-pressed", "false");
   });
 });
+
+test.describe("cloud tts source", () => {
+  const localProfile = (harness: ExtensionHarness) => [
+    {
+      id: "profile-speak",
+      name: "Local e2e-model",
+      baseUrl: harness.fakeModel.baseUrl,
+      apiKey: "sk-e2e-secret",
+      model: "e2e-model",
+    },
+  ];
+
+  test("云端语音源:点喇叭发起一次合成请求并切换按下态,再点停止不重复合成", async ({ harness }) => {
+    await harness.seedProfiles(localProfile(harness), "profile-speak");
+    await harness.seedTtsSource({
+      enabled: true,
+      baseUrl: harness.fakeModel.baseUrl,
+      apiKey: "sk-tts-secret",
+      model: "FunAudioLLM/CosyVoice2-0.5B",
+      voice: "anna",
+    });
+    const page = await startArticle(harness);
+
+    await expect(page.locator("[data-syntax-learning-block]")).toHaveCount(4, {
+      timeout: 20_000,
+    });
+    const speak = page.locator("[data-syntax-speak]").first();
+    await expect(speak).toBeVisible();
+
+    harness.fakeModel.clearRecorded();
+    await speak.click();
+    await expect(speak).toHaveAttribute("aria-pressed", "true");
+
+    await expect
+      .poll(() => harness.fakeModel.recordedOfKind("tts-speech").length, { timeout: 10_000 })
+      .toBe(1);
+    const request = harness.fakeModel.recordedOfKind("tts-speech")[0]!;
+    // SW 侧请求形态:音色带模型前缀,鉴权头在场,正文是所点句子的文本。
+    expect(request.voice).toBe("FunAudioLLM/CosyVoice2-0.5B:anna");
+    expect(request.authorizationPresent).toBe(true);
+    expect(request.promptText.length).toBeGreaterThan(0);
+
+    // 静音 mp3 只有约 26ms:不等点停,断言音频自然播完后按钮经 onended 广播复位,
+    // 且全程只有一次合成请求(点停/重读的语义已由单测钉住)。
+    await expect(speak).toHaveAttribute("aria-pressed", "false", { timeout: 5_000 });
+    expect(harness.fakeModel.recordedOfKind("tts-speech")).toHaveLength(1);
+  });
+
+  test("云端语音源关闭:零合成请求,朗读仍走本地", async ({ harness }) => {
+    await harness.seedProfiles(localProfile(harness), "profile-speak");
+    await harness.seedTtsSource({
+      enabled: false,
+      baseUrl: harness.fakeModel.baseUrl,
+      apiKey: "sk-tts-secret",
+      model: "FunAudioLLM/CosyVoice2-0.5B",
+      voice: "anna",
+    });
+    const page = await startArticle(harness);
+
+    await expect(page.locator("[data-syntax-learning-block]")).toHaveCount(4, {
+      timeout: 20_000,
+    });
+    const speak = page.locator("[data-syntax-speak]").first();
+    await expect(speak).toBeVisible();
+
+    harness.fakeModel.clearRecorded();
+    await speak.click();
+    // 按下态翻转证明点击已被处理;负向探针再留一小段确定性宽限——
+    // 消息若发出,早在点击的同一任务里就计数了。
+    await expect(speak).toHaveAttribute("aria-pressed", "true");
+    await page.waitForTimeout(500);
+    expect(harness.fakeModel.recordedOfKind("tts-speech")).toHaveLength(0);
+  });
+});

@@ -22,6 +22,7 @@ export type RequestKind =
   | "correction-repair"
   | "diagnosis"
   | "chat"
+  | "tts-speech"
   | "unknown";
 
 export type ScriptedOutcome =
@@ -48,6 +49,8 @@ export interface RecordedRequest {
   streamed: boolean;
   sentenceTexts: string[];
   promptText: string;
+  /** tts-speech 专用:请求体里的音色字段(SW 已拼模型前缀,如 Model:anna)。 */
+  voice?: string;
 }
 
 /**
@@ -87,6 +90,16 @@ export const CHAT_REPLY_PARAGRAPHS: readonly string[] = [
   "译文按各成分覆盖的局部短语展开；若问题与分析冲突，以分析为准并说明理由。",
 ];
 export const CHAT_REPLY_TEXT: string = CHAT_REPLY_PARAGRAPHS.join("\n\n");
+
+/**
+ * MPEG-1 Layer III(44.1kHz/32kbps/单声道)的全零静音:每帧 4 字节帧头 + 100 字节
+ * 零载荷,共 104 字节(144×32000/44100 向下取整),约 26ms/帧。取 45 帧(约 1.17s):
+ * headless 实测 1 帧会被 Chrome 判成 duration=null 直接 error(onended 不来),
+ * 多帧才能走完解码管线正常触发 ended——云端朗读 E2E 的自然复位断言依赖它。
+ */
+const SILENT_MP3: Buffer = Buffer.concat(
+  new Array(45).fill(Buffer.from([0xff, 0xfb, 0x10, 0xc0, ...new Array<number>(100).fill(0)])),
+);
 
 function detectKind(text: string): RequestKind {
   if (text.includes('Return exactly {"ok":true}')) return "probe";
@@ -484,6 +497,10 @@ export class FakeOpenAiServer {
   }
 
   private async handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
+    if ((request.url ?? "").split("?")[0]!.endsWith("/audio/speech")) {
+      await this.handleAudioSpeech(request, response);
+      return;
+    }
     let payload: {
       model: string;
       usedResponseFormat: boolean;
@@ -537,6 +554,48 @@ export class FakeOpenAiServer {
       payload.promptText,
       payload.stream,
     );
+  }
+
+  /**
+   * /v1/audio/speech(云端朗读,spec 2026-11-18):与 chat 端点不同族——请求体是
+   * {model, input, voice, response_format},响应是二进制音频而非 chat completion。
+   * 恒回 1 帧静音 mp3;不消费脚本队列(合成无修复轮)。promptText 存 input 文本,
+   * voice 存请求体的音色字段(SW 已拼模型前缀)。
+   */
+  private async handleAudioSpeech(
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> {
+    let payload: { model: string; input: string; voice: string };
+    try {
+      const raw = JSON.parse(await readBody(request)) as {
+        model?: unknown;
+        input?: unknown;
+        voice?: unknown;
+      };
+      payload = {
+        model: typeof raw.model === "string" ? raw.model : "",
+        input: typeof raw.input === "string" ? raw.input : "",
+        voice: typeof raw.voice === "string" ? raw.voice : "",
+      };
+    } catch {
+      response.writeHead(400, { "content-type": "application/json" });
+      response.end(jsonBody({ error: "invalid request body" }));
+      return;
+    }
+    this.requests.push({
+      kind: "tts-speech",
+      model: payload.model,
+      url: request.url ?? "",
+      authorizationPresent: typeof request.headers.authorization === "string",
+      usedResponseFormat: false,
+      streamed: false,
+      sentenceTexts: [],
+      promptText: payload.input,
+      voice: payload.voice,
+    });
+    response.writeHead(200, { "content-type": "audio/mpeg" });
+    response.end(SILENT_MP3);
   }
 
   private async reply(
