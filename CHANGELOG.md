@@ -10,13 +10,13 @@
 
 - **「朗读语音源」设置**：开关 + 服务地址/密钥/模型（预填硅基流动默认值）+ 音色下拉（anna/alex/benjamin/charles/david/diana）。Chrome 存 `chrome.storage.local`（密钥只在 SW 侧、永不下发页面；启用态保存时申请对应 optional host 权限）；IDEA 非密钥进 `english-syntax.xml`、密钥走 PasswordSafe（不进明文 XML）。配置独立于模型 profile——LLM 与 TTS 常不同家。
 - **Chrome 云端链路**：每页一个 `CloudSpeaker` 单例，点喇叭发 `TTS_SYNTHESIZE` → SW 内联合成（mp3）→ `TTS_AUDIO` → `Audio` 播放；代际作废（点停/换句后晚到的音频直接丢弃，不叠声）；回落本地时 console 提示一次。
-- **IDEA 云端链路**：`CloudSpeechSpeaker` 的 `speak` 立即返回、合成在后台协程（不阻塞桥消息泵）；配置懒读 + 5 秒缓存；`wav` 内存直开 `Clip`；云端+本地双失败才异步 `TTS_ERROR`。
+- **IDEA 云端链路**：`CloudSpeechSpeaker` 的 `speak` 立即返回、合成在后台协程（不阻塞桥消息泵）；配置懒读 + 5 秒缓存；`wav` 内存直开 `Clip`；云端+本地双失败才异步 `TTS_ERROR`。设置页带「测试语音」按钮（打一次 5 字符合成验证配置，balloon 反馈）。
 - **修复（Chrome 回落语义）**：云端失败回落本地后，播完自动复位按钮、点停真正停掉本地回落音（此前按钮会卡在按下态、点停会变成重读）；云端音频播完按钮复位经块级 hooks 广播，此前装配漏了登记线。
 
 ### 测试
 
 - Chrome：单测 1461 项、Playwright E2E 48 项（新增云端朗读两条：合成 fetch 计数与按下态复位、禁用零请求）；假模型服务器新增 `/v1/audio/speech` 端点（45 帧静音 mp3）。
-- IntelliJ：Gradle `test` 448 项（新增 CloudSpeechSpeaker/HttpTtsFetcher/TtsSourceRepository/设置节四组）；web vitest 180 项照跑。
+- IntelliJ：Gradle `test` 451 项（新增 CloudSpeechSpeaker/HttpTtsFetcher/TtsSourceRepository/设置节/试音按钮五组，含取消不回落与 clip 竞态的回归钉）；web vitest 180 项照跑。
 
 ## 1.7.0 — 2026-11-18
 
