@@ -2072,6 +2072,7 @@ describe("ContentScriptRouter", () => {
       parseHoveredBlock: vi.fn(() => Promise.resolve(undefined)),
       reanalyzeVisible: vi.fn(),
       switchProfile: vi.fn(),
+      enableCloudTts: vi.fn(),
     };
     const factory = vi.fn(() => controller);
     const router = new ContentScriptRouter({
@@ -2147,6 +2148,7 @@ describe("ContentScriptRouter", () => {
         parseHoveredBlock: vi.fn(() => Promise.resolve(undefined)),
         reanalyzeVisible: vi.fn(),
         switchProfile: vi.fn(),
+        enableCloudTts: vi.fn(),
       }),
       transportFactory: () => new FakeTransport(),
     });
@@ -2206,6 +2208,7 @@ describe("ContentScriptRouter", () => {
         parseHoveredBlock: vi.fn(() => Promise.resolve(undefined)),
         reanalyzeVisible: vi.fn(),
         switchProfile: vi.fn(),
+        enableCloudTts: vi.fn(),
       }),
       transportFactory: () => new FakeTransport(),
     });
@@ -2220,7 +2223,7 @@ describe("ContentScriptRouter", () => {
     });
 
     expect(response).toMatchObject({ type: "SESSION_STATUS" });
-    expect(start).toHaveBeenCalledWith({ prefetchDetail: true, tts: false });
+    expect(start).toHaveBeenCalledWith({ prefetchDetail: true });
   });
 
   it("routes a visible-area reanalysis request to the document controller", async () => {
@@ -2240,6 +2243,7 @@ describe("ContentScriptRouter", () => {
         parseHoveredBlock: vi.fn(() => Promise.resolve(undefined)),
         reanalyzeVisible,
         switchProfile: vi.fn(),
+        enableCloudTts: vi.fn(),
       }),
       transportFactory: () => new FakeTransport(),
     });
@@ -2273,6 +2277,7 @@ describe("ContentScriptRouter", () => {
         parseHoveredBlock,
         reanalyzeVisible: vi.fn(),
         switchProfile: vi.fn(),
+        enableCloudTts: vi.fn(),
       }),
       transportFactory: () => new FakeTransport(),
     });
@@ -2311,6 +2316,7 @@ describe("ContentScriptRouter", () => {
         ),
         reanalyzeVisible: vi.fn(),
         switchProfile: vi.fn(),
+        enableCloudTts: vi.fn(),
       }),
       transportFactory: () => new FakeTransport(),
     });

@@ -25,6 +25,7 @@ import { DiagnosisPanel } from "./diagnosis-panel";
 import { installHoverTracker } from "./hover-target";
 import { SyntaxProgressPill } from "./progress-pill";
 import { SessionController } from "./session-controller";
+import { createCloudSpeaker, createSpeaker, defaultSynthesis } from "./speech";
 import type { RuntimeTransport, SessionControllerOptions } from "./session-controller";
 
 interface RoutedController {
@@ -32,7 +33,8 @@ interface RoutedController {
   /** 诊断等页面侧一次性请求复用会话通道（S5）：绝不能另开 transport/端口。 */
   readonly transport: RuntimeTransport;
   diagnosisSnapshot(element: Element | null): SessionDiagnosisSnapshot;
-  start(options?: { prefetchDetail?: boolean; tts?: boolean }): Promise<void>;
+  start(options?: { prefetchDetail?: boolean }): Promise<void>;
+  enableCloudTts(factory: () => import("./speech").Speaker | null): void;
   pause(): void;
   resume(): void;
   stop(): void;
@@ -188,6 +190,47 @@ function isDiagnosisExplanation(value: unknown): value is DiagnosisExplanation {
     Array.isArray(value.suggestions) &&
     value.suggestions.every((item) => typeof item === "string")
   );
+}
+
+/** 云端朗读单例(每 content script 实例 = 每 document 一份,spec 裁决 1)。 */
+let cloudSpeakerSingleton: ReturnType<typeof createCloudSpeaker> | null = null;
+
+function cloudSpeakerFor(
+  controller: {
+    transport: { send: (message: RequestMessage) => Promise<unknown> };
+  },
+  tabId: number,
+  documentId: string,
+): () => import("./speech").Speaker | null {
+  if (cloudSpeakerSingleton === null) {
+    const synth = async (text: string): Promise<import("./speech").CloudSynthesisResult> => {
+      const response = (await controller.transport.send({
+        version: 1,
+        requestId: `tts:${crypto.randomUUID()}`,
+        type: "TTS_SYNTHESIZE",
+        tabId,
+        documentId,
+        text,
+      })) as { type?: string; audioBase64?: string; mime?: string; error?: { code?: string } };
+      if (
+        response?.type === "TTS_AUDIO" &&
+        typeof response.audioBase64 === "string" &&
+        typeof response.mime === "string"
+      ) {
+        return { audioBase64: response.audioBase64, mime: response.mime };
+      }
+      return { error: response?.error?.code ?? "NETWORK_ERROR" };
+    };
+    const localFallback = createSpeaker(defaultSynthesis()) ?? undefined;
+    cloudSpeakerSingleton = createCloudSpeaker(synth, {
+      localFallback,
+      onFallbackNotice: (reason) => {
+        // 云端失败已回落本地出声;提示走 console(P0 不加 UI 面,pill 提示留增强)。
+        console.info(`[句法学习] 云端语音源不可用(${reason}),已回落本地语音`);
+      },
+    });
+  }
+  return () => cloudSpeakerSingleton;
 }
 
 export function isRuntimeResponse(value: unknown, requestId: string): value is ResponseMessage {
@@ -486,7 +529,8 @@ export class ContentScriptRouter {
       const controller = this.controller(request.tabId, request.documentId);
       switch (request.type) {
         case "START_SESSION":
-          await controller.start({ prefetchDetail: request.prefetchDetail === true, tts: request.tts === true });
+          if (request.tts === true) controller.enableCloudTts(cloudSpeakerFor(controller, request.tabId, request.documentId));
+          await controller.start({ prefetchDetail: request.prefetchDetail === true });
           return statusResponse(request.requestId, controller.status);
         case "PAUSE_SESSION":
           controller.pause();

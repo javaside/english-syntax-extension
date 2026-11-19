@@ -1,4 +1,5 @@
 import type { ExtensionError } from "../shared/errors";
+import type { Speaker } from "./speech";
 import type {
   CoreAnalysis,
   CoreComponent,
@@ -134,6 +135,8 @@ export interface SessionControllerOptions {
   createSentenceId?: typeof createSentenceId;
   viewportFactory?: (callback: (candidate: CandidateBlock) => void) => ViewportPort;
   learningBlockFactory?: () => ControllerBlock;
+  /** 云端朗读单例工厂(START_SESSION 的 tts 标志置位时由 content-script 注入)。 */
+  ttsSpeakerFactory?: () => Speaker | null;
   replacementFactory?: () => ControllerReplacement;
   markerFactory?: () => ControllerMarker;
   now?: () => number;
@@ -236,6 +239,8 @@ export class SessionController {
   readonly documentId: string;
 
   private readonly document: Document;
+  /** 云端朗读单例(所有块共享);undefined = 未启用云端,块用各自本地 Speaker。 */
+  private cloudSpeakerFactory?: () => Speaker | null;
   private readonly scan: (root: ParentNode) => CandidateBlock[];
   private readonly sentenceIdFactory: typeof createSentenceId;
   private readonly viewport: ViewportPort;
@@ -380,6 +385,11 @@ export class SessionController {
           : { failureMessage: sentence.failureMessage }),
       })),
     };
+  }
+
+  /** START_SESSION 带 tts 标志时注入云端单例工厂;此后构造的块共享它。 */
+  enableCloudTts(factory: () => Speaker | null): void {
+    this.cloudSpeakerFactory = factory;
   }
 
   async start(options?: { prefetchDetail?: boolean; tts?: boolean; scan?: boolean }): Promise<void> {
@@ -848,7 +858,14 @@ export class SessionController {
       }
       if (sentences.length === 0) continue;
       const learningBlock = (
-        this.options.learningBlockFactory ?? (() => new SyntaxLearningBlock(this.document))
+        this.options.learningBlockFactory ??
+        (() =>
+          new SyntaxLearningBlock(
+            this.document,
+            this.cloudSpeakerFactory === undefined || this.cloudSpeakerFactory() === null
+              ? undefined
+              : { speakerFactory: () => this.cloudSpeakerFactory?.() ?? null },
+          ))
       )();
       learningBlock.setExpectedSentenceIds(sentences.map(({ input }) => input.sentenceId));
       const replacement = (this.options.replacementFactory ?? (() => new BlockReplacement()))();

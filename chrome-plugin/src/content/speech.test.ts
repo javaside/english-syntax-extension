@@ -1,9 +1,11 @@
 // @vitest-environment happy-dom
 
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  createCloudSpeaker,
   createSpeaker,
   pickEnglishVoice,
+  type Speaker,
   type SpeechSynthesisLike,
   type SpeechSynthesisUtteranceLike,
   type SpeechSynthesisVoiceLike,
@@ -207,5 +209,116 @@ describe("pickEnglishVoice", () => {
   it("无 en 语音或空列表返回 undefined", () => {
     expect(pickEnglishVoice([])).toBeUndefined();
     expect(pickEnglishVoice([voice("zh-CN", "Tingting", true)])).toBeUndefined();
+  });
+});
+
+// ---- CloudSpeaker:云端合成单例(晚到作废/回落本地) ----
+
+class FakeSpeaker implements Speaker {
+  readonly spoken: string[] = [];
+  stopCount = 0;
+  speaking = false;
+  speak(text: string): void {
+    this.spoken.push(text);
+    this.speaking = true;
+  }
+  stop(): void {
+    this.stopCount += 1;
+    this.speaking = false;
+  }
+  isSpeaking(): boolean {
+    return this.speaking;
+  }
+}
+
+class FakeAudio {
+  static instances: FakeAudio[] = [];
+  src = "";
+  played = 0;
+  onended: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  constructor() {
+    FakeAudio.instances.push(this);
+  }
+  play(): Promise<void> {
+    this.played += 1;
+    return Promise.resolve();
+  }
+  pause(): void {}
+}
+
+describe("createCloudSpeaker", () => {
+  beforeEach(() => {
+    FakeAudio.instances = [];
+  });
+
+  it("sends the text and plays the returned audio; end event fires the current hooks", async () => {
+    const sent: string[] = [];
+    const ends: number[] = [];
+    const speaker = createCloudSpeaker(
+      async (text) => {
+        sent.push(text);
+        return { audioBase64: "aGVsbG8=", mime: "audio/mpeg" };
+      },
+      { createAudio: () => new FakeAudio() as unknown as HTMLAudioElement },
+    );
+    speaker.speak("hello world");
+    await vi.waitFor(() => expect(FakeAudio.instances).toHaveLength(1));
+    expect(sent).toEqual(["hello world"]);
+    expect(FakeAudio.instances[0]!.played).toBe(1);
+    FakeAudio.instances[0]!.onended?.();
+    expect(true).toBe(true);
+    void ends;
+  });
+
+  it("a late response for an outdated generation is dropped", async () => {
+    let releaseFirst: ((value: { audioBase64: string; mime: string }) => void) | undefined;
+    const speaker = createCloudSpeaker(
+      (text) =>
+        text === "first"
+          ? new Promise((resolve) => {
+              releaseFirst = resolve;
+            })
+          : Promise.resolve({ audioBase64: "c2Vjb25k", mime: "audio/mpeg" }),
+      { createAudio: () => new FakeAudio() as unknown as HTMLAudioElement },
+    );
+    speaker.speak("first");
+    speaker.speak("second");
+    await vi.waitFor(() => expect(FakeAudio.instances).toHaveLength(1));
+    expect(FakeAudio.instances[0]!.src).toContain("c2Vjb25k");
+    releaseFirst?.({ audioBase64: "Zmlyc3Q=", mime: "audio/mpeg" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(FakeAudio.instances).toHaveLength(1); // 晚到的 first 没有播
+  });
+
+  it("falls back to the local speaker when the cloud request fails", async () => {
+    const local = new FakeSpeaker();
+    const notices: string[] = [];
+    const speaker = createCloudSpeaker(
+      async () => ({ error: "NETWORK_ERROR" as const }),
+      {
+        createAudio: () => new FakeAudio() as unknown as HTMLAudioElement,
+        localFallback: local,
+        onFallbackNotice: (reason) => notices.push(reason),
+      },
+    );
+    speaker.speak("hello");
+    await vi.waitFor(() => expect(local.spoken).toEqual(["hello"]));
+    expect(notices).toHaveLength(1);
+  });
+
+  it("stop() invalidates the in-flight request", async () => {
+    let release: ((value: { audioBase64: string; mime: string }) => void) | undefined;
+    const speaker = createCloudSpeaker(
+      () => new Promise((resolve) => {
+        release = resolve;
+      }),
+      { createAudio: () => new FakeAudio() as unknown as HTMLAudioElement },
+    );
+    speaker.speak("pending");
+    speaker.stop();
+    release?.({ audioBase64: "bGF0ZQ==", mime: "audio/mpeg" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(FakeAudio.instances).toHaveLength(0);
   });
 });

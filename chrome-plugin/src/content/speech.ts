@@ -243,3 +243,91 @@ export function createSpeaker(
     },
   };
 }
+
+
+/** 云端单例 Speaker:块构造时经 registerHooks 登记各自的结束回调。 */
+export interface CloudSpeakerHandle extends Speaker {
+  registerHooks(hooks: SpeakerHooks): void;
+}
+
+/** 云端合成的结果:音频或失败原因(错误码)。 */
+export type CloudSynthesisResult = { audioBase64: string; mime: string } | { error: string };
+
+export interface CloudSpeakerOptions {
+  /** 云端失败时的本地兜底(常驻一个;缺省时失败即静默复位)。 */
+  localFallback?: Speaker;
+  /** 回落发生时通知一次(UI 提示用)。 */
+  onFallbackNotice?: (reason: string) => void;
+  /** 测试注入 Audio 构造。 */
+  createAudio?: () => HTMLAudioElement;
+}
+
+/**
+ * 云端朗读 Speaker(每 documentId 单例,spec 2026-11-18 裁决):speak 发合成请求,
+ * 回来后 Audio 播放,onended/onerror 复位按下态。**代际作废**:新 speak/stop 使
+ * 在途请求作废——晚到的音频直接丢弃,绝不叠声、绝不误复位新朗读。失败回落
+ * localFallback(本地永远有声)。
+ */
+export function createCloudSpeaker(
+  synthesize: (text: string) => Promise<CloudSynthesisResult>,
+  options: CloudSpeakerOptions = {},
+): Speaker {
+  const createAudio = options.createAudio ?? (() => new Audio());
+  const localFallback = options.localFallback;
+  let generation = 0;
+  let audio: HTMLAudioElement | null = null;
+  // 单例被多个块共享:每个块的 hooks 注册进集合,结束事件广播(复位幂等,DOM 现查)。
+  const hooksSet = new Set<SpeakerHooks>();
+  const settle = (): void => {
+    for (const hooks of hooksSet) hooks.onEnd?.();
+  };
+  const speaker: Speaker = {
+    speak(text: string): void {
+      generation += 1;
+      const mine = generation;
+      audio?.pause();
+      audio = null;
+      void synthesize(text).then((result) => {
+        if (mine !== generation) return; // 晚到作废
+        if ("error" in result) {
+          options.onFallbackNotice?.(result.error);
+          if (localFallback !== undefined) {
+            localFallback.speak(text);
+            return;
+          }
+          return;
+        }
+        const element = createAudio();
+        element.src = `data:${result.mime};base64,${result.audioBase64}`;
+        element.onended = () => {
+          if (mine !== generation) return;
+          settle();
+        };
+        element.onerror = () => {
+          if (mine !== generation) return;
+          options.onFallbackNotice?.("audio-decode");
+          if (localFallback !== undefined) {
+            localFallback.speak(text);
+            return;
+          }
+          settle();
+        };
+        audio = element;
+        void element.play();
+      });
+    },
+    stop(): void {
+      generation += 1;
+      audio?.pause();
+      audio = null;
+      settle();
+    },
+    isSpeaking(): boolean {
+      return audio !== null;
+    },
+  };
+  (speaker as CloudSpeakerHandle).registerHooks = (hooks: SpeakerHooks): void => {
+    hooksSet.add(hooks);
+  };
+  return speaker as CloudSpeakerHandle;
+}
