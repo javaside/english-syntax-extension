@@ -244,7 +244,6 @@ export function createSpeaker(
   };
 }
 
-
 /** 云端单例 Speaker:块构造时经 registerHooks 登记各自的结束回调。 */
 export interface CloudSpeakerHandle extends Speaker {
   registerHooks(hooks: SpeakerHooks): void;

@@ -283,7 +283,13 @@ describe("tts-source 配置", () => {
   it("round-trips the tts source config", async () => {
     const repository = new ConfigRepository(storageMock().area);
     expect(await repository.loadTtsSource()).toBeUndefined();
-    await repository.saveTtsSource({ enabled: true, baseUrl: "https://api.siliconflow.cn/v1", apiKey: "sk-tts", model: "FunAudioLLM/CosyVoice2-0.5B", voice: "anna" });
+    await repository.saveTtsSource({
+      enabled: true,
+      baseUrl: "https://api.siliconflow.cn/v1",
+      apiKey: "sk-tts",
+      model: "FunAudioLLM/CosyVoice2-0.5B",
+      voice: "anna",
+    });
     expect(await repository.loadTtsSource()).toMatchObject({ enabled: true, voice: "anna" });
   });
 });

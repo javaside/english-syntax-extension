@@ -122,7 +122,6 @@ export interface TtsSourceConfig {
 export class ConfigRepository {
   constructor(private readonly storage: StorageArea = chrome.storage.local) {}
 
-
   async loadTtsSource(): Promise<TtsSourceConfig | undefined> {
     const stored = (await this.storage.get(TTS_SOURCE_KEY))[TTS_SOURCE_KEY];
     const record = stored as Record<string, unknown> | undefined | null;

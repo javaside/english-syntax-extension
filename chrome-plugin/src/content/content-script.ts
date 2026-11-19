@@ -536,7 +536,10 @@ export class ContentScriptRouter {
       const controller = this.controller(request.tabId, request.documentId);
       switch (request.type) {
         case "START_SESSION":
-          if (request.tts === true) controller.enableCloudTts(cloudSpeakerFor(controller, request.tabId, request.documentId));
+          if (request.tts === true)
+            controller.enableCloudTts(
+              cloudSpeakerFor(controller, request.tabId, request.documentId),
+            );
           await controller.start({ prefetchDetail: request.prefetchDetail === true });
           return statusResponse(request.requestId, controller.status);
         case "PAUSE_SESSION":

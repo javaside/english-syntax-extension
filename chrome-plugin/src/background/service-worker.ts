@@ -151,7 +151,10 @@ async function synthesizeSpeech(
     const bytes = new Uint8Array(await response.arrayBuffer());
     let binary = "";
     for (const byte of bytes) binary += String.fromCharCode(byte);
-    return { audioBase64: btoa(binary), mime: response.headers.get("content-type") ?? "audio/mpeg" };
+    return {
+      audioBase64: btoa(binary),
+      mime: response.headers.get("content-type") ?? "audio/mpeg",
+    };
   } catch (error) {
     if (error instanceof ModelRequestError) throw error;
     if (controller.signal.aborted) {
@@ -726,11 +729,7 @@ export function registerServiceWorker(
             };
           } catch (error) {
             const failure = asModelRequestErrorOrNetwork(error);
-            return errorResponse(
-              request.requestId,
-              failure.code,
-              failure.details,
-            );
+            return errorResponse(request.requestId, failure.code, failure.details);
           }
         }
         case "CHAT_ASK": {
