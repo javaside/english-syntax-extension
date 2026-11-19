@@ -1,5 +1,5 @@
 import type { ExtensionError } from "../shared/errors";
-import type { Speaker } from "./speech";
+import type { Speaker, SpeakerHooks } from "./speech";
 import type {
   CoreAnalysis,
   CoreComponent,
@@ -135,8 +135,8 @@ export interface SessionControllerOptions {
   createSentenceId?: typeof createSentenceId;
   viewportFactory?: (callback: (candidate: CandidateBlock) => void) => ViewportPort;
   learningBlockFactory?: () => ControllerBlock;
-  /** 云端朗读单例工厂(START_SESSION 的 tts 标志置位时由 content-script 注入)。 */
-  ttsSpeakerFactory?: () => Speaker | null;
+  /** 云端朗读单例工厂(START_SESSION 的 tts 标志置位时由 content-script 注入);每个块把自己的 hooks 传进来登记,否则结束事件无处广播。 */
+  ttsSpeakerFactory?: (hooks: SpeakerHooks) => Speaker | null;
   replacementFactory?: () => ControllerReplacement;
   markerFactory?: () => ControllerMarker;
   now?: () => number;
@@ -240,7 +240,7 @@ export class SessionController {
 
   private readonly document: Document;
   /** 云端朗读单例(所有块共享);undefined = 未启用云端,块用各自本地 Speaker。 */
-  private cloudSpeakerFactory?: () => Speaker | null;
+  private cloudSpeakerFactory?: (hooks: SpeakerHooks) => Speaker | null;
   private readonly scan: (root: ParentNode) => CandidateBlock[];
   private readonly sentenceIdFactory: typeof createSentenceId;
   private readonly viewport: ViewportPort;
@@ -388,7 +388,7 @@ export class SessionController {
   }
 
   /** START_SESSION 带 tts 标志时注入云端单例工厂;此后构造的块共享它。 */
-  enableCloudTts(factory: () => Speaker | null): void {
+  enableCloudTts(factory: (hooks: SpeakerHooks) => Speaker | null): void {
     this.cloudSpeakerFactory = factory;
   }
 
@@ -862,9 +862,14 @@ export class SessionController {
         (() =>
           new SyntaxLearningBlock(
             this.document,
-            this.cloudSpeakerFactory === undefined || this.cloudSpeakerFactory() === null
+            this.cloudSpeakerFactory === undefined
               ? undefined
-              : { speakerFactory: () => this.cloudSpeakerFactory?.() ?? null },
+              : {
+                  // hooks 必须传给工厂登记进单例:丢掉它,云端音频 onended 的
+                  // settle 广播就是空集合,朗读按钮永远不会复位(E2E 抓到过)。
+                  speakerFactory: (hooks: SpeakerHooks) =>
+                    this.cloudSpeakerFactory?.(hooks) ?? null,
+                },
           ))
       )();
       learningBlock.setExpectedSentenceIds(sentences.map(({ input }) => input.sentenceId));

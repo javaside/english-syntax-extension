@@ -34,7 +34,9 @@ interface RoutedController {
   readonly transport: RuntimeTransport;
   diagnosisSnapshot(element: Element | null): SessionDiagnosisSnapshot;
   start(options?: { prefetchDetail?: boolean }): Promise<void>;
-  enableCloudTts(factory: () => import("./speech").Speaker | null): void;
+  enableCloudTts(
+    factory: (hooks: import("./speech").SpeakerHooks) => import("./speech").Speaker | null,
+  ): void;
   pause(): void;
   resume(): void;
   stop(): void;
@@ -193,7 +195,7 @@ function isDiagnosisExplanation(value: unknown): value is DiagnosisExplanation {
 }
 
 /** 云端朗读单例(每 content script 实例 = 每 document 一份,spec 裁决 1)。 */
-let cloudSpeakerSingleton: ReturnType<typeof createCloudSpeaker> | null = null;
+let cloudSpeakerSingleton: import("./speech").CloudSpeakerHandle | null = null;
 
 function cloudSpeakerFor(
   controller: {
@@ -201,7 +203,7 @@ function cloudSpeakerFor(
   },
   tabId: number,
   documentId: string,
-): () => import("./speech").Speaker | null {
+): (hooks: import("./speech").SpeakerHooks) => import("./speech").Speaker | null {
   if (cloudSpeakerSingleton === null) {
     const synth = async (text: string): Promise<import("./speech").CloudSynthesisResult> => {
       const response = (await controller.transport.send({
@@ -231,7 +233,11 @@ function cloudSpeakerFor(
       },
     });
   }
-  return () => cloudSpeakerSingleton;
+  return (hooks) => {
+    const speaker = cloudSpeakerSingleton;
+    if (speaker !== null) speaker.registerHooks(hooks);
+    return speaker;
+  };
 }
 
 export function isRuntimeResponse(value: unknown, requestId: string): value is ResponseMessage {

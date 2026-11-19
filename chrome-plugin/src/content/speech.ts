@@ -275,7 +275,7 @@ export interface CloudSpeakerOptions {
 export function createCloudSpeaker(
   synthesize: (text: string) => Promise<CloudSynthesisResult>,
   options: CloudSpeakerOptions = {},
-): Speaker {
+): CloudSpeakerHandle {
   const createAudio = options.createAudio ?? (() => new Audio());
   let generation = 0;
   let audio: HTMLAudioElement | null = null;

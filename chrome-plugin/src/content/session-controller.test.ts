@@ -30,6 +30,7 @@ import type {
   ViewportPort,
 } from "./session-controller";
 import { SessionController } from "./session-controller";
+import type { Speaker, SpeakerHooks } from "./speech";
 import { ChromeRuntimeTransport, ContentScriptRouter, isRuntimeResponse } from "./content-script";
 
 class FakeLearningBlock implements ControllerBlock {
@@ -868,6 +869,40 @@ describe("SessionController", () => {
     expect(viewport.observed).toHaveLength(2);
     expect(viewport.observed[1]!.element).toBe(element);
     vi.useRealTimers();
+  });
+
+  it("云端单例装配:默认块工厂把块级 hooks 传给 tts 工厂(丢了 hooks 按钮永不复位)", async () => {
+    document.body.innerHTML = "<main><p>Readers understand complex sentences.</p></main>";
+    const received: SpeakerHooks[] = [];
+    const fakeSpeaker: Speaker = {
+      speak: vi.fn(),
+      stop: vi.fn(),
+      isSpeaking: () => false,
+    };
+    const controller = new SessionController({
+      tabId: 9,
+      document,
+      transport: new FakeTransport(),
+      scan: () => [
+        {
+          id: "block-1",
+          element: document.querySelector("p")!,
+          text: "Readers understand complex sentences.",
+        },
+      ],
+      createSentenceId: ({ order }) => Promise.resolve(`sentence-${order + 1}`),
+      viewportFactory: (callback) => new FakeViewport(callback),
+      replacementFactory: () => new FakeReplacement(),
+      markerFactory: () => new FakeMarker(),
+    });
+    controller.enableCloudTts((hooks) => {
+      received.push(hooks);
+      return fakeSpeaker;
+    });
+    await controller.start();
+
+    expect(received.length).toBeGreaterThanOrEqual(1);
+    expect(typeof received[0]!.onEnd).toBe("function");
   });
 
   it("discovers a newly inserted safe block from a child-list mutation", async () => {
