@@ -31,7 +31,12 @@ import type {
 } from "./session-controller";
 import { SessionController } from "./session-controller";
 import type { Speaker, SpeakerHooks } from "./speech";
-import { ChromeRuntimeTransport, ContentScriptRouter, isRuntimeResponse } from "./content-script";
+import {
+  ChromeRuntimeTransport,
+  ContentScriptRouter,
+  cloudSpeakerFor,
+  isRuntimeResponse,
+} from "./content-script";
 
 class FakeLearningBlock implements ControllerBlock {
   expected: string[] = [];
@@ -869,6 +874,25 @@ describe("SessionController", () => {
     expect(viewport.observed).toHaveLength(2);
     expect(viewport.observed[1]!.element).toBe(element);
     vi.useRealTimers();
+  });
+
+  it("跨块单路:同 document 两次取用返回同一云端单例,块级 hooks 各自登记", () => {
+    const controller = { transport: new FakeTransport() };
+    const factory = cloudSpeakerFor(controller, 9, "doc-cloud");
+    const again = cloudSpeakerFor(controller, 9, "doc-cloud");
+    const endedA: number[] = [];
+    const endedB: number[] = [];
+
+    const speakerA = factory({ onEnd: () => endedA.push(1) });
+    const speakerB = again({ onEnd: () => endedB.push(1) });
+
+    // 装配前提:两个块共享一个 CloudSpeaker——否则 Audio 时代没有全局 cancel,
+    // 跨块接管会叠声(plan Review Focus 1)。
+    expect(speakerA).not.toBeNull();
+    expect(speakerA).toBe(speakerB);
+    speakerA?.stop();
+    expect(endedA).toHaveLength(1);
+    expect(endedB).toHaveLength(1);
   });
 
   it("云端单例装配:默认块工厂把块级 hooks 传给 tts 工厂(丢了 hooks 按钮永不复位)", async () => {

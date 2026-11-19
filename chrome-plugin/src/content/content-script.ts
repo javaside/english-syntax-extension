@@ -197,7 +197,7 @@ function isDiagnosisExplanation(value: unknown): value is DiagnosisExplanation {
 /** 云端朗读单例(每 content script 实例 = 每 document 一份,spec 裁决 1)。 */
 let cloudSpeakerSingleton: import("./speech").CloudSpeakerHandle | null = null;
 
-function cloudSpeakerFor(
+export function cloudSpeakerFor(
   controller: {
     transport: { send: (message: RequestMessage) => Promise<unknown> };
   },

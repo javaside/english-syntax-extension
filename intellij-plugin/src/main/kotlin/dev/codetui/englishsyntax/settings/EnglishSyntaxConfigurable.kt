@@ -47,6 +47,9 @@ class EnglishSyntaxConfigurable(
   private val pauseControl: PauseControl = ServicePauseControl(),
   /** 云端朗读语音源(独立于 profile);null = 用时才构造(默认构造走 service(),测试环境会 NPE)。 */
   private val ttsRepository: TtsSourceRepository? = null,
+  /** 「测试语音」的合成 seam:生产打真端点,测试注入 fake。 */
+  private val ttsTester: suspend (dev.codetui.englishsyntax.tts.TtsSourceConfig, String) -> ByteArray =
+    { config, text -> dev.codetui.englishsyntax.tts.HttpTtsFetcher(config, text) },
 ) : BoundConfigurable(EnglishSyntaxBundle.message("settings.display.name")) {
 
   data class CacheSummary(val entries: Int, val estimatedBytes: Long)
@@ -308,6 +311,9 @@ class EnglishSyntaxConfigurable(
           { form.ttsVoice = it ?: TTS_VOICES.first() },
         ).align(AlignX.FILL)
       }
+      row {
+        button(EnglishSyntaxBundle.message("settings.tts.test")) { runTtsTestAction() }
+      }
     }
     row {
       statusLabel = javax.swing.JLabel("") as javax.swing.JLabel?
@@ -557,6 +563,32 @@ class EnglishSyntaxConfigurable(
     background.dispatch {
       runBlocking { pauseControl.releaseIfFingerprintChanged(savedProfileId) }
     }
+  }
+
+  /**
+   * 「测试语音」：用表单当前值打一次 5 字符合成(spec 2026-11-18),IO 派发后台,
+   * 结果 balloon(复用连接测试的先例)。不保存——试音不该有副作用。
+   */
+  fun runTtsTestAction(): Boolean {
+    val config = dev.codetui.englishsyntax.tts.TtsSourceConfig(
+      enabled = true,
+      baseUrl = form.ttsBaseUrl,
+      apiKey = form.ttsApiKey,
+      model = form.ttsModel,
+      voice = form.ttsVoice,
+    )
+    background.dispatch {
+      try {
+        runBlocking { ttsTester(config, "Hello") }
+        transferUi.balloon("语音源可用，保存后朗读将使用云端语音", error = false)
+      } catch (error: Exception) {
+        transferUi.balloon(
+          "语音源不可用：${error.message ?: error.javaClass.simpleName}(朗读仍可用本地语音)",
+          error = true,
+        )
+      }
+    }
+    return true
   }
 
   /** 测试连接：先保存（probe 需要 PasswordSafe 里的 key），再探测端点能力。 */

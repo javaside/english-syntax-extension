@@ -143,19 +143,24 @@ class CloudSpeechSpeaker(
   override fun shutdown() = stop()
 
   private suspend fun run(text: String) {
+    val job = kotlinx.coroutines.currentCoroutineContext()[Job]!!
     val config = cachedConfigOrNull()
-    val played = config?.enabled == true && runCatching { speakCloud(config, text) }
-      .fold(
-        onSuccess = { it },
-        // CancellationException 已在 speakCloud 内原样透传,这里只会是意外失败。
-        onFailure = { false },
-      )
+    val played = try {
+      config?.enabled == true && speakCloud(config, text, job)
+    } catch (error: kotlinx.coroutines.CancellationException) {
+      // stop/接管的取消绝不能当失败回落——被取消的文本不得经本地音读出
+      // (runCatching 会连 CancellationException 一起吞掉,所以这里手写 try/catch)。
+      throw error
+    } catch (error: Exception) {
+      LOGGER.info("cloud tts failed, falling back: ${error.message}")
+      false
+    }
     if (!played) {
       speakViaFallback(text)
     }
   }
 
-  private suspend fun speakCloud(config: TtsSourceConfig, text: String): Boolean {
+  private suspend fun speakCloud(config: TtsSourceConfig, text: String, job: Job): Boolean {
     val wav = try {
       fetcher(config, text)
     } catch (error: kotlinx.coroutines.CancellationException) {
@@ -171,10 +176,16 @@ class CloudSpeechSpeaker(
       return false
     }
     synchronized(lock) {
+      // open 是阻塞调用,不响应取消:cancel 可能落在 fetch 返回与这里之间。
+      // 失效的 job 不得发布并播放(否则 stop 后出声/关闭线上 start 抛错)。
+      if (currentJob !== job || !job.isActive) {
+        runCatching { clip.close() }
+        throw kotlinx.coroutines.CancellationException("superseded")
+      }
       closeCurrentClipLocked()
       currentClip = clip
+      clip.start()
     }
-    clip.start()
     return true
   }
 

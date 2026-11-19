@@ -115,7 +115,7 @@ test.describe("cloud tts source", () => {
     },
   ];
 
-  test("云端语音源:点喇叭发起一次合成请求并切换按下态,再点停止不重复合成", async ({ harness }) => {
+  test("云端语音源:点喇叭发起一次合成请求,播完自动复位且全程只合成一次", async ({ harness }) => {
     await harness.seedProfiles(localProfile(harness), "profile-speak");
     await harness.seedTtsSource({
       enabled: true,

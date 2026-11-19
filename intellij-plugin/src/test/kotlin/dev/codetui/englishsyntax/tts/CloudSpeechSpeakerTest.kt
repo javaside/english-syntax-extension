@@ -65,7 +65,7 @@ class CloudSpeechSpeakerTest {
     configProvider: suspend () -> TtsSourceConfig? = { config },
     fetcher: suspend (TtsSourceConfig, String) -> ByteArray = { _, _ -> byteArrayOf(1, 2, 3) },
     errors: MutableList<String> = mutableListOf(),
-    clipFactory: FakeClipFactory = FakeClipFactory(),
+    clipFactory: ClipFactory = FakeClipFactory(),
     scope: CoroutineScope,
     now: () -> Long = { 0L },
   ): CloudSpeechSpeaker = CloudSpeechSpeaker(
@@ -177,9 +177,11 @@ class CloudSpeechSpeakerTest {
   fun `stop cancels the in-flight fetch and nothing plays`() {
     val scope = CoroutineScope(Dispatchers.Default + Job())
     val clips = FakeClipFactory()
+    val fallback = RecordingSpeaker()
     val fetchStarted = java.util.concurrent.atomic.AtomicBoolean(false)
     val fetchCancelled = java.util.concurrent.atomic.AtomicBoolean(false)
     val subject = speaker(
+      fallback = fallback,
       clipFactory = clips,
       fetcher = { _, _ ->
         fetchStarted.set(true)
@@ -204,6 +206,40 @@ class CloudSpeechSpeakerTest {
     Thread.sleep(200)
     assertEquals(0, clips.clips.size, "在途请求被取消,不应有任何 clip")
     assertTrue(fetchCancelled.get(), "fetch 协程应被取消")
+    // 红线:被取消的朗读绝不能回落本地出声(取消≠失败)。
+    assertEquals(0, fallback.spoken.size, "取消不得触发本地回落: ${fallback.spoken}")
+    scope.cancel()
+  }
+
+  @Test
+  fun `stop during clip open suppresses playback and the fallback`() {
+    val scope = CoroutineScope(Dispatchers.Default + Job())
+    val clips = object : ClipFactory {
+      val opened = java.util.concurrent.atomic.AtomicInteger(0)
+
+      override fun open(wav: ByteArray): ManagedClip {
+        opened.incrementAndGet()
+        Thread.sleep(300) // fetch 已返回,停顿落在 open 与 start 之间
+        return FakeClip().also { clipsList += it }
+      }
+
+      val clipsList = mutableListOf<FakeClip>()
+    }
+    val fallback = RecordingSpeaker()
+    val subject = speaker(
+      fallback = fallback,
+      clipFactory = clips,
+      scope = scope,
+    )
+    subject.speak("race sentence")
+    // 等 fetch 返回并进入 open 阻塞,再停。
+    val deadline = System.currentTimeMillis() + 5_000
+    while (clips.opened.get() == 0 && System.currentTimeMillis() < deadline) Thread.sleep(10)
+    subject.stop()
+    Thread.sleep(500)
+
+    assertEquals(0, clips.clipsList.count { it.starts > 0 }, "停止后到达的音频不得播放")
+    assertEquals(0, fallback.spoken.size, "竞态取消不得触发本地回落: ${fallback.spoken}")
     scope.cancel()
   }
 

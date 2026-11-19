@@ -1,8 +1,10 @@
 package dev.codetui.englishsyntax.settings
 
 import kotlinx.coroutines.runBlocking
+import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
@@ -100,5 +102,97 @@ class EnglishSyntaxConfigurableTtsTest {
     configurable.applyForm()
 
     assertTrue("tts-source" to "api-key" !in credentials.values)
+  }
+
+  // 不用「class 实现 suspend 函数类型」——该构造会卡死 Kotlin 编译器,这里以 lambda 捕获等价实现。
+  private fun recordingTester(): Pair<suspend (dev.codetui.englishsyntax.tts.TtsSourceConfig, String) -> ByteArray, MutableList<Pair<dev.codetui.englishsyntax.tts.TtsSourceConfig, String>>> {
+    val calls = mutableListOf<Pair<dev.codetui.englishsyntax.tts.TtsSourceConfig, String>>()
+    val tester: suspend (dev.codetui.englishsyntax.tts.TtsSourceConfig, String) -> ByteArray = { config, text ->
+      calls += config to text
+      byteArrayOf(1, 2)
+    }
+    return tester to calls
+  }
+
+  private class BalloonUi : EnglishSyntaxConfigurable.CacheTransferUi {
+    val balloons = mutableListOf<Pair<String, Boolean>>()
+
+    override fun chooseExportFile(): Path? = null
+
+    override fun chooseImportFile(): Path? = null
+
+    override fun balloon(text: String, error: Boolean) {
+      balloons += text to error
+    }
+  }
+
+  @Test
+  fun `tts test button synthesizes a short sample off the caller thread and balloons the result`() = runBlocking {
+    val (tester, calls) = recordingTester()
+    val ui = BalloonUi()
+    val dispatcher = mutableListOf<() -> Unit>()
+    val configurable = EnglishSyntaxConfigurable(
+      repository = ProfileRepository(ProfileState(), FakeCredentialStore()),
+      profileState = ProfileState(),
+      ttsRepository = TtsSourceRepository(ProfileState(), FakeCredentialStore()),
+      background = EnglishSyntaxConfigurable.BackgroundDispatcher { dispatcher += it },
+      profileRefresh = EnglishSyntaxConfigurable.ProfileRefresh { },
+      pauseControl = object : EnglishSyntaxConfigurable.PauseControl {
+        override suspend fun releaseIfFingerprintChanged(profileId: String) = false
+        override fun release(profileId: String) = Unit
+      },
+      transferUi = ui,
+      ttsTester = tester,
+    )
+    configurable.form.ttsEnabled = true
+    configurable.form.ttsBaseUrl = "https://api.example.com/v1"
+    configurable.form.ttsModel = "speaker-model"
+    configurable.form.ttsVoice = "david"
+    configurable.form.ttsApiKey = "sk-tts"
+
+    assertTrue(configurable.runTtsTestAction())
+    // EDT 上只允许派发:合成与 balloon 都在后台块里。
+    assertEquals(0, calls.size)
+    assertEquals(0, ui.balloons.size)
+
+    dispatcher.single().invoke()
+
+    assertEquals(1, calls.size)
+    val (config, text) = calls.single()
+    assertEquals("https://api.example.com/v1", config.baseUrl)
+    assertEquals("speaker-model", config.model)
+    assertEquals("david", config.voice)
+    assertEquals("sk-tts", config.apiKey)
+    assertTrue(text.length in 1..10, "测试合成应是短样本文本: '$text'")
+    val (message, error) = ui.balloons.single()
+    assertFalse(error)
+    assertTrue(message.contains("语音源可用"), message)
+  }
+
+  @Test
+  fun `tts test failure balloons a warning`() {
+    val ui = BalloonUi()
+    val dispatcher = mutableListOf<() -> Unit>()
+    val configurable = EnglishSyntaxConfigurable(
+      repository = ProfileRepository(ProfileState(), FakeCredentialStore()),
+      profileState = ProfileState(),
+      ttsRepository = TtsSourceRepository(ProfileState(), FakeCredentialStore()),
+      background = EnglishSyntaxConfigurable.BackgroundDispatcher { dispatcher += it },
+      profileRefresh = EnglishSyntaxConfigurable.ProfileRefresh { },
+      pauseControl = object : EnglishSyntaxConfigurable.PauseControl {
+        override suspend fun releaseIfFingerprintChanged(profileId: String) = false
+        override fun release(profileId: String) = Unit
+      },
+      transferUi = ui,
+      ttsTester = { _, _ -> throw java.io.IOException("connection refused") },
+    )
+    configurable.form.ttsEnabled = true
+
+    assertTrue(configurable.runTtsTestAction())
+    dispatcher.single().invoke()
+
+    val (message, error) = ui.balloons.single()
+    assertTrue(error, message)
+    assertTrue(message.contains("语音源不可用"), message)
   }
 }
