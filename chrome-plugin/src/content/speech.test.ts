@@ -6,6 +6,7 @@ import {
   createCloudSpeaker,
   createSpeaker,
   pickEnglishVoice,
+  VOICE_START_WATCHDOG_MS,
   type Speaker,
   type SpeakerHooks,
   type SpeechSynthesisLike,
@@ -28,7 +29,7 @@ class FakeSynthesis implements SpeechSynthesisLike {
   }
 
   createUtterance(text: string): SpeechSynthesisUtteranceLike {
-    return { text, lang: "", onend: null, onerror: null };
+    return { text, lang: "", onstart: null, onend: null, onerror: null };
   }
 
   speak(utterance: SpeechSynthesisUtteranceLike): void {
@@ -83,6 +84,64 @@ describe("createSpeaker", () => {
     expect(synth.cancelCount).toBe(cancelsBefore + 1);
     expect(synth.spoken.map((u) => u.text)).toEqual(["a", "b"]);
     expect(speaker!.isSpeaking()).toBe(true);
+  });
+
+  it("选中的语音挂死(无 onstart)时降级为无 voice 重试,仍能出声", () => {
+    vi.useFakeTimers();
+    try {
+      // 场景:墙内选中 Google 网络语音/损坏语音——speak 后无任何事件。
+      class HangingVoiceSynthesis extends FakeSynthesis {
+        override speak(utterance: SpeechSynthesisUtteranceLike): void {
+          super.speak(utterance);
+          if (utterance.voice != null) return; // 带 voice 的吞掉:不触发事件
+          // 无 voice 的保底版正常启动收尾。
+          utterance.onstart?.();
+          utterance.onend?.();
+        }
+      }
+      const synth = new HangingVoiceSynthesis();
+      synth.voices = [voice("en-US", "Google US English", false)];
+      const ends: number[] = [];
+      const speaker = createSpeaker(synth, { onEnd: () => ends.push(1) });
+
+      speaker!.speak("hello");
+      expect(synth.spoken).toHaveLength(1); // 首选 Google 语音
+      expect(synth.spoken[0]!.voice?.name).toBe("Google US English");
+
+      vi.advanceTimersByTime(VOICE_START_WATCHDOG_MS + 1);
+
+      // 降级重试:第二条不带 voice(lang 保底),且播完复位。
+      expect(synth.spoken).toHaveLength(2);
+      expect(synth.spoken[1]!.voice).toBeUndefined();
+      expect(ends).toHaveLength(1);
+      expect(speaker!.isSpeaking()).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("保底重试也挂死时最终复位,绝不永久卡按下态", () => {
+    vi.useFakeTimers();
+    try {
+      class AllHangingSynthesis extends FakeSynthesis {
+        override speak(): void {
+          // 全部吞掉:无论有无 voice 都不触发事件。
+        }
+      }
+      const synth = new AllHangingSynthesis();
+      synth.voices = [voice("en-US", "Google US English", false)];
+      const ends: number[] = [];
+      const speaker = createSpeaker(synth, { onEnd: () => ends.push(1) });
+
+      speaker!.speak("hello");
+      vi.advanceTimersByTime(VOICE_START_WATCHDOG_MS + 1);
+      vi.advanceTimersByTime(VOICE_START_WATCHDOG_MS + 1);
+
+      expect(ends).toHaveLength(1);
+      expect(speaker!.isSpeaking()).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("stop():朗读中同步触发一次 onEnd 并 cancel;已停再 stop 是 no-op", () => {

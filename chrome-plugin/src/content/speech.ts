@@ -27,6 +27,8 @@ export interface SpeechSynthesisUtteranceLike {
   lang: string;
   /** 真实 DOM 属性可空(清空语音即 null);未挑选语音时不赋值(undefined)。 */
   voice?: SpeechSynthesisVoiceLike | null;
+  /** 真实 DOM 属性;启动看门狗靠它判定「选中的语音活了」。 */
+  onstart: (() => void) | null;
   onend: (() => void) | null;
   onerror: (() => void) | null;
 }
@@ -197,6 +199,10 @@ export function defaultSynthesis(): SpeechSynthesisLike | undefined {
   };
 }
 
+/** 本地语音启动看门狗:选中的语音 speak 后这么久还没 onstart(墙内选中
+ * Google 网络语音、损坏的增强版语音等),就摘掉 voice 用 lang 保底重试。 */
+export const VOICE_START_WATCHDOG_MS = 2_500;
+
 export function createSpeaker(
   synth: SpeechSynthesisLike | undefined,
   hooks?: SpeakerHooks,
@@ -205,9 +211,54 @@ export function createSpeaker(
     return null;
   }
   let current: SpeechSynthesisUtteranceLike | null = null;
+  let startWatchdog: ReturnType<typeof setTimeout> | undefined;
   const settle = (): void => {
+    if (startWatchdog !== undefined) {
+      clearTimeout(startWatchdog);
+      startWatchdog = undefined;
+    }
     current = null;
     hooks?.onEnd?.();
+  };
+  /** 挂事件守卫并送播。retried=false 时挂启动看门狗(首次尝试)——fire 则
+   * 摘 voice 重试一次;retried=true 时挂「最终复位」看门狗——再挂就 settle,
+   * 绝不永久卡按下态(真机教训:无声+无事件+按钮卡亮)。 */
+  const dispatch = (text: string, retried: boolean): void => {
+    const utterance = synth.createUtterance(text);
+    utterance.lang = "en-US";
+    if (!retried) {
+      const voice = pickEnglishVoice(synth.getVoices());
+      if (voice !== undefined) {
+        utterance.voice = voice;
+      }
+    }
+    utterance.onstart = () => {
+      if (current !== utterance) return;
+      if (startWatchdog !== undefined) {
+        clearTimeout(startWatchdog);
+        startWatchdog = undefined;
+      }
+    };
+    utterance.onend = () => {
+      if (current === utterance) {
+        settle();
+      }
+    };
+    utterance.onerror = utterance.onend;
+    current = utterance;
+    synth.speak(utterance);
+    startWatchdog = setTimeout(() => {
+      if (current !== utterance) return;
+      if (!retried) {
+        // 选中语音不可用:摘 voice、由 lang 保底重试一次。
+        synth.cancel();
+        dispatch(text, true);
+        return;
+      }
+      // 保底也挂死:复位收尾,别让按钮永久卡亮。
+      synth.cancel();
+      settle();
+    }, VOICE_START_WATCHDOG_MS);
   };
   return {
     speak(text: string): void {
@@ -216,20 +267,11 @@ export function createSpeaker(
       // 块的新朗读被 Web Speech API 排队而非立即接管。被取消 utterance 的
       // 晚到 onend 由各自守卫丢弃。
       synth.cancel();
-      const utterance = synth.createUtterance(text);
-      utterance.lang = "en-US";
-      const voice = pickEnglishVoice(synth.getVoices());
-      if (voice !== undefined) {
-        utterance.voice = voice;
+      if (startWatchdog !== undefined) {
+        clearTimeout(startWatchdog);
+        startWatchdog = undefined;
       }
-      utterance.onend = () => {
-        if (current === utterance) {
-          settle();
-        }
-      };
-      utterance.onerror = utterance.onend;
-      current = utterance;
-      synth.speak(utterance);
+      dispatch(text, false);
     },
     stop(): void {
       if (current === null) {
