@@ -267,8 +267,11 @@ export async function createOptionsPage(
   const ttsSaveButton = element("button", "options-page__primary", "保存语音源");
   ttsSaveButton.type = "button";
   ttsSaveButton.dataset.action = "save-tts";
+  const ttsTestButton = element("button", "options-page__secondary", "测试语音");
+  ttsTestButton.type = "button";
+  ttsTestButton.dataset.action = "test-tts";
   const ttsActions = element("div", "options-page__actions");
-  ttsActions.append(ttsSaveButton);
+  ttsActions.append(ttsSaveButton, ttsTestButton);
   ttsSection.append(
     ttsHeading,
     ttsEnabledLabel,
@@ -582,10 +585,21 @@ export async function createOptionsPage(
       ttsSaveButton.disabled = true;
       ttsSaveButton.textContent = "保存中…";
       try {
+        // 权限申请先于任何 await:chrome.permissions.request 对用户手势敏感,
+        // 等 storage 读回来再申请可能在部分版本被静默拒绝(真机排查教训)。
+        const wantEnabled = ttsEnabledInput.checked;
+        const baseUrl = normalizeBaseUrl(ttsBaseUrlInput.value);
+        if (
+          wantEnabled &&
+          !(await dependencies.requestPermission(hostPermissionPattern(baseUrl)))
+        ) {
+          ttsResult.textContent = "未获得语音源地址访问权限，请允许后重试。";
+          return;
+        }
         const stored = await dependencies.getTtsSource();
         const config: TtsSourceConfig = {
-          enabled: ttsEnabledInput.checked,
-          baseUrl: normalizeBaseUrl(ttsBaseUrlInput.value),
+          enabled: wantEnabled,
+          baseUrl,
           // 密钥不回显:留空表示沿用已存 Key(与模型配置同款约定)。
           apiKey: ttsApiKeyInput.value || stored?.apiKey || "",
           model: ttsModelInput.value.trim(),
@@ -594,24 +608,74 @@ export async function createOptionsPage(
         if (config.enabled && config.model === "") {
           throw new Error("TTS model is required when enabled");
         }
-        // 只有启用才申请 optional host 权限:禁用状态 SW 永不发请求,不弹权限框。
-        if (
-          config.enabled &&
-          !(await dependencies.requestPermission(hostPermissionPattern(config.baseUrl)))
-        ) {
-          ttsResult.textContent = "未获得语音源地址访问权限，请允许后重试。";
-          return;
-        }
         await dependencies.saveTtsSource(config);
         ttsApiKeyInput.value = "";
         ttsApiKeyInput.placeholder = API_KEY_SAVED_HINT;
         ttsResult.textContent =
-          "语音源配置已保存，下次「开始学习」时生效；朗读失败会自动回落本地语音。";
+          "语音源配置已保存，下一次点喇叭即生效；朗读失败会自动回落本地语音。";
       } catch {
         ttsResult.textContent = "语音源配置无效，请检查服务地址与模型名称。";
       } finally {
         ttsSaveButton.disabled = false;
         ttsSaveButton.textContent = "保存语音源";
+      }
+    })();
+  });
+  ttsTestButton.addEventListener("click", () => {
+    void (async () => {
+      ttsTestButton.disabled = true;
+      ttsTestButton.textContent = "测试中…";
+      ttsResult.textContent = "正在读取配置…";
+      try {
+        const stored = await dependencies.getTtsSource();
+        if (stored === undefined || !stored.enabled) {
+          ttsResult.textContent =
+            "✗ 未配置或未启用——朗读用的是本地语音（这就是「没有提示」的原因）。勾选开关并保存后再测。";
+          return;
+        }
+        ttsResult.textContent = `✓ 配置已保存（${stored.model} · ${stored.voice}）。检查站点权限…`;
+        if (!(await dependencies.requestPermission(hostPermissionPattern(stored.baseUrl)))) {
+          ttsResult.textContent = `✓ 配置已保存（${stored.model}）｜✗ 未获得 ${new URL(stored.baseUrl).origin} 的访问权限——重新点「保存语音源」并在弹窗中允许。`;
+          return;
+        }
+        ttsResult.textContent = `✓ 配置已保存｜✓ 权限已授予。正在合成 5 字符测试音频…`;
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 10_000);
+        try {
+          const response = await fetch(`${stored.baseUrl.replace(/\/$/u, "")}/audio/speech`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${stored.apiKey}`,
+            },
+            body: JSON.stringify({
+              model: stored.model,
+              input: "Hello",
+              voice: `${stored.model}:${stored.voice}`,
+              response_format: "mp3",
+            }),
+            signal: controller.signal,
+          });
+          if (!response.ok) {
+            const hint =
+              response.status === 401 || response.status === 403
+                ? "（API Key 无效或余额不足）"
+                : response.status === 404
+                  ? "（模型名或地址可能不对）"
+                  : "";
+            ttsResult.textContent = `✓ 配置已保存｜✓ 权限已授予｜✗ 合成失败：HTTP ${response.status}${hint}`;
+            return;
+          }
+          const bytes = (await response.arrayBuffer()).byteLength;
+          ttsResult.textContent = `✓ 配置已保存｜✓ 权限已授予｜✓ 合成成功（${bytes} 字节）——云端语音可用；若页面朗读仍回落本地，请刷新页面重试。`;
+        } finally {
+          clearTimeout(timer);
+        }
+      } catch (error) {
+        ttsResult.textContent = `✗ 测试失败：${error instanceof Error ? error.message : String(error)}（配置或网络问题，朗读会回落本地语音）`;
+      } finally {
+        ttsTestButton.disabled = false;
+        ttsTestButton.textContent = "测试语音";
       }
     })();
   });

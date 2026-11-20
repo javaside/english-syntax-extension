@@ -205,6 +205,35 @@ test.describe("cloud tts source", () => {
       .toBe(1);
   });
 
+  test("Alt+T 按段解析的喇叭也走云端(轻量会话同享云端单例)", async ({ harness }) => {
+    await harness.seedProfiles(localProfile(harness), "profile-speak");
+    await harness.seedTtsSource({
+      enabled: true,
+      baseUrl: harness.fakeModel.baseUrl,
+      apiKey: "sk-tts-secret",
+      model: "FunAudioLLM/CosyVoice2-0.5B",
+      voice: "anna",
+    });
+    const page = await harness.context.newPage();
+    await page.goto(`${harness.pagesOrigin}/dynamic-article.html`);
+    const tabId = await harness.tabIdFor(`${harness.pagesOrigin}/dynamic-article.html`);
+    // 悬停目标要真实 :hover 链(与 extension.spec 的冷启动先例同款),再冷启动按段解析。
+    await page.locator("#intro").hover();
+    const response = await harness.dispatchFromUi(
+      uiMessage("PARSE_HOVERED_BLOCK", { tabId, documentId: `speak-hover-${++requestCounter}` }),
+    );
+    expect(response).toMatchObject({ type: "ACK" });
+    await expect(page.locator("[data-syntax-learning-block]")).toHaveCount(1, {
+      timeout: 20_000,
+    });
+
+    const speak = page.locator("[data-syntax-speak]").first();
+    await speak.click();
+    await expect
+      .poll(() => harness.fakeModel.recordedOfKind("tts-speech").length, { timeout: 10_000 })
+      .toBe(1);
+  });
+
   test("云端语音源关闭:零合成请求,朗读仍走本地", async ({ harness }) => {
     await harness.seedProfiles(localProfile(harness), "profile-speak");
     await harness.seedTtsSource({

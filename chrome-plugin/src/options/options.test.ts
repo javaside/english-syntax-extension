@@ -715,6 +715,117 @@ describe("朗读语音源设置", () => {
     expect(subject.saveTtsSource).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }));
   });
 
+  it("测试语音:逐环显示配置/权限/合成结果,问题落在屏幕上而不是 console", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve(
+          new Response(new Uint8Array([1, 2, 3]), {
+            status: 200,
+            headers: { "content-type": "audio/mpeg" },
+          }),
+        ),
+      ),
+    );
+    try {
+      const subject = dependencies({
+        getTtsSource: vi.fn(() =>
+          Promise.resolve({
+            enabled: true,
+            baseUrl: "https://api.siliconflow.cn/v1",
+            apiKey: "sk-tts-secret",
+            model: "FunAudioLLM/CosyVoice2-0.5B",
+            voice: "anna",
+          }),
+        ),
+        requestPermission: vi.fn(() => Promise.resolve(true)),
+      });
+      await createOptionsPage(root(), subject);
+
+      document.querySelector<HTMLButtonElement>("[data-action='test-tts']")!.click();
+
+      await vi.waitFor(() => {
+        const text = document.querySelector("[data-tts-result]")?.textContent ?? "";
+        expect(text).toContain("配置已保存");
+        expect(text).toContain("权限已授予");
+        expect(text).toContain("合成成功");
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("测试语音:配置缺失时明示「未配置或未启用」,不发合成请求", async () => {
+    const fetchCalls = vi.fn();
+    vi.stubGlobal("fetch", fetchCalls);
+    try {
+      const subject = dependencies({
+        getTtsSource: vi.fn(() => Promise.resolve(undefined)),
+      });
+      await createOptionsPage(root(), subject);
+      document.querySelector<HTMLButtonElement>("[data-action='test-tts']")!.click();
+      await vi.waitFor(() => {
+        expect(document.querySelector("[data-tts-result]")?.textContent).toContain(
+          "未配置或未启用",
+        );
+      });
+      expect(fetchCalls).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("测试语音:HTTP 401 明示 Key/余额问题", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.resolve(new Response("unauthorized", { status: 401 }))),
+    );
+    try {
+      const subject = dependencies({
+        getTtsSource: vi.fn(() =>
+          Promise.resolve({
+            enabled: true,
+            baseUrl: "https://api.siliconflow.cn/v1",
+            apiKey: "sk-bad",
+            model: "FunAudioLLM/CosyVoice2-0.5B",
+            voice: "anna",
+          }),
+        ),
+        requestPermission: vi.fn(() => Promise.resolve(true)),
+      });
+      await createOptionsPage(root(), subject);
+      document.querySelector<HTMLButtonElement>("[data-action='test-tts']")!.click();
+      await vi.waitFor(() => {
+        expect(document.querySelector("[data-tts-result]")?.textContent).toContain("401");
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("保存语音源:权限申请先于任何异步读(用户手势栈内发起)", async () => {
+    const order: string[] = [];
+    const subject = dependencies({
+      getTtsSource: vi.fn(() => {
+        order.push("getTtsSource");
+        return Promise.resolve(undefined);
+      }),
+      requestPermission: vi.fn(() => {
+        order.push("requestPermission");
+        return Promise.resolve(true);
+      }),
+    });
+    await createOptionsPage(root(), subject);
+    inputByLabel("语音服务地址").value = "https://api.siliconflow.cn/v1";
+    const toggle = document.querySelector<HTMLInputElement>("[data-tts-enabled]")!;
+    toggle.checked = true;
+    order.length = 0; // 页面加载时的表单回填也读一次配置,清掉只看保存路径
+    document.querySelector<HTMLButtonElement>("[data-action='save-tts']")!.click();
+
+    await vi.waitFor(() => expect(subject.saveTtsSource).toHaveBeenCalledOnce());
+    expect(order).toEqual(["requestPermission", "getTtsSource"]);
+  });
+
   it("blocks saving an enabled source when the origin permission is denied", async () => {
     const subject = dependencies({
       requestPermission: vi.fn(() => Promise.resolve(false)),

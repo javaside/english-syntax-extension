@@ -608,6 +608,10 @@ export class ContentScriptRouter {
       hoverTarget: this.options.hoverTarget,
       onStatus: (status) => this.options.relayStatus?.(documentId, status),
     });
+    // 所有会话形态(整页/Alt+T 悬停/选区/右键)一律接云端单例:云端与否由 SW
+    // 每次点击实时读配置决定——配置一变下一次点击即生效,与会话形态、启动
+    // 顺序完全解耦(真机教训:「先学习后配置」「只用 Alt+T」两类都踩过坑)。
+    controller.enableCloudTts(cloudSpeakerFor(controller, tabId, documentId));
     this.controllers.set(documentId, controller);
     return controller;
   }
