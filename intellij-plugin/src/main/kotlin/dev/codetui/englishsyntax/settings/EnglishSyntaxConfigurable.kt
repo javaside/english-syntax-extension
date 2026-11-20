@@ -515,6 +515,24 @@ class EnglishSyntaxConfigurable(
 
   fun isFormModified(): Boolean = form != baseline
 
+  /**
+   * 设置对话框点 OK/Apply 的正确接线:DSL 绑定写回 form 后全量持久化。
+   * 此前 applyForm 只挂在「Save profile」按钮上——填完 Speech source 点 OK
+   * 什么都不保存,改动直接丢弃(真机:「配置了云端还是本地」的根因)。
+   */
+  override fun apply() {
+    super.apply()
+    try {
+      applyForm()
+    } catch (error: IllegalArgumentException) {
+      throw com.intellij.openapi.options.ConfigurationException(error.message ?: "配置无效")
+    } catch (error: IllegalStateException) {
+      throw com.intellij.openapi.options.ConfigurationException(error.message ?: "配置无效")
+    }
+  }
+
+  override fun isModified(): Boolean = super.isModified() || isFormModified()
+
   fun applyForm(): Unit {
     runBlocking {
       val headers = parseHeaders(form.headers)
@@ -570,6 +588,8 @@ class EnglishSyntaxConfigurable(
    * 结果 balloon(复用连接测试的先例)。不保存——试音不该有副作用。
    */
   fun runTtsTestAction(): Boolean {
+    // 立即在设置页状态行给反应——balloon 可能被通知中心折叠,用户会以为按钮没反应。
+    setStatus("正在后台合成测试音频…")
     val config = dev.codetui.englishsyntax.tts.TtsSourceConfig(
       enabled = true,
       baseUrl = form.ttsBaseUrl,
@@ -580,12 +600,12 @@ class EnglishSyntaxConfigurable(
     background.dispatch {
       try {
         runBlocking { ttsTester(config, "Hello") }
+        setStatus("语音源可用，保存后朗读将使用云端语音")
         transferUi.balloon("语音源可用，保存后朗读将使用云端语音", error = false)
       } catch (error: Exception) {
-        transferUi.balloon(
-          "语音源不可用：${error.message ?: error.javaClass.simpleName}(朗读仍可用本地语音)",
-          error = true,
-        )
+        val message = "语音源不可用：${error.message ?: error.javaClass.simpleName}（朗读仍可用本地语音）"
+        setStatus(message)
+        transferUi.balloon(message, error = true)
       }
     }
     return true

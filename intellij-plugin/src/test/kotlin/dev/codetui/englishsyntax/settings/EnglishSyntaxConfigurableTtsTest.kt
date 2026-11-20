@@ -88,6 +88,42 @@ class EnglishSyntaxConfigurableTtsTest {
   }
 
   @Test
+  fun `settings OK-Apply is wired to persist (apply overrides BoundConfigurable)`() {
+    // super.apply() 依赖平台 UI 设施,单测直接调会撞 Alarm——这里钉接线存在,
+    // 持久化正确性由 applyForm 的用例覆盖(apply = super.apply() + applyForm)。
+    val method = EnglishSyntaxConfigurable::class.java.getMethod("apply")
+    assertEquals(EnglishSyntaxConfigurable::class.java, method.declaringClass)
+    val isModified = EnglishSyntaxConfigurable::class.java.getMethod("isModified")
+    assertEquals(EnglishSyntaxConfigurable::class.java, isModified.declaringClass)
+  }
+
+  @Test
+  fun `test speech gives immediate in-page feedback before the balloon`() {
+    val dispatcher = mutableListOf<() -> Unit>()
+    val configurable = EnglishSyntaxConfigurable(
+      repository = ProfileRepository(ProfileState(), FakeCredentialStore()),
+      profileState = ProfileState(),
+      ttsRepository = TtsSourceRepository(ProfileState(), FakeCredentialStore()),
+      background = EnglishSyntaxConfigurable.BackgroundDispatcher { dispatcher += it },
+      profileRefresh = EnglishSyntaxConfigurable.ProfileRefresh { },
+      pauseControl = object : EnglishSyntaxConfigurable.PauseControl {
+        override suspend fun releaseIfFingerprintChanged(profileId: String) = false
+        override fun release(profileId: String) = Unit
+      },
+      transferUi = BalloonUi(),
+      ttsTester = { _, _ -> throw java.io.IOException("offline") },
+    )
+    configurable.form.ttsEnabled = true
+
+    assertTrue(configurable.runTtsTestAction())
+    // 派发后台块之前,页面状态行立即有反应(不依赖 balloon/通知中心)。
+    assertTrue(configurable.actionStatus.contains("正在"), configurable.actionStatus)
+
+    dispatcher.single().invoke()
+    assertTrue(configurable.actionStatus.contains("语音源"), configurable.actionStatus)
+  }
+
+  @Test
   fun `blank tts api key deletes the stored credential`() = runBlocking {
     val state = ProfileState()
     val credentials = FakeCredentialStore()
