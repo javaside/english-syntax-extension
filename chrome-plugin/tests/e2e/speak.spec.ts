@@ -149,6 +149,8 @@ test.describe("cloud tts source", () => {
     // 且全程只有一次合成请求(点停/重读的语义已由单测钉住)。
     await expect(speak).toHaveAttribute("aria-pressed", "false", { timeout: 5_000 });
     expect(harness.fakeModel.recordedOfKind("tts-speech")).toHaveLength(1);
+    // 来源指示:云端播放时胶囊明示,用户能一眼看出走的哪条路。
+    await expect(page.locator("[data-syntax-progress-pill]")).toContainText("☁ 云端语音");
   });
 
   test("云端语音源失败:页面胶囊明示回落,按钮不静默卡死", async ({ harness }) => {

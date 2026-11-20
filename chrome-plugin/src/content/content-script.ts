@@ -194,7 +194,7 @@ function isDiagnosisExplanation(value: unknown): value is DiagnosisExplanation {
   );
 }
 
-/** 云端朗读回落的用户可见提示口(installContentScript 创建胶囊后绑定)。 */
+/** 云端朗读的用户可见提示口(回落告警/来源指示;installContentScript 创建胶囊后绑定)。 */
 let notifyTtsFallback: ((reason: string) => void) | undefined;
 
 /** 云端朗读单例(每 content script 实例 = 每 document 一份,spec 裁决 1)。 */
@@ -235,6 +235,9 @@ export function cloudSpeakerFor(
         // 表现就是「无声又无提示」——必须给页面可见反馈(胶囊提示一次)。
         console.info(`[句法学习] 云端语音源不可用(${reason}),已回落本地语音`);
         notifyTtsFallback?.(`⚠ 云端语音不可用(${reason})，已用本地语音朗读`);
+      },
+      onCloudPlayback: () => {
+        notifyTtsFallback?.("☁ 云端语音");
       },
     });
   }

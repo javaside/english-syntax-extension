@@ -505,6 +505,20 @@ describe("createCloudSpeaker", () => {
     expect(speaker.isSpeaking()).toBe(true);
   });
 
+  it("云端成功播放触发 onCloudPlayback(来源指示)", async () => {
+    const started: number[] = [];
+    const speaker = createCloudSpeaker(
+      () => Promise.resolve({ audioBase64: "aGVsbG8=", mime: "audio/mpeg" }),
+      {
+        createAudio: () => new FakeAudio() as unknown as HTMLAudioElement,
+        onCloudPlayback: () => started.push(1),
+      },
+    );
+    speaker.speak("hello");
+    await vi.waitFor(() => expect(FakeAudio.instances).toHaveLength(1));
+    expect(started).toHaveLength(1);
+  });
+
   it("CONFIG_MISSING(未配置/禁用)静默回落本地,不弹回落提示", async () => {
     const local = new FakeSpeaker();
     const notices: string[] = [];

@@ -307,6 +307,8 @@ export interface CloudSpeakerOptions {
   createLocalFallback?: (hooks: SpeakerHooks) => Speaker | null;
   /** 回落发生时通知一次(UI 提示用)。 */
   onFallbackNotice?: (reason: string) => void;
+  /** 云端音频开始播放时通知一次(来源指示:用户需要一眼看出走的哪条路)。 */
+  onCloudPlayback?: () => void;
   /** 测试注入 Audio 构造。 */
   createAudio?: () => HTMLAudioElement;
 }
@@ -396,6 +398,7 @@ export function createCloudSpeaker(
             failToFallback(text, "audio-decode");
           };
           audio = element;
+          options.onCloudPlayback?.();
           void element.play().catch(() => {
             // 合成耗时超过手势激活窗口时,自动播放策略会拒绝 play():
             // 这个 rejection 不触发 onerror/onended——不接住就是静默卡死。
