@@ -63,6 +63,16 @@ class HttpTtsFetcherTest {
   }
 
   @Test
+  fun `trims whitespace around the pasted api key`(): Unit = runBlocking {
+    val dirty = config.copy(apiKey = "sk-tts-secret \n")
+    val wav = HttpTtsFetcher(dirty, "hello")
+    assertEquals("RIFF-wav-bytes", wav.decodeToString())
+    val hit = synchronized(recorded) { recorded.last() }
+    assertEquals("Bearer sk-tts-secret", hit.authorization)
+    Unit
+  }
+
+  @Test
   fun `fails loudly on http errors`(): Unit = runBlocking {
     status = 401
     val error = assertFailsWith<Exception> { HttpTtsFetcher(config, "hi") }

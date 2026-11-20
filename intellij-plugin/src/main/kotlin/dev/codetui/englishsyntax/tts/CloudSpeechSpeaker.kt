@@ -71,17 +71,24 @@ object JavaClipFactory : ClipFactory {
  */
 suspend fun HttpTtsFetcher(config: TtsSourceConfig, text: String): ByteArray =
   kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+    // 粘贴的 Key/地址常带尾空白:java.net.http 对脏 header 直接抛
+    // IllegalArgumentException(Chrome fetch 却宽容)——同 Key 两端一通一不通
+    // 的高发原因,进来先全部洗净。
+    val apiKey = config.apiKey.trim()
+    val baseUrl = config.baseUrl.trim().trimEnd('/')
+    val model = config.model.trim()
+    val voice = config.voice.trim()
     val body = kotlinx.serialization.json.buildJsonObject {
-      put("model", config.model)
+      put("model", model)
       put("input", text)
-      put("voice", "${config.model}:${config.voice}")
+      put("voice", "$model:$voice")
       put("response_format", "wav")
     }.toString()
     val request = java.net.http.HttpRequest.newBuilder()
-      .uri(java.net.URI.create("${config.baseUrl.trimEnd('/')}/audio/speech"))
+      .uri(java.net.URI.create("$baseUrl/audio/speech"))
       .timeout(java.time.Duration.ofSeconds(10))
       .header("Content-Type", "application/json")
-      .header("Authorization", "Bearer ${config.apiKey}")
+      .header("Authorization", "Bearer $apiKey")
       .POST(java.net.http.HttpRequest.BodyPublishers.ofString(body))
       .build()
     val response = java.net.http.HttpClient.newBuilder()

@@ -589,6 +589,11 @@ class EnglishSyntaxConfigurable(
    */
   fun runTtsTestAction(): Boolean {
     // 立即在设置页状态行给反应——balloon 可能被通知中心折叠,用户会以为按钮没反应。
+    if (form.ttsApiKey.isBlank()) {
+      setStatus("语音源不可用：未填写 API Key（Speech API key 一栏）")
+      transferUi.balloon("语音源不可用：未填写 API Key", error = true)
+      return false
+    }
     setStatus("正在后台合成测试音频…")
     val config = dev.codetui.englishsyntax.tts.TtsSourceConfig(
       enabled = true,

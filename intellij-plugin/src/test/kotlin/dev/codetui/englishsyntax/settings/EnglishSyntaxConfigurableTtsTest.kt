@@ -114,6 +114,7 @@ class EnglishSyntaxConfigurableTtsTest {
       ttsTester = { _, _ -> throw java.io.IOException("offline") },
     )
     configurable.form.ttsEnabled = true
+    configurable.form.ttsApiKey = "sk-filled"
 
     assertTrue(configurable.runTtsTestAction())
     // 派发后台块之前,页面状态行立即有反应(不依赖 balloon/通知中心)。
@@ -223,6 +224,7 @@ class EnglishSyntaxConfigurableTtsTest {
       ttsTester = { _, _ -> throw java.io.IOException("connection refused") },
     )
     configurable.form.ttsEnabled = true
+    configurable.form.ttsApiKey = "sk-filled"
 
     assertTrue(configurable.runTtsTestAction())
     dispatcher.single().invoke()
