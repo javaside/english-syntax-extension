@@ -505,6 +505,19 @@ describe("createCloudSpeaker", () => {
     expect(speaker.isSpeaking()).toBe(true);
   });
 
+  it("CONFIG_MISSING(未配置/禁用)静默回落本地,不弹回落提示", async () => {
+    const local = new FakeSpeaker();
+    const notices: string[] = [];
+    const speaker = createCloudSpeaker(() => Promise.resolve({ error: "CONFIG_MISSING" }), {
+      createAudio: () => new FakeAudio() as unknown as HTMLAudioElement,
+      createLocalFallback: () => local,
+      onFallbackNotice: (reason) => notices.push(reason),
+    });
+    speaker.speak("hello");
+    await vi.waitFor(() => expect(local.spoken).toEqual(["hello"]));
+    expect(notices).toHaveLength(0); // 「没配」不是错误,别骚扰用户
+  });
+
   it("synthesize 挂死(消息通道无响应)超过看门狗时回落本地,绝不静默卡死", async () => {
     vi.useFakeTimers();
     try {

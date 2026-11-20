@@ -339,7 +339,8 @@ export function createCloudSpeaker(
    * 出声、要么提示回落、要么复位——绝不静默卡死(真机教训:play() 被自动
    * 播放策略拒绝、消息通道挂死,都曾是"无声+无提示+按钮卡亮"的死路)。 */
   const failToFallback = (text: string, reason: string): void => {
-    options.onFallbackNotice?.(reason);
+    // 「没配/禁用」不是错误,静默回落——别对每个未配置用户弹提示。
+    if (reason !== "CONFIG_MISSING") options.onFallbackNotice?.(reason);
     if (localFallback !== undefined) {
       fallbackActive = true;
       localFallback.speak(text);

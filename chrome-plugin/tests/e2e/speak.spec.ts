@@ -178,6 +178,31 @@ test.describe("cloud tts source", () => {
     await expect(speak).toHaveAttribute("aria-pressed", "false", { timeout: 10_000 });
   });
 
+  test("会话先启动、后配置云端:下一次点喇叭即走云端,无需重启会话", async ({ harness }) => {
+    await harness.seedProfiles(localProfile(harness), "profile-speak");
+    const page = await startArticle(harness);
+    await expect(page.locator("[data-syntax-learning-block]")).toHaveCount(4, {
+      timeout: 20_000,
+    });
+
+    // 用户中途才去选项页配置云端:会话已在跑,配置保存后不重新开始学习。
+    await harness.seedTtsSource({
+      enabled: true,
+      baseUrl: harness.fakeModel.baseUrl,
+      apiKey: "sk-tts-secret",
+      model: "FunAudioLLM/CosyVoice2-0.5B",
+      voice: "anna",
+    });
+
+    harness.fakeModel.clearRecorded();
+    const speak = page.locator("[data-syntax-speak]").first();
+    await speak.click();
+    await expect(speak).toHaveAttribute("aria-pressed", "true");
+    await expect
+      .poll(() => harness.fakeModel.recordedOfKind("tts-speech").length, { timeout: 10_000 })
+      .toBe(1);
+  });
+
   test("云端语音源关闭:零合成请求,朗读仍走本地", async ({ harness }) => {
     await harness.seedProfiles(localProfile(harness), "profile-speak");
     await harness.seedTtsSource({
@@ -202,5 +227,7 @@ test.describe("cloud tts source", () => {
     await expect(speak).toHaveAttribute("aria-pressed", "true");
     await page.waitForTimeout(500);
     expect(harness.fakeModel.recordedOfKind("tts-speech")).toHaveLength(0);
+    // 「没配/禁用」不是错误:不得弹「云端语音不可用」骚扰用户。
+    await expect(page.locator("[data-syntax-progress-pill]")).not.toContainText("云端语音不可用");
   });
 });

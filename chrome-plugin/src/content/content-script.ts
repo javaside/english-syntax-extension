@@ -541,10 +541,10 @@ export class ContentScriptRouter {
       const controller = this.controller(request.tabId, request.documentId);
       switch (request.type) {
         case "START_SESSION":
-          if (request.tts === true)
-            controller.enableCloudTts(
-              cloudSpeakerFor(controller, request.tabId, request.documentId),
-            );
+          // 无条件装配云端单例:云端与否由 SW 每次实时决定(未配置/禁用回
+          // CONFIG_MISSING,CloudSpeaker 静默回落本地)——配置变化下一次点击
+          // 即生效,不再依赖会话重启(真机教训:「先开始学习后配置」永远踩坑)。
+          controller.enableCloudTts(cloudSpeakerFor(controller, request.tabId, request.documentId));
           await controller.start({ prefetchDetail: request.prefetchDetail === true });
           return statusResponse(request.requestId, controller.status);
         case "PAUSE_SESSION":
