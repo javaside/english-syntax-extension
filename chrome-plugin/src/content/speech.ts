@@ -226,11 +226,16 @@ export function createSpeaker(
   const dispatch = (text: string, retried: boolean): void => {
     const utterance = synth.createUtterance(text);
     utterance.lang = "en-US";
-    if (!retried) {
-      const voice = pickEnglishVoice(synth.getVoices());
-      if (voice !== undefined) {
-        utterance.voice = voice;
-      }
+    // 降级重试绝不能「无 voice 裸奔」:macOS 的无 voice 系统默认正是老式
+    // MacinTalk 语音(Albert 等,嘶哑——1.6.0 修过的同款坑)。排除网络语音
+    // (Google 前缀,挂死源)后重走白名单;只有列表里全是网络语音时才允许
+    // 无 voice 兜底(有声总比无声好)。
+    const candidates = retried
+      ? synth.getVoices().filter((candidate) => !candidate.name.startsWith("Google "))
+      : synth.getVoices();
+    const voice = pickEnglishVoice(candidates);
+    if (voice !== undefined) {
+      utterance.voice = voice;
     }
     utterance.onstart = () => {
       if (current !== utterance) return;

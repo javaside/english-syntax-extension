@@ -86,35 +86,63 @@ describe("createSpeaker", () => {
     expect(speaker!.isSpeaking()).toBe(true);
   });
 
-  it("选中的语音挂死(无 onstart)时降级为无 voice 重试,仍能出声", () => {
+  it("选中的语音挂死时降级重排白名单本地语音,绝不用系统默认(Albert 嘶哑)", () => {
     vi.useFakeTimers();
     try {
-      // 场景:墙内选中 Google 网络语音/损坏语音——speak 后无任何事件。
-      class HangingVoiceSynthesis extends FakeSynthesis {
+      // 场景:首选 Google 网络语音(墙内挂死);系统默认是老式 Albert(嘶哑,
+      // 1.6.0 修过的坑)——降级绝不能裸奔到它,要排除网络语音后重走白名单。
+      class HangingGoogleSynthesis extends FakeSynthesis {
         override speak(utterance: SpeechSynthesisUtteranceLike): void {
           super.speak(utterance);
-          if (utterance.voice != null) return; // 带 voice 的吞掉:不触发事件
-          // 无 voice 的保底版正常启动收尾。
+          if (utterance.voice?.name.startsWith("Google ")) return; // 网络语音吞
           utterance.onstart?.();
           utterance.onend?.();
         }
       }
-      const synth = new HangingVoiceSynthesis();
-      synth.voices = [voice("en-US", "Google US English", false)];
+      const synth = new HangingGoogleSynthesis();
+      synth.voices = [
+        voice("en-US", "Google US English", false),
+        voice("en-US", "Albert", true),
+        voice("en-US", "Samantha", true),
+      ];
       const ends: number[] = [];
       const speaker = createSpeaker(synth, { onEnd: () => ends.push(1) });
 
       speaker!.speak("hello");
-      expect(synth.spoken).toHaveLength(1); // 首选 Google 语音
       expect(synth.spoken[0]!.voice?.name).toBe("Google US English");
 
       vi.advanceTimersByTime(VOICE_START_WATCHDOG_MS + 1);
 
-      // 降级重试:第二条不带 voice(lang 保底),且播完复位。
+      // 降级重试:选中白名单的 Samantha,不是无 voice(会落到 Albert),播完复位。
       expect(synth.spoken).toHaveLength(2);
-      expect(synth.spoken[1]!.voice).toBeUndefined();
+      expect(synth.spoken[1]!.voice?.name).toBe("Samantha");
       expect(ends).toHaveLength(1);
       expect(speaker!.isSpeaking()).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("降级时全网络语音列表才允许无 voice 兜底(有声总比无声好)", () => {
+    vi.useFakeTimers();
+    try {
+      class HangingGoogleSynthesis extends FakeSynthesis {
+        override speak(utterance: SpeechSynthesisUtteranceLike): void {
+          super.speak(utterance);
+          if (utterance.voice?.name.startsWith("Google ")) return;
+          utterance.onstart?.();
+          utterance.onend?.();
+        }
+      }
+      const synth = new HangingGoogleSynthesis();
+      synth.voices = [voice("en-US", "Google US English", false)];
+      const speaker = createSpeaker(synth);
+
+      speaker!.speak("hello");
+      vi.advanceTimersByTime(VOICE_START_WATCHDOG_MS + 1);
+
+      expect(synth.spoken).toHaveLength(2);
+      expect(synth.spoken[1]!.voice).toBeUndefined();
     } finally {
       vi.useRealTimers();
     }
