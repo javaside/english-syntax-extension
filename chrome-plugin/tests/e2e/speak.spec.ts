@@ -151,6 +151,33 @@ test.describe("cloud tts source", () => {
     expect(harness.fakeModel.recordedOfKind("tts-speech")).toHaveLength(1);
   });
 
+  test("云端语音源失败:页面胶囊明示回落,按钮不静默卡死", async ({ harness }) => {
+    await harness.seedProfiles(localProfile(harness), "profile-speak");
+    // 端口 9(discard 协议)连接立即被拒:云端失败走真实回落路径,不依赖外网。
+    await harness.seedTtsSource({
+      enabled: true,
+      baseUrl: "http://127.0.0.1:9/v1",
+      apiKey: "sk-tts-secret",
+      model: "FunAudioLLM/CosyVoice2-0.5B",
+      voice: "anna",
+    });
+    const page = await startArticle(harness);
+
+    await expect(page.locator("[data-syntax-learning-block]")).toHaveCount(4, {
+      timeout: 20_000,
+    });
+    const speak = page.locator("[data-syntax-speak]").first();
+    await speak.click();
+
+    // 真机教训:回落只写 console 用户看不见,表现为「无声又无提示」。
+    // 页面胶囊必须明示一次。
+    await expect(page.locator("[data-syntax-progress-pill]")).toContainText("云端语音不可用", {
+      timeout: 8_000,
+    });
+    // 本地回落播完(无音频输出环境事件照到)后按钮复位,不卡按下态。
+    await expect(speak).toHaveAttribute("aria-pressed", "false", { timeout: 10_000 });
+  });
+
   test("云端语音源关闭:零合成请求,朗读仍走本地", async ({ harness }) => {
     await harness.seedProfiles(localProfile(harness), "profile-speak");
     await harness.seedTtsSource({

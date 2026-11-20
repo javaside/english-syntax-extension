@@ -144,7 +144,16 @@ class CloudSpeechSpeaker(
 
   private suspend fun run(text: String) {
     val job = kotlinx.coroutines.currentCoroutineContext()[Job]!!
-    val config = cachedConfigOrNull()
+    // 配置读取(PasswordSafe 等 IO)失败不能炸掉协程——那也是「无声无提示」的
+    // 死路:按未配置处理,回落本地。
+    val config = try {
+      cachedConfigOrNull()
+    } catch (error: kotlinx.coroutines.CancellationException) {
+      throw error
+    } catch (error: Exception) {
+      LOGGER.info("cloud tts config read failed, falling back: ${error.message}")
+      null
+    }
     val played = try {
       config?.enabled == true && speakCloud(config, text, job)
     } catch (error: kotlinx.coroutines.CancellationException) {

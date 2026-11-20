@@ -174,6 +174,21 @@ class CloudSpeechSpeakerTest {
   }
 
   @Test
+  fun `config reader failure falls back locally instead of dying silently`() {
+    val scope = CoroutineScope(Dispatchers.Default + Job())
+    val fallback = RecordingSpeaker()
+    val subject = speaker(
+      fallback = fallback,
+      configProvider = { throw java.io.IOException("password safe unavailable") },
+      scope = scope,
+    )
+    subject.speak("hello")
+
+    runBlocking { awaitUntil { fallback.spoken == listOf("hello") } }
+    scope.cancel()
+  }
+
+  @Test
   fun `stop cancels the in-flight fetch and nothing plays`() {
     val scope = CoroutineScope(Dispatchers.Default + Job())
     val clips = FakeClipFactory()

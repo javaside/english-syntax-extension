@@ -194,6 +194,9 @@ function isDiagnosisExplanation(value: unknown): value is DiagnosisExplanation {
   );
 }
 
+/** 云端朗读回落的用户可见提示口(installContentScript 创建胶囊后绑定)。 */
+let notifyTtsFallback: ((reason: string) => void) | undefined;
+
 /** 云端朗读单例(每 content script 实例 = 每 document 一份,spec 裁决 1)。 */
 let cloudSpeakerSingleton: import("./speech").CloudSpeakerHandle | null = null;
 
@@ -228,8 +231,10 @@ export function cloudSpeakerFor(
       // stop/接管也会先停掉它(与纯本地 Speaker 的停止语义一致)。
       createLocalFallback: (hooks) => createSpeaker(defaultSynthesis(), hooks),
       onFallbackNotice: (reason) => {
-        // 云端失败已回落本地出声;提示走 console(P0 不加 UI 面,pill 提示留增强)。
+        // 云端失败已回落本地出声;真机教训:只写 console 用户完全看不见,
+        // 表现就是「无声又无提示」——必须给页面可见反馈(胶囊提示一次)。
         console.info(`[句法学习] 云端语音源不可用(${reason}),已回落本地语音`);
+        notifyTtsFallback?.(`⚠ 云端语音不可用(${reason})，已用本地语音朗读`);
       },
     });
   }
@@ -617,6 +622,7 @@ function installContentScript(): void {
   if (document.documentElement.dataset.syntaxLearningExtension === "ready") return;
   let statusCounter = 0;
   const pill = new SyntaxProgressPill();
+  notifyTtsFallback = (reason) => pill.notice(reason);
   // 先挂指针追踪:快捷键冷启动时会话还不存在,那时才开始记就晚了。
   const hoverTarget = installHoverTracker(document);
   // 诊断落点：contextmenu 捕获监听，与 SessionController 的 contextTarget 无关——

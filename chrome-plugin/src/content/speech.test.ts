@@ -2,6 +2,7 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  CLOUD_SYNTHESIS_WATCHDOG_MS,
   createCloudSpeaker,
   createSpeaker,
   pickEnglishVoice,
@@ -385,6 +386,54 @@ describe("createCloudSpeaker", () => {
     speaker.speak("hello");
     await vi.waitFor(() => expect(ends).toHaveLength(1));
     expect(speaker.isSpeaking()).toBe(false);
+  });
+
+  it("play() 被自动播放策略拒绝时回落本地,绝不静默卡死", async () => {
+    // 真机症状:云端合成耗时超过手势激活窗口 → play() NotAllowedError →
+    // rejection 无人接 → 无声、无提示、按钮卡亮。必须回落本地出声。
+    class RefusingAudio extends FakeAudio {
+      override play(): Promise<void> {
+        this.played += 1;
+        return Promise.reject(new DOMException("play() failed", "NotAllowedError"));
+      }
+    }
+
+    const local = new FakeSpeaker();
+    const notices: string[] = [];
+    const ends: number[] = [];
+    const speaker = createCloudSpeaker(
+      () => Promise.resolve({ audioBase64: "aGVsbG8=", mime: "audio/mpeg" }),
+      {
+        createAudio: () => new RefusingAudio() as unknown as HTMLAudioElement,
+        createLocalFallback: () => local,
+        onFallbackNotice: (reason) => notices.push(reason),
+      },
+    );
+    speaker.registerHooks({ onEnd: () => ends.push(1) });
+
+    speaker.speak("hello");
+    await vi.waitFor(() => expect(local.spoken).toEqual(["hello"]));
+    expect(notices).toHaveLength(1);
+    expect(ends).toHaveLength(0); // 回落在播,播完才复位
+    expect(speaker.isSpeaking()).toBe(true);
+  });
+
+  it("synthesize 挂死(消息通道无响应)超过看门狗时回落本地,绝不静默卡死", async () => {
+    vi.useFakeTimers();
+    try {
+      const local = new FakeSpeaker();
+      const speaker = createCloudSpeaker(() => new Promise<never>(() => {}), {
+        createLocalFallback: () => local,
+      });
+
+      speaker.speak("hello");
+      await vi.advanceTimersByTimeAsync(CLOUD_SYNTHESIS_WATCHDOG_MS + 100);
+
+      expect(local.spoken).toEqual(["hello"]);
+      expect(speaker.isSpeaking()).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("stop() invalidates the in-flight request", async () => {

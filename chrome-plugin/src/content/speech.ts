@@ -271,6 +271,10 @@ export interface CloudSpeakerOptions {
  * localFallback(本地永远有声);回落在播时 isSpeaking 为真,stop/接管都会先停
  * 掉它——停止语义与纯本地 Speaker 完全一致。
  */
+/** 云端合成看门狗:消息通道挂死(SW 休眠丢消息/响应永不到达)时的最后兜底,
+ * 必须小于 SW 侧 fetch 的 10s 超时——真网络失败先由 ERROR 响应接管。 */
+export const CLOUD_SYNTHESIS_WATCHDOG_MS = 8_000;
+
 export function createCloudSpeaker(
   synthesize: (text: string) => Promise<CloudSynthesisResult>,
   options: CloudSpeakerOptions = {},
@@ -283,6 +287,18 @@ export function createCloudSpeaker(
   const hooksSet = new Set<SpeakerHooks>();
   const settle = (): void => {
     for (const hooks of hooksSet) hooks.onEnd?.();
+  };
+  /** 云端失败的标准出口:提示一次 + 回落本地(无兜底则复位)。任何路径要么
+   * 出声、要么提示回落、要么复位——绝不静默卡死(真机教训:play() 被自动
+   * 播放策略拒绝、消息通道挂死,都曾是"无声+无提示+按钮卡亮"的死路)。 */
+  const failToFallback = (text: string, reason: string): void => {
+    options.onFallbackNotice?.(reason);
+    if (localFallback !== undefined) {
+      fallbackActive = true;
+      localFallback.speak(text);
+      return;
+    }
+    settle();
   };
   const localFallback =
     options.createLocalFallback?.({
@@ -305,37 +321,50 @@ export function createCloudSpeaker(
       audio?.pause();
       audio = null;
       takeOverFallback();
-      void synthesize(text).then((result) => {
-        if (mine !== generation) return; // 晚到作废
-        if ("error" in result) {
-          options.onFallbackNotice?.(result.error);
-          if (localFallback !== undefined) {
-            fallbackActive = true;
-            localFallback.speak(text);
+      const watchdog = setTimeout(() => {
+        if (mine !== generation) return;
+        // 消息通道无响应:作废在途(晚到结果按代际丢弃),回落本地。
+        generation += 1;
+        failToFallback(text, "watchdog");
+      }, CLOUD_SYNTHESIS_WATCHDOG_MS);
+      void synthesize(text).then(
+        (result) => {
+          clearTimeout(watchdog);
+          if (mine !== generation) return; // 晚到作废
+          if ("error" in result) {
+            failToFallback(text, result.error);
             return;
           }
-          settle(); // 无本地兜底:失败也复位,别让按钮卡在按下态
-          return;
-        }
-        const element = createAudio();
-        element.src = `data:${result.mime};base64,${result.audioBase64}`;
-        element.onended = () => {
+          const element = createAudio();
+          element.src = `data:${result.mime};base64,${result.audioBase64}`;
+          element.onended = () => {
+            if (mine !== generation) return;
+            settle();
+          };
+          element.onerror = () => {
+            if (mine !== generation) return;
+            if (audio !== element) return;
+            audio = null;
+            failToFallback(text, "audio-decode");
+          };
+          audio = element;
+          void element.play().catch(() => {
+            // 合成耗时超过手势激活窗口时,自动播放策略会拒绝 play():
+            // 这个 rejection 不触发 onerror/onended——不接住就是静默卡死。
+            if (mine !== generation || audio !== element) return;
+            audio = null;
+            element.onended = null;
+            element.onerror = null;
+            failToFallback(text, "autoplay-blocked");
+          });
+        },
+        () => {
+          // transport 层 rejection(通道断开等):与错误响应同款回落。
+          clearTimeout(watchdog);
           if (mine !== generation) return;
-          settle();
-        };
-        element.onerror = () => {
-          if (mine !== generation) return;
-          options.onFallbackNotice?.("audio-decode");
-          if (localFallback !== undefined) {
-            fallbackActive = true;
-            localFallback.speak(text);
-            return;
-          }
-          settle();
-        };
-        audio = element;
-        void element.play();
-      });
+          failToFallback(text, "transport");
+        },
+      );
     },
     stop(): void {
       generation += 1;
