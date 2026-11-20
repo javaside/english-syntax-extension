@@ -28,6 +28,7 @@
 - **点击成分看详解**：懒加载该成分的内部结构、语法点与整体解释，详解按成分区间单独缓存；
 - **快捷键解析单段**：鼠标停在某段上按 `Alt+T` 只解析那一段，会话没启动也能直接按（自动轻量启动，不触发全文扫描）——长文档不必为了看一段付出上百次模型请求。两端都可改键：Chrome 在 `chrome://extensions/shortcuts`，IntelliJ 在 `Settings → Keymap`；
 - **任意 OpenAI 兼容模型**：多套配置可切换，保存时探测端点能力（JSON Schema / 流式 / 思考控制），不支持时自动降级，无需手动适配；
+- **句子与成分朗读**：句头喇叭读整句、详解面板读成分（发音查证）；默认系统本地语音零联网，可选接云端神经 TTS（如硅基流动 CosyVoice2），失败自动回落本地——见[配置朗读语音源](#配置朗读语音源可选)；
 - **思考模型自动关思考**：默认要求模型不做推理直接作答（实测单句从 153 秒降到 1.4 秒），端点拒绝该参数时自动去掉重发；
 - **按句缓存，跨端互通**：缓存键按规范化句文本加契约版本构造，与模型地址、模型名无关——换模型换配置仍命中；Chrome 扩展（IndexedDB）与 IntelliJ 插件（SQLite）的缓存可双向导入导出；
 - **流式渐进渲染 + 视口驱动增量分析**：段落边生成边显示（成分逐个出现），只解析看得见与邻近的段落，滚动到哪解析到哪；端点不支持流式时自动回落整段返回；
@@ -137,6 +138,26 @@ npm run package   # = npm run build + scripts/package-extension.mjs 打 zip
 
 点「测试连接」会：请求**该模型地址的精确主机权限**（Chrome 弹出授权框，需手动允许）→ 发送一次最小 JSON 探测请求 → 报告该模型是否支持 JSON Schema 结构化输出（不支持会自动使用兼容模式）。
 
+## 配置朗读语音源（可选）
+
+朗读默认用系统本地语音（零网络、零费用）。想要神经 TTS 的音质，可接一个 OpenAI 兼容的云端语音端点（以[硅基流动](https://cloud.siliconflow.cn)为例：注册后左侧「API 密钥」新建一个 `sk-` 开头的 Key，账户充少量余额即可）。
+
+**Chrome 扩展**：选项页往下翻到「朗读语音源」节——
+
+| 字段           | 值                                        |
+| -------------- | ----------------------------------------- |
+| 使用云端语音朗读 | 勾选                                      |
+| 语音服务地址   | `https://api.siliconflow.cn/v1`（已预填） |
+| 语音密钥       | 你的硅基流动 Key                          |
+| 语音模型       | `FunAudioLLM/CosyVoice2-0.5B`（已预填）   |
+| 音色           | anna / alex / benjamin / charles / david / diana |
+
+点「保存语音源」：勾选状态下保存会弹一次该地址的站点授权（与模型配置同款，只申请你填的那一个地址）。**下次点「开始学习」起生效**；配置独立于模型配置——LLM 和 TTS 可以不同家。
+
+**IntelliJ 插件**：`Settings → Tools → English Syntax Learning` 的 **Speech source** 组，字段同上；先点 **Test speech**——打一次 5 字符合成验证配置，balloon 直接告诉你通不通。Apply 保存（Key 存系统级 PasswordSafe，不进配置文件）。已打开的预览最迟 5 秒后生效。
+
+> 云端任何失败（网络 / Key 无效 / 余额不足）都会自动回落本地系统语音，朗读永远有声；Chrome 侧回落时 Console 会提示一次原因。不勾选开关时行为与之前完全一致。单次朗读上限 2000 字符。
+
 ## 使用（Chrome 扩展）
 
 1. 打开一篇英文文章页面（`http`/`https`）；
@@ -154,7 +175,7 @@ npm run package   # = npm run build + scripts/package-extension.mjs 打 zip
 
 **使用步骤：**
 
-1. `Settings → Tools → English Syntax Learning` 配置模型（与 Chrome 扩展同一套配置思路：Base URL / API Key / 模型名 / 超时；可存多份，一份为 Active）。API Key 存系统级 PasswordSafe，不进任何配置文件或日志；
+1. `Settings → Tools → English Syntax Learning` 配置模型（与 Chrome 扩展同一套配置思路：Base URL / API Key / 模型名 / 超时；可存多份，一份为 Active）。API Key 存系统级 PasswordSafe，不进任何配置文件或日志；朗读想用云端语音，在同一页的 **Speech source** 组配置（见上文「配置朗读语音源」）；
 2. 打开一个 `.md` 文件并切到预览（`Ctrl/Cmd+Shift+A` 搜 "Preview"，或编辑器右上角的预览图标）——用 IDEA 默认预览即可，插件不需要你切换任何 provider；
 3. 菜单 `Tools → 句法学习 → 开始句法学习`；
 4. 或者不开整篇：把鼠标停在预览里某个段落上按 `Alt+T`（Mac：`Option+T`），只解析那一段——会话没启动时会自动轻量启动，不触发全文扫描；键位在 `Settings → Keymap` 里搜「解析鼠标悬停的段落」修改；
@@ -171,7 +192,7 @@ npm run package   # = npm run build + scripts/package-extension.mjs 打 zip
 | `activeTab` + `scripting`   | 仅在你点击「开始学习」后向当前标签页注入内容脚本                                  |
 | `storage`                   | 保存模型配置；已设置 `TRUSTED_CONTEXTS`，**内容脚本（网页侧）读不到你的 API Key** |
 | `contextMenus`              | 右键菜单入口                                                                      |
-| `optional_host_permissions` | 模型地址按需精确授权（保存/测试配置时才弹授权框），不预先索要任何网站权限         |
+| `optional_host_permissions` | 模型 / 语音源地址按需精确授权（保存配置时才弹授权框），不预先索要任何网站权限   |
 
 清单中**没有**预置 `host_permissions`——扩展默认无权访问任何网站或模型地址。
 
