@@ -99,12 +99,23 @@ class TtsEndToEndTest {
     // ③ 生产朗读装配:与 PreviewSession.effectiveSpeaker 同款读取与 fetcher。
     val fallback = RecordingFallback()
     val notices = mutableListOf<String>()
+    // clip 用内存假件:核心验证对象是「真 HTTP 合成链」,真开音频线在无头
+    // CI 上会 LineUnavailableException 波动(被当失败回落,测试 flaky)。
+    val clips = object : dev.codetui.englishsyntax.tts.ClipFactory {
+      override fun open(wav: ByteArray): dev.codetui.englishsyntax.tts.ManagedClip =
+        object : dev.codetui.englishsyntax.tts.ManagedClip {
+          override fun start() = Unit
+          override fun stop() = Unit
+          override fun close() = Unit
+        }
+    }
     val speaker = CloudSpeechSpeaker(
       fallback = fallback,
       configReader = { repository.load() },
       fetcher = { config, text -> HttpTtsFetcher(config, text) },
       onSpeakError = { },
       scope = CoroutineScope(Dispatchers.Default + Job()),
+      clipFactory = clips,
       onFallbackNotice = { reason -> notices += reason },
     )
     speaker.speak("hello end to end")

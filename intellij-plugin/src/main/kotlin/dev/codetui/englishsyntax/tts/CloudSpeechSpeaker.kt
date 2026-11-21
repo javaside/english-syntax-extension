@@ -207,7 +207,8 @@ class CloudSpeechSpeaker(
       currentClip = clip
       clip.start()
     }
-    onCloudPlayback?.invoke()
+    // 来源指示是通知性副作用:它抛异常(如无平台通知设施)不代表云端失败。
+    runCatching { onCloudPlayback?.invoke() }
     return true
   }
 

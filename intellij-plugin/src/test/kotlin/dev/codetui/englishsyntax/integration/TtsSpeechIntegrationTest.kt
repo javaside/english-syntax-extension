@@ -36,7 +36,9 @@ class TtsSpeechIntegrationTest {
     }
   }
 
-  private object NoopAnalysis : AnalysisServicePort {
+  private object NoopAnalysis : AnalysisServicePort by TtsStubAnalysisHolder.stub
+
+  private object OriginalShape : AnalysisServicePort {
     override suspend fun analyzeCore(
       profile: dev.codetui.englishsyntax.settings.ModelProfile,
       documentId: String,

@@ -88,6 +88,26 @@ class EnglishSyntaxConfigurableTtsTest {
   }
 
   @Test
+  fun `Save speech source 按钮独立持久化,不触 profile 校验`() = runBlocking {
+    val state = ProfileState()
+    val credentials = FakeCredentialStore()
+    val configurable = configurable(state, credentials)
+
+    // profile 表单刻意无效:name 空(校验必炸)——保存按钮不得被连坐。
+    configurable.form.ttsEnabled = true
+    configurable.form.ttsBaseUrl = "https://api.siliconflow.cn/v1"
+    configurable.form.ttsModel = "FunAudioLLM/CosyVoice2-0.5B"
+    configurable.form.ttsVoice = "benjamin"
+    configurable.form.ttsApiKey = "sk-by-button"
+
+    assertTrue(configurable.saveTtsSourceOnly())
+
+    assertEquals(true, state.state.ttsEnabled)
+    assertEquals("benjamin", state.state.ttsVoice)
+    assertEquals("sk-by-button", credentials.values["tts-source" to "api-key"])
+  }
+
+  @Test
   fun `settings OK-Apply is wired to persist (apply overrides BoundConfigurable)`() {
     // super.apply() 依赖平台 UI 设施,单测直接调会撞 Alarm——这里钉接线存在,
     // 持久化正确性由 applyForm 的用例覆盖(apply = super.apply() + applyForm)。
@@ -165,13 +185,26 @@ class EnglishSyntaxConfigurableTtsTest {
 
   @Test
   fun `tts test button synthesizes a short sample off the caller thread and balloons the result`() = runBlocking {
+    val enabledState = ProfileState()
+    val enabledRepo = TtsSourceRepository(enabledState, FakeCredentialStore())
+    kotlinx.coroutines.runBlocking {
+      enabledRepo.save(
+        dev.codetui.englishsyntax.tts.TtsSourceConfig(
+          enabled = true,
+          baseUrl = "https://api.example.com/v1",
+          apiKey = "sk-stored",
+          model = "speaker-model",
+          voice = "david",
+        ),
+        apiKey = "sk-stored",
+      )
+    }
     val (tester, calls) = recordingTester()
     val ui = BalloonUi()
     val dispatcher = mutableListOf<() -> Unit>()
     val configurable = EnglishSyntaxConfigurable(
       repository = ProfileRepository(ProfileState(), FakeCredentialStore()),
       profileState = ProfileState(),
-      ttsRepository = TtsSourceRepository(ProfileState(), FakeCredentialStore()),
       background = EnglishSyntaxConfigurable.BackgroundDispatcher { dispatcher += it },
       profileRefresh = EnglishSyntaxConfigurable.ProfileRefresh { },
       pauseControl = object : EnglishSyntaxConfigurable.PauseControl {
@@ -180,6 +213,7 @@ class EnglishSyntaxConfigurableTtsTest {
       },
       transferUi = ui,
       ttsTester = tester,
+      ttsRepository = enabledRepo,
     )
     configurable.form.ttsEnabled = true
     configurable.form.ttsBaseUrl = "https://api.example.com/v1"

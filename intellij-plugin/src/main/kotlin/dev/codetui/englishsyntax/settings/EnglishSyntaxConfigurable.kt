@@ -312,6 +312,7 @@ class EnglishSyntaxConfigurable(
         ).align(AlignX.FILL)
       }
       row {
+        button(EnglishSyntaxBundle.message("settings.tts.save")) { saveTtsSourceOnly() }
         button(EnglishSyntaxBundle.message("settings.tts.test")) { runTtsTestAction() }
       }
     }
@@ -535,21 +536,9 @@ class EnglishSyntaxConfigurable(
 
   fun applyForm(): Unit {
     runBlocking {
-      // tts 先独立保存:绝不与 profile 校验互相连坐——真机根因:profile 表单
-      // 无效(如 name 空)时异常在 tts 保存之前上抛,tts 被静默跳过,表现为
-      // 「Test speech 可用但朗读永远本地」。
-      runCatching {
-        tts().save(
-          dev.codetui.englishsyntax.tts.TtsSourceConfig(
-            enabled = form.ttsEnabled,
-            baseUrl = form.ttsBaseUrl,
-            apiKey = "",
-            model = form.ttsModel,
-            voice = form.ttsVoice,
-          ),
-          apiKey = form.ttsApiKey,
-        )
-      }.onFailure { setStatus("Speech source not saved: ${it.message}") }
+      // tts 先独立保存:绝不与 profile 校验互相连坐(真机根因),且与
+      // 「Save speech source」按钮共用同一实现。
+      runCatching { persistTtsSource() }.onFailure { setStatus("Speech source not saved: ${it.message}") }
       val headers = parseHeaders(form.headers)
       val current = repository.list().firstOrNull { it.id == form.id }
       repository.save(
@@ -588,6 +577,34 @@ class EnglishSyntaxConfigurable(
    * 「测试语音」：用表单当前值打一次 5 字符合成(spec 2026-11-18),IO 派发后台,
    * 结果 balloon(复用连接测试的先例)。不保存——试音不该有副作用。
    */
+  /**
+   * Speech source 组自己的保存按钮:只存语音源,不碰 profile(用户直觉是
+   * 「配置了就该有个保存按钮」,而非依赖对话框 OK——真机多轮反馈)。
+   * 与 applyForm 共用同一持久化实现,两条路写入完全一致。
+   */
+  fun saveTtsSourceOnly(): Boolean = try {
+    runBlocking { persistTtsSource() }
+    setStatus("Speech source saved: ${form.ttsModel}")
+    true
+  } catch (error: Exception) {
+    setStatus("Save speech source failed: ${error.message ?: error.javaClass.simpleName}")
+    false
+  }
+
+  /** 当前表单的语音源持久化(保存按钮与 applyForm 共用)。 */
+  private suspend fun persistTtsSource() {
+    tts().save(
+      dev.codetui.englishsyntax.tts.TtsSourceConfig(
+        enabled = form.ttsEnabled,
+        baseUrl = form.ttsBaseUrl,
+        apiKey = "",
+        model = form.ttsModel,
+        voice = form.ttsVoice,
+      ),
+      apiKey = form.ttsApiKey,
+    )
+  }
+
   fun runTtsTestAction(): Boolean {
     // 立即在设置页状态行给反应——balloon 可能被通知中心折叠,用户会以为按钮没反应。
     if (form.ttsApiKey.isBlank()) {
@@ -604,12 +621,19 @@ class EnglishSyntaxConfigurable(
       voice = form.ttsVoice,
     )
     background.dispatch {
+      // 顺带核对持久化状态:表单测通 ≠ 已保存——「Test 可用但朗读走本地」
+      // 的用户需要一个屏幕上的直接答案。
+      val stored = runCatching { runBlocking { tts().load() } }.getOrNull()
+      val storedLine = when {
+        stored == null || !stored.enabled -> "｜⚠ 已保存配置：未启用（朗读走本地）——填好后点 OK/Apply 保存"
+        else -> "｜✓ 已保存配置：启用中"
+      }
       try {
         runBlocking { ttsTester(config, "Hello") }
-        setStatus("语音源可用，保存后朗读将使用云端语音")
-        transferUi.balloon("语音源可用，保存后朗读将使用云端语音", error = false)
+        setStatus("语音源可用$storedLine")
+        transferUi.balloon("语音源可用$storedLine", error = stored?.enabled != true)
       } catch (error: Exception) {
-        val message = "语音源不可用：${error.message ?: error.javaClass.simpleName}（朗读仍可用本地语音）"
+        val message = "语音源不可用：${error.message ?: error.javaClass.simpleName}$storedLine"
         setStatus(message)
         transferUi.balloon(message, error = true)
       }
