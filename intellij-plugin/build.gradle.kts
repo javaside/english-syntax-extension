@@ -6,7 +6,7 @@ plugins {
 }
 
 group = "dev.codetui"
-version = "1.8.0"
+version = "1.7.0"
 
 kotlin { jvmToolchain(21) }
 
