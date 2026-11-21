@@ -65,6 +65,7 @@ class CloudSpeechSpeakerTest {
     configProvider: suspend () -> TtsSourceConfig? = { config },
     fetcher: suspend (TtsSourceConfig, String) -> ByteArray = { _, _ -> byteArrayOf(1, 2, 3) },
     errors: MutableList<String> = mutableListOf(),
+    notices: MutableList<String> = mutableListOf(),
     clipFactory: ClipFactory = FakeClipFactory(),
     scope: CoroutineScope,
     now: () -> Long = { 0L },
@@ -73,6 +74,7 @@ class CloudSpeechSpeakerTest {
     configReader = configProvider,
     fetcher = fetcher,
     onSpeakError = { message -> errors += message },
+    onFallbackNotice = { reason -> notices += reason },
     scope = scope,
     clipFactory = clipFactory,
     now = now,
@@ -134,6 +136,40 @@ class CloudSpeechSpeakerTest {
 
     assertEquals(listOf("first", "second"), fallback.spoken)
     assertEquals(0, fetchCalls)
+    scope.cancel()
+  }
+
+  @Test
+  fun `cloud failure notifies onFallbackNotice once (visible feedback, not silent local)`() {
+    val scope = CoroutineScope(Dispatchers.Default + Job())
+    val fallback = RecordingSpeaker()
+    val notices = mutableListOf<String>()
+    val subject = speaker(
+      fallback = fallback,
+      notices = notices,
+      fetcher = { _, _ -> throw java.io.IOException("HTTP 401") },
+      scope = scope,
+    )
+    subject.speak("hello")
+    runBlocking { awaitUntil { fallback.spoken == listOf("hello") } }
+    assertEquals(listOf("HTTP 401"), notices)
+    scope.cancel()
+  }
+
+  @Test
+  fun `disabled config stays silent on the notice channel (no harassment)`() {
+    val scope = CoroutineScope(Dispatchers.Default + Job())
+    val fallback = RecordingSpeaker()
+    val notices = mutableListOf<String>()
+    val subject = speaker(
+      fallback = fallback,
+      notices = notices,
+      configProvider = { config.copy(enabled = false) },
+      scope = scope,
+    )
+    subject.speak("hello")
+    runBlocking { awaitUntil { fallback.spoken == listOf("hello") } }
+    assertEquals(emptyList<String>(), notices)
     scope.cancel()
   }
 

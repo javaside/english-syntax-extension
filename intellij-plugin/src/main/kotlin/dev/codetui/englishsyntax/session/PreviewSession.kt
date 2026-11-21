@@ -85,6 +85,17 @@ class PreviewSession(
         fetcher = { config, text -> dev.codetui.englishsyntax.tts.HttpTtsFetcher(config, text) },
         onSpeakError = { message -> deliverTtsError(currentTtsSentenceId, message) },
         scope = scope,
+        // 云端失败回落本地必须可见:静默回落=用户以为「配置了不生效」(真机
+        // 反复踩)。每会话只提示一次,避免连点刷屏。
+        onFallbackNotice = { reason ->
+          if (!cloudFallbackNoticeShown) {
+            cloudFallbackNoticeShown = true
+            dev.codetui.englishsyntax.actions.ActionNotifier.warn(
+              null,
+              "云端语音不可用（$reason），本次已用本地语音朗读",
+            )
+          }
+        },
       )
   }
 
@@ -153,6 +164,9 @@ class PreviewSession(
    * 复位哪个按钮,属可接受近似。
    */
   @Volatile private var currentTtsSentenceId: String = ""
+
+  /** 云端回落提示每会话一次(见 effectiveSpeaker 的 onFallbackNotice)。 */
+  @Volatile private var cloudFallbackNoticeShown = false
 
   /**
    * 朗读一句话/成分：同步执行（系统命令 fork 即返回）；失败回 TTS_ERROR 复位

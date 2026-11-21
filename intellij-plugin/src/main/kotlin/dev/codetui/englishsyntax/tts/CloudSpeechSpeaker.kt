@@ -120,6 +120,8 @@ class CloudSpeechSpeaker(
   private val scope: CoroutineScope,
   private val clipFactory: ClipFactory = JavaClipFactory,
   private val now: () -> Long = System::currentTimeMillis,
+  /** 云端失败回落本地时通知(可见反馈:静默回落=用户以为配置没生效)。 */
+  private val onFallbackNotice: ((reason: String) -> Unit)? = null,
 ) : SpeechSpeaker {
   private val lock = Any()
   private var currentJob: Job? = null
@@ -183,6 +185,7 @@ class CloudSpeechSpeaker(
       throw error
     } catch (error: Exception) {
       LOGGER.info("cloud tts fetch failed, falling back: ${error.message}")
+      onFallbackNotice?.invoke(error.message ?: error.javaClass.simpleName)
       return false
     }
     val clip = try {
