@@ -68,6 +68,8 @@ class PreviewSession(
   private val now: () -> Long = System::currentTimeMillis,
   /** F6 AUTH_FAILED 暂停表；默认「永不暂停」的空表（未接线时门直通，测试用）。 */
   private val pauseRegistry: ProfilePauseRegistry = ProfilePauseRegistry { null },
+  /** 云端朗读语音源仓库;null=用时才构造(默认构造走 service(),无平台测试环境会 NPE)。 */
+  private val ttsRepositoryProvider: (() -> dev.codetui.englishsyntax.settings.TtsSourceRepository)? = null,
   /** 每会话一个朗读执行器（多预览各自独立,spec 裁决）；测试注入 fake。
    *  null = 生产默认:云端包装本地兜底,未配置/禁用/失败都回落本地,行为与 1.7.0 一致。 */
   private val speaker: dev.codetui.englishsyntax.tts.SpeechSpeaker? = null,
@@ -81,7 +83,7 @@ class PreviewSession(
     speaker
       ?: dev.codetui.englishsyntax.tts.CloudSpeechSpeaker(
         fallback = dev.codetui.englishsyntax.tts.ProcessSpeechSpeaker(),
-        configReader = { dev.codetui.englishsyntax.settings.TtsSourceRepository().load() },
+        configReader = { (ttsRepositoryProvider?.invoke() ?: dev.codetui.englishsyntax.settings.TtsSourceRepository()).load() },
         fetcher = { config, text -> dev.codetui.englishsyntax.tts.HttpTtsFetcher(config, text) },
         onSpeakError = { message -> deliverTtsError(currentTtsSentenceId, message) },
         scope = scope,
@@ -94,6 +96,14 @@ class PreviewSession(
               null,
               "云端语音不可用（$reason），本次已用本地语音朗读",
             )
+          }
+        },
+        onCloudPlayback = {
+          // 来源指示(每会话首次):与 Chrome 的「☁ 云端语音」胶囊对齐,
+          // 用户听得见音质也看得见路数;后续点击不再打扰。
+          if (!cloudPlaybackNoticed) {
+            cloudPlaybackNoticed = true
+            dev.codetui.englishsyntax.actions.ActionNotifier.info(null, "☁ 云端语音朗读中")
           }
         },
       )
@@ -167,6 +177,9 @@ class PreviewSession(
 
   /** 云端回落提示每会话一次(见 effectiveSpeaker 的 onFallbackNotice)。 */
   @Volatile private var cloudFallbackNoticeShown = false
+
+  /** 云端来源指示每会话一次(见 effectiveSpeaker 的 onCloudPlayback)。 */
+  @Volatile private var cloudPlaybackNoticed = false
 
   /**
    * 朗读一句话/成分：同步执行（系统命令 fork 即返回）；失败回 TTS_ERROR 复位

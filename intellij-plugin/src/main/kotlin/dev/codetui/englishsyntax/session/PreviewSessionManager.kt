@@ -15,7 +15,11 @@ class PreviewSessionManager(
   private val profileProvider: () -> dev.codetui.englishsyntax.settings.ModelProfile?,
   /** F6 AUTH_FAILED 暂停表（profile 级事实，随应用而非 preview 存活）；默认空表门直通。 */
   private val pauseRegistry: ProfilePauseRegistry = ProfilePauseRegistry { null },
+  /** 云端朗读语音源仓库;null=用时才构造(默认构造走 service(),无平台测试环境会 NPE)。 */
+  private val ttsRepository: dev.codetui.englishsyntax.settings.TtsSourceRepository? = null,
 ) {
+  internal fun ttsSource(): dev.codetui.englishsyntax.settings.TtsSourceRepository =
+    ttsRepository ?: dev.codetui.englishsyntax.settings.TtsSourceRepository()
   private val sessions = LinkedHashMap<String, PreviewSession>()
   private val sessionJobs = LinkedHashMap<String, Job>()
 
@@ -30,7 +34,10 @@ class PreviewSessionManager(
     val job = Job(scope.coroutineContext[Job])
     sessionJobs[previewId] = job
     val sessionScope = CoroutineScope(scope.coroutineContext + job)
-    PreviewSession(previewId, sessionScope, analysis, sender, blockRequester, pauseRegistry = pauseRegistry).also { session ->
+    PreviewSession(
+      previewId, sessionScope, analysis, sender, blockRequester,
+      pauseRegistry = pauseRegistry, ttsRepositoryProvider = ttsRepository?.let { repo -> { repo } },
+    ).also { session ->
       session.currentProfile = profileProvider()
     }
   }

@@ -81,6 +81,24 @@ class CloudSpeechSpeakerTest {
   )
 
   @Test
+  fun `cloud playback fires onCloudPlayback once (source indicator)`() {
+    val scope = CoroutineScope(Dispatchers.Default + Job())
+    val played = java.util.concurrent.atomic.AtomicInteger(0)
+    val subject = CloudSpeechSpeaker(
+      fallback = RecordingSpeaker(),
+      configReader = { config },
+      fetcher = { _, _ -> byteArrayOf(1) },
+      onSpeakError = { },
+      scope = scope,
+      clipFactory = FakeClipFactory(),
+      onCloudPlayback = { played.incrementAndGet() },
+    )
+    subject.speak("hello")
+    runBlocking { awaitUntil { played.get() == 1 } }
+    scope.cancel()
+  }
+
+  @Test
   fun `speak returns immediately while the fetch is slow and plays the clip when it lands`() {
     val scope = CoroutineScope(Dispatchers.Default + Job())
     val clips = FakeClipFactory()

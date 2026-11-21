@@ -122,6 +122,8 @@ class CloudSpeechSpeaker(
   private val now: () -> Long = System::currentTimeMillis,
   /** 云端失败回落本地时通知(可见反馈:静默回落=用户以为配置没生效)。 */
   private val onFallbackNotice: ((reason: String) -> Unit)? = null,
+  /** 云端音频开始播放时通知(来源指示:用户要一眼看出走的哪条路)。 */
+  private val onCloudPlayback: (() -> Unit)? = null,
 ) : SpeechSpeaker {
   private val lock = Any()
   private var currentJob: Job? = null
@@ -205,6 +207,7 @@ class CloudSpeechSpeaker(
       currentClip = clip
       clip.start()
     }
+    onCloudPlayback?.invoke()
     return true
   }
 
