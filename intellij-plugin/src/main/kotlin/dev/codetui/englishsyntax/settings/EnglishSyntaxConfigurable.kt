@@ -535,6 +535,21 @@ class EnglishSyntaxConfigurable(
 
   fun applyForm(): Unit {
     runBlocking {
+      // tts 先独立保存:绝不与 profile 校验互相连坐——真机根因:profile 表单
+      // 无效(如 name 空)时异常在 tts 保存之前上抛,tts 被静默跳过,表现为
+      // 「Test speech 可用但朗读永远本地」。
+      runCatching {
+        tts().save(
+          dev.codetui.englishsyntax.tts.TtsSourceConfig(
+            enabled = form.ttsEnabled,
+            baseUrl = form.ttsBaseUrl,
+            apiKey = "",
+            model = form.ttsModel,
+            voice = form.ttsVoice,
+          ),
+          apiKey = form.ttsApiKey,
+        )
+      }.onFailure { setStatus("Speech source not saved: ${it.message}") }
       val headers = parseHeaders(form.headers)
       val current = repository.list().firstOrNull { it.id == form.id }
       repository.save(
@@ -554,20 +569,6 @@ class EnglishSyntaxConfigurable(
       )
       profileState.state.cacheLimitMb = form.cacheLimitMb
       profileState.state.streamRendering = form.streamRendering
-      // 语音源是独立可选配置:保存失败不连坐 profile 保存,单独提示。
-      // (生产 service() 恒可用,catch 兜的也是 PasswordSafe 一类真实 IO 失败。)
-      runCatching {
-        tts().save(
-          dev.codetui.englishsyntax.tts.TtsSourceConfig(
-            enabled = form.ttsEnabled,
-            baseUrl = form.ttsBaseUrl,
-            apiKey = "",
-            model = form.ttsModel,
-            voice = form.ttsVoice,
-          ),
-          apiKey = form.ttsApiKey,
-        )
-      }.onFailure { setStatus("Speech source not saved: ${it.message}") }
       baseline = form.copy()
       // F5（apply 路径）：保存的正是当前激活 profile 时，已开会话的快照需要刷新——
       // 只改 baseUrl/model 等字段不换激活也算 profile 变更；保存非激活 profile 不触发。
