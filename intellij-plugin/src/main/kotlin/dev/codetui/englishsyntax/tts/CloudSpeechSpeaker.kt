@@ -158,11 +158,24 @@ class CloudSpeechSpeaker(
     // 配置读取(PasswordSafe 等 IO)失败不能炸掉协程——那也是「无声无提示」的
     // 死路:按未配置处理,回落本地。
     val config = try {
-      cachedConfigOrNull()
+      cachedConfigOrNull().also { loaded ->
+        // 决策日志(不含 Key):用户侧复现后发 idea.log 即可远程定位,
+        // 不再依赖用户转述症状。
+        if (loaded != null) {
+          LOGGER.info(
+            "cloud tts config: enabled=${loaded.enabled} baseUrl=${loaded.baseUrl} model=${loaded.model} voice=${loaded.voice} keyPresent=${loaded.apiKey.isNotBlank()}",
+          )
+        } else {
+          LOGGER.info("cloud tts config: repository returned null")
+        }
+      }
     } catch (error: kotlinx.coroutines.CancellationException) {
       throw error
     } catch (error: Exception) {
+      // 配置读取失败曾是最深的静默死角:catch 后按未配置走本地,零提示——
+      // 用户看到的就是「保存了却不生效且无任何显示」。必须可见。
       LOGGER.info("cloud tts config read failed, falling back: ${error.message}")
+      onFallbackNotice?.invoke("配置读取失败：${error.message ?: error.javaClass.simpleName}")
       null
     }
     val played = try {

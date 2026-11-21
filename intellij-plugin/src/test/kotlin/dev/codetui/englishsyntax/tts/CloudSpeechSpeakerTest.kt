@@ -175,6 +175,24 @@ class CloudSpeechSpeakerTest {
   }
 
   @Test
+  fun `config read failure surfaces through the notice channel (was deepest silent pit)`() {
+    val scope = CoroutineScope(Dispatchers.Default + Job())
+    val fallback = RecordingSpeaker()
+    val notices = mutableListOf<String>()
+    val subject = speaker(
+      fallback = fallback,
+      notices = notices,
+      configProvider = { throw IllegalStateException("service unavailable") },
+      scope = scope,
+    )
+    subject.speak("hello")
+    runBlocking { awaitUntil { fallback.spoken.isNotEmpty() } }
+    assertEquals(1, notices.size)
+    assertTrue(notices.single().contains("配置读取失败"), notices.single())
+    scope.cancel()
+  }
+
+  @Test
   fun `disabled config stays silent on the notice channel (no harassment)`() {
     val scope = CoroutineScope(Dispatchers.Default + Job())
     val fallback = RecordingSpeaker()
