@@ -27,7 +27,8 @@ class HttpTtsFetcherTest {
       synchronized(recorded) {
         recorded += Hit(exchange.requestURI.path, body, exchange.requestHeaders.getFirst("Authorization"))
       }
-      val payload = "RIFF-wav-bytes".toByteArray()
+      // 裸 PCM(官方 pcm 格式):fetcher 负责包 wav 头。
+      val payload = ByteArray(128) { (it % 251).toByte() }
       exchange.sendResponseHeaders(status, payload.size.toLong())
       exchange.responseBody.use { it.write(payload) }
       exchange.close()
@@ -52,21 +53,35 @@ class HttpTtsFetcherTest {
   fun `posts the OpenAI-compatible speech shape and returns the wav bytes`() = runBlocking {
     val wav = HttpTtsFetcher(config, "hello world")
 
-    assertEquals("RIFF-wav-bytes", wav.decodeToString())
+    // 输出必须是自己包了合法 RIFF 头的 wav(javax.sound 对流式 wav 的
+    // 异常长度字段会抛 Audio data < 0,Chrome 却能播——真机根因)。
+    assertEquals("RIFF", wav.copyOfRange(0, 4).decodeToString())
+    assertEquals("WAVE", wav.copyOfRange(8, 12).decodeToString())
+    // PCM 16bit mono 44100:fmt 块的音频格式=1、声道=1、采样率=44100。
+    assertEquals(1, ((wav[20].toInt() and 0xFF) or ((wav[21].toInt() and 0xFF) shl 8)))
+    assertEquals(1, ((wav[22].toInt() and 0xFF) or ((wav[23].toInt() and 0xFF) shl 8)))
+    val sampleRate = (wav[24].toInt() and 0xFF) or ((wav[25].toInt() and 0xFF) shl 8) or
+      ((wav[26].toInt() and 0xFF) shl 16) or ((wav[27].toInt() and 0xFF) shl 24)
+    assertEquals(44100, sampleRate)
+    val dataSize = (wav[40].toInt() and 0xFF) or ((wav[41].toInt() and 0xFF) shl 8) or
+      ((wav[42].toInt() and 0xFF) shl 16) or ((wav[43].toInt() and 0xFF) shl 24)
+    assertEquals(128, dataSize)
+    assertEquals(44 + 128, wav.size)
     val hit = synchronized(recorded) { recorded.single() }
     assertEquals("/v1/audio/speech", hit.path)
     assertEquals("Bearer sk-tts-secret", hit.authorization)
     assertTrue(hit.body.contains("\"model\":\"FunAudioLLM/CosyVoice2-0.5B\""), hit.body)
     assertTrue(hit.body.contains("\"voice\":\"FunAudioLLM/CosyVoice2-0.5B:anna\""), hit.body)
     assertTrue(hit.body.contains("\"input\":\"hello world\""), hit.body)
-    assertTrue(hit.body.contains("\"response_format\":\"wav\""), hit.body)
+    assertTrue(hit.body.contains("\"response_format\":\"pcm\""), hit.body)
+    assertTrue(hit.body.contains("\"sample_rate\":44100"), hit.body)
   }
 
   @Test
   fun `trims whitespace around the pasted api key`(): Unit = runBlocking {
     val dirty = config.copy(apiKey = "sk-tts-secret \n")
     val wav = HttpTtsFetcher(dirty, "hello")
-    assertEquals("RIFF-wav-bytes", wav.decodeToString())
+    assertEquals("RIFF", wav.copyOfRange(0, 4).decodeToString())
     val hit = synchronized(recorded) { recorded.last() }
     assertEquals("Bearer sk-tts-secret", hit.authorization)
     Unit

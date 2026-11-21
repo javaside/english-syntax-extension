@@ -82,7 +82,11 @@ suspend fun HttpTtsFetcher(config: TtsSourceConfig, text: String): ByteArray =
       put("model", model)
       put("input", text)
       put("voice", "$model:$voice")
-      put("response_format", "wav")
+      // 裸 PCM + 固定采样率(官方 wav/pcm 支持的档位):流式生成的 wav 常把
+      // data 长度写成异常值,javax.sound 严格解析直接抛 Audio data < 0
+      // (Chrome 宽容能播)——自己包头绕开一切容器歧义。
+      put("response_format", "pcm")
+      put("sample_rate", 44100)
     }.toString()
     val request = java.net.http.HttpRequest.newBuilder()
       .uri(java.net.URI.create("$baseUrl/audio/speech"))
@@ -98,7 +102,38 @@ suspend fun HttpTtsFetcher(config: TtsSourceConfig, text: String): ByteArray =
     if (response.statusCode() !in 200..299) {
       throw java.io.IOException("语音源返回 HTTP ${response.statusCode()}")
     }
-    response.body() ?: throw java.io.IOException("语音源返回空体")
+    val pcm = response.body() ?: throw java.io.IOException("语音源返回空体")
+    wrapPcmAsWav(pcm)
+  }
+
+  /** PCM(s16le mono 44100)包 44 字节 wav 头:javax.sound 可直接播。 */
+  private fun wrapPcmAsWav(pcm: ByteArray): ByteArray {
+    val wav = ByteArray(44 + pcm.size)
+    fun le32(offset: Int, value: Int) {
+      wav[offset] = (value and 0xFF).toByte()
+      wav[offset + 1] = ((value ushr 8) and 0xFF).toByte()
+      wav[offset + 2] = ((value ushr 16) and 0xFF).toByte()
+      wav[offset + 3] = ((value ushr 24) and 0xFF).toByte()
+    }
+    fun le16(offset: Int, value: Int) {
+      wav[offset] = (value and 0xFF).toByte()
+      wav[offset + 1] = ((value ushr 8) and 0xFF).toByte()
+    }
+    "RIFF".encodeToByteArray().copyInto(wav, 0)
+    le32(4, 36 + pcm.size)
+    "WAVE".encodeToByteArray().copyInto(wav, 8)
+    "fmt ".encodeToByteArray().copyInto(wav, 12)
+    le32(16, 16)
+    le16(20, 1) // PCM
+    le16(22, 1) // mono
+    le32(24, 44100)
+    le32(28, 44100 * 2) // byte rate = sampleRate * channels * 2
+    le16(32, 2) // block align
+    le16(34, 16) // bits per sample
+    "data".encodeToByteArray().copyInto(wav, 36)
+    le32(40, pcm.size)
+    pcm.copyInto(wav, 44)
+    return wav
   }
 
 /**
