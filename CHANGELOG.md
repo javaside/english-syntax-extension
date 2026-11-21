@@ -15,8 +15,8 @@
 
 ### 测试
 
-- Chrome：单测 1461 项、Playwright E2E 48 项（新增云端朗读两条：合成 fetch 计数与按下态复位、禁用零请求）；假模型服务器新增 `/v1/audio/speech` 端点（45 帧静音 mp3）。
-- IntelliJ：Gradle `test` 451 项（新增 CloudSpeechSpeaker/HttpTtsFetcher/TtsSourceRepository/设置节/试音按钮五组，含取消不回落与 clip 竞态的回归钉）；web vitest 180 项照跑。
+- Chrome：单测 1473 项、Playwright E2E 49 项（云端合成计数/自然复位/失败胶囊明示/中途配置即时生效/Alt+T 冷启动走云端/禁用零请求）；假模型服务器新增 `/v1/audio/speech` 端点（45 帧静音 mp3——1 帧在 headless 下 duration=null 会直接 error）。
+- IntelliJ：Gradle `test` 464 项（CloudSpeechSpeaker/HttpTtsFetcher/TtsSourceRepository/设置节/保存按钮五组 + 生产装配端到端 TtsEndToEndTest/TtsSpeechIntegrationTest——「保存→读取→真实 HTTP 合成→不回落」全链钉死，profile 刻意无效 tts 仍完整落库）；web vitest 180 项照跑。
 
 ## 1.7.0 — 2026-11-18
 

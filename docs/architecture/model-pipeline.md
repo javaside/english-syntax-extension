@@ -310,6 +310,9 @@ raw → validateCoreBatch（解析前预丢弃纯标点成分）
 - **配置独立于模型 profile**(LLM 与 TTS 常不同家):Chrome 存 `chrome.storage.local` 键 `tts-source.v1`(config-repository 的 `loadTtsSource`/`saveTtsSource`),**apiKey 只存 SW 侧,永不下发 content**——会话快照只带 `tts: { enabled }`,content 只需知道选哪个 Speaker 实现。IDEA 存 `ProfileState` 的 `tts*` 字段(非密钥)+ PasswordSafe(`TtsSourceRepository`,固定条目 `tts-source`),密钥不进明文 XML。
 - **Chrome**:content 每 documentId 一个 `CloudSpeaker` 单例(裁决:Audio 元素没有 speechSynthesis 的全局 cancel 副作用,跨块接管靠单例),`speak` 发 `TTS_SYNTHESIZE` → SW 内联 fetch(`response_format: "mp3"`,10s 超时,voice 拼模型前缀 `Model:anna`)→ `TTS_AUDIO`(base64)→ `Audio(dataUri)` 播放;**代际作废**:新 speak/stop 使在途请求作废,晚到音频丢弃。快照 `tts.enabled` 置位才装配单例,禁用 = 每块本地 speaker(现状)。显式手势会话(选中/悬停/右键)不走 START_SESSION,保持本地语音(裁决:扩协议面成本不成比例)。
 - **IntelliJ**:`CloudSpeechSpeaker`(speak 即返,后台协程合成——调用链在 JBCefJSQuery 泵上,阻塞会停摆桥消息)包装 `ProcessSpeechSpeaker` 兜底;配置懒读 + 5 秒缓存(PasswordSafe 是 suspend+IO,装配链在 EDT 摸不到),`HttpTtsFetcher`(java.net.http,`response_format: "wav"`,内存 AudioInputStream 直开 Clip)。`PreviewSession` 恒构造云端包装,未配置/禁用直走本地——设置改动最迟 5 秒后生效,装配链零改动。云端+本地双失败才异步 `TTS_ERROR`(按最近一次 `launchTts` 的 sentenceId 归句)。
+- **配置即时生效**:Chrome 所有会话形态(整页/Alt+T/选区/右键)统一装配云端单例,IDEA 任意会话路径共用——云端与否由每次点击实时读配置决定,与「开始学习」/会话启动顺序解耦(真机教训:快照式生效时机连踩三轮)。
+- **音频格式与增益**:Chrome 端 SW 回 mp3、页面 WebAudio(AudioContext + GainNode ×2.5)播放(`volume` 上限 1.0,增益只能走 GainNode;解码被拒/上下文被自动播放策略拒都回落);IDEA 端请求裸 PCM(44.1kHz)自包 wav 头再样本级放大(流式生成的 wav 容器长度字段异常,Java 严格解析器拒、Chrome 宽容能播——idea.log 实锤的 Audio data < 0 根因)。
+- **来源三态可见**:☁ 云端 / ⚠ 回落(带原因) / 未配置静默;IDEA 决策日志(不含 Key)写 idea.log。
 - **无缓存**:P0 重复点击现拉(裁决);无重试、无修复轮。
 
 ## IntelliJ 插件的模型链路(Kotlin 侧)
