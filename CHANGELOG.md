@@ -2,21 +2,29 @@
 
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## 1.8.0 — 2026-11-19
+## 1.8.0 — 2026-11-21
 
 双端朗读获得**可选云端语音源**（OpenAI 兼容 `/v1/audio/speech`，如硅基流动 FunAudioLLM/CosyVoice2）：神经 TTS 音质远超系统语音。默认关闭、不配置时行为与 1.7.0 完全一致；云端任何失败自动回落本地语音，朗读永远有声。
 
 ### 双端新增
 
-- **「朗读语音源」设置**：开关 + 服务地址/密钥/模型（预填硅基流动默认值）+ 音色下拉（anna/alex/benjamin/charles/david/diana）。Chrome 存 `chrome.storage.local`（密钥只在 SW 侧、永不下发页面；启用态保存时申请对应 optional host 权限）；IDEA 非密钥进 `english-syntax.xml`、密钥走 PasswordSafe（不进明文 XML）。配置独立于模型 profile——LLM 与 TTS 常不同家。
-- **Chrome 云端链路**：每页一个 `CloudSpeaker` 单例，点喇叭发 `TTS_SYNTHESIZE` → SW 内联合成（mp3）→ `TTS_AUDIO` → `Audio` 播放；代际作废（点停/换句后晚到的音频直接丢弃，不叠声）；回落本地时 console 提示一次。
-- **IDEA 云端链路**：`CloudSpeechSpeaker` 的 `speak` 立即返回、合成在后台协程（不阻塞桥消息泵）；配置懒读 + 5 秒缓存；`wav` 内存直开 `Clip`；云端+本地双失败才异步 `TTS_ERROR`。设置页带「测试语音」按钮（打一次 5 字符合成验证配置，balloon 反馈）。
-- **修复（Chrome 回落语义）**：云端失败回落本地后，播完自动复位按钮、点停真正停掉本地回落音（此前按钮会卡在按下态、点停会变成重读）；云端音频播完按钮复位经块级 hooks 广播，此前装配漏了登记线。
+- **「朗读语音源」设置**：开关 + 服务地址/密钥/模型（预填硅基流动默认值）+ 音色下拉（anna/alex/benjamin/charles/david/diana）。Chrome 存 `chrome.storage.local`（密钥只在 SW 侧、永不下发页面；启用态保存时申请对应 optional host 权限），选项页带「测试语音」逐环诊断（配置/站点权限/合成请求三态结果，含 HTTP 401/404 具体化提示）；IDEA 非密钥进 `english-syntax.xml`、密钥走 PasswordSafe（不进明文 XML），设置页带独立的「Save speech source」按钮与「Test speech」（结果显示已保存配置状态）。配置独立于模型 profile——LLM 与 TTS 常不同家。
+- **配置即时生效（全形态）**：云端与否由每次点击实时读配置决定——启用、禁用、改地址、改 Key 下一次点喇叭立即反映；Chrome 整页/Alt+T 按段/选区/右键所有会话形态统一装配，IDEA 任意会话路径共用，与「开始学习」、会话启动顺序彻底解耦。
+- **朗读来源三态可见**：云端播放 →「☁ 云端语音」（Chrome 胶囊 / IDEA 每会话首次通知）；云端失败回落 →「⚠ 云端语音不可用(原因)」（Chrome 胶囊 / IDEA 通知）；未配置/禁用 → 静默本地。IDEA 的朗读决策（读到的配置值、合成结果、回落原因，不含 Key）写入 idea.log 可远程定位。
+- **Chrome 云端链路**：每页一个 `CloudSpeaker` 单例，点喇叭发 `TTS_SYNTHESIZE` → SW 内联合成（mp3）→ WebAudio（AudioContext + GainNode）播放；代际作废（点停/换句后晚到的音频直接丢弃，不叠声）；8 秒看门狗兜底消息通道挂死。
+- **IDEA 云端链路**：`CloudSpeechSpeaker` 的 `speak` 立即返回、合成在后台协程（不阻塞桥消息泵）；配置懒读 + 5 秒缓存；请求裸 PCM（44.1kHz）自包 wav 头（绕开流式 wav 容器长度异常——Java 严格解析器会拒而 Chrome 宽容能播）；云端+本地双失败才异步 `TTS_ERROR`。
+- **云端播放增益（约 +8dB）**：COS 系模型合成电平偏低——Chrome 走 GainNode 2.5×（`volume` 属性上限 1.0 只能换播放链），IDEA 在 PCM 样本级放大后 clamp；本地系统语音不受影响。
+
+### 真机修复（首版验收暴露）
+
+- Chrome：合成耗时超过手势激活窗口时 `play()` 被自动播放策略拒绝且无人接（无声+无提示+按钮卡死的静默死路）；本地选音首选网络语音（墙内挂死无事件）——加 2.5 秒启动看门狗，摘除网络语音重走白名单本地语音重试（绝不裸奔系统默认的老式 Albert——嘶哑回归）；降级路径同样经白名单。
+- IDEA：设置页 OK/Apply 未接持久化生命周期（配置随窗口丢弃）；tts 保存被 profile 校验异常连坐跳过；粘贴 Key 尾空白使 JVM 拒发请求（Chrome 宽容两端一通一不通）；配置读取异常静默当未配置。
 
 ### 测试
 
 - Chrome：单测 1473 项、Playwright E2E 49 项（云端合成计数/自然复位/失败胶囊明示/中途配置即时生效/Alt+T 冷启动走云端/禁用零请求）；假模型服务器新增 `/v1/audio/speech` 端点（45 帧静音 mp3——1 帧在 headless 下 duration=null 会直接 error）。
 - IntelliJ：Gradle `test` 464 项（CloudSpeechSpeaker/HttpTtsFetcher/TtsSourceRepository/设置节/保存按钮五组 + 生产装配端到端 TtsEndToEndTest/TtsSpeechIntegrationTest——「保存→读取→真实 HTTP 合成→不回落」全链钉死，profile 刻意无效 tts 仍完整落库）；web vitest 180 项照跑。
+
 
 ## 1.7.0 — 2026-11-18
 
