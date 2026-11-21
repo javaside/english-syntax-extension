@@ -299,6 +299,72 @@ export interface CloudSpeakerHandle extends Speaker {
 /** 云端合成的结果:音频或失败原因(错误码)。 */
 export type CloudSynthesisResult = { audioBase64: string; mime: string } | { error: string };
 
+/** 云端音频播放器 seam:测试注入 fake;默认 WebAudio 实现(带增益)。 */
+export interface CloudAudioPlayer {
+  onended: (() => void) | null;
+  onerror: (() => void) | null;
+  /** 解码(异步);失败 reject。 */
+  load(bytes: Uint8Array): Promise<void>;
+  start(): void;
+  stop(): void;
+}
+
+/** 云端音频增益:COS 系模型电平偏低,×2.5(约 +8dB)。HTMLAudioElement 的
+ * volume 上限 1.0,增益必须走 WebAudio 的 GainNode。 */
+export const CLOUD_TTS_GAIN = 2.5;
+
+/** 生产实现:AudioContext + GainNode 播放解码后的音频。 */
+export class WebAudioCloudPlayer implements CloudAudioPlayer {
+  onended: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  #ctx: AudioContext | null = null;
+  #source: AudioBufferSourceNode | null = null;
+
+  #buffer: AudioBuffer | null = null;
+
+  async load(bytes: Uint8Array): Promise<void> {
+    this.#ctx ??= new AudioContext();
+    const ctx = this.#ctx;
+    this.#buffer = await new Promise<AudioBuffer>((resolve, reject) => {
+      // 回调形:兼容没有 promise 形 decodeAudioData 的环境。
+      void ctx.decodeAudioData(bytes.buffer as ArrayBuffer, resolve, reject);
+    });
+  }
+
+  start(): void {
+    const ctx = this.#ctx;
+    if (ctx?.state === "suspended") {
+      void ctx.resume().catch(() => this.onerror?.());
+    }
+    const buffer = this.#buffer;
+    if (ctx === null || buffer === null) {
+      this.onerror?.();
+      return;
+    }
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    const gain = ctx.createGain();
+    gain.gain.value = CLOUD_TTS_GAIN;
+    source.connect(gain);
+    gain.connect(ctx.destination);
+    source.onended = () => {
+      if (this.#source === source) this.onended?.();
+    };
+    this.#source = source;
+    source.start();
+  }
+
+  stop(): void {
+    try {
+      this.#source?.stop();
+    } catch {
+      /* 未启动即停:忽略 */
+    }
+    void this.#ctx?.close().catch(() => undefined);
+    this.#source = null;
+  }
+}
+
 export interface CloudSpeakerOptions {
   /**
    * 云端失败时的本地兜底构造器。onEnd 由 CloudSpeaker 接线:回落自然结束 =
@@ -309,8 +375,8 @@ export interface CloudSpeakerOptions {
   onFallbackNotice?: (reason: string) => void;
   /** 云端音频开始播放时通知一次(来源指示:用户需要一眼看出走的哪条路)。 */
   onCloudPlayback?: () => void;
-  /** 测试注入 Audio 构造。 */
-  createAudio?: () => HTMLAudioElement;
+  /** 测试注入播放器构造。 */
+  createPlayer?: () => CloudAudioPlayer;
 }
 
 /**
@@ -328,9 +394,9 @@ export function createCloudSpeaker(
   synthesize: (text: string) => Promise<CloudSynthesisResult>,
   options: CloudSpeakerOptions = {},
 ): CloudSpeakerHandle {
-  const createAudio = options.createAudio ?? (() => new Audio());
+  const createPlayer = options.createPlayer ?? (() => new WebAudioCloudPlayer());
   let generation = 0;
-  let audio: HTMLAudioElement | null = null;
+  let player: CloudAudioPlayer | null = null;
   let fallbackActive = false;
   // 单例被多个块共享:每个块的 hooks 注册进集合,结束事件广播(复位幂等,DOM 现查)。
   const hooksSet = new Set<SpeakerHooks>();
@@ -368,8 +434,8 @@ export function createCloudSpeaker(
     speak(text: string): void {
       generation += 1;
       const mine = generation;
-      audio?.pause();
-      audio = null;
+      player?.stop();
+      player = null;
       takeOverFallback();
       const watchdog = setTimeout(() => {
         if (mine !== generation) return;
@@ -385,29 +451,38 @@ export function createCloudSpeaker(
             failToFallback(text, result.error);
             return;
           }
-          const element = createAudio();
-          element.src = `data:${result.mime};base64,${result.audioBase64}`;
+          // base64 → 字节,交给播放器 seam(WebAudio + 增益)。
+          const binary = atob(result.audioBase64);
+          const bytes = new Uint8Array(binary.length);
+          for (let index = 0; index < binary.length; index += 1) {
+            bytes[index] = binary.charCodeAt(index);
+          }
+          const element = createPlayer();
           element.onended = () => {
             if (mine !== generation) return;
             settle();
           };
           element.onerror = () => {
-            if (mine !== generation) return;
-            if (audio !== element) return;
-            audio = null;
+            if (mine !== generation || player !== element) return;
+            player = null;
             failToFallback(text, "audio-decode");
           };
-          audio = element;
-          options.onCloudPlayback?.();
-          void element.play().catch(() => {
-            // 合成耗时超过手势激活窗口时,自动播放策略会拒绝 play():
-            // 这个 rejection 不触发 onerror/onended——不接住就是静默卡死。
-            if (mine !== generation || audio !== element) return;
-            audio = null;
-            element.onended = null;
-            element.onerror = null;
-            failToFallback(text, "autoplay-blocked");
-          });
+          player = element;
+          void element.load(bytes).then(
+            () => {
+              if (mine !== generation || player !== element) return;
+              element.start();
+              options.onCloudPlayback?.();
+            },
+            () => {
+              // 解码失败或 AudioContext 被自动播放策略挂起:回落,别静默卡死。
+              if (mine !== generation || player !== element) return;
+              player = null;
+              element.onended = null;
+              element.onerror = null;
+              failToFallback(text, "audio-decode");
+            },
+          );
         },
         () => {
           // transport 层 rejection(通道断开等):与错误响应同款回落。
@@ -419,13 +494,13 @@ export function createCloudSpeaker(
     },
     stop(): void {
       generation += 1;
-      audio?.pause();
-      audio = null;
+      player?.stop();
+      player = null;
       takeOverFallback();
       settle();
     },
     isSpeaking(): boolean {
-      return audio !== null || fallbackActive;
+      return player !== null || fallbackActive;
     },
   };
   (speaker as CloudSpeakerHandle).registerHooks = (hooks: SpeakerHooks): void => {

@@ -28,7 +28,7 @@ class HttpTtsFetcherTest {
         recorded += Hit(exchange.requestURI.path, body, exchange.requestHeaders.getFirst("Authorization"))
       }
       // 裸 PCM(官方 pcm 格式):fetcher 负责包 wav 头。
-      val payload = ByteArray(128) { (it % 251).toByte() }
+      val payload = payloadOverride ?: ByteArray(128) { (it % 251).toByte() }
       exchange.sendResponseHeaders(status, payload.size.toLong())
       exchange.responseBody.use { it.write(payload) }
       exchange.close()
@@ -75,6 +75,18 @@ class HttpTtsFetcherTest {
     assertTrue(hit.body.contains("\"input\":\"hello world\""), hit.body)
     assertTrue(hit.body.contains("\"response_format\":\"pcm\""), hit.body)
     assertTrue(hit.body.contains("\"sample_rate\":44100"), hit.body)
+  }
+
+  private var payloadOverride: ByteArray? = null
+
+  @Test
+  fun `amplifies quiet cloud audio (CosyVoice2 levels are low)`(): Unit = runBlocking {
+    payloadOverride = byteArrayOf(0xE8.toByte(), 0x03) // 单样本 1000(s16le)
+    val wav = HttpTtsFetcher(config, "hello")
+    // 直接验证包好的 data 区(跳过 44 字节头):样本应放大 2.5 倍 → 2500。
+    val boosted = ((wav[44].toInt() and 0xFF) or ((wav[45].toInt() and 0xFF) shl 8))
+    assertTrue(boosted in 2400..2600, "expected amplified sample, got $boosted")
+    Unit
   }
 
   @Test

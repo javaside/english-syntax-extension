@@ -106,8 +106,12 @@ suspend fun HttpTtsFetcher(config: TtsSourceConfig, text: String): ByteArray =
     wrapPcmAsWav(pcm)
   }
 
-  /** PCM(s16le mono 44100)包 44 字节 wav 头:javax.sound 可直接播。 */
-  private fun wrapPcmAsWav(pcm: ByteArray): ByteArray {
+  /** 云端音频增益:COS 模型合成电平偏低,×2.5(约 +8dB)后 clamp。 */
+  private const val CLOUD_TTS_GAIN = 2.5f
+
+  /** PCM(s16le mono 44100)放大后包 44 字节 wav 头:javax.sound 可直接播。 */
+  private fun wrapPcmAsWav(raw: ByteArray): ByteArray {
+    val pcm = amplifyPcm(raw)
     val wav = ByteArray(44 + pcm.size)
     fun le32(offset: Int, value: Int) {
       wav[offset] = (value and 0xFF).toByte()
@@ -134,6 +138,20 @@ suspend fun HttpTtsFetcher(config: TtsSourceConfig, text: String): ByteArray =
     le32(40, pcm.size)
     pcm.copyInto(wav, 44)
     return wav
+  }
+
+  private fun amplifyPcm(input: ByteArray): ByteArray {
+    if (CLOUD_TTS_GAIN == 1.0f) return input
+    val output = input.copyOf()
+    var i = 0
+    while (i + 1 < output.size) {
+      val sample = ((output[i].toInt() and 0xFF) or ((output[i + 1].toInt() and 0xFF) shl 8)).toShort()
+      val boosted = (sample * CLOUD_TTS_GAIN).toInt().coerceIn(-32768, 32767)
+      output[i] = (boosted and 0xFF).toByte()
+      output[i + 1] = ((boosted ushr 8) and 0xFF).toByte()
+      i += 2
+    }
+    return output
   }
 
 /**
