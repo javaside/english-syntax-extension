@@ -80,6 +80,11 @@ private const val COMPLETENESS_FIRST_RULE =
     "An input with an explicit finite predicate of its own, or an imperative with an omitted subject, is a clause and uses the clause-level roles; " +
     "a finite verb inside an embedded relative clause does not count — \"The tool that we built passes every test\" keeps PREDICATE \"passes\" at the top level instead of becoming a fragment. " +
     "A heading, list item, noun phrase, adjective phrase, or non-finite verb phrase that does not form a clause must contain exactly one FRAGMENT_HEAD; never invent SUBJECT, PREDICATE, OBJECT, PREDICATIVE, or ADVERBIAL merely to force a fragment into a clause pattern. " +
+    // 版本 21:词条式「名词短语 - 定式谓语」输入按完整分句分析(词条就是谓语所缺的
+    // 主语),不得标 FRAGMENT_HEAD 再与分句级角色混用——2026-11-24 真机该形态两轮
+    // 修复输出逐字相同,首轮与修复轮都缺这条教学。
+    "A noun phrase before a dash or a colon that supplies the subject a following finite predicate lacks is that clause's SUBJECT, not a FRAGMENT_HEAD: " +
+    "\"Tool Calling - Permits the model to request the execution of tools\" = SUBJECT \"Tool Calling\" + PREDICATE \"Permits\" + OBJECT \"the model\" + COMPLEMENT \"to request the execution\" + ATTRIBUTE \"of tools\". " +
     "When a conjunction joins two conjuncts that a parenthetical or relative clause keeps apart, tag the conjunction as its own CONJUNCTION component and give each conjunct its own FRAGMENT_HEAD: " +
     "\"A DESIGN.md — a note — and a FRAME.md\" = FRAGMENT_HEAD \"A DESIGN.md\" + APPOSITIVE \"a note\" + CONJUNCTION \"and\" + FRAGMENT_HEAD \"a FRAME.md\"; " +
     "a conjunction inside one uninterrupted phrase stays inside that single component. " +
@@ -266,6 +271,16 @@ fun buildRepairPrompt(
     "Each error group below carries one sentenceId: apply its errors to that sentence only, never to another sentence in the same payload. A group's components[k] refers to entry k of that sentence's components array in the Invalid JSON below.",
     "Ranges, roles and translations may be corrected, but sentence IDs and Tokens must not change.",
     "For each PREDICATE error caused by a determiner inside the component, split that component immediately before the determiner and emit the resulting noun phrase as its own OBJECT, PREDICATIVE, or COMPLEMENT component.",
+    // 版本 21:「FRAGMENT_HEAD 与分句级角色混用」错误此前没有任何针对性出路指引——
+    // 词条式「名词短语 - 定式谓语」输入(2026-11-24 真机)两轮修复输出逐字相同。出路
+    // 两条:整句其实是完整分句(词条就是谓语所缺的主语)→去掉 FRAGMENT_HEAD 按分句
+    // 重析;确非分句 →保留唯一 head 并把混入的分句级角色降级,整条定语从句除外。
+    "For each FRAGMENT_HEAD error reporting clause-level roles mixed into a fragment, re-decide what the input is before retagging: " +
+      "an input with a finite predicate of its own is a clause, so drop every FRAGMENT_HEAD and analyse it with clause-level roles — " +
+      "the noun phrase before a dash or a colon that supplies the subject the finite predicate lacks is that clause's SUBJECT " +
+      "(\"Tool Calling - Permits the model to request the execution of tools\" = SUBJECT \"Tool Calling\" + PREDICATE \"Permits\" + OBJECT \"the model\" + COMPLEMENT \"to request the execution\" + ATTRIBUTE \"of tools\"); " +
+      "only when the input has no finite predicate of its own outside an embedded relative clause, keep exactly one FRAGMENT_HEAD and retag every mixed clause-level role as ATTRIBUTE, ADVERBIAL, APPOSITIVE, or INDEPENDENT_ELEMENT — " +
+      "a whole trailing ATTRIBUTIVE_CLAUSE is the only clause role that may stay.",
     // 版本 20:逐项判定替换 v19 的按整表分流——混合列表(`A; B; and C`)里模型看到
     // 末项前的 and 就维持逐项 head,分号隔开的中间项永远非法;判定口径与 validator
     // 硬门逐字同源(额外 head 只看紧邻前一个语义成分是不是 FANBOYS 连词)。

@@ -265,6 +265,32 @@ describe("model-facing sentence payload", () => {
     );
   });
 
+  // 2026-11-24 真机(功能列表词条句,三轮输出逐字相同、两轮修复仍失败):
+  // `Tool Calling - Permits the model to request the execution of client-side
+  // tools and functions, thereby accessing …` 被标成 FRAGMENT_HEAD("Tool Calling")
+  // + PREDICATE/OBJECT…,正撞混用硬门;修复轮对「混用」错误没有针对性出路指引,
+  // 而唯一正解是「词条就是定式谓语所缺的主语,整句按完整分句重析」。core 与
+  // repair 都要教这条出路,repair 还要给出「确非分句」时的降级出路。
+  it("teaches a dash-separated term supplying the missing subject as SUBJECT, not FRAGMENT_HEAD", () => {
+    const core = buildCorePrompt([sentence]);
+    const repair = buildRepairPrompt([sentence], [repairGroup], {});
+
+    for (const prompt of [core, repair]) {
+      expect(prompt).toContain(
+        "A noun phrase before a dash or a colon that supplies the subject a following finite predicate lacks is that clause's SUBJECT, not a FRAGMENT_HEAD",
+      );
+      expect(prompt).toContain(
+        '"Tool Calling - Permits the model to request the execution of tools" = SUBJECT "Tool Calling" + PREDICATE "Permits" + OBJECT "the model" + COMPLEMENT "to request the execution" + ATTRIBUTE "of tools"',
+      );
+    }
+    expect(repair).toContain(
+      "For each FRAGMENT_HEAD error reporting clause-level roles mixed into a fragment, re-decide what the input is before retagging",
+    );
+    expect(repair).toContain(
+      "only when the input has no finite predicate of its own outside an embedded relative clause, keep exactly one FRAGMENT_HEAD",
+    );
+  });
+
   it("treats dash supplements as explanations instead of coordination", () => {
     const dashSentence: SentenceInput = {
       sentenceId: "dash-1",
@@ -556,7 +582,9 @@ describe("页面句型教学(版本 13 重写)", () => {
   // 最短可教形式后再计入,超出说明又在机械追加。2026-11-02(core 19)新增
   // 非 FANBOYS 并列片段一组正反例(压缩后 +390 字符,实测 11998),系数
   // 1.42 → 1.48——v17/v18 的既定增长已把旧信封用到 99.6%,这次是带真机失败
-  // 依据的定向教学,不是机械追加。
+  // 依据的定向教学,不是机械追加。2026-11-24(core 21)新增词条式「名词短语 -
+  // 定式谓语」一组正例(压缩后 +371 字符,实测 12480),系数 1.48 → 1.53——
+  // 旧信封用到 99.7%,同样是真机两轮修复逐字相同失败的定向教学。
   it("teaches field-label + complete question as clause, not fragment", () => {
     const prompt = buildCorePrompt([sentence]);
 
@@ -570,7 +598,7 @@ describe("页面句型教学(版本 13 重写)", () => {
     const payloadStart = prompt.indexOf("Numbered sentence requests:");
     const ruleTextLength = prompt.slice(0, payloadStart).length;
 
-    expect(ruleTextLength).toBeLessThanOrEqual(Math.ceil(8207 * 1.48));
+    expect(ruleTextLength).toBeLessThanOrEqual(Math.ceil(8207 * 1.53));
   });
 });
 

@@ -54,6 +54,12 @@ describe("core gold annotations", () => {
     expect(conventions).toMatch(/即使末项前还有 and.*仍单列 CONJUNCTION/);
     expect(conventions).toMatch(/不得.*SUBJECT.*PREDICATE.*OBJECT/);
     expect(conventions).toMatch(/祈使句.*PREDICATE/);
+    // 2026-11-24(core 21):破折号或冒号后的定式谓语不带自己的主语时,破折号前的
+    // 名词短语(词条)就是主语——整句按完整分句分析,不得标 FRAGMENT_HEAD 再混
+    // 分句级角色(真机死锁形态:两轮修复输出逐字相同)。
+    expect(conventions).toMatch(
+      /冒号或破折号后的定式谓语不带自己的主语时，破折号前的名词短语（词条）就是它的主语/,
+    );
     expect(conventions).toMatch(/总体.*不覆盖标点/);
     expect(conventions).toMatch(/fragment-portable-api.*6\.\.14.*例外.*不得推广/);
     // D4:句末书目引用附着口径(不进 validator 硬门——裸字符串无法高把握区分
@@ -249,6 +255,25 @@ describe("core gold annotations", () => {
         { startToken: 4, endToken: 8, role: GrammarRole.COMPLEMENT },
         { startToken: 9, endToken: 9, role: GrammarRole.ADVERBIAL },
         { startToken: 10, endToken: 17, role: GrammarRole.ADVERBIAL },
+      ],
+    ],
+    [
+      // 2026-11-24 真机(功能列表词条句):破折号后的定式谓语不带自己的主语,词条
+      // "Tool Calling" 就是主语——整句按完整分句分析,一个 FRAGMENT_HEAD 都不
+      // 得出现;后置 of 短语照常单列 ATTRIBUTE,结果分词短语标 ADVERBIAL。该句
+      // 两轮修复输出逐字相同,正是「混用」错误缺出路指引的死锁形态。
+      // 0 Tool/1 Calling/2 -(p)/3 Permits/4 the/5 model/6 to/7 request/8 the/
+      // 9 execution/10 of/11 client-side/12 tools/13 and/14 functions/15 ,(p)/
+      // 16 thereby/17 accessing/18 necessary/19 real-time/20 information/21 as/
+      // 22 required/23 .(p)
+      "page-dash-term-subject",
+      [
+        { startToken: 0, endToken: 1, role: GrammarRole.SUBJECT },
+        { startToken: 3, endToken: 3, role: GrammarRole.PREDICATE },
+        { startToken: 4, endToken: 5, role: GrammarRole.OBJECT },
+        { startToken: 6, endToken: 9, role: GrammarRole.COMPLEMENT },
+        { startToken: 10, endToken: 14, role: GrammarRole.ATTRIBUTE },
+        { startToken: 16, endToken: 22, role: GrammarRole.ADVERBIAL },
       ],
     ],
     [

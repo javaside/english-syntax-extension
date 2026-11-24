@@ -170,11 +170,11 @@
 
 **规则** 修复轮指令教模型的「修正路线」必须是 validator 眼里**真实存在**的合法形态。改任何 repair 指令前,先对照 validator 对应错误的完整判定:指令推荐的路要与错误文案给出的全部出路一致,而不是只服务其中一种输入形态。
 
-**为什么** core 18 的修复轮指令「多 head 错误 → 每个并列项一个 FRAGMENT_HEAD、连词单列 CONJUNCTION,**不得**把并列项改标 APPOSITIVE/ATTRIBUTE」只对 FANBOYS 并列成立。validator 错误文案明说出路是「merge into the fragment head **or** retag it as ATTRIBUTE or APPOSITIVE」;逗号/分号/`vs` 连接的并列里**没有**可单列的连词,旧指令把两条合法出路同时封死,模型无路可走——只能保持多 head(被「至多一个」门拒)或把 `,`/`；`/`vs` 虚构成 CONJUNCTION(被 FANBOYS 词表门拒)。两轮修复必然失败,core 19 把指令改为按「并列项靠什么连接」分流。**v20 教训:分流维度本身也要对**——按整表分流在混合列表(`A; B; and C`)里仍会死锁,模型看到末项前的 and 就套 FANBOYS 分支,分号隔开的中间项永远非法(2026-11-03 该句 6/6 试验全败、三轮输出逐字相同);core 20 把首轮与修复轮都改成**逐项判定**(每个额外 head 只看紧邻前一个语义成分是不是 FANBOYS 连词),与 validator 硬门逐字同口径。
+**为什么** core 18 的修复轮指令「多 head 错误 → 每个并列项一个 FRAGMENT_HEAD、连词单列 CONJUNCTION,**不得**把并列项改标 APPOSITIVE/ATTRIBUTE」只对 FANBOYS 并列成立。validator 错误文案明说出路是「merge into the fragment head **or** retag it as ATTRIBUTE or APPOSITIVE」;逗号/分号/`vs` 连接的并列里**没有**可单列的连词,旧指令把两条合法出路同时封死,模型无路可走——只能保持多 head(被「至多一个」门拒)或把 `,`/`；`/`vs` 虚构成 CONJUNCTION(被 FANBOYS 词表门拒)。两轮修复必然失败,core 19 把指令改为按「并列项靠什么连接」分流。**v20 教训:分流维度本身也要对**——按整表分流在混合列表(`A; B; and C`)里仍会死锁,模型看到末项前的 and 就套 FANBOYS 分支,分号隔开的中间项永远非法(2026-11-03 该句 6/6 试验全败、三轮输出逐字相同);core 20 把首轮与修复轮都改成**逐项判定**(每个额外 head 只看紧邻前一个语义成分是不是 FANBOYS 连词),与 validator 硬门逐字同口径。**v21 教训:出路指引可以整条缺席,不封死同样死锁**——「FRAGMENT_HEAD 与分句级角色混用」错误此前没有任何针对性修复指令,词条式「名词短语 - 定式谓语」输入(`Tool Calling - Permits the model to request the execution of client-side tools and functions, thereby accessing …`,2026-11-24 真机)里模型把词条标 FRAGMENT_HEAD、谓语照常分句级,唯一合法出路是「整句其实是完整分句,词条就是谓语所缺的主语」——错误文案只禁混用、不提这条路;core 21 首轮教该口径,修复轮指令补齐「先重判是否成句」的两条出路(成句 → 去掉 head 按分句重析;确非分句 → 保留唯一 head 并降级混入角色,整条定语从句除外)。
 
 **症状** HyperFrames vs Remotion 对比页 7/49 句(页标题 `HyperFrames vs Remotion`、h2 `Same request, two agents`、引导长句、表格数量单元等)在页面上全部显示笼统的 `INVALID_MODEL_OUTPUT：模型未返回此句的解析结果`;真模型复现的逐轮原始输出显示模型在「多 head ↔ 虚构连词」之间反复横跳,三轮返回同一形态。该症状同时暴露了 failures 不随 CORE_RESULT 下发的问题(协议侧已一并修复)。
 
-**守护测试** `prompts.test.ts` / `PromptsTest.kt` 的 "teaches non-FANBOYS coordination as one merged head and forbids punctuation conjunctions"(core 与 repair 双侧钉住新口径)与改写后的 "teaches coordinated fragment heads…"(FANBOYS 分支保留);`core-gold-annotations.test.ts` 的 `fragment-vs-heading` / `fragment-comma-conjuncts` / `fragment-comma-quantity` 三句真机失败句钉死标注;`service-worker.test.ts` 的 "非鉴权失败的 outcome.failures 逐句随 CORE_RESULT 下发且消息脱敏"。
+**守护测试** `prompts.test.ts` / `PromptsTest.kt` 的 "teaches non-FANBOYS coordination as one merged head and forbids punctuation conjunctions"(core 与 repair 双侧钉住新口径)与改写后的 "teaches coordinated fragment heads…"(FANBOYS 分支保留);`core-gold-annotations.test.ts` 的 `fragment-vs-heading` / `fragment-comma-conjuncts` / `fragment-comma-quantity` 三句真机失败句钉死标注,v21 补 `page-dash-term-subject` 真机失败句与 `prompts.test.ts` / `PromptsTest.kt` 的 "teaches a dash-separated term supplying the missing subject as SUBJECT, not FRAGMENT_HEAD";`service-worker.test.ts` 的 "非鉴权失败的 outcome.failures 逐句随 CORE_RESULT 下发且消息脱敏"。
 
 ### I-12 别改 prompt 首行措辞
 
@@ -270,7 +270,7 @@
 
 ### I-18.1 Tokenization 改动必须同时提升 core 与 detail 提示词版本
 
-**规则** 任何会改变 Token 数量或 ID 的分词改动，都必须同时提升 `CORE_PROMPT_VERSION` 与 `DETAIL_PROMPT_VERSION`；当前值分别为 `20` 与 `10`（版本 13/7 面向页面级英文覆盖重写双端 prompt 并给 detail 修复轮补输出模板与完整中文角色词表；core 18 只改片段并列口径、core 19 在其上补非 FANBOYS 并列(逗号/分号/vs)的合并口径并修复修复轮指令矛盾,core 20 把判定改为逐项(混合列表的分号项一律 `APPOSITIVE`),均不动 tokenization，所以 detail 仍为 `10`；`CORE_PROMPT_VERSION` 13 起单句规则段预算由预算测试钉住,系数按版本递进 1.35→1.42→1.48(基线为版本 12 实测 8207 字符,每次上调须在预算测试注释里给出测量依据)），而输出契约未变，`CORE_SCHEMA_VERSION` 保持 `3`。
+**规则** 任何会改变 Token 数量或 ID 的分词改动，都必须同时提升 `CORE_PROMPT_VERSION` 与 `DETAIL_PROMPT_VERSION`；当前值分别为 `21` 与 `10`（版本 13/7 面向页面级英文覆盖重写双端 prompt 并给 detail 修复轮补输出模板与完整中文角色词表；core 18 只改片段并列口径、core 19 在其上补非 FANBOYS 并列(逗号/分号/vs)的合并口径并修复修复轮指令矛盾,core 20 把判定改为逐项(混合列表的分号项一律 `APPOSITIVE`),core 21 补词条式「名词短语 - 定式谓语」的完整分句口径与「混用」错误的修复轮出路,均不动 tokenization，所以 detail 仍为 `10`；`CORE_PROMPT_VERSION` 13 起单句规则段预算由预算测试钉住,系数按版本递进 1.35→1.42→1.48→1.53(基线为版本 12 实测 8207 字符,每次上调须在预算测试注释里给出测量依据)），而输出契约未变，`CORE_SCHEMA_VERSION` 保持 `3`。
 
 **为什么** core span 与 detail focus 都使用 Token ID。两条缓存键虽各自带提示词版本，但 Token 坐标是共同依赖；只升一条会让另一类旧缓存仍以过期坐标命中新文本。
 

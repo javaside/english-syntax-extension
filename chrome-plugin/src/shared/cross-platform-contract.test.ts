@@ -14,12 +14,12 @@ import {
   MESSAGE_VERSION,
 } from "./versions";
 
-it("pins the shared analysis versions after the mixed-coordination fix", () => {
-  // core 20 在 19 的非 FANBOYS 并列口径上把判定改为逐项——混合列表(`A; B; and C`)
-  // 里分号隔开的中间项一律 APPOSITIVE,即使末项前有 and;修复轮指令同步改逐项
-  // 判定(额外 head 只看紧邻前一个语义成分是不是 FANBOYS 连词)。旧的 core 缓存按
-  // 新版本键作废;detail 提示词未动,保持 10。
-  expect(CORE_PROMPT_VERSION).toBe(20);
+it("pins the shared analysis versions after the dash-term-subject fix", () => {
+  // core 21 教词条式「名词短语 - 定式谓语」输入按完整分句分析(词条就是谓语所缺的
+  // 主语),并给修复轮补「FRAGMENT_HEAD 与分句级角色混用」错误的出路指引——此前
+  // 该错误没有任何针对性指令,2026-11-24 真机两轮修复输出逐字相同。旧的 core 缓存
+  // 按新版本键作废;detail 提示词未动,保持 10。
+  expect(CORE_PROMPT_VERSION).toBe(21);
   expect(DETAIL_PROMPT_VERSION).toBe(10);
   expect(CORE_SCHEMA_VERSION).toBe(3);
 });

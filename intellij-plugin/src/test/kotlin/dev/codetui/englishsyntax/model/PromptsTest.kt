@@ -213,6 +213,40 @@ class PromptsTest {
     assertTrue(repair.contains("including an item of a list that merely ends with \"; and\" — retag it APPOSITIVE"))
   }
 
+  /** 2026-11-24 真机（功能列表词条句，三轮输出逐字相同、两轮修复仍失败）：与 TS 同一死锁。 */
+  @Test
+  fun `teaches a dash separated term supplying the missing subject as SUBJECT not FRAGMENT_HEAD`() {
+    val core = buildCorePrompt(listOf(sentence("Classify the request.")))
+    val repair = buildRepairPrompt(
+      listOf(sentence("Classify the request.")),
+      listOf(RepairErrorGroup("s1", 0, "invalid", listOf(ValidationError("components[0]", "bad")))),
+      buildJsonObject { put("sentences", buildJsonArray { }) },
+    )
+
+    listOf(core, repair).forEach { prompt ->
+      assertTrue(
+        prompt.contains(
+          "A noun phrase before a dash or a colon that supplies the subject a following finite predicate lacks is that clause's SUBJECT, not a FRAGMENT_HEAD",
+        ),
+      )
+      assertTrue(
+        prompt.contains(
+          "\"Tool Calling - Permits the model to request the execution of tools\" = SUBJECT \"Tool Calling\" + PREDICATE \"Permits\" + OBJECT \"the model\" + COMPLEMENT \"to request the execution\" + ATTRIBUTE \"of tools\"",
+        ),
+      )
+    }
+    assertTrue(
+      repair.contains(
+        "For each FRAGMENT_HEAD error reporting clause-level roles mixed into a fragment, re-decide what the input is before retagging",
+      ),
+    )
+    assertTrue(
+      repair.contains(
+        "only when the input has no finite predicate of its own outside an embedded relative clause, keep exactly one FRAGMENT_HEAD",
+      ),
+    )
+  }
+
   @Test
   fun `dash supplements remain explanations and keep relative clause boundaries`() {
     val input = sentence("Ask clarifying questions — one at a time, the ones that matter.")
@@ -468,7 +502,9 @@ class PromptsTest {
    * (spec D4/D5)新增 Trailing-citation 与 Heading-number 两条规则,系数 1.35 → 1.42。
    * 2026-11-02(core 19)新增非 FANBOYS 并列片段一组正反例(实测 12038),系数
    * 1.42 → 1.48——v17/v18 的既定增长已把旧信封用到 99.6%,这次是带真机失败依据
-   * 的定向教学。与 TS prompts.test.ts 同一系数。
+   * 的定向教学。2026-11-24(core 21)新增词条式「名词短语 - 定式谓语」一组正例
+   * (实测 12480),系数 1.48 → 1.53——旧信封用到 99.7%,同样是真机两轮修复
+   * 逐字相同失败的定向教学。与 TS prompts.test.ts 同一系数。
    */
   @Test
   fun `core prompt rule text stays within the measured budget envelope`() {
@@ -476,7 +512,7 @@ class PromptsTest {
     val payloadStart = prompt.indexOf("Numbered sentence requests:")
     val ruleTextLength = prompt.slice(0 until payloadStart).length
 
-    assertTrue(ruleTextLength <= 8207 * 1.48, "rule text grew beyond budget: $ruleTextLength")
+    assertTrue(ruleTextLength <= 8207 * 1.53, "rule text grew beyond budget: $ruleTextLength")
   }
 
   /** 追问对话提示词：首行是函数内字面量，绝不进 contracts.json 的 promptFirstLines。 */
