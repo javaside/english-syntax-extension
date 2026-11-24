@@ -40,7 +40,6 @@
 - Chrome：单测 1473 项、Playwright E2E 49 项（云端合成计数/自然复位/失败胶囊明示/中途配置即时生效/Alt+T 冷启动走云端/禁用零请求）；假模型服务器新增 `/v1/audio/speech` 端点（45 帧静音 mp3——1 帧在 headless 下 duration=null 会直接 error）。
 - IntelliJ：Gradle `test` 464 项（CloudSpeechSpeaker/HttpTtsFetcher/TtsSourceRepository/设置节/保存按钮五组 + 生产装配端到端 TtsEndToEndTest/TtsSpeechIntegrationTest——「保存→读取→真实 HTTP 合成→不回落」全链钉死，profile 刻意无效 tts 仍完整落库）；web vitest 180 项照跑。
 
-
 ## 1.7.0 — 2026-11-18
 
 IntelliJ 插件获得与 Chrome 扩展对等的**朗读**（发音查证），并补齐详解「重试永远失败」在 IDEA 侧的同类修复。Chrome 扩展本版无功能变化（双端同版本号发布）。
