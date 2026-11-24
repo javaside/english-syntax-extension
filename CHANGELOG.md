@@ -2,6 +2,21 @@
 
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## 1.8.1 — 2026-11-24
+
+修复一个真机修复死锁：功能列表词条句 `Tool Calling - Permits the model to request the execution of client-side tools and functions, thereby accessing …` 首轮与两轮模型修复输出逐字相同，整段拿不到译文。根因不在「没修」而在「修不动」——模型把词条标成片段主体（FRAGMENT_HEAD）、谓语照常标分句级角色，被「FRAGMENT_HEAD 不得与分句级角色混用」硬门拒绝；而修复轮对这类错误此前没有任何针对性出路指引，唯一正解（词条就是定式谓语所缺的主语，整句按完整分句重析）模型自己想不到。本版 `CORE_PROMPT_VERSION` 20→21（双端同步，规则段预算信封 1.48→1.53），旧 core 缓存按新版本键作废、重访页面重新解析一次；输出形状、协议与权限零变化，详解缓存不受影响。
+
+### 双端修复
+
+- **词条式「名词短语 - 定式谓语」输入按完整分句分析**：破折号/冒号前的名词短语若补足其后定式谓语所缺的主语，就标 SUBJECT 而非 FRAGMENT_HEAD（同页 `Tool Search handles large tool sets` 即同构）；宾控结构 OBJECT + COMPLEMENT，后置 of 短语照常单列 ATTRIBUTE，结果分词短语标 ADVERBIAL。
+- **修复轮补「混用」错误的出路指引**：先重判输入是否成句——成句则去掉 FRAGMENT_HEAD 按分句重析；确非分句才保留唯一 head 并把混入的分句级角色降级（整条定语从句除外）。出路指引整条缺席与指错路同样死锁（invariants I-11.3 的 v21 教训）。
+- 双端提示词逐字同步（parity fixture 钉住，trace fixture 重建并重算哈希）；黄金集新增该真机失败句 `page-dash-term-subject`（第 104 句）钉死正解形态并补 conventions 口径。
+
+### 测试
+
+- Chrome：单测 1475 项、Playwright E2E 49 项全绿（新增词条主语教学与修复轮出路指令断言；黄金集 104 句全量过双端 validator）。
+- IntelliJ：web vitest 180 项、Gradle `test` 465 项、`buildPlugin`/`verifyPluginProjectConfiguration` 全绿（shared-fixtures 变更后 `--rerun-tasks` 重跑，避免配置缓存假绿）。
+
 ## 1.8.0 — 2026-11-21
 
 双端朗读获得**可选云端语音源**（OpenAI 兼容 `/v1/audio/speech`，如硅基流动 FunAudioLLM/CosyVoice2）：神经 TTS 音质远超系统语音。默认关闭、不配置时行为与 1.7.0 完全一致；云端任何失败自动回落本地语音，朗读永远有声。
