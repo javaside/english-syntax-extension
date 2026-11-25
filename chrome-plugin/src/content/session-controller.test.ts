@@ -3044,6 +3044,181 @@ describe("SessionController 追问对话接线", () => {
     expect(asks[1]!.history).toEqual([]); // 第一轮问答不跨句携带
     expect(asks[1]!.context.sentence.sentenceId).toBe("sentence-2");
   });
+
+  // —— 重开恢复(2026-11-25 spec):面板只持有活跃会话,关闭/换句时停靠到控制器
+  //    的按句存储,重开同句恢复历史;conversationId 每次新铸。 ——
+
+  function headerButton(page: Document, label: string): HTMLButtonElement | null {
+    const root = chatHost(page)?.shadowRoot;
+    if (root === undefined || root === null) return null;
+    return (
+      [...root.querySelectorAll<HTMLButtonElement>(".header button")].find(
+        (button) => button.textContent === label,
+      ) ?? null
+    );
+  }
+
+  function messagesOf(page: Document): string[] {
+    return [...chatHost(page)!.shadowRoot!.querySelectorAll<HTMLElement>(".message")].map(
+      (bubble) => bubble.textContent ?? "",
+    );
+  }
+
+  it("关闭面板再重开同句:气泡与历史恢复,续问携带恢复的历史且换新 conversationId", async () => {
+    const subject = chatHarness();
+    await subject.controller.start();
+    subject.viewport.emit();
+    await vi.waitFor(() => expect(subject.controller.status.ready).toBe(1));
+    openChatFor(subject.page, "sentence-1");
+    await subject.controller.askChat("sentence-1", "问1");
+    await subject.controller.askChat("sentence-1", "问2");
+
+    headerButton(subject.page, "关闭")!.click();
+    expect(chatHost(subject.page)).toBeNull();
+
+    openChatFor(subject.page, "sentence-1");
+    expect(messagesOf(subject.page)).toEqual(["问1", "答", "问2", "答"]);
+
+    await subject.controller.askChat("sentence-1", "问3");
+    const asks = chatAsks(subject.transport);
+    expect(asks[2]!.history).toEqual([
+      { role: "user", content: "问1" },
+      { role: "assistant", content: "答" },
+      { role: "user", content: "问2" },
+      { role: "assistant", content: "答" },
+    ]);
+    // 恢复的是内容不是 id:重开续问用新铸的 conversationId
+    expect(asks[2]!.conversationId).not.toBe(asks[0]!.conversationId);
+  });
+
+  it("换句停靠回切恢复:s2 空会话,s1 历史回来;他句在飞的迟到答案不落进恢复面板", async () => {
+    const pending: Array<{
+      message: Extract<RequestMessage, { type: "CHAT_ASK" }>;
+      resolve: (response: ResponseMessage) => void;
+    }> = [];
+    const subject = chatHarness("Readers read books. Writers compose prose.", (message) =>
+      new Promise<ResponseMessage>((resolve) => {
+        pending.push({ message, resolve });
+      }),
+    );
+    await subject.controller.start();
+    subject.viewport.emit();
+    await vi.waitFor(() => expect(subject.controller.status.ready).toBe(2));
+
+    openChatFor(subject.page, "sentence-1");
+    const round1 = subject.controller.askChat("sentence-1", "问1");
+    await vi.waitFor(() => expect(pending).toHaveLength(1));
+    const first = pending.shift()!;
+    first.resolve(chatResultMessage(first.message, "答1"));
+    await round1;
+
+    // 切句(不关闭):s1 停靠,s2 是空会话
+    openChatFor(subject.page, "sentence-2");
+    expect(messagesOf(subject.page)).toEqual([]);
+    expect(chatHost(subject.page)!.shadowRoot!.querySelector(".summary")?.textContent).toBe(
+      "Writers compose prose.",
+    );
+
+    // s2 在飞一轮,随后回切 s1:历史恢复
+    const round2 = subject.controller.askChat("sentence-2", "问B");
+    await vi.waitFor(() => expect(pending).toHaveLength(1));
+    openChatFor(subject.page, "sentence-1");
+    const host = chatHost(subject.page)!;
+    expect(messagesOf(subject.page)).toEqual(["问1", "答1"]);
+
+    // s2 的迟到答案到达:面板已在新会话上,守卫丢弃,不画气泡也不进历史
+    const second = pending.shift()!;
+    second.resolve(chatResultMessage(second.message, "答B"));
+    await round2;
+    expect(host.shadowRoot!.textContent).not.toContain("答B");
+  });
+
+  it("在飞轮关闭再重开:悬空问照显示,续问的请求 history 不含悬空轮", async () => {
+    const subject = chatHarness(undefined, () => new Promise<ResponseMessage>(() => undefined));
+    await subject.controller.start();
+    subject.viewport.emit();
+    await vi.waitFor(() => expect(subject.controller.status.ready).toBe(1));
+    openChatFor(subject.page, "sentence-1");
+    void subject.controller.askChat("sentence-1", "悬空问");
+    await vi.waitFor(() => expect(chatAsks(subject.transport)).toHaveLength(1));
+
+    headerButton(subject.page, "关闭")!.click();
+    expect(chatHost(subject.page)).toBeNull();
+
+    openChatFor(subject.page, "sentence-1");
+    expect(messagesOf(subject.page)).toEqual(["悬空问"]);
+    // 恢复的会话无在飞轮(id 已换):输入可用
+    expect(
+      chatHost(subject.page)!.shadowRoot!.querySelector<HTMLTextAreaElement>("textarea")!.disabled,
+    ).toBe(false);
+
+    // 续问(transport 永不响应,只断言请求形态,不等回答)
+    void subject.controller.askChat("sentence-1", "续问");
+    await vi.waitFor(() => expect(chatAsks(subject.transport)).toHaveLength(2));
+    expect(chatAsks(subject.transport)[1]!.history).toEqual([]); // 悬空轮被裁出请求视图
+  });
+
+  it("停靠第 9 句时最旧句被逐出(LRU 8):重开第 1 句为空会话,第 8/9 句恢复", async () => {
+    const nine = Array.from({ length: 9 }, (_, index) => `Sentence number ${index + 1} talks.`).join(
+      " ",
+    );
+    const subject = chatHarness(nine, (message) =>
+      chatResultMessage(message, `答:${message.question}`),
+    );
+    await subject.controller.start();
+    subject.viewport.emit();
+    await vi.waitFor(() => expect(subject.controller.status.ready).toBe(9));
+    for (let index = 1; index <= 9; index += 1) {
+      openChatFor(subject.page, `sentence-${index}`);
+      await subject.controller.askChat(`sentence-${index}`, `问${index}`);
+      headerButton(subject.page, "关闭")!.click();
+    }
+
+    openChatFor(subject.page, "sentence-1");
+    expect(messagesOf(subject.page)).toEqual([]); // 被逐出:空会话
+    openChatFor(subject.page, "sentence-8");
+    expect(messagesOf(subject.page)).toEqual(["问8", "答:问8"]);
+    openChatFor(subject.page, "sentence-9");
+    expect(messagesOf(subject.page)).toEqual(["问9", "答:问9"]);
+  });
+
+  it("「新对话」:换新 id、清空历史并丢弃停靠;重开不再恢复被丢弃的对话", async () => {
+    const subject = chatHarness();
+    await subject.controller.start();
+    subject.viewport.emit();
+    await vi.waitFor(() => expect(subject.controller.status.ready).toBe(1));
+    openChatFor(subject.page, "sentence-1");
+    await subject.controller.askChat("sentence-1", "旧问");
+
+    headerButton(subject.page, "新对话")!.click();
+    expect(messagesOf(subject.page)).toEqual([]); // 立即清空
+    await subject.controller.askChat("sentence-1", "新问");
+    const asks = chatAsks(subject.transport);
+    expect(asks[1]!.history).toEqual([]); // 新会话不携带旧问答
+    expect(asks[1]!.conversationId).not.toBe(asks[0]!.conversationId);
+
+    // 关闭后重开:恢复的是新会话,被显式丢弃的旧对话不回来
+    headerButton(subject.page, "关闭")!.click();
+    openChatFor(subject.page, "sentence-1");
+    expect(messagesOf(subject.page)).toEqual(["新问", "答"]);
+  });
+
+  it("stop 清空停靠:停止后重开同句,首轮 history 为空", async () => {
+    const subject = chatHarness();
+    await subject.controller.start();
+    subject.viewport.emit();
+    await vi.waitFor(() => expect(subject.controller.status.ready).toBe(1));
+    openChatFor(subject.page, "sentence-1");
+    await subject.controller.askChat("sentence-1", "问1");
+    headerButton(subject.page, "关闭")!.click(); // 停靠 s1
+
+    subject.controller.stop();
+
+    // stop 后事件监听已拆:直接调 openChat(DOM 事件路径不可用是既有语义)
+    subject.controller.openChat("sentence-1");
+    await subject.controller.askChat("sentence-1", "问2");
+    expect(chatAsks(subject.transport)[1]!.history).toEqual([]);
+  });
 });
 
 describe("段落解析中标记", () => {

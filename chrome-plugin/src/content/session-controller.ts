@@ -11,6 +11,7 @@ import type {
 import { MAX_SENTENCES_PER_REQUEST } from "../shared/protocol";
 import type {
   ChatStreamPush,
+  ChatTurn,
   CoreStreamPush,
   DetailStreamPush,
   RequestMessage,
@@ -34,6 +35,9 @@ import { resolveHoverTarget } from "./hover-target";
 import type { SyntaxFocusEventDetail } from "./learning-block";
 import { SyntaxLearningBlock } from "./learning-block";
 import { ViewportObserver } from "./viewport-observer";
+
+/** 按句停靠的追问会话上限(LRU):纯内存态防失控的启发式,超出逐出最久未停靠句。 */
+const MAX_STORED_CHAT_CONVERSATIONS = 8;
 
 export type SentencePhase =
   | "discovered"
@@ -277,6 +281,12 @@ export class SessionController {
   private chatPanel?: ChatPanel;
   /** openChat 递增的会话计数,conversationId 的 `${documentId}:chat:` 后缀。 */
   private chatCounter = 0;
+  /**
+   * 按句停靠的追问会话(重开恢复,2026-11-25 spec):快照是未裁剪的原始历史
+   * (显示保真;请求视图照旧走面板 #trimmedHistory)。LRU 上限 8 句——超出逐出
+   * 最久未停靠的;stop() 整体清空。会话内存态,不落任何缓存/存储。
+   */
+  private readonly chatConversations = new Map<string, ChatTurn[]>();
   private scanned = false;
   private cacheOnly = false;
   private readonly batchWindowMs: number;
@@ -495,8 +505,10 @@ export class SessionController {
     );
     this.document.removeEventListener("syntax-chat-request", this.handleChatEvent);
     // 面板随控制器一起收摊;在飞的 CHAT_ASK 不主动取消——SW 侧端口回收负责
-    // (stop 已发 STOP_SESSION,`${documentId}:chat` 命名空间随之回收)。
+    // (stop 已发 STOP_SESSION,`${documentId}:chat` 命名空间随之回收)。停靠的
+    // 追问会话一并清空:会话死了,恢复无意义(新会话新控制器,store 本就为空)。
     this.chatPanel?.dispose();
+    this.chatConversations.clear();
     for (const timer of this.reconnectTimers) this.cancelTimeout(timer);
     this.reconnectTimers.clear();
     // 挂起的合批窗口必须取消，否则会话停掉之后还会冒出一条请求。
@@ -755,23 +767,60 @@ export class SessionController {
   }
 
   /**
-   * 打开追问对话浮层(惰性单例)。换(或重按)锚定句 = 重置会话:新 conversationId、
-   * 摘要行换新、onSubmit 重绑,旧会话的迟到流/结果由面板按 conversationId 把关丢弃。
-   * 句子没有 core 时直接返回——没有已核实的划分可作上下文(按钮本应禁用)。
+   * 打开追问对话浮层(惰性单例)。重开恢复(2026-11-25 spec):先停靠当前活跃会话
+   * (关闭/换句统一入口),同句有停靠记录则恢复历史、无则新会话;conversationId
+   * **每次打开新铸**——恢复的是内容不是 id,旧轮的迟到流/结果照旧被面板按 id 把关
+   * 丢弃。「新对话」按钮 = 显式丢弃(连停靠条目一起)后重置。句子没有 core 时直接
+   * 返回——没有已核实的划分可作上下文(按钮本应禁用)。
    */
   openChat(sentenceId: string, anchor?: { x: number; y: number }): void {
     const sentence = this.sentences.get(sentenceId);
     if (sentence === undefined || sentence.core === undefined) return;
-    if (this.chatPanel === undefined) this.chatPanel = new ChatPanel(this.document);
+    if (this.chatPanel === undefined) {
+      const panel = new ChatPanel(this.document);
+      // 关闭浮层 = 快照停靠(dispose 清态前触发):同句重开走恢复。
+      panel.onClose = () => this.#parkChatConversation();
+      this.chatPanel = panel;
+    }
     const panel = this.chatPanel;
+    const summary = sentence.input.text.slice(0, 40);
+    this.#parkChatConversation();
+    const stored = this.chatConversations.get(sentenceId);
     const conversationId = `${this.documentId}:chat:${++this.chatCounter}`;
     panel.open({
       sentenceId,
-      summary: sentence.input.text.slice(0, 40),
+      summary,
       ...(anchor !== undefined ? { anchor } : {}),
     });
     panel.setConversationId(conversationId);
+    if (stored !== undefined) {
+      panel.restoreHistory(stored);
+    }
     panel.onSubmit = (question) => void this.askChat(sentenceId, question);
+    panel.onNewConversation = () => {
+      // 「新对话」:显式丢弃——连停靠条目一起删,别让下次重开把刚扔掉的对话带回来。
+      this.chatConversations.delete(sentenceId);
+      const freshId = `${this.documentId}:chat:${++this.chatCounter}`;
+      panel.open({ sentenceId, summary }); // 不带 anchor:位置保持
+      panel.setConversationId(freshId);
+    };
+  }
+
+  /**
+   * 停靠当前活跃会话:快照面板原始(未裁剪)历史;空会话不停靠(新会话/刚「新对话」
+   * 后的空态不必入册);重插刷新 LRU 热度,超上限逐出最旧条目。
+   */
+  #parkChatConversation(): void {
+    const active = this.chatPanel?.activeConversation();
+    if (active === null || active === undefined) return;
+    if (active.history.length === 0) return;
+    this.chatConversations.delete(active.sentenceId);
+    this.chatConversations.set(active.sentenceId, active.history);
+    while (this.chatConversations.size > MAX_STORED_CHAT_CONVERSATIONS) {
+      const oldest = this.chatConversations.keys().next().value;
+      if (oldest === undefined) break;
+      this.chatConversations.delete(oldest);
+    }
   }
 
   /**
