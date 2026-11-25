@@ -319,4 +319,115 @@ describe("ChatPanel", () => {
     panel.open({ sentenceId: "sentence-9", summary: "无锚点" });
     expect(surface.style.left).toBe("");
   });
+
+  // —— 重开恢复(2026-11-25 spec):关闭/换句后同句重开,控制器用 restoreHistory
+  //    把停靠的历史画回来;conversationId 由控制器新铸,快照取未裁剪原始历史。 ——
+
+  it("restoreHistory 重画气泡并落历史;恢复会话指向新铸的 conversationId", () => {
+    const panel = openPanel();
+    completeRound(panel, "问1", "答1");
+    completeRound(panel, "问2", "答2");
+
+    // 模拟控制器重开时序:open 复位 → 新 id → 恢复历史
+    panel.open({ sentenceId: "sentence-1", summary: "Learners read books." });
+    panel.setConversationId("document-1:chat:9");
+    const restored: ChatTurn[] = [
+      { role: "user", content: "问1" },
+      { role: "assistant", content: "答1" },
+      { role: "user", content: "问2" },
+      { role: "assistant", content: "答2" },
+    ];
+    panel.restoreHistory(restored);
+
+    const bubbles = [...panel.host.shadowRoot!.querySelectorAll<HTMLElement>(".message")];
+    expect(bubbles.map((bubble) => `${bubble.className}=${bubble.textContent}`)).toEqual([
+      "message user=问1",
+      "message assistant=答1",
+      "message user=问2",
+      "message assistant=答2",
+    ]);
+    const conversation = panel.currentConversation()!;
+    expect(conversation.conversationId).toBe("document-1:chat:9");
+    expect(conversation.history).toEqual(restored);
+    // 传入数组是副本:调用方改动不污染面板
+    restored.push({ role: "user", content: "污染" });
+    expect(panel.currentConversation()!.history).toHaveLength(4);
+    // 恢复的会话无在飞轮:输入可用
+    expect(inputOf(panel).disabled).toBe(false);
+  });
+
+  it("activeConversation 返回未裁剪历史副本(对照 currentConversation 裁剪);未开会话为 null", () => {
+    const fresh = new ChatPanel();
+    expect(fresh.activeConversation()).toBeNull();
+
+    const panel = openPanel();
+    for (let round = 1; round <= 4; round += 1) {
+      completeRound(panel, `问${round}`, `答${round}`);
+    }
+
+    const active = panel.activeConversation()!;
+    expect(active.sentenceId).toBe("sentence-1");
+    expect(active.conversationId).toBe(CONVERSATION);
+    // 8 项全量快照;请求视图(currentConversation)裁到最近 6 项
+    expect(active.history.map((turn) => `${turn.role}:${turn.content}`)).toEqual([
+      "user:问1",
+      "assistant:答1",
+      "user:问2",
+      "assistant:答2",
+      "user:问3",
+      "assistant:答3",
+      "user:问4",
+      "assistant:答4",
+    ]);
+    expect(panel.currentConversation()!.history).toHaveLength(6);
+
+    // 副本:改外层不污染面板
+    active.history.pop();
+    active.history[0]!.content = "污染";
+    const reread = panel.activeConversation()!;
+    expect(reread.history).toHaveLength(8);
+    expect(reread.history[0]!.content).toBe("问1");
+  });
+
+  it("dispose 先触发 onClose 再清态(钩子里仍能拿到完整快照)", () => {
+    const panel = openPanel();
+    completeRound(panel, "问1", "答1");
+
+    let snapshot: ReturnType<ChatPanel["activeConversation"]> = null;
+    panel.onClose = () => {
+      snapshot = panel.activeConversation();
+    };
+    panel.dispose();
+
+    expect(snapshot).not.toBeNull();
+    expect(snapshot!.sentenceId).toBe("sentence-1");
+    expect(snapshot!.conversationId).toBe(CONVERSATION);
+    expect(snapshot!.history.map((turn) => turn.content)).toEqual(["问1", "答1"]);
+    // 既有口径不变:dispose 之后会话作废
+    expect(panel.currentConversation()).toBeNull();
+  });
+
+  it("「新对话」按钮触发 onNewConversation;面板自身不清态,按钮起手不启动拖动", () => {
+    const panel = openPanel();
+    completeRound(panel, "问1", "答1");
+    const fresh = vi.fn();
+    panel.onNewConversation = fresh;
+
+    const newChat = [...panel.host.shadowRoot!.querySelectorAll<HTMLButtonElement>(".header button")].find(
+      (button) => button.textContent === "新对话",
+    )!;
+    expect(newChat).toBeDefined();
+
+    // 按钮起手不算拖(收起/关闭同款守卫):面板位置不动
+    newChat.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, clientX: 10, clientY: 10 }));
+    document.dispatchEvent(new MouseEvent("pointermove", { clientX: 300, clientY: 300 }));
+    document.dispatchEvent(new MouseEvent("pointerup", { clientX: 300, clientY: 300 }));
+    const surface = panel.host.shadowRoot!.querySelector<HTMLElement>(".panel")!;
+    expect(surface.style.left).toBe("");
+
+    newChat.click();
+    expect(fresh).toHaveBeenCalledTimes(1);
+    // 清态是控制器回调的职责(重铸 id + open 复位),面板不动自己的历史
+    expect(panel.currentConversation()).not.toBeNull();
+  });
 });
