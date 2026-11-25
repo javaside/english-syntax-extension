@@ -10,6 +10,11 @@
  * 它把关:换句 open 重置会话后,旧会话的迟到流/结果直接丢弃。回答气泡纯文本 +
  * pre-wrap（不引 markdown）,`renderStreamedText` 按「截至目前完整回答」的推送形状
  * **全量替换**当前气泡（调度器静默重试后重画同一段文本,天然无害）。
+ *
+ * 重开恢复（2026-11-25 spec）:面板只持有**活跃**会话;关闭/换句时 bootstrap 经
+ * `onClose`/`activeConversation` 快照停靠,重开同句时新铸 conversationId 后经
+ * `restoreHistory` 画回历史——恢复的是内容不是 id,旧轮迟到事件照旧被 id 守卫
+ * 丢弃。「新对话」按钮只派发 `onNewConversation`,清态与换 id 都是 bootstrap 的事。
  */
 import {
   MAX_CHAT_HISTORY_CHARACTERS,
@@ -68,6 +73,10 @@ export class ChatPanel {
    * CHAT_ASK 的构造发送。
    */
   onSubmit: (question: string) => void = () => {};
+  /** 关闭浮层时(dispose 清态之前)触发一次:bootstrap 在此快照停靠当前会话。 */
+  onClose: () => void = () => {};
+  /** 「新对话」按钮点击时触发;面板自身不清态,bootstrap 回调里铸新 id 并 open 复位。 */
+  onNewConversation: () => void = () => {};
 
   readonly host: HTMLElement;
   readonly #doc: Document;
@@ -105,13 +114,19 @@ export class ChatPanel {
       collapse.textContent = collapsed ? "展开" : "收起";
     });
     this.#collapse = collapse;
+    // 「新对话」:当前句重开会话(重置入口——重开恢复上线后,重按同句不再重置)。
+    // 只派发回调,清态与换 id 由 bootstrap 回调完成(铸新 id + open 复位)。
+    const newChat = ownerDocument.createElement("button");
+    newChat.type = "button";
+    newChat.textContent = "新对话";
+    newChat.addEventListener("click", () => this.onNewConversation());
     const close = ownerDocument.createElement("button");
     close.type = "button";
     close.textContent = "关闭";
     close.addEventListener("click", () => this.dispose());
     const header = ownerDocument.createElement("div");
     header.className = "english-syntax-chat-header";
-    header.append(this.#summary, collapse, close);
+    header.append(this.#summary, newChat, collapse, close);
     // 标题栏拖动把手:move/up 挂在 document 上,指针甩出标题栏也能继续拖。
     // 从按钮上起手不算拖（收起/关闭仍可点）;抓取以 pointerdown 的 target 判定。
     header.addEventListener("pointerdown", (event) => {
@@ -211,6 +226,38 @@ export class ChatPanel {
   /** 会话 id 的显式轮换（open 已带 id,这只留给测试与潜在的手动作废/续用点）。 */
   setConversationId(id: string): void {
     this.#conversationId = id;
+  }
+
+  /**
+   * 当前会话的**完整快照**（未裁剪的原始 history 副本 + 锚定句 + conversationId）:
+   * 关闭/换句时 bootstrap 停靠用。与 `currentConversation`（请求视图,裁到最近 6 项）
+   * 不同,快照不裁——重开恢复的显示要保真。无会话（未铸 id 或无锚定句）时为 null。
+   */
+  activeConversation(): { sentenceId: string; conversationId: string; history: ChatTurn[] } | null {
+    const conversationId = this.#conversationId;
+    const sentenceId = this.#root.dataset.sentenceId;
+    if (conversationId === undefined || sentenceId === undefined) {
+      return null;
+    }
+    return {
+      sentenceId,
+      conversationId,
+      history: this.#history.map((turn) => ({ role: turn.role, content: turn.content })),
+    };
+  }
+
+  /**
+   * 重开恢复:把停靠的历史落回面板并按 turn.role 重画气泡。须在 open() 复位之后、
+   * bootstrap 铸好新 conversationId 之后调用;恢复的是内容不是 id——旧轮的迟到事件
+   * 照旧被 id 守卫丢弃。传入数组复制入内,调用方后续改动不污染面板。
+   */
+  restoreHistory(history: readonly ChatTurn[]): void {
+    this.#history = history.map((turn) => ({ role: turn.role, content: turn.content }));
+    this.#messages.replaceChildren(
+      ...this.#history.map((turn) => this.#bubble(turn.role, turn.content)),
+    );
+    this.#assistantBubble = undefined;
+    this.#scrollToEnd();
   }
 
   /**
@@ -340,8 +387,13 @@ export class ChatPanel {
     this.#placedTop = clampedTop;
   }
 
-  /** 关闭浮层并作废会话（对话不持久化:面板关闭即丢;对象常驻,下次 open 重开）。 */
+  /**
+   * 关闭浮层并作废面板内会话状态（对象常驻,下次 open 重开）。`onClose` 先于清态
+   * 触发:bootstrap 在那里快照停靠,重开同句时可恢复（面板自身状态不跨关闭存活
+   * ——恢复走 bootstrap 的存储,单一路径）。
+   */
   dispose(): void {
+    this.onClose();
     this.host.remove();
     this.#conversationId = undefined;
     this.#history = [];
