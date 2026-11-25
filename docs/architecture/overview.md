@@ -162,7 +162,9 @@ MV3 把扩展拆成互不共享内存的几个世界。**每个模块能做什�
 用户点句头「问」按钮
   ├─ learning-block 派发 CustomEvent syntax-chat-request {sentenceId}
   ├─ SessionController.openChat(): 惰性建 ChatPanel;无 core 的句子直接忽略
-  │     换(或重按)锚定句 = 重置会话并生成新 conversationId(`${documentId}:chat:${n}`)
+  │     每次打开都生成新 conversationId(`${documentId}:chat:${n}`)
+  │     重开恢复(2026-11-25):关闭/换句时快照停靠到控制器按句 Map(LRU 8),
+  │     同句重开恢复历史(恢复内容不恢复 id);「新对话」按钮显式丢弃后重置
   ├─ 面板 Enter 提交 → askChat(): 面板先落用户轮 + pending 回答轮,再发 CHAT_ASK
   │     {context: {sentence, core}, history(面板已裁剪、不含本轮悬空用户轮), question}
   ├─ SW → chat(): 不查/不写缓存、无修复轮;流式经同一端口推 CHAT_STREAM(累积全量),
@@ -170,7 +172,7 @@ MV3 把扩展拆成互不共享内存的几个世界。**每个模块能做什�
   └─ SW → content: CHAT_RESULT 以缓冲答案校平收尾;ERROR 渲染 `${code}：${message}` 并撤销悬空用户轮
 ```
 
-面板历史由 ChatPanel 自持(最近 6 项 / ≤8000 字符,与 SW 入站兜底同边界);`stop()` 时面板随控制器 dispose,在飞请求不取消(端口回收负责)。原句 core 中途被清(块还原重扫)后再提交:面板给「原句已失效」错误气泡,不发 `CHAT_ASK`、不污染历史。
+面板历史由 ChatPanel 自持(最近 6 项 / ≤8000 字符,与 SW 入站兜底同边界;停靠快照取未裁剪原始历史,恢复显示保真);`stop()` 时面板随控制器 dispose、停靠的会话一并清空,在飞请求不取消(端口回收负责)。原句 core 中途被清(块还原重扫)后再提交:面板给「原句已失效」错误气泡,不发 `CHAT_ASK`、不污染历史。
 
 ## 6. 两个状态机
 
