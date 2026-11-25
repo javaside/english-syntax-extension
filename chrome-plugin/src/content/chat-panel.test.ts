@@ -413,13 +413,15 @@ describe("ChatPanel", () => {
     const fresh = vi.fn();
     panel.onNewConversation = fresh;
 
-    const newChat = [...panel.host.shadowRoot!.querySelectorAll<HTMLButtonElement>(".header button")].find(
-      (button) => button.textContent === "新对话",
-    )!;
+    const newChat = [
+      ...panel.host.shadowRoot!.querySelectorAll<HTMLButtonElement>(".header button"),
+    ].find((button) => button.textContent === "新对话")!;
     expect(newChat).toBeDefined();
 
     // 按钮起手不算拖(收起/关闭同款守卫):面板位置不动
-    newChat.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, clientX: 10, clientY: 10 }));
+    newChat.dispatchEvent(
+      new MouseEvent("pointerdown", { bubbles: true, clientX: 10, clientY: 10 }),
+    );
     document.dispatchEvent(new MouseEvent("pointermove", { clientX: 300, clientY: 300 }));
     document.dispatchEvent(new MouseEvent("pointerup", { clientX: 300, clientY: 300 }));
     const surface = panel.host.shadowRoot!.querySelector<HTMLElement>(".panel")!;

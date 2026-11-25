@@ -3096,10 +3096,12 @@ describe("SessionController 追问对话接线", () => {
       message: Extract<RequestMessage, { type: "CHAT_ASK" }>;
       resolve: (response: ResponseMessage) => void;
     }> = [];
-    const subject = chatHarness("Readers read books. Writers compose prose.", (message) =>
-      new Promise<ResponseMessage>((resolve) => {
-        pending.push({ message, resolve });
-      }),
+    const subject = chatHarness(
+      "Readers read books. Writers compose prose.",
+      (message) =>
+        new Promise<ResponseMessage>((resolve) => {
+          pending.push({ message, resolve });
+        }),
     );
     await subject.controller.start();
     subject.viewport.emit();
@@ -3159,9 +3161,10 @@ describe("SessionController 追问对话接线", () => {
   });
 
   it("停靠第 9 句时最旧句被逐出(LRU 8):重开第 1 句为空会话,第 8/9 句恢复", async () => {
-    const nine = Array.from({ length: 9 }, (_, index) => `Sentence number ${index + 1} talks.`).join(
-      " ",
-    );
+    const nine = Array.from(
+      { length: 9 },
+      (_, index) => `Sentence number ${index + 1} talks.`,
+    ).join(" ");
     const subject = chatHarness(nine, (message) =>
       chatResultMessage(message, `答:${message.question}`),
     );
