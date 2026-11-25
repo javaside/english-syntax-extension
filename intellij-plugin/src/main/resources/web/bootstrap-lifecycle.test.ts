@@ -480,6 +480,8 @@ describe("bootstrap-entry 追问对话接线", () => {
         opens.push(request);
       },
       handleHostMessage: () => {},
+      activeConversation: () => null,
+      restoreHistory: () => {},
     };
     setChatPanel(panel);
     const { sentenceId, icon } = renderOneSentence("pv-chat");
@@ -505,6 +507,8 @@ describe("bootstrap-entry 追问对话接线", () => {
         opens.push({ conversationId: request.conversationId });
       },
       handleHostMessage: () => {},
+      activeConversation: () => null,
+      restoreHistory: () => {},
     });
     const { icon } = renderOneSentence("pv-chat-again");
 
@@ -582,6 +586,8 @@ describe("bootstrap-entry 追问对话接线", () => {
         received.push(message.type);
         messages.push(message);
       },
+      activeConversation: () => null,
+      restoreHistory: () => {},
     });
     initialize()("pv-host", 3, false);
 
@@ -819,6 +825,152 @@ describe("bootstrap-entry 追问面板实装接线（ChatPanel）", () => {
     icon2.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 10, clientY: 10 }));
     await flush();
     expect(document.querySelector("[data-english-syntax-chat-panel]")).not.toBeNull();
+  });
+
+  // —— 重开恢复(2026-11-25 spec):bootstrap 按句停靠,重开恢复历史;conversationId
+  //    每次新铸;「新对话」显式丢弃;换代清空。 ——
+
+  const chatHostOf = (): HTMLElement =>
+    document.querySelector<HTMLElement>("[data-english-syntax-chat-panel]")!;
+  const chatHeaderButton = (label: string): HTMLButtonElement | null =>
+    [...chatHostOf().querySelectorAll<HTMLButtonElement>(".english-syntax-chat-header button")].find(
+      (button) => button.textContent === label,
+    ) ?? null;
+  const chatMessages = (): string[] =>
+    [...chatHostOf().querySelectorAll<HTMLElement>(".english-syntax-chat-message")].map(
+      (bubble) => bubble.textContent ?? "",
+    );
+  const clickIcon = async (icon: HTMLElement): Promise<void> => {
+    icon.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 30, clientY: 30 }));
+    await flush();
+  };
+  const askViaPanel = async (question: string): Promise<Posted> => {
+    const input = chatHostOf().querySelector<HTMLTextAreaElement>("textarea")!;
+    input.value = question;
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    await flush();
+    const asks = posted.filter((m) => m.type === "CHAT_ASK");
+    return asks[asks.length - 1]!;
+  };
+  const deliverAnswer = async (
+    previewId: string,
+    generation: number,
+    conversationId: string,
+    answer: string,
+  ): Promise<void> => {
+    hostMessage()({
+      version: 1,
+      type: "CHAT_RESULT",
+      previewId,
+      generation,
+      conversationId,
+      answer,
+    });
+    await flush();
+  };
+
+  /** 渲染两张 core 成功卡(两段各一句),返回各自句 id 与图标。 */
+  function renderTwoSentences(previewId: string): Array<{ sentenceId: string; icon: HTMLElement }> {
+    const paragraphs = ["The service validates every response before returning anything.", "Readers understand the structure of complex sentences."].map(
+      (text) => {
+        const element = document.createElement("p");
+        element.textContent = text;
+        document.body.append(element);
+        return element;
+      },
+    );
+    initialize()(previewId, 0, false);
+    const blockIds = paragraphs.map((element) => {
+      const blockId = element.getAttribute("data-english-syntax-block");
+      if (blockId === null) throw new Error("scan did not assign a block id");
+      hostMessage()(coreResultMessage(previewId, 0, blockId));
+      return blockId;
+    });
+    const icons = [...document.querySelectorAll<HTMLElement>(".english-syntax-chat-ask")];
+    if (icons.length < 2) throw new Error("chat icons not rendered for two sentences");
+    return blockIds.map((blockId, index) => ({ sentenceId: `s-${blockId}-0`, icon: icons[index]! }));
+  }
+
+  it("点「关闭」再点图标:历史恢复,续问携带恢复历史且 conversationId 新铸", async () => {
+    const { sentenceId, icon } = renderOneSentence("pv-reopen");
+    await clickIcon(icon);
+    const first = await askViaPanel("问一");
+    await deliverAnswer("pv-reopen", 0, String(first.conversationId), "答一");
+
+    chatHeaderButton("关闭")!.click();
+    expect(document.querySelector("[data-english-syntax-chat-panel]")).toBeNull();
+
+    await clickIcon(icon);
+    expect(chatMessages()).toEqual(["问一", "答一"]);
+
+    const second = await askViaPanel("问二");
+    expect(second.sentenceId).toBe(sentenceId);
+    expect(second.history).toEqual([
+      { role: "user", content: "问一" },
+      { role: "assistant", content: "答一" },
+    ]);
+    expect(second.conversationId).not.toBe(first.conversationId);
+  });
+
+  it("换句停靠回切恢复:他句是新会话,回切原句历史回来", async () => {
+    const [first, second] = renderTwoSentences("pv-switch");
+    await clickIcon(first.icon);
+    const ask = await askViaPanel("问A");
+    await deliverAnswer("pv-switch", 0, String(ask.conversationId), "答A");
+
+    // 切句(不关闭):first 停靠,second 是空会话
+    await clickIcon(second.icon);
+    expect(chatMessages()).toEqual([]);
+
+    // 回切 first:历史恢复
+    await clickIcon(first.icon);
+    expect(chatMessages()).toEqual(["问A", "答A"]);
+  });
+
+  it("「新对话」:清空换新 id 并丢弃停靠;重开不再恢复被丢弃的对话", async () => {
+    const { icon } = renderOneSentence("pv-newchat");
+    await clickIcon(icon);
+    const first = await askViaPanel("旧问");
+    await deliverAnswer("pv-newchat", 0, String(first.conversationId), "答旧");
+
+    chatHeaderButton("新对话")!.click();
+    await flush();
+    expect(chatMessages()).toEqual([]); // 立即清空
+
+    const second = await askViaPanel("新问");
+    expect(second.history).toEqual([]); // 新会话不携带旧问答
+    expect(second.conversationId).not.toBe(first.conversationId);
+    await deliverAnswer("pv-newchat", 0, String(second.conversationId), "答新");
+
+    // 关闭后重开:恢复的是新会话,被显式丢弃的旧对话不回来
+    chatHeaderButton("关闭")!.click();
+    await clickIcon(icon);
+    expect(chatMessages()).toEqual(["新问", "答新"]);
+  });
+
+  it("换代清空停靠:换代后同句重开是空会话", async () => {
+    const { icon } = renderOneSentence("pv-regenclear");
+    await clickIcon(icon);
+    const ask = await askViaPanel("问一");
+    await deliverAnswer("pv-regenclear", 0, String(ask.conversationId), "答一");
+    chatHeaderButton("关闭")!.click(); // 停靠
+
+    // 换代重初始化:面板收走,store 应一并清空
+    initialize()("pv-regenclear", 1, false);
+    await flush();
+    expect(document.querySelector("[data-english-syntax-chat-panel]")).toBeNull();
+
+    // 同一 <p> 重扫沿用 blockId(注释钉死:重扫同一批元素,sentenceId 照旧复用)
+    // ——若 store 未清,重开即恢复;清空后应为空会话。
+    const element = document.querySelector<HTMLElement>("[data-english-syntax-block]")!;
+    const blockId = element.getAttribute("data-english-syntax-block")!;
+    hostMessage()(coreResultMessage("pv-regenclear", 1, blockId));
+    await flush();
+    const icons = document.querySelectorAll<HTMLElement>(".english-syntax-chat-ask");
+    const icon2 = icons[icons.length - 1];
+    if (icon2 === undefined) throw new Error("chat icon not re-rendered after regen");
+    await clickIcon(icon2);
+    expect(chatMessages()).toEqual([]);
   });
 });
 

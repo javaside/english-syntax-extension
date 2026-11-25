@@ -379,9 +379,12 @@ function initialize(previewId: string, generation: number, autoScan = true): voi
   clearAllActive();
   // 换代重初始化（PREVIEW_RENDERED → Kotlin initialize / 停止后重开）时旧会话的锚定句
   // 已随 DOM 作废,追问面板一并收走（stale conversation）;面板对象常驻,下次点图标重开。
-  // 在飞的 CHAT_ASK 不主动取消——Kotlin 侧 onGenerationChanged/cancelDocument 负责回收。
+  // 停靠的追问会话同时清空:换代后 sentenceId 即使沿用(重扫同一批元素),旧上下文也
+  // 已作废,恢复无意义。在飞的 CHAT_ASK 不主动取消——Kotlin 侧
+  // onGenerationChanged/cancelDocument 负责回收。
   chatPanelInstance?.dispose();
   chatSentenceId = null;
+  chatConversations.clear();
   resetScanRegistry(); // 重新扫描全文：清空防重扫描注册表，否则二次 scan 返回空、失败句无法重派
   ensureStatusElement(); // 官方 updateDom 重写 body 会清掉浮层，换代后重建。
   if (s.observer !== null) s.observer.disconnect();
@@ -556,6 +559,13 @@ export interface ChatAskInput {
 export interface ChatPanelSeam {
   open(request: ChatOpenRequest): void;
   handleHostMessage(message: ChatHostMessage): void;
+  /**
+   * 当前会话的**未裁剪快照**:关闭/换句时 bootstrap 停靠用(重开恢复的显示保真;
+   * 请求视图照旧走面板自身的裁剪)。无会话时 null。
+   */
+  activeConversation(): { sentenceId: string; history: ChatTurn[] } | null;
+  /** 重开恢复:把停靠的历史画回面板(新 conversationId 已由 open 带入)。 */
+  restoreHistory(history: readonly ChatTurn[]): void;
 }
 
 let chatPanel: ChatPanelSeam | null = null;
@@ -570,6 +580,32 @@ export function setChatPanel(panel: ChatPanelSeam | null): void {
 
 /** conversationId 计数器：模块级持有、单调递增，跨代次不重置（id 含 previewId 仍唯一）。 */
 let chatConversationCounter = 0;
+
+/**
+ * 按句停靠的追问会话上限(LRU):纯内存态防失控的启发式,超出逐出最久未停靠句。
+ */
+const MAX_STORED_CHAT_CONVERSATIONS = 8;
+
+/**
+ * 按句停靠的追问会话(重开恢复,2026-11-25 spec):快照是面板原始未裁剪历史;LRU 上限
+ * 8 句;换代整体清空(会话死了恢复无意义)。停靠经 seam(chatPanel)读当前会话——测试
+ * 装着假面板缝时快照为 null,停靠天然 no-op,不会把真面板的残留状态串进测试。
+ */
+const chatConversations = new Map<string, ChatTurn[]>();
+
+/** 停靠当前活跃会话:空会话不入册;重插刷新 LRU 热度,超上限逐出最旧条目。 */
+function parkChatConversation(): void {
+  const active = chatPanel?.activeConversation();
+  if (active === null || active === undefined) return;
+  if (active.history.length === 0) return;
+  chatConversations.delete(active.sentenceId);
+  chatConversations.set(active.sentenceId, active.history);
+  while (chatConversations.size > MAX_STORED_CHAT_CONVERSATIONS) {
+    const oldest = chatConversations.keys().next().value;
+    if (oldest === undefined) break;
+    chatConversations.delete(oldest);
+  }
+}
 
 // —— 面板实装：单例 + submit 接线（Chrome 端 session-controller.openChat/askChat
 //    的 web 侧对应物;面板对象常驻、host 惰性挂载,换句 open 重置会话）。 ——
@@ -612,6 +648,22 @@ export function installChatPanel(): ChatPanel {
   if (chatPanelInstance === null) {
     chatPanelInstance = new ChatPanel();
     chatPanelInstance.onSubmit = submitChatQuestion;
+    // 关闭浮层 = 快照停靠(dispose 清态前触发):同句重开走恢复。
+    chatPanelInstance.onClose = parkChatConversation;
+    // 「新对话」:显式丢弃(连停靠条目一起,别让重开把刚扔掉的对话带回来)后换新 id
+    // 重开;不带锚点,位置保持。
+    chatPanelInstance.onNewConversation = () => {
+      const s = state;
+      const sentenceId = chatSentenceId;
+      if (s === null || sentenceId === null) return;
+      chatConversations.delete(sentenceId);
+      chatConversationCounter += 1;
+      chatPanelInstance!.open({
+        conversationId: `${s.previewId}:chat:${chatConversationCounter}`,
+        sentenceId,
+        summary: s.renderer.sentenceText(sentenceId).slice(0, 40),
+      });
+    };
   }
   setChatPanel(chatPanelInstance);
   return chatPanelInstance;
@@ -644,6 +696,8 @@ export function sendChatAsk(input: ChatAskInput): boolean {
 }
 
 // 图标点击：只开面板（锚点 + 锚定句摘要 + 新铸的 conversationId），不发任何桥消息。
+// 重开恢复(2026-11-25 spec):先停靠当前活跃会话,同句有停靠记录则恢复历史、无则新
+// 会话;conversationId 每次新铸——恢复的是内容不是 id,旧轮迟到事件照旧被守卫丢弃。
 document.addEventListener(CHAT_ASK_REQUEST_EVENT, (event) => {
   if (state === null || state.previewId === "") return;
   // 事件可能被页面脚本伪造：载荷按 unknown 复核形状，锚点只收两个数字。
@@ -654,6 +708,8 @@ document.addEventListener(CHAT_ASK_REQUEST_EVENT, (event) => {
   if (typeof anchor?.x !== "number" || typeof anchor?.y !== "number") return;
   const panel = chatPanel;
   if (panel === null) return;
+  parkChatConversation();
+  const stored = chatConversations.get(sentenceId);
   chatConversationCounter += 1;
   // 摘要取 renderer 按 token 重建的句原文（面板标题栏显示,Chrome 端 controller 同款
   // slice(0, 40)）——图标只在 core 成功句上渲染,句子必然已注册。
@@ -664,6 +720,7 @@ document.addEventListener(CHAT_ASK_REQUEST_EVENT, (event) => {
     summary: state.renderer.sentenceText(sentenceId).slice(0, 40),
     anchor: { x: anchor.x, y: anchor.y },
   });
+  if (stored !== undefined) panel.restoreHistory(stored);
 });
 
 // F2 纠正按钮的 document 级委托（chat 图标同款先例）：失败行「纠正」按钮只派发

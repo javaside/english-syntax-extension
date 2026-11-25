@@ -1374,6 +1374,11 @@ var EnglishSyntaxPreview = (function(exports) {
 	* 它把关:换句 open 重置会话后,旧会话的迟到流/结果直接丢弃。回答气泡纯文本 +
 	* pre-wrap（不引 markdown）,`renderStreamedText` 按「截至目前完整回答」的推送形状
 	* **全量替换**当前气泡（调度器静默重试后重画同一段文本,天然无害）。
+	*
+	* 重开恢复（2026-11-25 spec）:面板只持有**活跃**会话;关闭/换句时 bootstrap 经
+	* `onClose`/`activeConversation` 快照停靠,重开同句时新铸 conversationId 后经
+	* `restoreHistory` 画回历史——恢复的是内容不是 id,旧轮迟到事件照旧被 id 守卫
+	* 丢弃。「新对话」按钮只派发 `onNewConversation`,清态与换 id 都是 bootstrap 的事。
 	*/
 	/**
 	* 拖动钳制边界:不依赖布局就能算的「至少留一个可抓取的角」——left/top 各自
@@ -1401,6 +1406,10 @@ var EnglishSyntaxPreview = (function(exports) {
 		* CHAT_ASK 的构造发送。
 		*/
 		onSubmit = () => {};
+		/** 关闭浮层时(dispose 清态之前)触发一次:bootstrap 在此快照停靠当前会话。 */
+		onClose = () => {};
+		/** 「新对话」按钮点击时触发;面板自身不清态,bootstrap 回调里铸新 id 并 open 复位。 */
+		onNewConversation = () => {};
 		host;
 		#doc;
 		#root;
@@ -1434,13 +1443,17 @@ var EnglishSyntaxPreview = (function(exports) {
 				collapse.textContent = collapsed ? "展开" : "收起";
 			});
 			this.#collapse = collapse;
+			const newChat = ownerDocument.createElement("button");
+			newChat.type = "button";
+			newChat.textContent = "新对话";
+			newChat.addEventListener("click", () => this.onNewConversation());
 			const close = ownerDocument.createElement("button");
 			close.type = "button";
 			close.textContent = "关闭";
 			close.addEventListener("click", () => this.dispose());
 			const header = ownerDocument.createElement("div");
 			header.className = "english-syntax-chat-header";
-			header.append(this.#summary, collapse, close);
+			header.append(this.#summary, newChat, collapse, close);
 			header.addEventListener("pointerdown", (event) => {
 				if (event.target instanceof Element && event.target.closest("button")) return;
 				const rect = this.#root.getBoundingClientRect();
@@ -1517,6 +1530,38 @@ var EnglishSyntaxPreview = (function(exports) {
 		/** 会话 id 的显式轮换（open 已带 id,这只留给测试与潜在的手动作废/续用点）。 */
 		setConversationId(id) {
 			this.#conversationId = id;
+		}
+		/**
+		* 当前会话的**完整快照**（未裁剪的原始 history 副本 + 锚定句 + conversationId）:
+		* 关闭/换句时 bootstrap 停靠用。与 `currentConversation`（请求视图,裁到最近 6 项）
+		* 不同,快照不裁——重开恢复的显示要保真。无会话（未铸 id 或无锚定句）时为 null。
+		*/
+		activeConversation() {
+			const conversationId = this.#conversationId;
+			const sentenceId = this.#root.dataset.sentenceId;
+			if (conversationId === void 0 || sentenceId === void 0) return null;
+			return {
+				sentenceId,
+				conversationId,
+				history: this.#history.map((turn) => ({
+					role: turn.role,
+					content: turn.content
+				}))
+			};
+		}
+		/**
+		* 重开恢复:把停靠的历史落回面板并按 turn.role 重画气泡。须在 open() 复位之后、
+		* bootstrap 铸好新 conversationId 之后调用;恢复的是内容不是 id——旧轮的迟到事件
+		* 照旧被 id 守卫丢弃。传入数组复制入内,调用方后续改动不污染面板。
+		*/
+		restoreHistory(history) {
+			this.#history = history.map((turn) => ({
+				role: turn.role,
+				content: turn.content
+			}));
+			this.#messages.replaceChildren(...this.#history.map((turn) => this.#bubble(turn.role, turn.content)));
+			this.#assistantBubble = void 0;
+			this.#scrollToEnd();
 		}
 		/**
 		* 当前会话的请求视图:history 已按 Kotlin parse 门同单位裁剪（项 ≤ 6、总字符
@@ -1639,8 +1684,13 @@ var EnglishSyntaxPreview = (function(exports) {
 			this.#placedLeft = clampedLeft;
 			this.#placedTop = clampedTop;
 		}
-		/** 关闭浮层并作废会话（对话不持久化:面板关闭即丢;对象常驻,下次 open 重开）。 */
+		/**
+		* 关闭浮层并作废面板内会话状态（对象常驻,下次 open 重开）。`onClose` 先于清态
+		* 触发:bootstrap 在那里快照停靠,重开同句时可恢复（面板自身状态不跨关闭存活
+		* ——恢复走 bootstrap 的存储,单一路径）。
+		*/
 		dispose() {
+			this.onClose();
 			this.host.remove();
 			this.#conversationId = void 0;
 			this.#history = [];
@@ -1977,6 +2027,7 @@ var EnglishSyntaxPreview = (function(exports) {
 		clearAllActive();
 		chatPanelInstance?.dispose();
 		chatSentenceId = null;
+		chatConversations.clear();
 		resetScanRegistry();
 		ensureStatusElement();
 		if (s.observer !== null) s.observer.disconnect();
@@ -2094,6 +2145,29 @@ var EnglishSyntaxPreview = (function(exports) {
 	}
 	/** conversationId 计数器：模块级持有、单调递增，跨代次不重置（id 含 previewId 仍唯一）。 */
 	let chatConversationCounter = 0;
+	/**
+	* 按句停靠的追问会话上限(LRU):纯内存态防失控的启发式,超出逐出最久未停靠句。
+	*/
+	const MAX_STORED_CHAT_CONVERSATIONS = 8;
+	/**
+	* 按句停靠的追问会话(重开恢复,2026-11-25 spec):快照是面板原始未裁剪历史;LRU 上限
+	* 8 句;换代整体清空(会话死了恢复无意义)。停靠经 seam(chatPanel)读当前会话——测试
+	* 装着假面板缝时快照为 null,停靠天然 no-op,不会把真面板的残留状态串进测试。
+	*/
+	const chatConversations = /* @__PURE__ */ new Map();
+	/** 停靠当前活跃会话:空会话不入册;重插刷新 LRU 热度,超上限逐出最旧条目。 */
+	function parkChatConversation() {
+		const active = chatPanel?.activeConversation();
+		if (active === null || active === void 0) return;
+		if (active.history.length === 0) return;
+		chatConversations.delete(active.sentenceId);
+		chatConversations.set(active.sentenceId, active.history);
+		while (chatConversations.size > MAX_STORED_CHAT_CONVERSATIONS) {
+			const oldest = chatConversations.keys().next().value;
+			if (oldest === void 0) break;
+			chatConversations.delete(oldest);
+		}
+	}
 	/** 面板单例（构造不挂载,首次 open 才上 DOM）;installChatPanel 里接线并注册 seam。 */
 	let chatPanelInstance = null;
 	/** 当前锚定句（open 时记下,submit 时作 CHAT_ASK 的 sentenceId）;换代随面板一起作废。 */
@@ -2126,6 +2200,19 @@ var EnglishSyntaxPreview = (function(exports) {
 		if (chatPanelInstance === null) {
 			chatPanelInstance = new ChatPanel();
 			chatPanelInstance.onSubmit = submitChatQuestion;
+			chatPanelInstance.onClose = parkChatConversation;
+			chatPanelInstance.onNewConversation = () => {
+				const s = state;
+				const sentenceId = chatSentenceId;
+				if (s === null || sentenceId === null) return;
+				chatConversations.delete(sentenceId);
+				chatConversationCounter += 1;
+				chatPanelInstance.open({
+					conversationId: `${s.previewId}:chat:${chatConversationCounter}`,
+					sentenceId,
+					summary: s.renderer.sentenceText(sentenceId).slice(0, 40)
+				});
+			};
 		}
 		setChatPanel(chatPanelInstance);
 		return chatPanelInstance;
@@ -2165,6 +2252,8 @@ var EnglishSyntaxPreview = (function(exports) {
 		if (typeof anchor?.x !== "number" || typeof anchor?.y !== "number") return;
 		const panel = chatPanel;
 		if (panel === null) return;
+		parkChatConversation();
+		const stored = chatConversations.get(sentenceId);
 		chatConversationCounter += 1;
 		chatSentenceId = sentenceId;
 		panel.open({
@@ -2176,6 +2265,7 @@ var EnglishSyntaxPreview = (function(exports) {
 				y: anchor.y
 			}
 		});
+		if (stored !== void 0) panel.restoreHistory(stored);
 	});
 	document.addEventListener(CORRECTION_OPEN_EVENT, (event) => {
 		const s = state;
