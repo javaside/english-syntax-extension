@@ -2155,11 +2155,12 @@ var EnglishSyntaxPreview = (function(exports) {
 	* 装着假面板缝时快照为 null,停靠天然 no-op,不会把真面板的残留状态串进测试。
 	*/
 	const chatConversations = /* @__PURE__ */ new Map();
-	/** 停靠当前活跃会话:空会话不入册;重插刷新 LRU 热度,超上限逐出最旧条目。 */
+	/** 停靠当前活跃会话:空会话不入册;重插刷新 LRU 热度,超上限逐出最旧条目。返回本次
+	* 停靠的快照(未停靠为 null)——图标点击用它判「重按同句取面板当前历史」。 */
 	function parkChatConversation() {
 		const active = chatPanel?.activeConversation();
-		if (active === null || active === void 0) return;
-		if (active.history.length === 0) return;
+		if (active === null || active === void 0) return null;
+		if (active.history.length === 0) return null;
 		chatConversations.delete(active.sentenceId);
 		chatConversations.set(active.sentenceId, active.history);
 		while (chatConversations.size > MAX_STORED_CHAT_CONVERSATIONS) {
@@ -2167,6 +2168,10 @@ var EnglishSyntaxPreview = (function(exports) {
 			if (oldest === void 0) break;
 			chatConversations.delete(oldest);
 		}
+		return {
+			sentenceId: active.sentenceId,
+			history: active.history
+		};
 	}
 	/** 面板单例（构造不挂载,首次 open 才上 DOM）;installChatPanel 里接线并注册 seam。 */
 	let chatPanelInstance = null;
@@ -2252,8 +2257,9 @@ var EnglishSyntaxPreview = (function(exports) {
 		if (typeof anchor?.x !== "number" || typeof anchor?.y !== "number") return;
 		const panel = chatPanel;
 		if (panel === null) return;
-		parkChatConversation();
-		const stored = chatConversations.get(sentenceId);
+		let stored = chatConversations.get(sentenceId);
+		const parked = parkChatConversation();
+		if (parked !== null && parked.sentenceId === sentenceId) stored = parked.history;
 		chatConversationCounter += 1;
 		chatSentenceId = sentenceId;
 		panel.open({

@@ -784,8 +784,14 @@ export class SessionController {
     }
     const panel = this.chatPanel;
     const summary = sentence.input.text.slice(0, 40);
-    this.#parkChatConversation();
-    const stored = this.chatConversations.get(sentenceId);
+    // lookup 先于 park:LRU 满载时 park(当前活跃句入册)会逐出最旧条目——若目标句
+    // 恰是它,「先停再查」会把用户想恢复的对话逐掉,静默变空会话。同句重按则要取
+    // **面板当前**的快照(park 刚写进 store 的那份),不能取 store 里的旧份。
+    let stored = this.chatConversations.get(sentenceId);
+    const parked = this.#parkChatConversation();
+    if (parked !== null && parked.sentenceId === sentenceId) {
+      stored = parked.history;
+    }
     const conversationId = `${this.documentId}:chat:${++this.chatCounter}`;
     panel.open({
       sentenceId,
@@ -808,12 +814,14 @@ export class SessionController {
 
   /**
    * 停靠当前活跃会话:快照面板原始(未裁剪)历史;空会话不停靠(新会话/刚「新对话」
-   * 后的空态不必入册);重插刷新 LRU 热度,超上限逐出最旧条目。
+   * 后的空态不必入册);重插刷新 LRU 热度,超上限逐出最旧条目。返回本次停靠的快照
+   * (未停靠为 null)——openChat 用它判「重按同句取面板当前历史」(store 里可能是
+   * 旧份)。
    */
-  #parkChatConversation(): void {
+  #parkChatConversation(): { sentenceId: string; history: ChatTurn[] } | null {
     const active = this.chatPanel?.activeConversation();
-    if (active === null || active === undefined) return;
-    if (active.history.length === 0) return;
+    if (active === null || active === undefined) return null;
+    if (active.history.length === 0) return null;
     this.chatConversations.delete(active.sentenceId);
     this.chatConversations.set(active.sentenceId, active.history);
     while (this.chatConversations.size > MAX_STORED_CHAT_CONVERSATIONS) {
@@ -821,6 +829,7 @@ export class SessionController {
       if (oldest === undefined) break;
       this.chatConversations.delete(oldest);
     }
+    return { sentenceId: active.sentenceId, history: active.history };
   }
 
   /**

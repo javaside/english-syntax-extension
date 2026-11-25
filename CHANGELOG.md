@@ -13,8 +13,8 @@
 
 ### 测试
 
-- Chrome:单测 1485 项、Playwright E2E 49 项全绿(新增面板恢复 API、控制器停靠/恢复/LRU/新对话/stop 清空共 10 项单测)。
-- IntelliJ:web vitest 188 项全绿(面板同款 4 项 + bootstrap 停靠/恢复/新对话/换代清空 4 项);`bundle.js` 已随 web 源码重建。
+- Chrome:单测 1486 项、Playwright E2E 49 项全绿(面板恢复 API、控制器停靠/恢复/LRU/新对话/stop 清空共 11 项单测,含评审发现的「LRU 满载切句重开最旧句不被本次停靠逐出」回归)。
+- IntelliJ:web vitest 190 项全绿(面板同款 4 项 + bootstrap 停靠/恢复/新对话/换代清空/悬空轮/LRU 切换共 7 项);`bundle.js` 已随 web 源码重建。
 
 ## 1.8.1 — 2026-11-24
 

@@ -972,6 +972,63 @@ describe("bootstrap-entry 追问面板实装接线（ChatPanel）", () => {
     await clickIcon(icon2);
     expect(chatMessages()).toEqual([]);
   });
+
+  it("在飞轮关闭再重开:悬空问照显示,续问的 CHAT_ASK history 不含悬空问", async () => {
+    const { icon } = renderOneSentence("pv-dangling");
+    await clickIcon(icon);
+    const first = await askViaPanel("悬空问"); // 不回 CHAT_RESULT:在飞中关闭
+
+    chatHeaderButton("关闭")!.click();
+    expect(document.querySelector("[data-english-syntax-chat-panel]")).toBeNull();
+
+    await clickIcon(icon);
+    expect(chatMessages()).toEqual(["悬空问"]);
+    // 恢复的会话无在飞轮(id 已换):输入可用
+    expect(
+      chatHostOf().querySelector<HTMLTextAreaElement>("textarea")!.disabled,
+    ).toBe(false);
+
+    const second = await askViaPanel("续问");
+    expect(second.history).toEqual([]); // 悬空问被裁出请求视图
+    expect(second.conversationId).not.toBe(first.conversationId);
+  });
+
+  it("LRU 满载时切句重开最旧句:恢复先于本次停靠,不被逐出(2026-11-25 评审)", async () => {
+    // 九句九块:每句一个 <p>,逐块喂 CORE_RESULT 渲染图标。
+    const paragraphs = Array.from(
+      { length: 9 },
+      (_, index) => `Sentence number ${index + 1} talks about grammar.`,
+    ).map((text) => {
+      const element = document.createElement("p");
+      element.textContent = text;
+      document.body.append(element);
+      return element;
+    });
+    initialize()("pv-lru", 0, false);
+    const blockIds = paragraphs.map((element) => {
+      const blockId = element.getAttribute("data-english-syntax-block");
+      if (blockId === null) throw new Error("scan did not assign a block id");
+      hostMessage()(coreResultMessage("pv-lru", 0, blockId));
+      return blockId;
+    });
+    const icons = [...document.querySelectorAll<HTMLElement>(".english-syntax-chat-ask")];
+    if (icons.length < 9) throw new Error("chat icons not rendered for nine sentences");
+
+    // 停靠 8 句(开→问→关),第 9 句保持打开(store 满 8,活跃会话在 s9)
+    for (let index = 0; index < 8; index += 1) {
+      await clickIcon(icons[index]!);
+      const ask = await askViaPanel(`问${index + 1}`);
+      await deliverAnswer("pv-lru", 0, String(ask.conversationId), `答${index + 1}`);
+      chatHeaderButton("关闭")!.click();
+    }
+    await clickIcon(icons[8]!);
+    const ninth = await askViaPanel("问9");
+    await deliverAnswer("pv-lru", 0, String(ninth.conversationId), "答9");
+
+    // 点回最旧句:park(s9) 会把 store 推到 9 而逐出 s1——lookup 必须先于 park。
+    await clickIcon(icons[0]!);
+    expect(chatMessages()).toEqual(["问1", "答1"]);
+  });
 });
 
 describe("bootstrap-entry F2 纠正反馈接线", () => {

@@ -593,11 +593,12 @@ const MAX_STORED_CHAT_CONVERSATIONS = 8;
  */
 const chatConversations = new Map<string, ChatTurn[]>();
 
-/** 停靠当前活跃会话:空会话不入册;重插刷新 LRU 热度,超上限逐出最旧条目。 */
-function parkChatConversation(): void {
+/** 停靠当前活跃会话:空会话不入册;重插刷新 LRU 热度,超上限逐出最旧条目。返回本次
+ * 停靠的快照(未停靠为 null)——图标点击用它判「重按同句取面板当前历史」。 */
+function parkChatConversation(): { sentenceId: string; history: ChatTurn[] } | null {
   const active = chatPanel?.activeConversation();
-  if (active === null || active === undefined) return;
-  if (active.history.length === 0) return;
+  if (active === null || active === undefined) return null;
+  if (active.history.length === 0) return null;
   chatConversations.delete(active.sentenceId);
   chatConversations.set(active.sentenceId, active.history);
   while (chatConversations.size > MAX_STORED_CHAT_CONVERSATIONS) {
@@ -605,6 +606,7 @@ function parkChatConversation(): void {
     if (oldest === undefined) break;
     chatConversations.delete(oldest);
   }
+  return { sentenceId: active.sentenceId, history: active.history };
 }
 
 // —— 面板实装：单例 + submit 接线（Chrome 端 session-controller.openChat/askChat
@@ -708,8 +710,14 @@ document.addEventListener(CHAT_ASK_REQUEST_EVENT, (event) => {
   if (typeof anchor?.x !== "number" || typeof anchor?.y !== "number") return;
   const panel = chatPanel;
   if (panel === null) return;
-  parkChatConversation();
-  const stored = chatConversations.get(sentenceId);
+  // lookup 先于 park:LRU 满载时 park(当前活跃句入册)会逐出最旧条目——若目标句
+  // 恰是它,「先停再查」会把用户想恢复的对话逐掉,静默变空会话。同句重按则要取
+  // **面板当前**的快照(park 刚写进 store 的那份),不能取 store 里的旧份。
+  let stored = chatConversations.get(sentenceId);
+  const parked = parkChatConversation();
+  if (parked !== null && parked.sentenceId === sentenceId) {
+    stored = parked.history;
+  }
   chatConversationCounter += 1;
   // 摘要取 renderer 按 token 重建的句原文（面板标题栏显示,Chrome 端 controller 同款
   // slice(0, 40)）——图标只在 core 成功句上渲染,句子必然已注册。

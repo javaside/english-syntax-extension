@@ -3185,6 +3185,33 @@ describe("SessionController 追问对话接线", () => {
     expect(messagesOf(subject.page)).toEqual(["问9", "答:问9"]);
   });
 
+  it("LRU 满载时切句重开最旧句:恢复先于本次停靠,不被逐出(2026-11-25 评审)", async () => {
+    const nine = Array.from(
+      { length: 9 },
+      (_, index) => `Sentence number ${index + 1} talks.`,
+    ).join(" ");
+    const subject = chatHarness(nine, (message) =>
+      chatResultMessage(message, `答:${message.question}`),
+    );
+    await subject.controller.start();
+    subject.viewport.emit();
+    await vi.waitFor(() => expect(subject.controller.status.ready).toBe(9));
+    // 停靠 8 句(开→问→关)
+    for (let index = 1; index <= 8; index += 1) {
+      openChatFor(subject.page, `sentence-${index}`);
+      await subject.controller.askChat(`sentence-${index}`, `问${index}`);
+      headerButton(subject.page, "关闭")!.click();
+    }
+    // 第 9 句保持打开(活跃会话在 s9,不关闭):store 已满 8
+    openChatFor(subject.page, "sentence-9");
+    await subject.controller.askChat("sentence-9", "问9");
+
+    // 点回最旧句 s1:park(s9) 会把 store 推到 9 而逐出 s1——lookup 必须先于 park,
+    // 否则用户想恢复的 s1 被自己这次点击逐掉,静默变空会话。
+    openChatFor(subject.page, "sentence-1");
+    expect(messagesOf(subject.page)).toEqual(["问1", "答:问1"]);
+  });
+
   it("「新对话」:换新 id、清空历史并丢弃停靠;重开不再恢复被丢弃的对话", async () => {
     const subject = chatHarness();
     await subject.controller.start();
