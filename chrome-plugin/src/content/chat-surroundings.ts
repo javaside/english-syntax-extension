@@ -8,7 +8,9 @@ import {
 /**
  * 追问对话的段落级上下文(2026-11-28 spec)——纯函数,不碰 DOM 写、不发消息。
  * 封顶常量从 protocol.ts import,本模块不出现第二处数字;截断标记 `…` 是
- * U+2026 单字符,只出现在真截断边界。IntelliJ web 侧
+ * U+2026 单字符,只出现在真截断边界,且**计入各自封顶**(2026-11-28 裁决):
+ * 截断产出的字段值恒 ≤ cap,与 SW 守卫 isChatSurroundings 的「length ≤ cap」
+ * 判据一致,真机长段落的上下文不会被 MALFORMED_MESSAGE 拒收。IntelliJ web 侧
  * (`intellij-plugin/src/main/resources/web/chat-surroundings.ts`)逐函数镜像本
  * 文件,导出名与行为必须一致——改这里要同步那边。
  */
@@ -51,37 +53,48 @@ export function documentOrderedNeighbors(
   return neighbors;
 }
 
-/** trim 后 ≤1200 原样返回;超长取尾部 1200 字符并前置 "…"(U+2026)。 */
+/** trim 后 ≤1200 原样返回;超长 = "…"(U+2026) + 尾 1199,总长恰 1200(标记计入)。 */
 export function capSurroundingBefore(text: string): string {
   const trimmed = text.trim();
   if (trimmed.length <= MAX_CHAT_SURROUNDING_BEFORE_CHARS) return trimmed;
-  return `…${trimmed.slice(trimmed.length - MAX_CHAT_SURROUNDING_BEFORE_CHARS)}`;
+  return `…${trimmed.slice(trimmed.length - (MAX_CHAT_SURROUNDING_BEFORE_CHARS - 1))}`;
 }
 
-/** trim 后 ≤800 原样返回;超长取头部 800 字符并后置 "…"。 */
+/** trim 后 ≤800 原样返回;超长 = 头 799 + "…",总长恰 800(标记计入)。 */
 export function capSurroundingAfter(text: string): string {
   const trimmed = text.trim();
   if (trimmed.length <= MAX_CHAT_SURROUNDING_AFTER_CHARS) return trimmed;
-  return `${trimmed.slice(0, MAX_CHAT_SURROUNDING_AFTER_CHARS)}…`;
+  return `${trimmed.slice(0, MAX_CHAT_SURROUNDING_AFTER_CHARS - 1)}…`;
 }
 
 /**
  * current 段封顶:trim 后 ≤4000 原样返回;超长取句锚窗口——以锚句在段内的
- * 命中位置为中心,向前回看至多 1200(与 before 段同一预算,是算法钉死的取值,
- * 引用同一常量而不是写出第二处 1200),窗口共 4000。窗口盖不住整条锚句(锚句
- * 长于窗口)时改从锚句起始处开窗,宁可截掉锚句尾部也不丢起点。两端 `…` 仅在
- * 真截断时出现。锚句不命中(理论到不了:锚句是段文本的子串)回落头部窗口。
+ * 命中位置定窗(命中则向前回看至多 1200,与 before 段同一预算,是算法钉死的
+ * 取值,引用同一常量而不是写出第二处 1200;未命中回落头部窗口)。`…` 标记
+ * 计入 4000 总预算(2026-11-28 裁决):两侧都真截断时净窗 4000−2;一侧贴到
+ * 段尾(无该侧标记)时省下的预算还给窗口;产出总长恒 ≤4000,与 SW 守卫的
+ * 「length ≤ cap」判据一致。锚句连同回看前缀装不进从回看起点出发的最宽净窗
+ * 时,改从锚句起始处开窗——宁可截掉锚句尾部也不丢起点(锚句允许被截断)。
+ * 标记只出现在真截断边界。锚句不命中(理论到不了:锚句是段文本的子串)回落
+ * 头部窗口。
  */
 export function capSurroundingCurrent(text: string, anchorText: string): string {
   const trimmed = text.trim();
+  if (trimmed.length <= MAX_CHAT_SURROUNDING_CURRENT_CHARS) return trimmed;
+  // 净窗预算 = 4000 − 左侧标记数:起点贴 0 时左侧没真截断,省下的 1 字符还给窗口。
+  const budgetFrom = (start: number): number =>
+    MAX_CHAT_SURROUNDING_CURRENT_CHARS - (start > 0 ? 1 : 0);
+  // 从 start 起的最宽净窗右端:能贴到段尾(无右标记,预算如数还给窗口)就取
+  // 段尾,否则给右标记留 1 字符。
+  const widestEnd = (start: number): number => {
+    const budget = budgetFrom(start);
+    return start + budget >= trimmed.length ? trimmed.length : start + budget - 1;
+  };
   const idx = trimmed.indexOf(anchorText);
   let start = idx >= 0 ? Math.max(0, idx - MAX_CHAT_SURROUNDING_BEFORE_CHARS) : 0;
-  let end = start + MAX_CHAT_SURROUNDING_CURRENT_CHARS;
-  if (idx >= 0 && end < idx + anchorText.length) {
-    start = idx;
-    end = idx + MAX_CHAT_SURROUNDING_CURRENT_CHARS;
-  }
-  end = Math.min(trimmed.length, end);
+  // 锚句装不进回看窗 → 放弃回看,窗口改从锚句起点开(锚句尾部允许截断)。
+  if (idx >= 0 && idx + anchorText.length > widestEnd(start)) start = idx;
+  const end = widestEnd(start);
   return `${start > 0 ? "…" : ""}${trimmed.slice(start, end)}${end < trimmed.length ? "…" : ""}`;
 }
 

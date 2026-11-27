@@ -11,6 +11,7 @@ import type {
   SentenceInput,
   SessionStatus,
 } from "../shared/protocol";
+import { MAX_CHAT_SURROUNDING_BEFORE_CHARS } from "../shared/protocol";
 import type { ModelProfile } from "./config-repository";
 import type { AnalysisModelWork, AnalysisService } from "./analysis-service";
 import { ModelRequestError } from "./openai-compatible-adapter";
@@ -1932,6 +1933,31 @@ describe("chat 路由", () => {
       current: "Current paragraph text.",
       after: "Next paragraph text.",
     });
+  });
+
+  it("surroundings.before 恰 1200 字符(截断产出的上界)→ 照常 CHAT_RESULT", async () => {
+    // 截断标记计入封顶(2026-11-28 裁决):content 侧 capSurroundingBefore 的
+    // 截断产出 = "…" + 尾 1199,恰 1200。这条钉住 wire 契约端到端的边界:上界
+    // 值本身必须放行——守卫若 off-by-one 拒收,真机长前段的 chat 必炸。
+    const chat = vi.fn<AnalysisService["chat"]>().mockResolvedValue({ answer: "好的" });
+    const subject = chromeMock();
+    registerServiceWorker(dependencies({ chat }), subject.api);
+
+    const response = await dispatch(
+      subject.events.runtime.onMessage.listeners[0]!,
+      chatAskRequest({
+        surroundings: {
+          before: `…${"x".repeat(MAX_CHAT_SURROUNDING_BEFORE_CHARS - 1)}`,
+          current: "Current paragraph text.",
+        },
+      }),
+    );
+
+    expect(response.type).toBe("CHAT_RESULT");
+    expect(chat).toHaveBeenCalledTimes(1);
+    expect(chat.mock.calls[0]![0].context.surroundings!.before).toHaveLength(
+      MAX_CHAT_SURROUNDING_BEFORE_CHARS,
+    );
   });
 
   it("surroundings 多余键/超 1200 上限/trim 后为空/空对象/类型错 → MALFORMED_MESSAGE", async () => {

@@ -3383,7 +3383,7 @@ describe("SessionController 追问对话接线", () => {
     controller.stop();
   });
 
-  it("巨长本段(> 4000):current 封顶 ≤ 4000+2 且句锚窗口完整包含锚句", async () => {
+  it("巨长本段(> 4000):current 封顶 ≤ 4000(… 计入)且句锚窗口完整包含锚句", async () => {
     const middleSentences = [1, 2, 3, 4].map(
       (index) => `Middle sentence ${index} ${"carries many ordinary words ".repeat(47)}ends here.`,
     );
@@ -3400,7 +3400,8 @@ describe("SessionController 追问对话接线", () => {
     expect(surroundings.before).toBe(PARAGRAPH_FIRST);
     expect(surroundings.after).toBe(PARAGRAPH_LAST);
     const current = surroundings.current!;
-    expect(current.length).toBeLessThanOrEqual(MAX_CHAT_SURROUNDING_CURRENT_CHARS + 2);
+    // 截断标记计入封顶(2026-11-28 裁决):截断产出恒 ≤ 4000,SW 守卫不再拒收
+    expect(current.length).toBeLessThanOrEqual(MAX_CHAT_SURROUNDING_CURRENT_CHARS);
     expect(current).toContain(middleSentences[1]!); // 句锚窗口完整包含锚句
     // 锚句位于第 2 句,回看 1200 后头尾都是真截断 → 两端各一个 …
     expect(current.startsWith("…")).toBe(true);
