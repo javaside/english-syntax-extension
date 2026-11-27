@@ -628,6 +628,8 @@ export class PreviewRenderer {
     if (record.card === null) {
       record.card = record.element.ownerDocument.createElement(CARD_TAG);
       record.card.setAttribute(CARD_ATTRIBUTE, "true");
+      // bootstrap 的悬停快捷键从「停在卡片上」反查块(开关循环,2026-11-28 spec)。
+      record.card.dataset.blockId = blockId;
       record.element.after(record.card);
     }
     record.element.setAttribute(HIDDEN_ATTRIBUTE, "true");
@@ -1268,6 +1270,45 @@ export class PreviewRenderer {
     this.#detailStack = [];
     this.#currentDetailPayload = null;
     for (const record of this.#blocks.values()) this.#restoreBlock(record);
+  }
+
+  /**
+   * 开关循环的「关」(2026-11-28 spec,悬停快捷键专用):还原单个块,别的块照旧。
+   * 收尾按块收:纠正行与详解状态仅当锚定句属于本块时清空(restoreAll 的按块子集);
+   * 详解面板 DOM 挂在卡内随卡销毁,挂在别的块的面板不受牵连。
+   * @returns 块未注册或卡片不在页上时 false(调用方据此走提示路径)。
+   */
+  restoreBlock(blockId: string): boolean {
+    const record = this.#blocks.get(blockId);
+    if (record === undefined || record.card === null) return false;
+    if (this.#sentenceBlockIdOf(this.#correction?.sentenceId) === blockId) {
+      this.#closeCorrection();
+    }
+    if (this.#sentenceBlockIdOf(this.#currentDetail?.sentenceId) === blockId) {
+      this.#currentDetail = null;
+      this.#detailStack = [];
+      this.#currentDetailPayload = null;
+    }
+    this.#restoreBlock(record);
+    return true;
+  }
+
+  /**
+   * 开关循环的「开」:按既有句子记录重画整卡(句子映射不动,record/card 复用或重建)。
+   * 只重画,不重新下发——结果已 settle,repaint 出来的就是当时的译文/失败行。
+   */
+  repaintBlock(blockId: string): void {
+    this.#repaintBlock(blockId);
+  }
+
+  /** 句子 → 宿主块反查,未注册句返回 null。bootstrap 用它判追问面板锚定句属于哪个块。 */
+  sentenceBlockId(sentenceId: string): string | null {
+    return this.#sentences.get(sentenceId)?.blockId ?? null;
+  }
+
+  /** #correction/#currentDetail 的句子句柄判块;null 句柄返回 undefined 永不等于任何块。 */
+  #sentenceBlockIdOf(sentenceId: string | undefined): string | undefined {
+    return sentenceId === undefined ? undefined : this.#sentences.get(sentenceId)?.blockId;
   }
 
   /** 测试辅助：注册句子（生产路径由会话层把分词结果喂进来）。 */
