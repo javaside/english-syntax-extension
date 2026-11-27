@@ -877,6 +877,54 @@ describe("PreviewRenderer", () => {
     });
   });
 
+  // —— sentenceBlockElement 访问器(追问段落上下文,2026-11-28 spec) ——
+  describe("sentenceBlockElement 访问器", () => {
+    it("命中已注册句 → 句所在块的原元素;多块各归各", () => {
+      const a = paragraph("pa");
+      const b = paragraph("pb");
+      const renderer = new PreviewRenderer(() => {});
+      renderer.registerBlock("b-a", a);
+      renderer.registerBlock("b-b", b);
+      renderer.registerSentence("b-a", "s-a-0");
+      renderer.registerSentence("b-b", "s-b-0");
+
+      expect(renderer.sentenceBlockElement("s-a-0")).toBe(a);
+      expect(renderer.sentenceBlockElement("s-b-0")).toBe(b);
+    });
+
+    it("未注册句 → null(调用方据此省略 CHAT_ASK 的 surroundings 键)", () => {
+      const a = paragraph("pa");
+      const renderer = new PreviewRenderer(() => {});
+      renderer.registerBlock("b-a", a);
+      renderer.registerSentence("b-a", "s-a-0");
+
+      expect(renderer.sentenceBlockElement("s-a-0")).toBe(a);
+      expect(renderer.sentenceBlockElement("s-unknown-0")).toBeNull();
+      expect(renderer.sentenceBlockElement("never-registered")).toBeNull();
+    });
+
+    it("卡片渲染后仍返回原 <p>(不是卡片):追问 current 要匹配候选集里的原段落元素", () => {
+      // 原文被卡片替换后原元素只被打上 HIDDEN 属性,DOM 位置与 textContent 都不变;
+      // collectContextBlocks 的候选集收录的正是原元素——访问器必须返回它而不是卡片。
+      const { renderer, element } = setup();
+      renderer.renderCoreResult(
+        "s1",
+        "b1",
+        corePayload("s1", [
+          { startToken: 0, endToken: 1, role: "SUBJECT", translation: "该服务", text: "The service" },
+        ]),
+      );
+      const card = document.querySelector("[data-english-syntax-card]");
+      expect(card).not.toBeNull();
+
+      const current = renderer.sentenceBlockElement("s1");
+      expect(current).toBe(element);
+      expect(current).not.toBe(card);
+      // 与 currentElement(卡片优先)的语义刻意不同:那是打标记用的「当前呈现元素」。
+      expect(renderer.currentElement("b1")).toBe(card);
+    });
+  });
+
   describe("F2 内联纠正输入行", () => {
     const TOKENS = [
       { id: 0, text: "Classify", leadingWhitespace: "", punctuation: false },

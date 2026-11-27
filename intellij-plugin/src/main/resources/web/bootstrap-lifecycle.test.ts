@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // 跨用例共享，因此每个用例都重新 initialize() 来复位（previewHadCards 只在「先有卡、再清卡」
 // 的判据里用到，RESTORE_ALL 分支会把它复位，详见用例）。
 import { installChatPanel, sendChatAsk, setChatPanel, type ChatPanelSeam } from "./bootstrap-entry";
+import { MAX_CHAT_SURROUNDING_CURRENT_CHARS } from "./bridge";
 
 interface Posted {
   type: string;
@@ -77,6 +78,14 @@ describe("bootstrap-entry 停止回归", () => {
     expect(bundle).toContain("FEEDBACK_REQUEST");
     expect(bundle).toContain("english-syntax-feedback");
     expect(bundle).toContain("english-syntax-correct");
+    // 追问段落上下文（2026-11-28 spec）：sendChatAsk 的 surroundings 计算（走查/访问器/
+    // 封顶）只经 bundle 进真机——忘了重建 bundle 的症状是「单测全绿、真机 CHAT_ASK
+    // 永远不带 surroundings 键」（Kotlin 侧照常收九键消息，只是少了段落上下文）。
+    expect(bundle).toContain("collectContextBlocks");
+    expect(bundle).toContain("sentenceBlockElement");
+    expect(bundle).toContain("buildChatSurroundings");
+    // 截断标记 … 计入封顶的算法本体（capSurroundingBefore 的尾窗截断）必须在 bundle 里。
+    expect(bundle).toContain("…");
   });
 
   it("RESTORE_ALL 清卡后不再把清卡误判成官方重渲染、也不重新亮出进度浮层", async () => {
@@ -628,6 +637,138 @@ describe("bootstrap-entry 追问对话接线", () => {
     });
     await flush();
     expect(received).toHaveLength(3);
+  });
+});
+
+// —— 追问段落上下文（CHAT_ASK.surroundings，2026-11-28 spec）——
+//    sendChatAsk 内经 renderer.sentenceBlockElement 定位本句块 + collectContextBlocks
+//    只读走查取候选集 + documentOrderedNeighbors/buildChatSurroundings 封顶组装。
+describe("bootstrap-entry 追问段落上下文（CHAT_ASK surroundings）", () => {
+  const initialize = () =>
+    (window as unknown as Record<string, unknown>).__englishSyntaxInitialize as (
+      previewId: string,
+      generation: number,
+      autoScan?: boolean,
+    ) => void;
+  const hostMessage = () =>
+    (window as unknown as Record<string, unknown>).__englishSyntaxMessage as (
+      message: Record<string, unknown>,
+    ) => void;
+
+  const PARAGRAPHS = [
+    "Alpha paragraph introduces the topic clearly for readers.",
+    "The service validates every response before returning anything.",
+    "Gamma paragraph concludes the discussion with a short summary.",
+  ];
+
+  /** 三段 Markdown DOM（中段含锚句 The service），返回段元素数组（文档序）。 */
+  function threeParagraphs(): HTMLElement[] {
+    return PARAGRAPHS.map((text) => {
+      const el = document.createElement("p");
+      el.textContent = text;
+      document.body.append(el);
+      return el;
+    });
+  }
+
+  /** 三段 DOM + 中段出卡（CORE_RESULT 惰性注册 s-{blockId}-0），返回中段句 id。 */
+  function setupMiddleSentence(previewId: string, autoScan: boolean): string {
+    const paragraphs = threeParagraphs();
+    initialize()(previewId, 0, autoScan);
+    const middle = paragraphs[1]!;
+    const blockId = middle.getAttribute("data-english-syntax-block");
+    if (blockId === null) throw new Error("scan did not assign a block id");
+    hostMessage()(coreResultMessage(previewId, 0, blockId));
+    return `s-${blockId}-0`;
+  }
+
+  const askOnce = (previewId: string, sentenceId: string): Posted => {
+    posted.length = 0;
+    const ok = sendChatAsk({
+      conversationId: `${previewId}:chat:1`,
+      sentenceId,
+      question: "这段为什么这么划分？",
+      history: [],
+    });
+    expect(ok).toBe(true);
+    const ask = posted.find((m) => m.type === "CHAT_ASK");
+    if (ask === undefined) throw new Error("CHAT_ASK not posted");
+    return ask;
+  };
+
+  it("autoScan 整篇模式：surroundings 三键 = 前段/本段/后段文本（中段已挂卡）", async () => {
+    const sentenceId = setupMiddleSentence("pv-surr-auto", true);
+    await flush();
+    // auto 语义：整篇上报 + 中段已挂卡（原文打 HIDDEN）——只读走查必须照常拿全三段。
+    expect(posted.some((m) => m.type === "VISIBLE_BLOCKS")).toBe(true);
+    expect(document.querySelector("[data-english-syntax-card]")).not.toBeNull();
+
+    const ask = askOnce("pv-surr-auto", sentenceId);
+    expect(ask.surroundings).toEqual({
+      before: PARAGRAPHS[0],
+      current: PARAGRAPHS[1],
+      after: PARAGRAPHS[2],
+    });
+  });
+
+  it("manual initialize 形态：同样带三段上下文（走查不依赖 VISIBLE_BLOCKS 上报）", async () => {
+    const sentenceId = setupMiddleSentence("pv-surr-manual", false);
+    await flush();
+    expect(posted.some((m) => m.type === "VISIBLE_BLOCKS")).toBe(false);
+
+    const ask = askOnce("pv-surr-manual", sentenceId);
+    expect(ask.surroundings).toEqual({
+      before: PARAGRAPHS[0],
+      current: PARAGRAPHS[1],
+      after: PARAGRAPHS[2],
+    });
+  });
+
+  it("巨长本段：current 封顶（恰 4000、含锚句、双侧 …），前后段原样", async () => {
+    const oversized = `${"a".repeat(2000)} The service ${"b".repeat(3000)}`;
+    const before = document.createElement("p");
+    before.textContent = "Alpha paragraph sits before the oversized one.";
+    const middle = document.createElement("p");
+    middle.textContent = oversized;
+    const after = document.createElement("p");
+    after.textContent = "Gamma paragraph sits after the oversized one.";
+    document.body.append(before, middle, after);
+    initialize()("pv-surr-long", 0, false);
+    const blockId = middle.getAttribute("data-english-syntax-block");
+    if (blockId === null) throw new Error("scan did not assign a block id");
+    // 锚句 = renderer 按 token 重建的句原文（tokensJson 只有 The/service）。
+    hostMessage()(coreResultMessage("pv-surr-long", 0, blockId));
+    await flush();
+
+    const ask = askOnce("pv-surr-long", `s-${blockId}-0`);
+    const surroundings = ask.surroundings as { before: string; current: string; after: string };
+    expect(surroundings.before).toBe("Alpha paragraph sits before the oversized one.");
+    expect(surroundings.after).toBe("Gamma paragraph sits after the oversized one.");
+    // 锚句命中(2001)，回看 1200 → 起点 801；双侧真截断 → 净窗 3998 + 两个标记。
+    expect(surroundings.current).toBe(`…${oversized.slice(801, 801 + MAX_CHAT_SURROUNDING_CURRENT_CHARS - 2)}…`);
+    expect(surroundings.current).toContain("The service");
+    expect(surroundings.current).toHaveLength(MAX_CHAT_SURROUNDING_CURRENT_CHARS);
+  });
+
+  it("未知句（renderer 无此句）：省略 surroundings 键，消息照发（优雅降级）", async () => {
+    // 三段在场、但句从未注册（无 CORE_RESULT）——current 定位失败时键整体缺席,
+    // 不发 surroundings: {}(空对象过不了桥门「至少一键在场」)。
+    threeParagraphs();
+    initialize()("pv-surr-unknown", 0, false);
+    await flush();
+
+    const ask = askOnce("pv-surr-unknown", "s-english-syntax-block-999-0");
+    expect("surroundings" in ask).toBe(false);
+    expect(Object.keys(ask).sort()).toEqual([
+      "conversationId",
+      "generation",
+      "history",
+      "previewId",
+      "question",
+      "sentenceId",
+      "type",
+      "version",
+    ]);
   });
 });
 

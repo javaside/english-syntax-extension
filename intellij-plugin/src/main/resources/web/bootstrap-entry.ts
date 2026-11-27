@@ -23,7 +23,9 @@ import {
   nearestPreviewBlock,
   resetScanRegistry,
   scanMarkdownBlocks,
+  collectContextBlocks,
 } from "./preview";
+import { buildChatSurroundings, documentOrderedNeighbors } from "./chat-surroundings";
 import { CHAT_ASK_REQUEST_EVENT, CORRECTION_OPEN_EVENT, PreviewRenderer } from "./render";
 import { setDarkMode } from "./roles";
 import { ChatPanel } from "./chat-panel";
@@ -676,12 +678,33 @@ installChatPanel();
  * 面板 submit → 构造并发送 CHAT_ASK。图标点击时**绝不下发**这条消息——那时还没有合法
  * question，Kotlin 侧 parseChatAsk（trim 后 1..2000 + 白名单键集）会直接拒收。history 只做
  * 最浅的防呆（收敛到 {role, content} 键集 + 取最近 6 项）；按字符裁剪是面板职责，硬门在 Kotlin。
+ *
+ * 段落级上下文（2026-11-28 spec）：current = 本句所在块元素（renderer 访问器定位，
+ * 不做 sentenceId 反解），候选集每次现走查（`collectContextBlocks` 只读零副作用，
+ * 已注册/已挂卡的原段照常收录），邻段按文档序 ±1，封顶截断由 `chat-surroundings`
+ * 的纯函数完成（Chrome 端逐函数镜像）。renderer 找不到本句元素（未注册句）时
+ * **省略 surroundings 键**——空对象过不了 Kotlin 桥门的「至少一键在场」，宁可
+ * 无上下文也不发错的段（优雅降级）。
  */
 export function sendChatAsk(input: ChatAskInput): boolean {
   const s = state;
   if (s === null || s.previewId === "") return false;
   const question = input.question.trim();
   if (question.length === 0 || question.length > MAX_CHAT_QUESTION_CHARACTERS) return false;
+  // current 与候选集（renderer 找不到本句元素 → 不带 surroundings 键）。
+  const currentEl = s.renderer.sentenceBlockElement(input.sentenceId);
+  const candidates = collectContextBlocks(document.body);
+  // 候选集找不到时（如本段没过走查门：快捷键解析的短段）合成一份——current 并入
+  // 排序后仍取得到真实邻段（Chrome 端 documentOrderedNeighbors 同款语义）。
+  const current = currentEl === null ? null
+    : candidates.find((c) => c.element === currentEl)
+      ?? { element: currentEl, text: (currentEl.textContent ?? "").trim() };
+  const neighbors = current === null ? undefined : documentOrderedNeighbors(candidates, current);
+  const surroundings = current === null ? undefined : buildChatSurroundings({
+    neighbors: { before: neighbors?.before?.text, after: neighbors?.after?.text },
+    currentText: current.text,
+    anchorText: s.renderer.sentenceText(input.sentenceId),
+  });
   postToHost({
     version: BRIDGE_VERSION,
     type: "CHAT_ASK",
@@ -693,6 +716,8 @@ export function sendChatAsk(input: ChatAskInput): boolean {
       .slice(-MAX_CHAT_HISTORY_TURNS)
       .map((turn) => ({ role: turn.role, content: turn.content })),
     question,
+    // undefined 时省略键（不发 surroundings: {}）。
+    ...(surroundings === undefined ? {} : { surroundings }),
   });
   return true;
 }

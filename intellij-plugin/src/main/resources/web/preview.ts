@@ -9,6 +9,8 @@
  * 有英文实词即可，其余标签维持最短 20 字符。
  */
 
+import type { SurroundingCandidate } from "./chat-surroundings";
+
 export interface PreviewBlock {
   blockId: string;
   element: HTMLElement;
@@ -184,13 +186,23 @@ function collectCandidates(element: HTMLElement, into: HTMLElement[]): void {
   into.push(element);
 }
 
-export function scanMarkdownBlocks(root: ParentNode): PreviewBlock[] {
+/**
+ * 共用候选走查（2026-11-28 spec 抽出）：querySelectorAll 先序遍历 + 标签过滤 +
+ * `collectCandidates` 资格门。`scanMarkdownBlocks` 与 `collectContextBlocks` 各自
+ * 消费同一实现——门的单一来源，改门只动这一处，防两处漂移（走查漏掉扫描新增的
+ * 排除区会让追问上下文喂进代码/数学段）。
+ */
+function collectEligibleElements(root: ParentNode): HTMLElement[] {
   const elements: HTMLElement[] = [];
   for (const element of root.querySelectorAll<HTMLElement>("*")) {
     if (!STANDARD_CANDIDATE_TAGS.has(element.tagName) && !isHyphenatedCustomElement(element)) continue;
     collectCandidates(element, elements);
   }
-  return elements
+  return elements;
+}
+
+export function scanMarkdownBlocks(root: ParentNode): PreviewBlock[] {
+  return collectEligibleElements(root)
     .filter(
       (element) => !registeredElements.has(element) && !element.hasAttribute(HIDDEN_ATTRIBUTE),
     )
@@ -198,6 +210,23 @@ export function scanMarkdownBlocks(root: ParentNode): PreviewBlock[] {
       registeredElements.add(element);
       return { blockId: ensureBlockId(element), element, text: (element.textContent ?? "").trim() };
     });
+}
+
+/**
+ * 只读走查（追问段落上下文，2026-11-28 spec）：收集候选块供 sendChatAsk 计算段落
+ * 上下文。与 `scanMarkdownBlocks` 共用同一候选走查（标签过滤 + `collectCandidates`
+ * 资格门），但**忽略 `registeredElements` 与 `HIDDEN_ATTRIBUTE` 两项过滤**——auto
+ * 模式整页挂卡且全部已注册，套用扫描的防重/防重复解析过滤会让走查拿不到任何候选
+ * （正是本特性要修的失败模式）；**零副作用**——不 `ensureBlockId`、不登记注册表
+ * （走查后再 `scanMarkdownBlocks` 仍返回空）。文本取 `(element.textContent ?? "")
+ * .trim()`（原文被卡片替换后只是打 HIDDEN 属性隐藏，textContent 不变）；
+ * `querySelectorAll` 先序即文档序（供 `documentOrderedNeighbors` 的 ±1 取邻段）。
+ */
+export function collectContextBlocks(root: ParentNode): SurroundingCandidate[] {
+  return collectEligibleElements(root).map((element) => ({
+    element,
+    text: (element.textContent ?? "").trim(),
+  }));
 }
 
 /** Markdown 重渲染后失效：原节点没了，注册记录要清掉。 */
