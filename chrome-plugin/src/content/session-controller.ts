@@ -628,11 +628,20 @@ export class SessionController {
    * 开关循环的「关」:卡片移除、原文精确还原(BlockReplacement.restore 连空 class 都按
    * 原样处理)。句子相位、块记录、缓存全部不动——「开」(重显卡片)靠内存里的既有渲染,
    * 不再下发。去抖窗口内的第二按静默忽略:连按会翻译/原文来回闪,用户看到的比提示更糟。
+   * 追问面板是 documentElement 上的 fixed 浮层(不在卡片子树里),锚定句属于本块时随停
+   * 停靠收走(dispose 先触发 onClose 停靠再摘 host,与用户点关闭按钮同路径),锚定别的
+   * 块不误收——与 IntelliJ 端 bootstrap 的 toggleBlockOff 同款判块。
    */
   private toggleBlockOff(block: BlockRecord): undefined {
     if (this.debounceExplicitParse(block.candidate.id)) return undefined;
     block.replacement.restore();
     block.marker.clear();
+    const active = this.chatPanel?.activeConversation();
+    if (active !== null && active !== undefined) {
+      if (block.sentences.some(({ input }) => input.sentenceId === active.sentenceId)) {
+        this.chatPanel?.dispose();
+      }
+    }
     return undefined;
   }
 

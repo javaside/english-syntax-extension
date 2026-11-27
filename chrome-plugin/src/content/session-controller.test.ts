@@ -1713,6 +1713,55 @@ describe("SessionController", () => {
     subject.controller.stop();
   });
 
+  it("关卡收走锚定该块的追问面板，别的块不受牵连", async () => {
+    // 面板是 documentElement 上的 fixed 浮层(不在卡片子树里):关锚定块必须随停停靠收走
+    // (dispose 先触发 onClose 停靠再摘 host,与用户点关闭按钮同路径),关别的块不得误收。
+    let clock = 0;
+    let target: Element | null = null;
+    const subject = harness("Readers understand complex sentences.", new FakeTransport(), {
+      scan: () => refreshPrincipalRoot(),
+      createSentenceId: ({ blockId, order }) => Promise.resolve(`s-${blockId}-${order}`),
+      hoverTarget: () => target,
+      now: () => clock,
+    });
+    const main = document.querySelector("main")!;
+    const p1 = document.querySelector("p")!;
+    const p2 = document.createElement("p");
+    p2.textContent = "Writers craft each paragraph carefully today.";
+    main.append(p2);
+    refreshPrincipalRoot();
+
+    target = p1;
+    await subject.controller.parseHoveredBlock();
+    target = p2;
+    clock = 1_000;
+    await subject.controller.parseHoveredBlock();
+    await vi.waitFor(() => expect(subject.controller.status.ready).toBe(2));
+    const p1SentenceId = (
+      subject.transport.sent.find(({ type }) => type === "ANALYZE_CORE") as {
+        sentences: Array<{ sentenceId: string }>;
+      }
+    ).sentences[0]!.sentenceId;
+
+    subject.controller.openChat(p1SentenceId);
+    expect(document.querySelector("[data-syntax-chat-panel]")).not.toBeNull();
+
+    // 关 p2(卡片探针):面板锚定 p1 的句子,不受牵连。
+    clock = 5_000;
+    target = subject.replacements[1]!.displayed;
+    await subject.controller.parseHoveredBlock();
+    expect(subject.replacements[1]!.restores).toBe(1);
+    expect(document.querySelector("[data-syntax-chat-panel]")).not.toBeNull();
+
+    // 关 p1(锚定块):面板随停停靠收走。
+    clock = 10_000;
+    target = subject.replacements[0]!.displayed;
+    await subject.controller.parseHoveredBlock();
+    expect(subject.replacements[0]!.restores).toBe(1);
+    expect(document.querySelector("[data-syntax-chat-panel]")).toBeNull();
+    subject.controller.stop();
+  });
+
   it("同一段在飞时再按快捷键：不重复下发，只提示正在解析中", async () => {
     // 显式手势跳过合批窗口直接发请求,而在飞的相位不在终态闸门里——第二次按键此前会为
     // 同一批句子再发一条 ANALYZE_CORE,并且 ++operationVersion 让第一条的响应整条作废:

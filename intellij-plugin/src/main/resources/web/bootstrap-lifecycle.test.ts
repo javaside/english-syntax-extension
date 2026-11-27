@@ -504,6 +504,75 @@ describe("bootstrap-entry 按段解析", () => {
     expect(document.querySelector("[data-english-syntax-chat-panel]")).toBeNull();
   });
 
+  it("关掉页面上最后一张卡不误报官方重渲染（不触发换代）", async () => {
+    // PREVIEW_RENDERED 的 true→false 边沿必须排除「我方主动删卡」:RESTORE_ALL 分支早已
+    // 同步复位 previewHadCards,单块 toggle 关同样删卡——按段解析是轻量模式,页上通常
+    // 只有这一张卡,Alt+T 关它是最主流用法,恰好制造边沿。误报会让 Kotlin 换代重扫
+    // (取消在飞请求、清追问停靠),第三按「开」退化成重新下发+registerBlock。
+    const para = document.createElement("p");
+    para.textContent = "The service validates every response before returning anything.";
+    document.body.append(para);
+
+    initialize()("pv-lastcard", 0, false);
+    await flush();
+    posted.length = 0;
+
+    parseHovered()(para);
+    await flush();
+    const blockId = para.getAttribute("data-english-syntax-block")!;
+    hostMessage()(coreResultMessage("pv-lastcard", 0, blockId));
+    await flush();
+    expect(document.querySelector("[data-english-syntax-card]")).not.toBeNull();
+    posted.length = 0;
+
+    vi.spyOn(Date, "now").mockReturnValue(Date.now() + 5_000);
+    parseHovered()(para);
+    await flush();
+
+    expect(para.hasAttribute("data-english-syntax-hidden")).toBe(false);
+    expect(document.querySelector("[data-english-syntax-card]")).toBeNull();
+    expect(posted.some((m) => m.type === "PREVIEW_RENDERED")).toBe(false);
+  });
+
+  it("关之后去抖窗口内按「开」静默忽略，窗口过后重显卡片", async () => {
+    const para = document.createElement("p");
+    para.textContent = "The service validates every response before returning anything.";
+    document.body.append(para);
+
+    initialize()("pv-reopen", 0, false);
+    await flush();
+    posted.length = 0;
+
+    parseHovered()(para);
+    await flush();
+    const blockId = para.getAttribute("data-english-syntax-block")!;
+    hostMessage()(coreResultMessage("pv-reopen", 0, blockId));
+    await flush();
+    expect(document.querySelector("[data-english-syntax-card]")).not.toBeNull();
+
+    // 关(跨首按去抖)。
+    vi.spyOn(Date, "now").mockReturnValue(Date.now() + 5_000);
+    parseHovered()(para);
+    await flush();
+    expect(document.querySelector("[data-english-syntax-card]")).toBeNull();
+    posted.length = 0;
+
+    // 同一时刻仍在关的去抖窗口内:「开」静默忽略,卡片不得闪回。
+    parseHovered()(para);
+    await flush();
+    expect(document.querySelector("[data-english-syntax-card]")).toBeNull();
+    expect(posted.filter((m) => m.type === "PARSE_BLOCK")).toHaveLength(0);
+
+    // 窗口过后:重显。
+    const later = Date.now() + 5_000;
+    vi.spyOn(Date, "now").mockReturnValue(later);
+    parseHovered()(para);
+    await flush();
+    expect(document.querySelector("[data-english-syntax-card]")).not.toBeNull();
+    expect(para.hasAttribute("data-english-syntax-hidden")).toBe(true);
+    expect(posted.filter((m) => m.type === "PARSE_BLOCK")).toHaveLength(0);
+  });
+
   it("keydown 兼底逐位匹配修饰键，并随 setHotkey 改键", async () => {
     initialize()("pv-keyboard", 0, false);
     await flush();

@@ -2025,7 +2025,7 @@ var EnglishSyntaxPreview = (function(exports) {
 		}
 		const existingBlockId = element.getAttribute("data-english-syntax-block");
 		if (existingBlockId !== null && settledBlocks.has(existingBlockId)) {
-			debouncedToggle(existingBlockId);
+			if (!debouncedToggle(existingBlockId)) return;
 			s.renderer.repaintBlock(existingBlockId);
 			return;
 		}
@@ -2062,8 +2062,9 @@ var EnglishSyntaxPreview = (function(exports) {
 		if (!debouncedToggle(blockId)) return;
 		const s = state;
 		if (s === null) return;
-		s.renderer.restoreBlock(blockId);
+		const restored = s.renderer.restoreBlock(blockId);
 		unmarkBlockActive(blockId);
+		if (restored) previewHadCards = false;
 		if (chatSentenceId !== null && s.renderer.sentenceBlockId(chatSentenceId) === blockId) chatPanelInstance?.dispose();
 	}
 	/** 开关动作去抖:窗口内返回 false(静默忽略,卡片不得闪回),窗口外记录并放行。 */

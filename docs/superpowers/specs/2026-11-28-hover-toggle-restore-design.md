@@ -54,7 +54,7 @@ Alt+T 悬停解析（双端同构）翻译完一段后，卡片永久替换原�
 - 视口路径：`queueVisibleBlock` 对全 ready 块不重发（终态闸门）→ restore 后滚动不会翻案
 - 迟到响应：`finishBlock`/`showPreview` 只在批落地或流式进行中调用，全终态块无流
 - 重显可行性：卡片 host DOM 在 restore 后仍由 `learningBlock` 持有，`show()` 重新插入（`#display` 自带先 restore 再插入的幂等）；字体继承按原元素重算
-- 追问面板：Chrome 端挂在卡片 DOM 子树内，随卡片移除/复现，不触发 onClose 停靠钩子（面板没被「关闭」，只是暂时不可见），历史保留
+- 追问面板：双端面板都是 `documentElement` 上的 fixed 浮层（**不在卡片子树内**——初稿曾误写「Chrome 端挂在卡片 DOM 子树内」，评审更正）；关卡时若其锚定句属于该块，随停停靠收走（`dispose` 先触发 `onClose` 停靠钩子再摘 host），锚定别的块不误收。Chrome 端此行为在最终评审修复轮补齐（初版漏做）。
 
 ## IntelliJ 端（`bootstrap-entry.ts` + `render.ts`）
 

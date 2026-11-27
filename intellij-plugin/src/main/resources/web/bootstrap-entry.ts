@@ -333,7 +333,7 @@ function parseHoveredBlock(target?: Element | null): void {
   // 分配过 id(下发 PARSE_BLOCK 前就写了),未 settle 的原文拿到 null 照常走首按路径。
   const existingBlockId = element.getAttribute("data-english-syntax-block");
   if (existingBlockId !== null && settledBlocks.has(existingBlockId)) {
-    debouncedToggle(existingBlockId);
+    if (!debouncedToggle(existingBlockId)) return;
     s.renderer.repaintBlock(existingBlockId);
     return;
   }
@@ -373,8 +373,13 @@ function toggleBlockOff(blockId: string): void {
   if (!debouncedToggle(blockId)) return;
   const s = state;
   if (s === null) return;
-  s.renderer.restoreBlock(blockId);
+  const restored = s.renderer.restoreBlock(blockId);
   unmarkBlockActive(blockId);
+  // PREVIEW_RENDERED 的「卡片从有到无」边沿必须排除我方主动删卡(RESTORE_ALL 分支同款
+  // 同步复位):按段解析是轻量模式,页上常只有这一张卡,不复位会让关卡的 DOM 变更被
+  // MutationObserver 当成官方 updateDom 重渲染上报,Kotlin 换代重扫——「开」退化成
+  // 重新下发、追问停靠被清。页面仍有别的卡片时,下一次 mutation 会把基线重新置 true。
+  if (restored) previewHadCards = false;
   if (chatSentenceId !== null && s.renderer.sentenceBlockId(chatSentenceId) === blockId) {
     chatPanelInstance?.dispose();
   }
