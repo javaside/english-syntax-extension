@@ -432,4 +432,58 @@ describe("ChatPanel", () => {
     // 清态是控制器回调的职责(重铸 id + open 复位),面板不动自己的历史
     expect(panel.currentConversation()).not.toBeNull();
   });
+
+  // —— 受限 markdown 渲染(2026-11-27 spec):assistant 气泡经 renderMarkdown,
+  //    user/error 保持纯文本;流式逐片全量重渲,未闭合标记字面显示。 ——
+
+  it("assistant 回答经受限 markdown 渲染:加粗成 strong,标记符不显示", () => {
+    const panel = openPanel();
+    panel.appendUserTurn("问1");
+    panel.beginAssistantTurn(CONVERSATION);
+    panel.completeAssistantTurn(CONVERSATION, "这是**加粗**的说明");
+
+    const bubble = assistantBubbles(panel)[0]!;
+    expect(bubble.querySelector("strong")!.textContent).toBe("加粗");
+    expect(bubble.textContent).toContain("加粗");
+    expect(bubble.textContent).not.toContain("**");
+  });
+
+  it("user 气泡不渲染 markdown:标记原样显示", () => {
+    const panel = openPanel();
+    panel.appendUserTurn("**不是粗体**");
+
+    const userBubble = panel.host.shadowRoot!.querySelector<HTMLElement>(".message.user")!;
+    expect(userBubble.querySelector("strong")).toBeNull();
+    expect(userBubble.textContent).toBe("**不是粗体**");
+  });
+
+  it("流式逐片全量重渲:未闭合的字面显示,闭合后成 strong", () => {
+    const panel = openPanel();
+    panel.appendUserTurn("问1");
+    panel.beginAssistantTurn(CONVERSATION);
+
+    panel.renderStreamedText(CONVERSATION, "生成中的**粗");
+    const mid = assistantBubbles(panel)[0]!;
+    expect(mid.querySelector("strong")).toBeNull();
+    expect(mid.textContent).toContain("**粗");
+
+    panel.renderStreamedText(CONVERSATION, "生成中的**粗体**完毕");
+    const done = assistantBubbles(panel)[0]!;
+    expect(done.querySelector("strong")!.textContent).toBe("粗体");
+    expect(done.textContent).not.toContain("**");
+  });
+
+  it("restoreHistory 的 assistant 轮同样渲染 markdown,user 轮仍纯文本", () => {
+    const panel = openPanel();
+    panel.open({ sentenceId: "sentence-1", summary: "Learners read books." });
+    panel.setConversationId(CONVERSATION);
+    panel.restoreHistory([
+      { role: "user", content: "问1" },
+      { role: "assistant", content: "带**标记**的回答" },
+    ]);
+
+    const bubbles = [...panel.host.shadowRoot!.querySelectorAll<HTMLElement>(".message")];
+    expect(bubbles[1]!.querySelector("strong")!.textContent).toBe("标记");
+    expect(bubbles[0]!.textContent).toBe("问1");
+  });
 });

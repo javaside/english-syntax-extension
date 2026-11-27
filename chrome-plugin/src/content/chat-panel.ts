@@ -1,4 +1,5 @@
 import type { ChatTurn } from "../shared/protocol";
+import { renderMarkdown } from "./chat-markdown";
 
 /**
  * 历史裁剪上限。与 SW 入站兜底(service-worker.ts 的 CHAT_HISTORY_MAX_*)刻意同单位:
@@ -59,7 +60,8 @@ const STYLES = `
     flex: 1; min-height: 72px; overflow-y: auto;
     display: flex; flex-direction: column; gap: 8px; padding: 10px 12px;
   }
-  /* 气泡是纯文本:不引 markdown,换行交给 pre-wrap,XSS 面只有 textContent。 */
+  /* user/error 气泡是纯文本:换行交给 pre-wrap。assistant 气泡走受限 markdown
+     渲染(见下方 --assistant 规则),XSS 面仍只有 createElement/textContent。 */
   .message {
     max-width: 85%; padding: 6px 10px; border-radius: 10px;
     white-space: pre-wrap; overflow-wrap: anywhere;
@@ -71,8 +73,26 @@ const STYLES = `
   .message.assistant {
     align-self: flex-start; background: #f4f4f5; color: #111;
     border-end-start-radius: 3px;
+    /* markdown 渲染后换行由 br 承担,撤 pre-wrap(其余消息类保留)。 */
+    white-space: normal;
   }
   .message.assistant.pending { color: #71717a; }
+  .message.assistant p { margin: 0 0 .35em; }
+  .message.assistant p:last-child { margin-bottom: 0; }
+  .message.assistant h4 { margin: .45em 0 .2em; font-size: 1.05em; font-weight: 700; }
+  .message.assistant ul, .message.assistant ol { margin: .2em 0; padding-left: 1.4em; }
+  .message.assistant blockquote {
+    margin: .3em 0; padding: 0 0 0 .7em;
+    border-left: 3px solid #d4d4d8; color: #52525b;
+  }
+  .message.assistant pre {
+    margin: .3em 0; padding: 6px 8px; background: #e4e4e7; border-radius: 6px;
+    overflow-x: auto; font-size: 12px;
+  }
+  .message.assistant code {
+    background: #e4e4e7; padding: 1px 4px; border-radius: 4px; font-size: 12px;
+  }
+  .message.assistant pre code { background: none; padding: 0; }
   .message.error {
     align-self: flex-start; color: #b91c1c; background: #fef2f2;
     border: 1px solid #fecaca;
@@ -115,9 +135,11 @@ export interface SyntaxChatRequestEventDetail {
 
 /**
  * 追问对话浮层:host + open shadow root,固定右下、惰性单例挂载(工艺照
- * DiagnosisPanel)。会话状态 = { conversationId, 锚定句摘要, history };回答气泡
- * 纯文本 + pre-wrap;`renderStreamedText` 按「截至目前完整回答」的推送形状**全量
- * 替换**当前气泡(调度器静默重试后重画同一段文本,天然无害)。所有 assistant 侧
+ * DiagnosisPanel)。会话状态 = { conversationId, 锚定句摘要, history };assistant
+ * 回答气泡经受限 markdown 渲染(chat-markdown.ts,模型输出常见标记成真实排版,
+ * XSS 面仍只有 createElement/textContent;user/error 气泡保持纯文本 + pre-wrap);
+ * `renderStreamedText` 按「截至目前完整回答」的推送形状**全量替换**当前气泡
+ * (调度器静默重试后重画同一段文本,天然无害)。所有 assistant 侧
  * 方法按 conversationId 把关:换句 open 重置会话后,旧会话的迟到流/结果直接丢弃。
  *
  * 重开恢复(2026-11-25 spec):面板只持有**活跃**会话;关闭/换句时控制器经
@@ -340,7 +362,7 @@ export class ChatPanel {
     if (this.#assistantBubble === undefined) return;
     const bubble = this.#assistantBubble;
     bubble.classList.remove("pending");
-    bubble.textContent = text;
+    renderMarkdown(bubble, text);
     this.#scrollToEnd();
   }
 
@@ -356,7 +378,7 @@ export class ChatPanel {
     }
     const bubble = this.#assistantBubble;
     bubble.classList.remove("pending");
-    bubble.textContent = answer;
+    renderMarkdown(bubble, answer);
     this.#assistantBubble = undefined;
     this.#history.push({ role: "assistant", content: answer });
     this.#setSending(false);
@@ -436,7 +458,12 @@ export class ChatPanel {
   ): HTMLElement {
     const bubble = this.#doc.createElement("div");
     bubble.className = `message ${variant}`;
-    bubble.textContent = text;
+    if (variant.includes("assistant")) {
+      // assistant 气泡走受限 markdown 渲染;user/error 仍是纯文本
+      renderMarkdown(bubble, text);
+    } else {
+      bubble.textContent = text;
+    }
     return bubble;
   }
 
