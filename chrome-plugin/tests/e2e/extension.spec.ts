@@ -968,8 +968,8 @@ test("悬停段落经 PARSE_HOVERED_BLOCK 冷启动解析，其余段落保持�
 
 // 回归:同一段第二次按快捷键曾报「未找到可解析的段落」——替换后原文已隐藏，鼠标停在的
 // 其实是卡片，而卡片文字在影子根里，nearestSafeBlock 一路向上找不到候选。真实布局与真实
-// :hover 链只有 E2E 才有，单测里的替换是假件。
-test("同一段再按快捷键：提示该段已解析，不多出第二张卡片也不再发请求", async ({ harness }) => {
+// :hover 链只有 E2E 才有，单测里的替换是假件。开关循环(2026-11-28 spec):再按 = 恢复原文。
+test("同一段再按快捷键：恢复原文，不多出第二张卡片也不再发请求", async ({ harness }) => {
   await seedLocalProfile(harness);
   const page = await openArticle(harness, "hover-blocks.html");
   const tabId = await harness.tabIdFor(`${harness.pagesOrigin}/hover-blocks.html`);
@@ -981,6 +981,8 @@ test("同一段再按快捷键：提示该段已解析，不多出第二张卡�
   await expect(learningBlocks(page)).toHaveCount(1, { timeout: 20_000 });
   await expect(page.locator("#plain")).toBeHidden();
   const coreRequests = harness.fakeModel.recordedOfKind("core").length;
+  // 跨过 400ms 手势去抖窗口:toggle 动作与首次解析同受其保护(窗口内静默忽略)。
+  await page.waitForTimeout(500);
 
   // 卡片插在原文之后:原文已 display:none,此刻鼠标停在的只能是卡片。
   await learningBlocks(page).first().hover();
@@ -988,11 +990,41 @@ test("同一段再按快捷键：提示该段已解析，不多出第二张卡�
     uiMessage("PARSE_HOVERED_BLOCK", { tabId, documentId }),
   );
 
-  // SW 丢弃页面命令的响应、一律回 ACK,提示只在页面里就地出现(content-script 的
-  // pill.notice)——所以这里要钉的是胶囊文案,而不是 dispatch 的返回值。
+  // toggle 成功不打 pill(SW 丢弃页面命令响应、一律回 ACK),卡片消失、原文复现即反馈。
   expect(response, JSON.stringify(response)).toMatchObject({ type: "ACK" });
-  await expect(page.locator("[data-syntax-progress-pill] .pill")).toHaveText("该段已解析");
+  await expect(page.locator("#plain")).toBeVisible();
+  await expect(learningBlocks(page)).toHaveCount(0);
+  expect(harness.fakeModel.recordedOfKind("core")).toHaveLength(coreRequests);
+});
+
+// 开关循环的另一半:关掉之后鼠标停在复原的原文上再按,卡片按既有渲染回来——
+// 探针钉死「重显卡片不调模型」:整轮循环 core 请求计数恒定。
+test("三连按循环：翻译→恢复原文→重显卡片，全程不发新请求", async ({ harness }) => {
+  await seedLocalProfile(harness);
+  const page = await openArticle(harness, "hover-blocks.html");
+  const tabId = await harness.tabIdFor(`${harness.pagesOrigin}/hover-blocks.html`);
+  const documentId = `e2e-doc-${++requestCounter}`;
+
+  await page.locator("#plain").hover();
+  await harness.dispatchFromUi(uiMessage("PARSE_HOVERED_BLOCK", { tabId, documentId }));
+  await expect(learningBlocks(page)).toHaveCount(1, { timeout: 20_000 });
+  await expect(page.locator("#plain")).toBeHidden();
+  const coreRequests = harness.fakeModel.recordedOfKind("core").length;
+  await page.waitForTimeout(500);
+
+  // 关:鼠标此刻停在卡片上。
+  await learningBlocks(page).first().hover();
+  await harness.dispatchFromUi(uiMessage("PARSE_HOVERED_BLOCK", { tabId, documentId }));
+  await expect(page.locator("#plain")).toBeVisible();
+  await expect(learningBlocks(page)).toHaveCount(0);
+  await page.waitForTimeout(500);
+
+  // 开:鼠标停在复原的原文上,卡片按内存里的既有渲染回来。
+  await page.locator("#plain").hover();
+  await harness.dispatchFromUi(uiMessage("PARSE_HOVERED_BLOCK", { tabId, documentId }));
   await expect(learningBlocks(page)).toHaveCount(1);
+  await expect(page.locator("#plain")).toBeHidden();
+
   expect(harness.fakeModel.recordedOfKind("core")).toHaveLength(coreRequests);
 });
 
