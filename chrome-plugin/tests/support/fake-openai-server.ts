@@ -79,17 +79,24 @@ function completion(content: string): string {
 }
 
 /**
- * 追问对话（chat）的确定性回答：两段中文文本，以空行分段——面板气泡是 pre-wrap，
- * 段落换行的渲染路径一并覆盖。E2E 断言气泡最终文本 === 两段拼接全文（流式分片到
- * 齐），并断言第二轮请求体携带该全文的 JSON 转义形（history 经紧凑 serialize 进
- * prompt，换行被转义成字面 `\n`）。文本刻意不含引号与反斜杠：除换行外的字符在
- * JSON.stringify 后原样可见，断言保持简单。
+ * 追问对话（chat）的确定性回答：两段中文文本，以空行分段,第二段带一处 `**粗体**`
+ * ——assistant 气泡走受限 markdown 渲染（两段成两个 <p>、粗体成 <strong>），
+ * markdown 渲染的真实浏览器/shadow DOM 路径由这条回答一并覆盖。E2E 断言气泡内
+ * 两个 <p> 的文本 === 渲染后段落（标记符不显示，见 CHAT_REPLY_RENDERED_PARAGRAPHS），
+ * 并断言第二轮请求体携带**原始全文**的 JSON 转义形（history 存模型原始文本，经
+ * 紧凑 serialize 进 prompt，换行被转义成字面 `\n`）。文本刻意不含引号与反斜杠：
+ * 除换行外的字符在 JSON.stringify 后原样可见，断言保持简单。
  */
 export const CHAT_REPLY_PARAGRAPHS: readonly string[] = [
   "这句的划分以已核实的分析为准：主语与谓语的边界在卡片里已经标出，不会重新划分。",
-  "译文按各成分覆盖的局部短语展开；若问题与分析冲突，以分析为准并说明理由。",
+  "译文按各成分覆盖的**局部短语**展开；若问题与分析冲突，以分析为准并说明理由。",
 ];
 export const CHAT_REPLY_TEXT: string = CHAT_REPLY_PARAGRAPHS.join("\n\n");
+/** 渲染后气泡内各 <p> 的文本（markdown 标记符不显示）。 */
+export const CHAT_REPLY_RENDERED_PARAGRAPHS: readonly string[] = [
+  "这句的划分以已核实的分析为准：主语与谓语的边界在卡片里已经标出，不会重新划分。",
+  "译文按各成分覆盖的局部短语展开；若问题与分析冲突，以分析为准并说明理由。",
+];
 
 /**
  * MPEG-1 Layer III(44.1kHz/32kbps/单声道)的全零静音:每帧 4 字节帧头 + 100 字节

@@ -7,9 +7,11 @@
  *
  * 会话状态 = { conversationId, 锚定句摘要, history };conversationId 由 bootstrap
  * 在图标点击时铸好经 open 传入（Task 4 评审钉死的 seam）,所有 assistant 侧方法按
- * 它把关:换句 open 重置会话后,旧会话的迟到流/结果直接丢弃。回答气泡纯文本 +
- * pre-wrap（不引 markdown）,`renderStreamedText` 按「截至目前完整回答」的推送形状
- * **全量替换**当前气泡（调度器静默重试后重画同一段文本,天然无害）。
+ * 它把关:换句 open 重置会话后,旧会话的迟到流/结果直接丢弃。assistant 回答气泡
+ * 经受限 markdown 渲染（chat-markdown.ts,平行于 Chrome 端;XSS 面仍只有
+ * createElement/textContent;user/error/notice 气泡保持纯文本 + pre-wrap）,
+ * `renderStreamedText` 按「截至目前完整回答」的推送形状**全量替换**当前气泡
+ * （调度器静默重试后重画同一段文本,天然无害）。
  *
  * 重开恢复（2026-11-25 spec）:面板只持有**活跃**会话;关闭/换句时 bootstrap 经
  * `onClose`/`activeConversation` 快照停靠,重开同句时新铸 conversationId 后经
@@ -25,6 +27,7 @@ import {
   type ChatStreamHostMessage,
   type ChatTurn,
 } from "./bridge";
+import { renderMarkdown } from "./chat-markdown";
 
 /** bootstrap-entry 转发来的 CHAT_* 三条 host 消息（generation 已在 bridge 层过滤）。 */
 export type ChatHostMessage = ChatStreamHostMessage | ChatResultHostMessage | ChatErrorHostMessage;
@@ -315,7 +318,7 @@ export class ChatPanel {
     if (this.#assistantBubble === undefined) return;
     const bubble = this.#assistantBubble;
     bubble.classList.remove("english-syntax-chat-message--pending");
-    bubble.textContent = text;
+    renderMarkdown(bubble, text);
     this.#scrollToEnd();
   }
 
@@ -331,7 +334,7 @@ export class ChatPanel {
     }
     const bubble = this.#assistantBubble;
     bubble.classList.remove("english-syntax-chat-message--pending");
-    bubble.textContent = answer;
+    renderMarkdown(bubble, answer);
     this.#assistantBubble = undefined;
     this.#history.push({ role: "assistant", content: answer });
     this.#setSending(false);
@@ -428,7 +431,12 @@ export class ChatPanel {
       .split(" ")
       .map((part) => `english-syntax-chat-message--${part}`);
     bubble.className = ["english-syntax-chat-message", ...variantClasses].join(" ");
-    bubble.textContent = text;
+    if (variant.includes("assistant")) {
+      // assistant 气泡走受限 markdown 渲染;user/error/notice 仍是纯文本
+      renderMarkdown(bubble, text);
+    } else {
+      bubble.textContent = text;
+    }
     return bubble;
   }
 
