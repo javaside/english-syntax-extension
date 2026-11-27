@@ -4,6 +4,7 @@ import { CORE_SCHEMA_VERSION } from "../shared/versions";
 import type {
   BlockDiagnosis,
   ChatStreamPush,
+  ChatSurroundings,
   ChatTurn,
   RequestMessage,
   ResponseMessage,
@@ -1756,12 +1757,27 @@ describe("chat 路由", () => {
   };
 
   function chatAskRequest(
-    options: { history?: ChatTurn[]; question?: string; conversationId?: string } = {},
+    options: {
+      history?: ChatTurn[];
+      question?: string;
+      conversationId?: string;
+      /** 段落上下文,提供时并入 context.surroundings。 */
+      surroundings?: ChatSurroundings;
+    } = {},
   ): RequestMessage {
     return pageRequest({
       type: "CHAT_ASK",
       conversationId: options.conversationId ?? "document-1:chat:1",
-      context: { kind: "sentence" as const, sentence, core: chatCore },
+      // surroundings 缺省时整个键不发(undefined 键不进消息),与 content 侧真实发送一致。
+      context:
+        options.surroundings === undefined
+          ? { kind: "sentence" as const, sentence, core: chatCore }
+          : {
+              kind: "sentence" as const,
+              sentence,
+              core: chatCore,
+              surroundings: options.surroundings,
+            },
       history: options.history ?? [
         { role: "user" as const, content: "这句为什么这么译？" },
         { role: "assistant" as const, content: "因为主语是复数。" },
@@ -1891,6 +1907,62 @@ describe("chat 路由", () => {
     expect(boundary.type).toBe("CHAT_RESULT");
     expect(sixTurnsBoundary.type).toBe("CHAT_RESULT");
     expect(chat).toHaveBeenCalledTimes(2);
+  });
+
+  it("合法 surroundings(三段全带)照常派发 chat,字段原样过 SW", async () => {
+    const chat = vi.fn<AnalysisService["chat"]>().mockResolvedValue({ answer: "好的" });
+    const subject = chromeMock();
+    registerServiceWorker(dependencies({ chat }), subject.api);
+
+    const response = await dispatch(
+      subject.events.runtime.onMessage.listeners[0]!,
+      chatAskRequest({
+        surroundings: {
+          before: "Previous paragraph text.",
+          current: "Current paragraph text.",
+          after: "Next paragraph text.",
+        },
+      }),
+    );
+
+    expect(response.type).toBe("CHAT_RESULT");
+    expect(chat).toHaveBeenCalledTimes(1);
+    expect(chat.mock.calls[0]![0].context.surroundings).toEqual({
+      before: "Previous paragraph text.",
+      current: "Current paragraph text.",
+      after: "Next paragraph text.",
+    });
+  });
+
+  it("surroundings 多余键/超 1200 上限/trim 后为空/空对象/类型错 → MALFORMED_MESSAGE", async () => {
+    const chat = vi.fn<AnalysisService["chat"]>().mockResolvedValue({ answer: "好的" });
+    const subject = chromeMock();
+    registerServiceWorker(dependencies({ chat }), subject.api);
+    const listener = subject.events.runtime.onMessage.listeners[0]!;
+
+    const extraKey = await dispatch(
+      listener,
+      chatAskRequest({ surroundings: { before: "x", extra: "y" } as ChatSurroundings }),
+    );
+    const overlong = await dispatch(
+      listener,
+      chatAskRequest({ surroundings: { before: "x".repeat(1201) } }),
+    );
+    const blank = await dispatch(listener, chatAskRequest({ surroundings: { before: "   " } }));
+    // 三键全缺的空对象没有上下文意义,「至少一键在场」的门要拒。
+    const noKeys = await dispatch(listener, chatAskRequest({ surroundings: {} }));
+    const wrongType = await dispatch(
+      listener,
+      chatAskRequest({ surroundings: "not-an-object" as unknown as ChatSurroundings }),
+    );
+
+    expect(extraKey).toMatchObject({ type: "ERROR", error: { code: "MALFORMED_MESSAGE" } });
+    expect(overlong).toMatchObject({ type: "ERROR", error: { code: "MALFORMED_MESSAGE" } });
+    expect(blank).toMatchObject({ type: "ERROR", error: { code: "MALFORMED_MESSAGE" } });
+    expect(noKeys).toMatchObject({ type: "ERROR", error: { code: "MALFORMED_MESSAGE" } });
+    expect(wrongType).toMatchObject({ type: "ERROR", error: { code: "MALFORMED_MESSAGE" } });
+    // 形状不过守卫的载荷绝不能到达模型。
+    expect(chat).not.toHaveBeenCalled();
   });
 
   it("无 profile → CONFIG_MISSING（chat 无缓存兜底语义）", async () => {
