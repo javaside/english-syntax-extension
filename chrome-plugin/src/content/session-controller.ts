@@ -573,19 +573,44 @@ export class SessionController {
 
   async parseHoveredBlock(): Promise<ExtensionError | undefined> {
     const hovered = this.hoverTarget();
-    // 先判「鼠标停在我方卡片上」= 这段已经解析过了。原文被卡片替换后是 display:none 的
-    // 兄弟节点(扫描的可见性判据会跳过它),所以第二次按键落在的一定是卡片;而卡片宿主在
-    // 浅 DOM 里没有文本,nearestSafeBlock 会一路向上找不到块并返回 null——不先判这一条,
-    // 用户拿到的是与事实相反的「未找到可解析的段落」。IntelliJ 侧同款判据见 rendering.md。
-    const showing = this.explicitBlockNotice(this.blockShowing(hovered));
-    if (showing !== undefined) return showing;
+    // 先判「鼠标停在我方卡片上」:在飞就提示在飞,全终态则是开关循环的「关」(恢复原文)。
+    // 原文被卡片替换后是 display:none 的兄弟节点(扫描的可见性判据会跳过它),所以第二次
+    // 按键落在的一定是卡片;而卡片宿主在浅 DOM 里没有文本,nearestSafeBlock 会一路向上找
+    // 不到块并返回 null——不先判这一条,用户拿到的是与事实相反的「未找到可解析的段落」。
+    // IntelliJ 侧同款判据见 rendering.md。
+    const showing = this.blockShowing(hovered);
+    if (showing !== undefined) {
+      const inFlight = showing.sentences.some(({ phase }) => IN_FLIGHT_PHASES.includes(phase));
+      if (inFlight) return IN_FLIGHT_ERROR;
+      if (showing.sentences.every(({ phase }) => SETTLED_PHASES.includes(phase))) {
+        return this.toggleBlockOff(showing);
+      }
+      // 未全终态且无在飞(queued 流式间隙):落回常规路径,把还没发的句子提前发走。
+    }
     // 快捷键可作为页面冷启动入口：轻量启动，不做全页扫描。
     if (this.state === "stopped") await this.start({ scan: false });
     const candidate = nearestSafeBlock(hovered);
     if (candidate === null) return HOVER_ERROR;
     const known = this.blocks.get(candidate.id);
-    const notice = this.explicitBlockNotice(known);
-    if (notice !== undefined) return notice;
+    if (known !== undefined) {
+      // 悬停快捷键是唯一有开关语义的手势(选区/右键经 explicitBlockNotice 仍提示已解析):
+      // 在飞提示在飞;全终态看卡片在不在页——在页即「关」,hover 链 quirks 指向已隐藏的
+      // 原文兄弟时用户看到的同样是卡片,走到这里即等价「停在卡片上」;不在页且有可显示
+      // 内容(成功译文或失败行)则「开」:重显卡片而非重新解析。
+      if (known.sentences.some(({ phase }) => IN_FLIGHT_PHASES.includes(phase))) {
+        return IN_FLIGHT_ERROR;
+      }
+      if (known.sentences.every(({ phase }) => SETTLED_PHASES.includes(phase))) {
+        if (known.replacement.active) {
+          return this.toggleBlockOff(known);
+        }
+        if (known.sentences.some(({ phase }) => phase === "ready" || phase === "failed")) {
+          return this.toggleBlockOn(known);
+        }
+        // 整块 skipped(纯缓存未命中,卡片从未上页):无物可关可显,维持既有提示。
+        return ALREADY_PARSED_ERROR;
+      }
+    }
     // 去抖挡的是「相位还没翻到在飞」的那一小段窗口:注册句子要 await(SHA-256 算 sentenceId),
     // 连按两次会各自跑一遍 registerCandidates,后一遍把前一遍的记录整条换掉——卡片留在 DOM
     // 上却没人认领,同一批句子还会被发两遍(第二次 ++operationVersion 让第一次的响应作废)。
@@ -596,6 +621,30 @@ export class SessionController {
     // 会永远停在「句法解析中…」——一个块都没有,此后再没有任何 emitStatus 来收尾。
     if (!this.blocks.has(candidate.id)) return UNSEGMENTABLE_ERROR;
     this.queueVisibleBlock(candidate.id, true);
+    return undefined;
+  }
+
+  /**
+   * 开关循环的「关」:卡片移除、原文精确还原(BlockReplacement.restore 连空 class 都按
+   * 原样处理)。句子相位、块记录、缓存全部不动——「开」(重显卡片)靠内存里的既有渲染,
+   * 不再下发。去抖窗口内的第二按静默忽略:连按会翻译/原文来回闪,用户看到的比提示更糟。
+   */
+  private toggleBlockOff(block: BlockRecord): undefined {
+    if (this.debounceExplicitParse(block.candidate.id)) return undefined;
+    block.replacement.restore();
+    block.marker.clear();
+    return undefined;
+  }
+
+  /**
+   * 开关循环的「开」:把「关」时收起的卡片按内存里的既有渲染重新插回(show 自带先
+   * restore 再插入的幂等;全失败块的失败行/重试按钮同样随卡复现)。与「关」对称:
+   * 不重新下发、不改句子相位,去抖窗口内静默忽略。
+   */
+  private toggleBlockOn(block: BlockRecord): undefined {
+    if (this.debounceExplicitParse(block.candidate.id)) return undefined;
+    block.replacement.show(block.candidate.element, block.learningBlock);
+    block.marker.clear();
     return undefined;
   }
 
