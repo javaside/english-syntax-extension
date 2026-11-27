@@ -909,6 +909,7 @@ var EnglishSyntaxPreview = (function(exports) {
 			if (record.card === null) {
 				record.card = record.element.ownerDocument.createElement(CARD_TAG);
 				record.card.setAttribute(CARD_ATTRIBUTE, "true");
+				record.card.dataset.blockId = blockId;
 				record.element.after(record.card);
 			}
 			record.element.setAttribute(HIDDEN_ATTRIBUTE, "true");
@@ -1336,6 +1337,39 @@ var EnglishSyntaxPreview = (function(exports) {
 			this.#detailStack = [];
 			this.#currentDetailPayload = null;
 			for (const record of this.#blocks.values()) this.#restoreBlock(record);
+		}
+		/**
+		* 开关循环的「关」(2026-11-28 spec,悬停快捷键专用):还原单个块,别的块照旧。
+		* 收尾按块收:纠正行与详解状态仅当锚定句属于本块时清空(restoreAll 的按块子集);
+		* 详解面板 DOM 挂在卡内随卡销毁,挂在别的块的面板不受牵连。
+		* @returns 块未注册或卡片不在页上时 false(调用方据此走提示路径)。
+		*/
+		restoreBlock(blockId) {
+			const record = this.#blocks.get(blockId);
+			if (record === void 0 || record.card === null) return false;
+			if (this.#sentenceBlockIdOf(this.#correction?.sentenceId) === blockId) this.#closeCorrection();
+			if (this.#sentenceBlockIdOf(this.#currentDetail?.sentenceId) === blockId) {
+				this.#currentDetail = null;
+				this.#detailStack = [];
+				this.#currentDetailPayload = null;
+			}
+			this.#restoreBlock(record);
+			return true;
+		}
+		/**
+		* 开关循环的「开」:按既有句子记录重画整卡(句子映射不动,record/card 复用或重建)。
+		* 只重画,不重新下发——结果已 settle,repaint 出来的就是当时的译文/失败行。
+		*/
+		repaintBlock(blockId) {
+			this.#repaintBlock(blockId);
+		}
+		/** 句子 → 宿主块反查,未注册句返回 null。bootstrap 用它判追问面板锚定句属于哪个块。 */
+		sentenceBlockId(sentenceId) {
+			return this.#sentences.get(sentenceId)?.blockId ?? null;
+		}
+		/** #correction/#currentDetail 的句子句柄判块;null 句柄返回 undefined 永不等于任何块。 */
+		#sentenceBlockIdOf(sentenceId) {
+			return sentenceId === void 0 ? void 0 : this.#sentences.get(sentenceId)?.blockId;
 		}
 		/** 测试辅助：注册句子（生产路径由会话层把分词结果喂进来）。 */
 		registerSentence(blockId, sentenceId) {
@@ -1950,6 +1984,11 @@ var EnglishSyntaxPreview = (function(exports) {
 	/**
 	* 解析一段并上报 `PARSE_BLOCK`。
 	*
+	* 悬停快捷键带开关循环（2026-11-28 spec，Chrome 端同款）：解析 settle 后鼠标停在卡片或
+	* 已隐藏原文上再按 = 「关」（恢复原文）；卡片被收起后再按 = 「开」（按既有渲染重画，
+	* 不重新下发）。解析进行中（requested 未 settled）提示、不取消。解析中的原文不受影响，
+	* 首按照常下发。
+	*
 	* `target` 省略时查悬停链取最深元素（`deepestHovered`，判据见 `preview.ts`）——这是 Kotlin 的
 	* 调用方式（`executeJavaScript` 里不传参）。测试与将来可能的右键路径可以显式传入目标元素。
 	*/
@@ -1958,7 +1997,16 @@ var EnglishSyntaxPreview = (function(exports) {
 		if (s === null || s.previewId === "") return;
 		const hovered = target === void 0 ? deepestHovered(document) : target;
 		if (hovered !== null && hovered.closest("[data-english-syntax-card]") !== null) {
-			flashStatus("该段已解析");
+			const blockId = hovered.closest("[data-english-syntax-card]")?.dataset.blockId ?? "";
+			if (blockId === "") {
+				flashStatus("该段已解析");
+				return;
+			}
+			if (parsingBlock(blockId)) {
+				flashStatus("该段正在解析中…");
+				return;
+			}
+			toggleBlockOff(blockId);
 			return;
 		}
 		const element = nearestPreviewBlock(hovered);
@@ -1967,7 +2015,18 @@ var EnglishSyntaxPreview = (function(exports) {
 			return;
 		}
 		if (element.hasAttribute("data-english-syntax-hidden")) {
-			flashStatus("该段已解析");
+			const hiddenBlockId = ensureBlockId(element);
+			if (parsingBlock(hiddenBlockId)) {
+				flashStatus("该段正在解析中…");
+				return;
+			}
+			toggleBlockOff(hiddenBlockId);
+			return;
+		}
+		const existingBlockId = element.getAttribute("data-english-syntax-block");
+		if (existingBlockId !== null && settledBlocks.has(existingBlockId)) {
+			debouncedToggle(existingBlockId);
+			s.renderer.repaintBlock(existingBlockId);
 			return;
 		}
 		const blockId = ensureBlockId(element);
@@ -1989,6 +2048,31 @@ var EnglishSyntaxPreview = (function(exports) {
 		});
 		markBlockActive(blockId);
 		setStatus("句法学习：正在解析 1 段…", "running");
+	}
+	/** 块已下发解析但尚未 settle(流式预览期间)。这一按只能提示,不得关。 */
+	function parsingBlock(blockId) {
+		return requestedBlocks.has(blockId) && !settledBlocks.has(blockId);
+	}
+	/**
+	* 开关循环的「关」:单块还原(renderer 按块收纠错行/详解状态),追问面板仅当锚定句属于
+	* 该块时随停停靠收走(dispose 先触发 onClose 停靠再摘 host,与用户点关闭按钮同路径)。
+	* 去抖复用 lastParsedBlockId/lastParsedAt:与首次解析共用 400ms 窗口,窗口内静默忽略。
+	*/
+	function toggleBlockOff(blockId) {
+		if (!debouncedToggle(blockId)) return;
+		const s = state;
+		if (s === null) return;
+		s.renderer.restoreBlock(blockId);
+		unmarkBlockActive(blockId);
+		if (chatSentenceId !== null && s.renderer.sentenceBlockId(chatSentenceId) === blockId) chatPanelInstance?.dispose();
+	}
+	/** 开关动作去抖:窗口内返回 false(静默忽略,卡片不得闪回),窗口外记录并放行。 */
+	function debouncedToggle(blockId) {
+		const now = Date.now();
+		if (blockId === lastParsedBlockId && now - lastParsedAt < PARSE_DEBOUNCE_MS) return false;
+		lastParsedBlockId = blockId;
+		lastParsedAt = now;
+		return true;
 	}
 	/**
 	* 兼底通道键位。由 Kotlin 从 IDEA keymap 读实际绑定后下发；默认与 plugin.xml 声明的一致。

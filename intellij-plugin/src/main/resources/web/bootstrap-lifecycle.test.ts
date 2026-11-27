@@ -70,9 +70,13 @@ describe("bootstrap-entry 停止回归", () => {
     // 忘了 npm run bundle-web 的症状是「Kotlin 侧全绿、真机按快捷键毫无反应」。
     expect(bundle).toContain("PARSE_BLOCK");
     expect(bundle).toContain("__englishSyntaxParseHoveredBlock");
-    // 「该段已解析」有两处判据：鼠标停在卡片里、以及停在已出过卡的原文上（卡片的兄弟节点）。
-    // 少一处就会对同一段重复下发，页面永远停在「解析中」——而这两条判据都只活在 bundle 里。
-    expect(bundle.match(/该段已解析/g) ?? []).toHaveLength(2);
+    // 开关循环(2026-11-28 spec)两处「关」判据——鼠标停在卡片里、停在已出过卡的原文上
+    // (卡片的兄弟节点)——都只活在 bundle 里;少一处就有一半入口漏判(对同一段重复下发或
+    // 误报未找到)。两处都提示「该段正在解析中…」,只剩孤儿卡片兜底走「该段已解析」。
+    expect(bundle.match(/该段正在解析中/g) ?? []).toHaveLength(2);
+    expect(bundle).toContain("restoreBlock");
+    expect(bundle).toContain("repaintBlock");
+    expect(bundle).toContain("dataset.blockId");
     // F2 纠正反馈：桥消息与内联输入行同样只经 bundle 进真机——忘了重建 bundle 的症状
     // 是「单测全绿、真机失败行没有纠正按钮」。
     expect(bundle).toContain("FEEDBACK_REQUEST");
