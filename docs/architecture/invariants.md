@@ -410,6 +410,16 @@
 
 **测试** `intellij-plugin/src/main/resources/web/render.test.ts` 的 "anchors the loading placeholder on the clicked line so the panel never jumps when content arrives" 与 "keeps sentences that share a visual line on that line: the panel goes after the last one"(happy-dom 零布局,靠 mock `getBoundingClientRect` 造行)。
 
+### I-23.4 chat 气泡的 markdown 渲染只经受限渲染器,禁 innerHTML
+
+**规则** assistant 气泡(流式分片 / 落定答案 / `restoreHistory` 历史轮)的 markdown 渲染**只允许走受限渲染器** `chat-markdown.ts`(双端平行实现,子集与安全约束逐字同款):全部节点经 `createElement` / `createTextNode` / `textContent` 构造,**绝无 `innerHTML` / `insertAdjacentHTML`**;只渲染 assistant 气泡,user/error/notice 保持纯文本;`ChatTurn.content`、桥消息与 SW 协议存**原始文本**,渲染纯在显示层。双端任何一侧要动子集或行内解析规则,另一侧必须同步(平行实现没有共享代码可依赖,靠两侧同构测试钉住)。
+
+**为什么** chat 提示词不约束输出格式,模型默认回 markdown,纯文本显示会满屏 `**`/列表符号;但「引 marked + DOMPurify」会往 MV3 bundle 塞两个依赖、sanitize 配置本身是新出错面(v1 spec 列为非目标即为此)。渲染器不解析的内容(链接、嵌套列表、原始 HTML)一律原样字面显示——这是安全边界不是缺陷:模型输出的 `<script>` / 事件属性天然变成文本节点,XSS 面与纯 `textContent` 持平。
+
+**症状** 有人图省事改用 `innerHTML`(或新加了链路直写 HTML)→ 模型回答里混进 `<img onerror=…>` 即注入,预览页/页面上下文里执行任意脚本;或一侧改了子集另一侧没跟 → 双端同一模型同一回答渲染不一致。
+
+**守护测试** 双端 `chat-markdown.test.ts` 的「原始 HTML 字面显示:不产生 script/img 元素节点」与 12 条同构用例;`chat-panel.test.ts` 的「assistant 回答经受限 markdown 渲染」「user 气泡不渲染 markdown」(Chrome 侧 4 条 / IntelliJ 侧 5 条,含 error 气泡守卫)与 preview.css 文本钉(IntelliJ)。
+
 ## 测试与验收
 
 ### I-24 用探针,不用墙钟

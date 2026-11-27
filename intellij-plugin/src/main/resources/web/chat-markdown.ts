@@ -7,7 +7,10 @@
  *   粗体 / 斜体 / 行内代码 / 段内换行;链接、嵌套列表、表格、下划线强调一律
  *   不支持——原样显示。
  * - XSS 面与纯 textContent 持平:所有内容只经 createElement / createTextNode /
- *   textContent,绝无 innerHTML——模型输出的 <script> 等天然变字面文本。
+ *   textContent,绝无 innerHTML——模型输出的原始 HTML(脚本标签、事件属性)天然
+ *   变字面文本。注意:本文件的注释措辞避开字面 script 起始标签——注释会被
+ *   rolldown 带进 bundle.js,而 Kotlin 的 CSP 守卫测试按文本拦注入脚本里的
+ *   该字面量(EnglishSyntaxPreviewPanelTest)。
  * - 流式逐片全量重渲:未闭合的 ** 字面显示,未闭合的 ``` 围栏按代码块渲染到
  *   当前结尾,与闭合后的最终渲染保持一致。
  * - 产出元素只用语义标签、不发 class:样式由 preview.css 的
