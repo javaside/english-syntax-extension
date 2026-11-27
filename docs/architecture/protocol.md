@@ -38,7 +38,7 @@
 | `PARSE_HOVERED_BLOCK`       | 受信任 UI;或 SW 自发 | —                                           | 转发页面:解析鼠标悬停的块                                | ✅    | ❌       |
 | `DIAGNOSE_BLOCK`            | SW 自发(右键菜单)    | `selectionText?`                            | 菜单监听器经 `sendPageCommand` 下发;`route()` 里穷尽性拒绝 | ❌    | ❌       |
 | `EXPLAIN_DIAGNOSIS`         | 页面(有 tabId)       | `diagnosis`                                 | 诊断模型解释请求;回 `DIAGNOSIS_RESULT`                   | ❌    | ❌       |
-| `CHAT_ASK`                  | content              | `conversationId`、`context`、`history[]`、`question` | 追问对话一轮提问:无缓存、无修复轮,流式推 `CHAT_STREAM`,回 `CHAT_RESULT`;SW 兜底校验 question trim 后 1..2000、history ≤6 项且总字符 ≤8000,违者 `MALFORMED_MESSAGE`,无 profile 回 `CONFIG_MISSING`(无缓存兜底),鉴权暂停直接 `AUTH_FAILED` | ❌ | ❌ |
+| `CHAT_ASK`                  | content              | `conversationId`、`context`(含可选 `context.surroundings`)、`history[]`、`question` | 追问对话一轮提问:无缓存、无修复轮,流式推 `CHAT_STREAM`,回 `CHAT_RESULT`;SW 兜底校验 question trim 后 1..2000、history ≤6 项且总字符 ≤8000,违者 `MALFORMED_MESSAGE`,无 profile 回 `CONFIG_MISSING`(无缓存兜底),鉴权暂停直接 `AUTH_FAILED` | ❌ | ❌ |
 | `TTS_SYNTHESIZE`     | content              | `text`                                      | 云端朗读合成(content 的 CloudSpeaker 发起,配置与密钥只存 SW)  | ❌    | ❌       |
 | `TTS_AUDIO`        | SW → content         | `audioBase64`、`mime`                       | 云端合成的音频(base64 mp3)                                    | ❌    | ❌       |
 | `TEST_PROFILE`              | options              | `profileId`                                 | 探测端点能力;**成功即解除鉴权暂停**                      | —     | —        |
@@ -52,6 +52,8 @@
 `DIAGNOSE_BLOCK` 落到**页面路由**(`content-script.ts`)后是一条 fire-and-forget 分支:立即回 `ACK`(页面命令只承诺"已受理"),诊断编排异步执行——本地证据先上 `DiagnosisPanel`,再经 `EXPLAIN_DIAGNOSIS` 请求模型解释。两个配套的 content 侧守卫:①页面路由开头的入站拒绝列表(`ANALYZE_CORE` / `ANALYZE_DETAIL` / `REANALYZE_WITH_FEEDBACK` / `EXPLAIN_DIAGNOSIS` / `CHAT_ASK`)把页面伪造的 `EXPLAIN_DIAGNOSIS` / `CHAT_ASK` 拒成 `MALFORMED_MESSAGE`——这两条只有 content 自己会发;②`isRuntimeResponse()` 有 `DIAGNOSIS_RESULT` case(`isBlockDiagnosis` 查 `diagnosis` 回显,`model` 三字段 / `modelError` / `profile.model` 逐项把关),这是三层校验的第 3 层。`EXPLAIN_DIAGNOSIS` **不豁免②**:content 用 `DIAGNOSE_BLOCK` 命令里 SW 已解析出的真实 `documentId` 发请求,凭与账上一致**合规通过**;文档换代后旧 controller 攥着旧 id 再发,照旧被判 `REQUEST_CANCELLED`——这正是想要的。
 
 > **注意 `STOP_SESSION` 的一条死路径。** `ChromeRuntimeTransport.cancelDocument()` 也会从 content 发这条消息,但该分支要求受信任 UI,所以它必然被回成 `UNSUPPORTED_PAGE`(调用处 fire-and-forget 吞掉了响应)。真正的取消依赖端口断开与 `tabs.onRemoved` / `onUpdated` 触发的 `cancelTab()`。这两个回收点在既有 `cancelDocument(documentId)` 旁都**追加**一条对 `${documentId}:chat` 的 `cancelDocument`:追问对话的调度命名空间带 `:chat` 后缀,`cancelDocument` 精确匹配够不到它,而流式是静默超时(总时长不设限),漏回收会让页面关走后的回答无限期占住全局并发槽。
+
+> **`CHAT_ASK.context.surroundings` 的形状守卫(2026-11-28,第 1 层 `isRequestMessage` 内)**:`context = {kind: "sentence", sentence, core, surroundings?}`;`surroundings` 可选,出现即须键集 ⊆ {`before` / `current` / `after`} 且**至少一键在场**,各值为 trim 后非空、长度 ≤ 各自封顶的 string——封顶常量 `MAX_CHAT_SURROUNDING_BEFORE/CURRENT/AFTER_CHARS`(1200/4000/800)就定义在 `shared/protocol.ts` 并导出,content 计算侧 import 同一常量、不写第二处数字;IntelliJ 桥的 mirror pair 见 §IntelliJ 预览桥协议。违者整条 `MALFORMED_MESSAGE`。**截断在 content 侧完成**(`chat-surroundings.ts` 纯函数:文档序取本段 ±1,`…` U+2026 只标真截断且**计入封顶**,截断产出恒 ≤ cap),SW/服务侧只兜底把关不截断——判据与产出「length ≤ cap」逐字对齐,真机长段落不会被守卫拒收。邻段缺省不置键,`none` 占位发生在 prompt 侧而非协议层。
 
 关键语义:
 
