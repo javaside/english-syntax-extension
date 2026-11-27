@@ -85,6 +85,7 @@ class PageMessageWiringTest {
       conversationId: String,
       input: SentenceInput,
       core: CoreAnalysis,
+      surroundings: dev.codetui.englishsyntax.model.ChatSurroundings?,
       history: List<ChatTurn>,
       question: String,
       onStreamedText: StreamedTextSink?,

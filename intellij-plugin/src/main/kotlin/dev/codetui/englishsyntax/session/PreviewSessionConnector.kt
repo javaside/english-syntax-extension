@@ -6,6 +6,7 @@ import com.intellij.openapi.util.Key
 import dev.codetui.englishsyntax.bridge.BridgeProtocol
 import dev.codetui.englishsyntax.bridge.PageMessage
 import dev.codetui.englishsyntax.markdown.EnglishSyntaxPreviewPanel
+import dev.codetui.englishsyntax.model.ChatSurroundings
 import dev.codetui.englishsyntax.model.ChatTurn
 
 /**
@@ -65,12 +66,16 @@ object PreviewSessionConnector {
         is PageMessage.ParseBlock -> session.parseExplicitBlock(message.blockId, message.text)
         is PageMessage.DetailRequest ->
           session.launchDetailRequest(message.sentenceId, message.focusStart, message.focusEnd)
-        // 追问对话：上下文不过桥，Kotlin 侧从 SentenceRecord 重建；history 的桥类型
-        // （PageMessage.ChatAsk.ChatTurn）在这里换成服务层模型（model.ChatTurn）。
+        // 追问对话：句子锚点与已核实 core 不过桥（Kotlin 侧从 SentenceRecord 重建，防伪造
+        // 面不扩大），邻段 surroundings 过桥；history/surroundings 的桥类型
+        // （PageMessage.ChatAsk.ChatTurn / ChatSurroundings）在这里换成服务层模型
+        // （model.*）——沿用 ChatTurn 的桥/模型分层先例，surroundings 映射自 Task 5 裁决
+        // 随本任务 launchChatAsk 新签名一起落。
         is PageMessage.ChatAsk ->
           session.launchChatAsk(
             message.conversationId,
             message.sentenceId,
+            message.surroundings?.let { ChatSurroundings(it.before, it.current, it.after) },
             message.history.map { ChatTurn(it.role, it.content) },
             message.question,
           )

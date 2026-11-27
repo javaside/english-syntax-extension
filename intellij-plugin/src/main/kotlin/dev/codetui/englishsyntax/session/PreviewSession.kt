@@ -15,6 +15,7 @@ import dev.codetui.englishsyntax.domain.SentenceInput
 import dev.codetui.englishsyntax.domain.TokenRange
 import dev.codetui.englishsyntax.language.segmentBlock
 import dev.codetui.englishsyntax.language.tokenize
+import dev.codetui.englishsyntax.model.ChatSurroundings
 import dev.codetui.englishsyntax.model.ChatTurn
 import dev.codetui.englishsyntax.scheduler.SchedulerPriority
 import dev.codetui.englishsyntax.settings.ModelProfile
@@ -784,10 +785,19 @@ class PreviewSession(
    * `if state == STOPPED return`）：面板在 stop/RESTORE_ALL 后仍然开着，静默丢弃会把
    * 输入框永久卡在禁用态；chat 是用户手势，与 Chrome 端同款只判数据可用性——
    * 记录/core 缺失或无 profile 都用 CHAT_ERROR 明示，绝不静默。
+   *
+   * surroundings 是 connector 已完成桥→模型映射的邻段参考上下文（null = 无上下文），
+   * 原样透传给服务层拼进提示词第五段。
    */
-  fun launchChatAsk(conversationId: String, sentenceId: String, history: List<ChatTurn>, question: String) {
+  fun launchChatAsk(
+    conversationId: String,
+    sentenceId: String,
+    surroundings: ChatSurroundings?,
+    history: List<ChatTurn>,
+    question: String,
+  ) {
     scope.launch {
-      runCatching { onChatAsk(conversationId, sentenceId, history, question) }
+      runCatching { onChatAsk(conversationId, sentenceId, surroundings, history, question) }
         .onFailure { error ->
           if (error is kotlinx.coroutines.CancellationException) throw error
           // dispose 竞速下 panel.send 可能已抛错（面板关走时的在飞回答）——回收路径不得再炸 scope。
@@ -800,6 +810,7 @@ class PreviewSession(
   private suspend fun onChatAsk(
     conversationId: String,
     sentenceId: String,
+    surroundings: ChatSurroundings?,
     history: List<ChatTurn>,
     question: String,
   ) {
@@ -828,6 +839,7 @@ class PreviewSession(
         conversationId = conversationId,
         input = record.input,
         core = core,
+        surroundings = surroundings,
         history = history,
         question = question,
         onStreamedText = StreamedTextSink { textSoFar ->

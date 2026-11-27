@@ -14,6 +14,7 @@ import dev.codetui.englishsyntax.domain.GrammarRole
 import dev.codetui.englishsyntax.domain.SentenceInput
 import dev.codetui.englishsyntax.domain.TokenRange
 import dev.codetui.englishsyntax.bridge.BridgeProtocol
+import dev.codetui.englishsyntax.model.ChatSurroundings
 import dev.codetui.englishsyntax.model.ChatTurn
 import dev.codetui.englishsyntax.scheduler.SchedulerPriority
 import dev.codetui.englishsyntax.settings.JsonSchemaSupport
@@ -77,6 +78,7 @@ class PreviewSessionTest {
     var lastChatHistory: List<ChatTurn>? = null
     var lastChatInput: SentenceInput? = null
     var lastChatCore: CoreAnalysis? = null
+    var lastChatSurroundings: ChatSurroundings? = null
     /** chat 返回前依次推送的「截至目前完整回答」分片。 */
     var chatPushes: List<String> = emptyList()
     var chatAnswer = ""
@@ -160,6 +162,7 @@ class PreviewSessionTest {
       conversationId: String,
       input: SentenceInput,
       core: CoreAnalysis,
+      surroundings: ChatSurroundings?,
       history: List<dev.codetui.englishsyntax.model.ChatTurn>,
       question: String,
       onStreamedText: dev.codetui.englishsyntax.analysis.StreamedTextSink?,
@@ -171,6 +174,7 @@ class PreviewSessionTest {
       lastChatHistory = history
       lastChatInput = input
       lastChatCore = core
+      lastChatSurroundings = surroundings
       chatError?.let { throw it }
       onStreamedText?.let { sink -> chatPushes.forEach { sink.onText(it) } }
       return chatAnswer
@@ -965,8 +969,9 @@ class PreviewSessionTest {
     service.chatPushes = listOf("回答的第", "一部分")
     service.chatAnswer = "完整回答"
 
+    val surroundings = ChatSurroundings(before = "Previous paragraph text.", current = "Current paragraph text.", after = "Next paragraph text.")
     session.launchChatAsk(
-      "pv1:chat:1", first.sentenceId,
+      "pv1:chat:1", first.sentenceId, surroundings,
       listOf(ChatTurn("user", "上一轮问题")), "这个短语修饰谁?",
     )
     kotlinx.coroutines.delay(100)
@@ -978,6 +983,7 @@ class PreviewSessionTest {
     assertEquals(listOf(ChatTurn("user", "上一轮问题")), service.lastChatHistory)
     assertEquals(first.sentenceId, service.lastChatInput?.sentenceId)
     assertSame(core, service.lastChatCore, "上下文必须是 Kotlin 侧 SentenceRecord 里已核实的 core")
+    assertEquals(surroundings, service.lastChatSurroundings, "邻段上下文必须原样透传到服务层（connector 已完成桥/模型映射）")
 
     // 流式分片：每次都是「截至目前完整回答」，带 generation 与 conversationId。
     val streams = sender.of("CHAT_STREAM")
@@ -1000,11 +1006,11 @@ class PreviewSessionTest {
     session.start()
 
     // ① 记录不存在（stop/onGenerationChanged 清空后的常态）。
-    session.launchChatAsk("c-missing", "s-b1-0", emptyList(), "问?")
+    session.launchChatAsk("c-missing", "s-b1-0", null, emptyList(), "问?")
     // ② 记录在、core 还没核实（phase != READY）。
     session.onVisibleBlocks(listOf("b1" to "The service validates every response carefully today."))
     val first = session.sentences.values.firstOrNull()?.input ?: error("no sentence")
-    session.launchChatAsk("c-nocore", first.sentenceId, emptyList(), "问?")
+    session.launchChatAsk("c-nocore", first.sentenceId, null, emptyList(), "问?")
     kotlinx.coroutines.delay(100)
 
     assertEquals(0, service.chatCalls, "数据不可用绝不调模型")
@@ -1030,7 +1036,7 @@ class PreviewSessionTest {
     session.stop()
     kotlinx.coroutines.delay(50)
 
-    session.launchChatAsk("c-after-stop", first.sentenceId, emptyList(), "问?")
+    session.launchChatAsk("c-after-stop", first.sentenceId, null, emptyList(), "问?")
     kotlinx.coroutines.delay(100)
 
     assertEquals(0, service.chatCalls)
@@ -1048,7 +1054,7 @@ class PreviewSessionTest {
     session.start()
     val first = seedReadySentence(session)
 
-    session.launchChatAsk("c-np", first.sentenceId, emptyList(), "问?")
+    session.launchChatAsk("c-np", first.sentenceId, null, emptyList(), "问?")
     kotlinx.coroutines.delay(100)
 
     assertEquals(0, service.chatCalls)
@@ -1066,12 +1072,12 @@ class PreviewSessionTest {
 
     // ExtensionFailure：复用既有 ErrorCode 做前缀，message 已在服务边界脱敏（不重复脱敏）。
     service.chatError = ExtensionFailure(ErrorCode.REQUEST_TIMEOUT, "Model request timed out", true)
-    session.launchChatAsk("c-timeout", first.sentenceId, emptyList(), "问?")
+    session.launchChatAsk("c-timeout", first.sentenceId, null, emptyList(), "问?")
     kotlinx.coroutines.delay(100)
     // 未知异常：兜底 NETWORK_ERROR 前缀 + 原始 message。（先等第一次 launch 读完 chatError
     // 再切换——两次 launch 都在 Default 调度器上异步跑。）
     service.chatError = IllegalStateException("boom")
-    session.launchChatAsk("c-crash", first.sentenceId, emptyList(), "问?")
+    session.launchChatAsk("c-crash", first.sentenceId, null, emptyList(), "问?")
     kotlinx.coroutines.delay(100)
 
     val errors = sender.of("CHAT_ERROR")
@@ -1897,7 +1903,7 @@ class PreviewSessionTest {
     registry.recordAuthFailed("p1")
     val first = seedReadySentence(session)
 
-    session.launchChatAsk("c-paused", first.sentenceId, emptyList(), "问?")
+    session.launchChatAsk("c-paused", first.sentenceId, null, emptyList(), "问?")
     kotlinx.coroutines.delay(100)
     assertEquals(0, service.chatCalls, "暂停期 chat 不得发模型请求")
     val pausedError = localSender.of("CHAT_ERROR").single()
@@ -1911,7 +1917,7 @@ class PreviewSessionTest {
     assertFalse(freshRegistry.isPaused("p1"))
 
     service.chatError = ExtensionFailure(ErrorCode.AUTH_FAILED, "auth", false)
-    freshSession.launchChatAsk("c-auth", seeded.sentenceId, emptyList(), "问?")
+    freshSession.launchChatAsk("c-auth", seeded.sentenceId, null, emptyList(), "问?")
     kotlinx.coroutines.delay(100)
 
     assertTrue(freshRegistry.isPaused("p1"), "chat 的 AUTH_FAILED 必须上报暂停表")

@@ -351,11 +351,16 @@ data class ChatSurroundings(val before: String?, val current: String?, val after
  * 追问对话提示词:基于该句已核实的分析继续问答。首行是函数内字面量,**绝不进
  * contracts.json 的 promptFirstLines**——那张表被双端 contracts 钉死且只有五个键,
  * 与 Chrome 端 buildChatPrompt 的「函数内字面量、不进 PROMPT_FIRST_LINES」约定一致。
- * 四段结构与 Chrome 端逐字相同:系统指令 → serializeSentence + 紧凑 core JSON → 历史 → 问题。
+ * 五段（11 元素）结构与 Chrome 端逐字相同:系统指令（含「邻段仅供参考、答案只谈本句」
+ * 追加句）→ serializeSentence + 紧凑 core JSON → Surrounding context 段 → 历史 → 问题。
+ * 上下文段是单数组元素的四行骨架,字段缺省占位 `none`（null 或单字段 null 都落 none）;
+ * 邻段原文**直排**、不走 serialize/serializeSentence——那两条服务需要 Token ID 定位的
+ * 句载荷,上下文无需定位,紧凑直文已是最省。
  */
 fun buildChatPrompt(
   input: SentenceInput,
   core: CoreAnalysis,
+  surroundings: ChatSurroundings?,
   history: List<ChatTurn>,
   question: String,
 ): String = listOf(
@@ -363,11 +368,19 @@ fun buildChatPrompt(
   "Answer the reader's question in Chinese based on the verified core analysis below. " +
     "Do not re-divide or re-tag the grammatical components: the verified analysis is fixed. " +
     "If the analysis conflicts with the question, follow the analysis and say so. " +
-    "Keep the answer concise and split it into short paragraphs.",
+    "Keep the answer concise and split it into short paragraphs. " +
+    "The surrounding paragraphs are reference context only: use them to resolve references " +
+    "that point outside the sentence (for example what a pronoun refers to), but keep every " +
+    "answer about the selected sentence — do not analyze, divide, or translate the context " +
+    "paragraphs.",
   "Selected sentence:",
   serializeSentence(input),
   "Verified core result:",
   serialize(core.toJsonElement()),
+  "Surrounding context (reference only; not the topic):\n" +
+    "Paragraph before: ${surroundings?.before ?: "none"}\n" +
+    "Paragraph containing the selected sentence: ${surroundings?.current ?: "none"}\n" +
+    "Paragraph after: ${surroundings?.after ?: "none"}",
   "Conversation history (oldest first):",
   serialize(chatHistoryJson(history)),
   "Reader question:",

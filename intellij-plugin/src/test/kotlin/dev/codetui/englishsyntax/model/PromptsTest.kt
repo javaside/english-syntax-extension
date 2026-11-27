@@ -522,6 +522,7 @@ class PromptsTest {
     val prompt = buildChatPrompt(
       sentence("The service works."),
       CoreAnalysis(sentenceId = "s1", components = listOf(CoreComponent(0, 1, GrammarRole.SUBJECT, "该服务")), modelProfileId = "profile-1"),
+      null,
       listOf(ChatTurn("user", "为什么")),
       "那宾语呢？",
     )
@@ -533,21 +534,30 @@ class PromptsTest {
     }
   }
 
-  /** 四段结构与 Chrome 端 prompts.ts buildChatPrompt 逐字一致；内嵌 JSON 全部紧凑序列化。 */
+  /**
+   * 五段（11 元素）结构与 Chrome 端 prompts.ts buildChatPrompt 逐字一致；内嵌 JSON 全部
+   * 紧凑序列化。系统指令段整段逐字断言：原文四句 + 邻段参考语义追加句（前缀一个空格、
+   * em-dash），与 Chrome prompts.test.ts 的镜像用例同款字符串。
+   */
   @Test
-  fun `chat prompt embeds sentence core history and question in four compact sections`() {
+  fun `chat prompt embeds sentence core surroundings history and question in five compact sections`() {
     val input = sentence("The service works.")
     val core = CoreAnalysis(sentenceId = "s1", components = listOf(CoreComponent(0, 1, GrammarRole.SUBJECT, "该服务")), modelProfileId = "profile-1")
     val history = listOf(ChatTurn("user", "为什么"), ChatTurn("assistant", "因为主语在前"))
-    val prompt = buildChatPrompt(input, core, history, "那宾语呢？")
+    val surroundings = ChatSurroundings(before = "Before text.", current = "Current text.", after = "After text.")
+    val prompt = buildChatPrompt(input, core, surroundings, history, "那宾语呢？")
 
     val sections = prompt.split("\n\n")
-    assertEquals(10, sections.size)
+    assertEquals(11, sections.size)
     assertEquals(
       "Answer the reader's question in Chinese based on the verified core analysis below. " +
         "Do not re-divide or re-tag the grammatical components: the verified analysis is fixed. " +
         "If the analysis conflicts with the question, follow the analysis and say so. " +
-        "Keep the answer concise and split it into short paragraphs.",
+        "Keep the answer concise and split it into short paragraphs. " +
+        "The surrounding paragraphs are reference context only: use them to resolve references " +
+        "that point outside the sentence (for example what a pronoun refers to), but keep every " +
+        "answer about the selected sentence — do not analyze, divide, or translate the context " +
+        "paragraphs.",
       sections[1],
     )
     assertEquals("Selected sentence:", sections[2])
@@ -558,14 +568,57 @@ class PromptsTest {
         """"components":[{"startToken":0,"endToken":1,"role":"SUBJECT","translation":"该服务"}],"modelProfileId":"profile-1"}""",
       sections[5],
     )
-    assertEquals("Conversation history (oldest first):", sections[6])
+    // 上下文段（第七段）：单元素四行骨架，邻段原文直排（不走 serialize），逐字镜像 Chrome。
+    assertEquals(
+      "Surrounding context (reference only; not the topic):\n" +
+        "Paragraph before: Before text.\n" +
+        "Paragraph containing the selected sentence: Current text.\n" +
+        "Paragraph after: After text.",
+      sections[6],
+    )
+    // 插入位置钉死：紧凑 core 之后、历史段头之前。
+    assertEquals("Conversation history (oldest first):", sections[7])
     assertEquals(
       """[{"role":"user","content":"为什么"},{"role":"assistant","content":"因为主语在前"}]""",
-      sections[7],
+      sections[8],
     )
-    assertEquals("Reader question:", sections[8])
-    assertEquals("那宾语呢？", sections[9])
+    assertEquals("Reader question:", sections[9])
+    assertEquals("那宾语呢？", sections[10])
     assertFalse(prompt.contains("\n  \""))
+  }
+
+  /**
+   * 缺省形态逐字钉死：surroundings 为 null 或单字段为 null 时占位 `none`。桥门只在至少
+   * 一键在场时才下发非 null 对象，但字段级缺省合法（web 侧只算到单侧邻段的情形）。
+   */
+  @Test
+  fun `chat prompt surroundings skeleton falls back to none for null param or null fields`() {
+    val core = CoreAnalysis(sentenceId = "s1", components = listOf(CoreComponent(0, 1, GrammarRole.SUBJECT, "该服务")), modelProfileId = "profile-1")
+    val nullSections = buildChatPrompt(sentence("The service works."), core, null, emptyList(), "问").split("\n\n")
+    assertEquals(11, nullSections.size)
+    assertEquals(
+      "Surrounding context (reference only; not the topic):\n" +
+        "Paragraph before: none\n" +
+        "Paragraph containing the selected sentence: none\n" +
+        "Paragraph after: none",
+      nullSections[6],
+    )
+
+    val fieldNullSections = buildChatPrompt(
+      sentence("The service works."),
+      core,
+      ChatSurroundings(before = null, current = "Current text.", after = null),
+      emptyList(),
+      "问",
+    ).split("\n\n")
+    assertEquals(11, fieldNullSections.size)
+    assertEquals(
+      "Surrounding context (reference only; not the topic):\n" +
+        "Paragraph before: none\n" +
+        "Paragraph containing the selected sentence: Current text.\n" +
+        "Paragraph after: none",
+      fieldNullSections[6],
+    )
   }
 
   // ---- 纠正反馈提示词（F2）：逐字对齐 Chrome correctionPrompt / correctionRepairPrompt ----
