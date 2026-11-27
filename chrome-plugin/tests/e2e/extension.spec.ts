@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import type { ExtensionHarness } from "./fixtures";
-import { CHAT_REPLY_TEXT } from "../support/fake-openai-server";
+import { CHAT_REPLY_RENDERED_PARAGRAPHS, CHAT_REPLY_TEXT } from "../support/fake-openai-server";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -1101,13 +1101,16 @@ test("追问对话 chat 面板：两段流式回答拼齐且第二轮携带多�
   // 摘要行 = 锚定句前 40 字符(openChat 的 slice(0, 40))。
   await expect(panel.locator(".summary")).toContainText(SINGLE_SENTENCE.slice(0, 40));
 
-  // 第一轮:输入问题回车 → 回答文本 === 服务器两段拼接全文(流式到齐)。
+  // 第一轮:输入问题回车 → 气泡渲染 markdown:两个 <p> 逐段对上(流式到齐),
+  // 粗体标记成 <strong>(真实浏览器 + shadow DOM 路径的渲染断言)。
   const composer = panel.locator(".composer textarea");
   await composer.fill("这句为什么这么译");
   await composer.press("Enter");
-  await expect(panel.locator(".message.assistant").first()).toHaveText(CHAT_REPLY_TEXT, {
+  const firstReply = panel.locator(".message.assistant").first();
+  await expect(firstReply.locator("p")).toHaveText(CHAT_REPLY_RENDERED_PARAGRAPHS, {
     timeout: 15_000,
   });
+  await expect(firstReply.locator("strong")).toHaveText("局部短语");
   // fetch 计数 === 1:一次流式请求拿到完整回答,没有缓冲回落造成的重发。
   const firstRound = harness.fakeModel.recordedOfKind("chat");
   expect(firstRound).toHaveLength(1);
@@ -1117,9 +1120,11 @@ test("追问对话 chat 面板：两段流式回答拼齐且第二轮携带多�
   await expect(composer).toBeEnabled();
   await composer.fill("主语为什么这样划分");
   await composer.press("Enter");
-  await expect(panel.locator(".message.assistant").nth(1)).toHaveText(CHAT_REPLY_TEXT, {
+  const secondReply = panel.locator(".message.assistant").nth(1);
+  await expect(secondReply.locator("p")).toHaveText(CHAT_REPLY_RENDERED_PARAGRAPHS, {
     timeout: 15_000,
   });
+  await expect(secondReply.locator("strong")).toHaveText("局部短语");
   const chatRequests = harness.fakeModel.recordedOfKind("chat");
   expect(chatRequests).toHaveLength(2);
   // history 经 serialize(紧凑 JSON.stringify)拼进 prompt:回答里的空行在请求体中是

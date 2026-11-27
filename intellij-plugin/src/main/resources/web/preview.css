@@ -625,7 +625,13 @@ button.english-syntax-annotation:hover {
   border-color: #4b5563;
 }
 
-:root[data-english-syntax-dark="true"] .english-syntax-chat-message--assistant,
+:root[data-english-syntax-dark="true"] .english-syntax-chat-message--assistant {
+  background: #374151;
+  /* 浅色规则里的 color:#111 不会随主题变——暗色必须显式覆盖,
+     否则 #111 落在 #374151 上几乎不可读(p/h4/li/strong 继承这里)。 */
+  color: #e5e7eb;
+}
+
 :root[data-english-syntax-dark="true"] .english-syntax-chat-input:disabled {
   background: #374151;
 }

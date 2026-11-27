@@ -156,42 +156,63 @@ function appendInline(parent: Node, text: string, doc: Document): void {
 
 /** 粗体优先、斜体其次的递归强调解析;找不到配对就整段按纯文本。 */
 function appendEmphasis(parent: Node, text: string, doc: Document): void {
-  const bold = findEmphasisPair(text, "**");
-  if (bold !== null) {
-    appendEmphasis(parent, text.slice(0, bold.start), doc);
-    const strong = doc.createElement("strong");
-    appendEmphasis(strong, text.slice(bold.start + 2, bold.end), doc);
-    parent.appendChild(strong);
-    appendEmphasis(parent, text.slice(bold.end + 2), doc);
+  const pair = findEmphasisPair(text);
+  if (pair === null) {
+    if (text.length > 0) parent.appendChild(doc.createTextNode(text));
     return;
   }
-  const italic = findEmphasisPair(text, "*");
-  if (italic !== null) {
-    appendEmphasis(parent, text.slice(0, italic.start), doc);
+  appendEmphasis(parent, text.slice(0, pair.start), doc);
+  const content = text.slice(pair.start + pair.width, pair.end);
+  if (pair.width === 3) {
+    // 三星 = 斜体套粗体(与 CommonMark 的 ***x*** 一致)
     const em = doc.createElement("em");
-    appendEmphasis(em, text.slice(italic.start + 1, italic.end), doc);
+    const strong = doc.createElement("strong");
+    appendEmphasis(strong, content, doc);
+    em.append(strong);
     parent.appendChild(em);
-    appendEmphasis(parent, text.slice(italic.end + 1), doc);
-    return;
+  } else {
+    const element = doc.createElement(pair.width === 2 ? "strong" : "em");
+    appendEmphasis(element, content, doc);
+    parent.appendChild(element);
   }
-  if (text.length > 0) parent.appendChild(doc.createTextNode(text));
+  appendEmphasis(parent, text.slice(pair.end + pair.width), doc);
 }
 
 /**
- * 找一对强调标记:开标记后不得紧跟空白、闭标记前不得紧邻空白、内容非空
- * (侧翼规则——`2 * 3` 的乘号因此不成对)。找不到返回 null。
+ * 找下一对强调标记——按「星号游程」整体判定,不按单字符配对:开游程后不得紧跟
+ * 空白、闭游程前不得紧邻空白(侧翼规则,`2 * 3` 的乘号因此不成对),且**两侧游程
+ * 长度必须相等**——游程内不再单独配对(`** 空格 **`、`***重要**` 这类残缺组合
+ * 整段字面,不产出吞标记的畸形 em)。宽度 1=斜体、2=粗体、3=斜体套粗体;
+ * 超过 3 的游程不解析(子集外,字面)。
  */
-function findEmphasisPair(text: string, delimiter: string): { start: number; end: number } | null {
-  const width = delimiter.length;
-  for (let start = 0; start + width < text.length; start += 1) {
-    if (!text.startsWith(delimiter, start)) continue;
-    const after = start + width;
-    if (isWhitespace(text[after]!)) continue; // 后跟空白,不是开标记
-    for (let end = after + 1; end + width <= text.length; end += 1) {
-      if (!text.startsWith(delimiter, end)) continue;
-      if (isWhitespace(text[end - 1]!)) continue; // 前邻空白,不是闭标记
-      return { start, end };
+function findEmphasisPair(text: string): { start: number; end: number; width: number } | null {
+  for (let start = 0; start < text.length;) {
+    if (text[start] !== "*") {
+      start += 1;
+      continue;
     }
+    let runEnd = start;
+    while (runEnd < text.length && text[runEnd] === "*") runEnd += 1;
+    const width = runEnd - start;
+    // 开游程:后跟非空白,宽度 1..3
+    if (width <= 3 && runEnd < text.length && !isWhitespace(text[runEnd]!)) {
+      for (let end = runEnd + 1; end + width <= text.length;) {
+        if (text[end] !== "*") {
+          end += 1;
+          continue;
+        }
+        let closeRunEnd = end;
+        while (closeRunEnd < text.length && text[closeRunEnd] === "*") {
+          closeRunEnd += 1;
+        }
+        // 闭游程:等长且前邻非空白;不等长就跳过整条游程再找
+        if (closeRunEnd - end === width && !isWhitespace(text[end - 1]!)) {
+          return { start, end, width };
+        }
+        end = closeRunEnd;
+      }
+    }
+    start = runEnd; // 这条游程当不成开标记,跳过整条
   }
   return null;
 }

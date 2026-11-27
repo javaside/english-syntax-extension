@@ -49,6 +49,27 @@ describe("renderMarkdown", () => {
     expect(target.querySelector("strong")!.textContent).toBe("中文");
   });
 
+  it("定界符游程:两侧带空格的 ** 与残缺配对一律字面,三星成 em 套 strong", () => {
+    // `** 空格 **` 曾被单星扫描配对出 <em>* 空格 *</em>——比纯文本更糟。游程规则:
+    // 开/闭标记的星号游程长度必须相等,游程内不再单独配对,残缺整段字面。
+    const spaced = render("** 空格 **");
+    expect(spaced.querySelectorAll("em,strong").length).toBe(0);
+    expect(spaced.querySelector("p")!.textContent).toBe("** 空格 **");
+
+    const trailing = render("**加粗 **");
+    expect(trailing.querySelectorAll("em,strong").length).toBe(0);
+    expect(trailing.querySelector("p")!.textContent).toBe("**加粗 **");
+
+    const mismatch = render("***重要**");
+    expect(mismatch.querySelectorAll("em,strong").length).toBe(0);
+    expect(mismatch.querySelector("p")!.textContent).toBe("***重要**");
+
+    const triple = render("***重要***");
+    const em = triple.querySelector("p > em")!;
+    expect(em.querySelector("strong")!.textContent).toBe("重要");
+    expect(triple.querySelector("p")!.textContent).toBe("重要");
+  });
+
   it("未闭合的 ** 字面显示,不产生 strong", () => {
     const target = render("未闭合**标记");
     expect(target.querySelectorAll("strong").length).toBe(0);

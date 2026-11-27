@@ -687,5 +687,10 @@ describe("ChatPanel", () => {
     expect(css).toMatch(
       /:root\[data-english-syntax-dark="true"\]\s+\.english-syntax-chat-message--assistant\s+blockquote\s*\{/,
     );
+    // 暗色可读性:assistant 的浅色 color 字面值(#111)必须被暗色显式覆盖——
+    // 暗色规则若只换背景不换字色,#111 落在 #374151 上几乎不可读。
+    expect(css).toMatch(
+      /:root\[data-english-syntax-dark="true"\]\s+\.english-syntax-chat-message--assistant\s*\{[^}]*color:\s*#e5e7eb/,
+    );
   });
 });

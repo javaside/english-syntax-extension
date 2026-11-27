@@ -84,7 +84,7 @@ harness 提供三个口子:`seedProfiles()`(直接写 `chrome.storage.local`)、
 3. **`script()` 的队列耗尽即回落默认合法响应**,所以脚本要覆盖生产里的每一轮:core 最终失败路径必须为首轮 + 两轮 repair 排满三份非法响应。少排任何一轮 = 后续 repair 拿到默认合法响应、页面渲染成功,用例从"验证失败可见"悄悄变成"验证成功渲染"。E2E 要同时用请求记录断言 `core = 1`、`core-repair = 2`(详见 [`invariants.md` I-13.1](./invariants.md))。
 4. **默认合法响应必须过得了本地语法硬门。** `autoComponents` 的尾段刻意标 `OBJECT` 而**不是** `PREDICATE`:两条硬门只作用于 `PREDICATE`(首词不得是限定词/主格代词、内部不得含限定词),而按位置切分对任意 fixture 散文都保证不了这两条(`Although the passage…` / `However, you may need…` 都会撞上)。同理,「单成分包住整句」现在也非法,所以 Kotlin 侧 `AnalysisServiceTest.validCoreRaw` 与 `MarkdownSyntaxIntegrationTest.validCore` 都必须给真的同层划分。E2E 断言是结构性的(成分个数、三行结构),从不读 role 文案,所以换 role 是安全的。**core 的修复轮(`kind: "core-repair"`)作答用 `repairComponents` 而不是 `autoComponents`**:首词为介词的句子(`With …` 一类)若仍按「首词 SUBJECT + 其余 OBJECT」拆,会被本地 validator 的介词硬门连拒两轮,表现成假模型服务器特有的最终失败(真模型按修复指令一轮就修好);修复轮因此把首个介词短语并入 ADVERBIAL。默认 core/repair 响应还必须统一经 `splitPostmodifyingOfPhrases` 把名词性 component 内每个非首位 `of` 依次切成独立 `ATTRIBUTE`；只切第一个会让 `the goal of ... measurement of H0` 的第二个 `of` 继续藏在 ATTRIBUTE 里并耗尽两轮 repair。故意非法的 scripted 分支不走这层归一化。译文同样必须含 Han(译文质量硬门对修复结果照样生效)。
 
-服务器还记录每次请求(kind / model / 是否带 Authorization / 是否用了 response_format / 是否流式 / 句子文本 / 完整 prompt),并可脚本化注入错误、分片、非法输出。详解 fixture 也必须遵守生产校验:每个 structure 位于 focus 内且有序不重叠;测试并列分句内部时不能把 focus 外的并列连词塞进详解。
+服务器还记录每次请求(kind / model / 是否带 Authorization / 是否用了 response_format / 是否流式 / 句子文本 / 完整 prompt),并可脚本化注入错误、分片、非法输出。chat 的确定性回文 `CHAT_REPLY_TEXT`(两段中文,第二段带一处 `**粗体**`)刻意带 markdown:assistant 气泡渲染后 E2E 断言两个 `<p>` 的渲染文本与 `<strong>`——真实浏览器/shadow DOM 的渲染路径由此覆盖;history 断言仍用**原文**的 JSON 转义形(面板存原始文本)。详解 fixture 也必须遵守生产校验:每个 structure 位于 focus 内且有序不重叠;测试并列分句内部时不能把 focus 外的并列连词塞进详解。
 
 ### 断言纪律
 
