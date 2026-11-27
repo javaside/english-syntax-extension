@@ -281,6 +281,11 @@ let lastParsedAt = 0;
 /**
  * 解析一段并上报 `PARSE_BLOCK`。
  *
+ * 悬停快捷键带开关循环（2026-11-28 spec，Chrome 端同款）：解析 settle 后鼠标停在卡片或
+ * 已隐藏原文上再按 = 「关」（恢复原文）；卡片被收起后再按 = 「开」（按既有渲染重画，
+ * 不重新下发）。解析进行中（requested 未 settled）提示、不取消。解析中的原文不受影响，
+ * 首按照常下发。
+ *
  * `target` 省略时查悬停链取最深元素（`deepestHovered`，判据见 `preview.ts`）——这是 Kotlin 的
  * 调用方式（`executeJavaScript` 里不传参）。测试与将来可能的右键路径可以显式传入目标元素。
  */
@@ -289,8 +294,19 @@ function parseHoveredBlock(target?: Element | null): void {
   if (s === null || s.previewId === "") return;
   const hovered = target === undefined ? deepestHovered(document) : target;
   if (hovered !== null && hovered.closest("[data-english-syntax-card]") !== null) {
-    // 已经是卡片了：落到下面的「未找到」提示会误导用户。
-    flashStatus("该段已解析");
+    // 鼠标停在卡片上(原文是 display:none 的兄弟,用户看到的就是卡片):settle 即关。
+    // 卡片带 data-block-id(renderer 建卡时写),供反查;落到「未找到」提示只会误导用户。
+    const card = hovered.closest<HTMLElement>("[data-english-syntax-card]");
+    const blockId = card?.dataset.blockId ?? "";
+    if (blockId === "") {
+      flashStatus("该段已解析"); // 无 blockId 的孤儿卡片,生产到不了,兜底不误导。
+      return;
+    }
+    if (parsingBlock(blockId)) {
+      flashStatus("该段正在解析中…");
+      return;
+    }
+    toggleBlockOff(blockId);
     return;
   }
   const element = nearestPreviewBlock(hovered);
@@ -299,12 +315,26 @@ function parseHoveredBlock(target?: Element | null): void {
     return;
   }
   if (element.hasAttribute(HIDDEN_ATTRIBUTE)) {
-    // 已出过卡的原文。上面那条 closest 只拦得住「鼠标停在卡片里」——原文是卡片的**兄弟**
-    // 节点，停在原文上照样会走到这里（CSS 隐藏后仍可能命中：JCEF 的 `:hover` 链在 DOM 变
-    // 更后不一定重算，测试与右键路径还会显式传元素）。放行的后果是对同一段重复下发
-    // PARSE_BLOCK，而 Kotlin 侧那段句子已全部 READY，没有任何 CORE_RESULT 回来撤掉
-    // 「解析中」竖条与浮层；顺带 `registerBlock` 还会清空该块的句子映射，卡片虽在却点不动。
-    flashStatus("该段已解析");
+    // 已出过卡的原文(卡片的兄弟节点),用户看到的同样是卡片:与「停在卡片上」同款 toggle 关。
+    // CSS 隐藏后仍可能命中:JCEF 的 `:hover` 链在 DOM 变更后不一定重算,测试与右键路径
+    // 还会显式传元素。放行(旧行为提示已解析)之外的新出路是关——恢复原文。
+    const hiddenBlockId = ensureBlockId(element);
+    if (parsingBlock(hiddenBlockId)) {
+      flashStatus("该段正在解析中…");
+      return;
+    }
+    toggleBlockOff(hiddenBlockId);
+    return;
+  }
+  // 重显拦截:settle 过且原文未隐藏 = 卡片曾被「关」收起 → 「开」按既有渲染重画。
+  // 绝不走下面的 registerBlock(会清空句子映射,卡片虽回却点不动)也不重发 PARSE_BLOCK
+  // (Kotlin 侧句子已 READY,重发只会白亮「解析中」浮层)。repaintBlock 对无内容块是
+  // no-op(内部 hasContent 判空走还原),无副作用。settle 过的块必有 ensureBlockId
+  // 分配过 id(下发 PARSE_BLOCK 前就写了),未 settle 的原文拿到 null 照常走首按路径。
+  const existingBlockId = element.getAttribute("data-english-syntax-block");
+  if (existingBlockId !== null && settledBlocks.has(existingBlockId)) {
+    debouncedToggle(existingBlockId);
+    s.renderer.repaintBlock(existingBlockId);
     return;
   }
   const blockId = ensureBlockId(element);
@@ -327,6 +357,36 @@ function parseHoveredBlock(target?: Element | null): void {
   });
   markBlockActive(blockId);
   setStatus("句法学习：正在解析 1 段…", "running");
+}
+
+/** 块已下发解析但尚未 settle(流式预览期间)。这一按只能提示,不得关。 */
+function parsingBlock(blockId: string): boolean {
+  return requestedBlocks.has(blockId) && !settledBlocks.has(blockId);
+}
+
+/**
+ * 开关循环的「关」:单块还原(renderer 按块收纠错行/详解状态),追问面板仅当锚定句属于
+ * 该块时随停停靠收走(dispose 先触发 onClose 停靠再摘 host,与用户点关闭按钮同路径)。
+ * 去抖复用 lastParsedBlockId/lastParsedAt:与首次解析共用 400ms 窗口,窗口内静默忽略。
+ */
+function toggleBlockOff(blockId: string): void {
+  if (!debouncedToggle(blockId)) return;
+  const s = state;
+  if (s === null) return;
+  s.renderer.restoreBlock(blockId);
+  unmarkBlockActive(blockId);
+  if (chatSentenceId !== null && s.renderer.sentenceBlockId(chatSentenceId) === blockId) {
+    chatPanelInstance?.dispose();
+  }
+}
+
+/** 开关动作去抖:窗口内返回 false(静默忽略,卡片不得闪回),窗口外记录并放行。 */
+function debouncedToggle(blockId: string): boolean {
+  const now = Date.now();
+  if (blockId === lastParsedBlockId && now - lastParsedAt < PARSE_DEBOUNCE_MS) return false;
+  lastParsedBlockId = blockId;
+  lastParsedAt = now;
+  return true;
 }
 
 interface PageHotkey {
