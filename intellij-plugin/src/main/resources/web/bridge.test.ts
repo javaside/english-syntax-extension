@@ -4,18 +4,22 @@ import {
   MAX_CHAT_HISTORY_CHARACTERS,
   MAX_CHAT_HISTORY_TURNS,
   MAX_CHAT_QUESTION_CHARACTERS,
+  MAX_CHAT_SURROUNDING_AFTER_CHARS,
+  MAX_CHAT_SURROUNDING_BEFORE_CHARS,
+  MAX_CHAT_SURROUNDING_CURRENT_CHARS,
   MAX_FEEDBACK_CHARACTERS,
   parseHostMessage,
   parsePageMessage,
 } from "./bridge";
 
-/** CHAT_ASK 的默认合法载荷（防伪造门测试用）；单测按需覆写单个字段。history 为 unknown——测试要喂的就是非法形状。 */
+/** CHAT_ASK 的默认合法载荷（防伪造门测试用）；单测按需覆写单个字段。history/surroundings 为 unknown——测试要喂的就是非法形状。 */
 function chatAsk(
   overrides: Partial<{
     conversationId: string;
     sentenceId: string;
     history: unknown;
     question: string;
+    surroundings: unknown;
   }> = {},
 ) {
   return {
@@ -457,6 +461,107 @@ describe("parsePageMessage", () => {
         answer: "a",
       }),
     ).toBeNull();
+  });
+
+  // ---- CHAT_ASK surroundings：段落上下文封顶门（与 Kotlin parseChatAsk 的 surroundings 分支镜像）----
+
+  it("accepts chat ask surroundings with all three fields and passes values through as-is", () => {
+    const message = parsePageMessage(
+      chatAsk({
+        surroundings: {
+          before: "…the tail of the previous paragraph",
+          current: "  The paragraph with the anchored sentence.  ",
+          after: "the head of the next paragraph…",
+        },
+      }),
+    );
+    expect(message).toEqual({
+      version: 1,
+      type: "CHAT_ASK",
+      previewId: "p1",
+      generation: 2,
+      conversationId: "p1:chat:1",
+      sentenceId: "s-b1-0",
+      history: [
+        { role: "user", content: "上一轮问题" },
+        { role: "assistant", content: "上一轮回答" },
+      ],
+      question: "这个 of 短语修饰谁?",
+      surroundings: {
+        before: "…the tail of the previous paragraph",
+        // 值原样透传：门只校验不改写（question 在门里 trim 的做法刻意不复制——
+        // surroundings 是机器算好的已封顶文本，两侧一致只校验）。
+        current: "  The paragraph with the anchored sentence.  ",
+        after: "the head of the next paragraph…",
+      },
+    });
+  });
+
+  it("accepts chat ask surroundings at exactly the caps for all three fields", () => {
+    const message = parsePageMessage(
+      chatAsk({
+        surroundings: {
+          before: "b".repeat(MAX_CHAT_SURROUNDING_BEFORE_CHARS),
+          current: "c".repeat(MAX_CHAT_SURROUNDING_CURRENT_CHARS),
+          after: "a".repeat(MAX_CHAT_SURROUNDING_AFTER_CHARS),
+        },
+      }),
+    );
+    const surroundings = message && message.type === "CHAT_ASK" ? message.surroundings : null;
+    // … 截断标记计入各自上限：门按裸 length ≤ cap 判，恰好贴线合法。
+    expect(surroundings?.before?.length).toBe(MAX_CHAT_SURROUNDING_BEFORE_CHARS);
+    expect(surroundings?.current?.length).toBe(MAX_CHAT_SURROUNDING_CURRENT_CHARS);
+    expect(surroundings?.after?.length).toBe(MAX_CHAT_SURROUNDING_AFTER_CHARS);
+  });
+
+  it("accepts chat ask surroundings with only current, and without the key", () => {
+    const only = parsePageMessage(chatAsk({ surroundings: { current: "Only this paragraph." } }));
+    expect(only && only.type === "CHAT_ASK" ? only.surroundings : "missing").toEqual({
+      current: "Only this paragraph.",
+    });
+    // 不带 surroundings 键：纯句子锚点提问照旧合法（字段可选）。
+    const absent = parsePageMessage(chatAsk());
+    expect(absent && absent.type === "CHAT_ASK" ? absent.surroundings : "present").toBeUndefined();
+  });
+
+  it("rejects chat ask surroundings with extra keys or over-cap values", () => {
+    // 多余键
+    expect(parsePageMessage(chatAsk({ surroundings: { before: "x", extra: "y" } }))).toBeNull();
+    // before 超 1200 / current 超 4000 / after 超 800
+    expect(
+      parsePageMessage(chatAsk({ surroundings: { before: "x".repeat(MAX_CHAT_SURROUNDING_BEFORE_CHARS + 1) } })),
+    ).toBeNull();
+    expect(
+      parsePageMessage(chatAsk({ surroundings: { current: "x".repeat(MAX_CHAT_SURROUNDING_CURRENT_CHARS + 1) } })),
+    ).toBeNull();
+    expect(
+      parsePageMessage(chatAsk({ surroundings: { after: "x".repeat(MAX_CHAT_SURROUNDING_AFTER_CHARS + 1) } })),
+    ).toBeNull();
+  });
+
+  it("rejects chat ask surroundings with blank or non-string field values", () => {
+    // 空串
+    expect(parsePageMessage(chatAsk({ surroundings: { current: "" } }))).toBeNull();
+    // 纯空白串（web .trim() / Kotlin trimJsWhitespace 同答案）
+    expect(parsePageMessage(chatAsk({ surroundings: { current: "   " } }))).toBeNull();
+    expect(parsePageMessage(chatAsk({ surroundings: { current: "\uFEFF" } }))).toBeNull();
+    // 在场键非 string（数字 / null——null 不是缺席，必须走 string 门）
+    expect(parsePageMessage(chatAsk({ surroundings: { before: 5 } }))).toBeNull();
+    expect(parsePageMessage(chatAsk({ surroundings: { before: null, current: "t" } }))).toBeNull();
+  });
+
+  it("rejects chat ask surroundings that is not an object or is the empty object", () => {
+    // 非对象（字符串 / 数组 / null——null 不是缺席，必须走 record 门）
+    expect(parsePageMessage(chatAsk({ surroundings: "not an object" }))).toBeNull();
+    expect(parsePageMessage(chatAsk({ surroundings: ["current"] }))).toBeNull();
+    expect(parsePageMessage(chatAsk({ surroundings: null }))).toBeNull();
+    // 空对象（零键——三键全缺没有上下文意义）
+    expect(parsePageMessage(chatAsk({ surroundings: {} }))).toBeNull();
+  });
+
+  it("rejects chat ask with surroundings alongside a top-level credential leak", () => {
+    // 顶层 forbiddenKeys 照旧拒——surroundings 门不放松信封级守卫。
+    expect(parsePageMessage({ ...chatAsk({ surroundings: { current: "t" } }), apiKey: "leak" })).toBeNull();
   });
 
   // ---- FEEDBACK_REQUEST（F2 纠正反馈）：防伪造门与 CHAT_ASK 同款（与 Kotlin parseFeedbackRequest 镜像）----

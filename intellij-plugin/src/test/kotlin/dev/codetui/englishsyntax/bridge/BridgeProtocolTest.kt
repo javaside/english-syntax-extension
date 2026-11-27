@@ -224,8 +224,11 @@ class BridgeProtocolTest {
     sentenceId: String = "s-b1-0",
     history: String = """[{"role":"user","content":"上一轮问题"},{"role":"assistant","content":"上一轮回答"}]""",
     question: String = "这个 of 短语修饰谁?",
+    surroundings: String? = null,
   ): String =
-    """{"version":1,"type":"CHAT_ASK","previewId":"p1","generation":2,"conversationId":"$conversationId","sentenceId":"$sentenceId","history":$history,"question":"$question"}"""
+    """{"version":1,"type":"CHAT_ASK","previewId":"p1","generation":2,"conversationId":"$conversationId","sentenceId":"$sentenceId","history":$history,"question":"$question"""" +
+      (if (surroundings != null) ""","surroundings":$surroundings""" else "") +
+      "}"
 
   @Test
   fun `accepts chat ask within caps and trims the question`() {
@@ -325,6 +328,95 @@ class BridgeProtocolTest {
     // 方向混淆：页面伪造的 CHAT_RESULT 不是合法 page 消息
     assertNull(
       parse("""{"version":1,"type":"CHAT_RESULT","previewId":"p1","generation":2,"conversationId":"c","answer":"a"}"""),
+    )
+  }
+
+  // ---- CHAT_ASK surroundings：段落上下文封顶门（与 web/bridge.test.ts 的 surroundings 组镜像）----
+
+  @Test
+  fun `accepts chat ask surroundings with all three fields and passes values through as-is`() {
+    val message = parse(
+      chatAskJson(
+        surroundings = """{"before":"…上一段的结尾","current":"  含锚句的本段原文  ","after":"下一段的开头…"}""",
+      ),
+    ) as PageMessage.ChatAsk
+    val surroundings = message.surroundings!!
+    assertEquals("…上一段的结尾", surroundings.before)
+    // 值原样透传：门只校验不改写（question 在门里 trim 的做法刻意不复制——
+    // surroundings 是 web 侧算好的已封顶文本，两侧一致只校验）。
+    assertEquals("  含锚句的本段原文  ", surroundings.current)
+    assertEquals("下一段的开头…", surroundings.after)
+  }
+
+  @Test
+  fun `accepts chat ask surroundings at exactly the caps for all three fields`() {
+    val before = "b".repeat(BridgeProtocol.MAX_CHAT_SURROUNDING_BEFORE_CHARS)
+    val current = "c".repeat(BridgeProtocol.MAX_CHAT_SURROUNDING_CURRENT_CHARS)
+    val after = "a".repeat(BridgeProtocol.MAX_CHAT_SURROUNDING_AFTER_CHARS)
+    val message = parse(
+      chatAskJson(surroundings = """{"before":"$before","current":"$current","after":"$after"}"""),
+    ) as PageMessage.ChatAsk
+    val surroundings = message.surroundings!!
+    // … 截断标记计入各自上限：门按裸 length ≤ cap 判，恰好贴线合法。
+    assertEquals(BridgeProtocol.MAX_CHAT_SURROUNDING_BEFORE_CHARS, surroundings.before!!.length)
+    assertEquals(BridgeProtocol.MAX_CHAT_SURROUNDING_CURRENT_CHARS, surroundings.current!!.length)
+    assertEquals(BridgeProtocol.MAX_CHAT_SURROUNDING_AFTER_CHARS, surroundings.after!!.length)
+  }
+
+  @Test
+  fun `accepts chat ask surroundings with only current, and without the key`() {
+    val only = parse(chatAskJson(surroundings = """{"current":"只有本段"}""")) as PageMessage.ChatAsk
+    assertEquals("只有本段", only.surroundings!!.current)
+    assertNull(only.surroundings!!.before)
+    assertNull(only.surroundings!!.after)
+    // 不带 surroundings 键：纯句子锚点提问照旧合法（字段可选）。
+    val absent = parse(chatAskJson()) as PageMessage.ChatAsk
+    assertNull(absent.surroundings)
+  }
+
+  @Test
+  fun `rejects chat ask surroundings with extra keys or over-cap values`() {
+    // 多余键
+    assertNull(parse(chatAskJson(surroundings = """{"before":"x","extra":"y"}""")))
+    // before 超 1200 / current 超 4000 / after 超 800
+    val overBefore = "x".repeat(BridgeProtocol.MAX_CHAT_SURROUNDING_BEFORE_CHARS + 1)
+    assertNull(parse(chatAskJson(surroundings = """{"before":"$overBefore"}""")))
+    val overCurrent = "x".repeat(BridgeProtocol.MAX_CHAT_SURROUNDING_CURRENT_CHARS + 1)
+    assertNull(parse(chatAskJson(surroundings = """{"current":"$overCurrent"}""")))
+    val overAfter = "x".repeat(BridgeProtocol.MAX_CHAT_SURROUNDING_AFTER_CHARS + 1)
+    assertNull(parse(chatAskJson(surroundings = """{"after":"$overAfter"}""")))
+  }
+
+  @Test
+  fun `rejects chat ask surroundings with blank or non-string field values`() {
+    // 空串
+    assertNull(parse(chatAskJson(surroundings = """{"current":""}""")))
+    // 纯空白串（web .trim() / Kotlin trimJsWhitespace 同答案）
+    assertNull(parse(chatAskJson(surroundings = """{"current":"   "}""")))
+    val feff = "\uFEFF"
+    assertNull(parse(chatAskJson(surroundings = """{"current":"$feff"}""")))
+    // 在场键非 string（数字 / JSON null——null 不是缺席，必须走 string 门）
+    assertNull(parse(chatAskJson(surroundings = """{"before":5}""")))
+    assertNull(parse(chatAskJson(surroundings = """{"before":null,"current":"t"}""")))
+  }
+
+  @Test
+  fun `rejects chat ask surroundings that is not an object or is the empty object`() {
+    // 非对象（字符串 / 数组 / JSON null——键在场但值非 JsonObject）
+    assertNull(parse(chatAskJson(surroundings = """"not an object"""")))
+    assertNull(parse(chatAskJson(surroundings = """["current"]""")))
+    assertNull(parse(chatAskJson(surroundings = "null")))
+    // 空对象（零键——三键全缺没有上下文意义）
+    assertNull(parse(chatAskJson(surroundings = "{}")))
+  }
+
+  @Test
+  fun `rejects chat ask with surroundings alongside a top-level credential leak`() {
+    // 顶层 forbiddenKeys 照旧拒——surroundings 门不放松信封级守卫。
+    assertNull(
+      parse(
+        """{"version":1,"type":"CHAT_ASK","previewId":"p1","generation":2,"conversationId":"c1","sentenceId":"s1","history":[],"question":"q","surroundings":{"current":"t"},"apiKey":"leak"}""",
+      ),
     )
   }
 

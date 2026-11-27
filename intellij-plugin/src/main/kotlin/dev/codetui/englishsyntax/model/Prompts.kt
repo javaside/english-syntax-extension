@@ -339,6 +339,15 @@ fun buildDetailPrompt(
 data class ChatTurn(val role: String, val content: String)
 
 /**
+ * 追问对话的段落级参考上下文:提问句所在段(current)与前后段(before/after)的原文,
+ * web 侧按文档序取邻段并封顶截断后过桥。与 bridge 的
+ * `PageMessage.ChatAsk.ChatSurroundings` 分立——沿用 [ChatTurn] 的桥/模型分层先例
+ * (bridge 类型守门,model 类型进提示词),connector 做映射。三键全可选;桥门只在
+ * 至少一键在场时才下发非 null,值是已封顶的原样文本(不 trim)。
+ */
+data class ChatSurroundings(val before: String?, val current: String?, val after: String?)
+
+/**
  * 追问对话提示词:基于该句已核实的分析继续问答。首行是函数内字面量,**绝不进
  * contracts.json 的 promptFirstLines**——那张表被双端 contracts 钉死且只有五个键,
  * 与 Chrome 端 buildChatPrompt 的「函数内字面量、不进 PROMPT_FIRST_LINES」约定一致。
