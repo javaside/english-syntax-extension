@@ -11,6 +11,7 @@ import type {
 import { MAX_SENTENCES_PER_REQUEST } from "../shared/protocol";
 import type {
   ChatStreamPush,
+  ChatSurroundings,
   ChatTurn,
   CoreStreamPush,
   DetailStreamPush,
@@ -25,6 +26,8 @@ import { createSentenceId, segmentBlock, tokenize } from "../language/segmenter"
 import { BlockActivityMarker } from "./block-activity-marker";
 import { BlockReplacement } from "./block-replacement";
 import type { SentenceFailure } from "./block-replacement";
+import { buildChatSurroundings, documentOrderedNeighbors } from "./chat-surroundings";
+import type { SurroundingCandidate } from "./chat-surroundings";
 import { ChatPanel } from "./chat-panel";
 import type { SyntaxChatRequestEventDetail } from "./chat-panel";
 import { nearestSafeBlock, scanDocument } from "./document-scanner";
@@ -287,6 +290,12 @@ export class SessionController {
    * 最久未停靠的;stop() 整体清空。会话内存态,不落任何缓存/存储。
    */
   private readonly chatConversations = new Map<string, ChatTurn[]>();
+  /**
+   * 轻量会话(未做过全页扫描)首次追问时的一次性只读扫描缓存:只取清单供邻段
+   * 计算,不 registerCandidates、不 viewport.observe(注册会把整页翻成解析中的
+   * 卡片)。stop() 清空(换代作废);空清单也是有效缓存(缓存的是「扫过了」)。
+   */
+  private chatScanCandidates?: readonly CandidateBlock[];
   private scanned = false;
   private cacheOnly = false;
   private readonly batchWindowMs: number;
@@ -482,6 +491,9 @@ export class SessionController {
     if (this.state === "stopped") return;
     this.state = "stopped";
     this.scanned = false;
+    // 与 scanned 同一生命周期:轻量会话的一次性追问扫描缓存随换代作废,下次
+    // 追问重新取清单(页面内容可能已经换了一轮)。
+    this.chatScanCandidates = undefined;
     this.cacheOnly = false;
     this.operationVersion += 1;
     this.options.transport.cancelDocument(this.documentId);
@@ -833,6 +845,45 @@ export class SessionController {
   }
 
   /**
+   * 追问轮的段落级上下文(2026-11-28 spec):current 恒取本句所在块的整段文本,
+   * before/after 取文档序前后各一段,封顶截断由 chat-surroundings 的纯函数完成。
+   * 候选集常规会话来自 `this.blocks`(performScan 即全量注册,视口只管派发解析);
+   * 轻量会话(未做过全页扫描)合并一次性只读扫描的缓存。邻段一律按
+   * compareDocumentPosition 的文档序取,不用 Map 插入序——轻量→全量升级与
+   * 突变重插都会让插入序错位,静默喂错「上一段」正是本特性要修的失败模式。
+   */
+  #chatSurroundingsFor(sentence: SentenceRecord): ChatSurroundings {
+    const block = this.blocks.get(sentence.blockId);
+    // 句子必有所在块(删块的 flushMutations 必同时删句);防御分支宁缺上下文
+    // 也不猜——空对象过不了 SW 守卫的「至少一键在场」,宁可被拒也不发错的段。
+    if (block === undefined) return {};
+    const candidates: SurroundingCandidate[] = [...this.blocks.values()].map((record) => ({
+      element: record.candidate.element,
+      text: record.candidate.text,
+    }));
+    if (!this.scanned) {
+      const inventory = this.chatScanCandidates ?? this.scan(this.document);
+      this.chatScanCandidates = inventory;
+      // 去重按 element 身份交给 documentOrderedNeighbors;块候选在前,同元素
+      // 保留块侧那份。HTMLElement 收窄与 registerCandidates 同款。
+      for (const candidate of inventory) {
+        if (isHTMLElement(candidate.element)) {
+          candidates.push({ element: candidate.element, text: candidate.text });
+        }
+      }
+    }
+    const neighbors = documentOrderedNeighbors(candidates, {
+      element: block.candidate.element,
+      text: block.candidate.text,
+    });
+    return buildChatSurroundings({
+      neighbors: { before: neighbors.before?.text, after: neighbors.after?.text },
+      currentText: block.candidate.text,
+      anchorText: sentence.input.text,
+    });
+  }
+
+  /**
    * 追问一轮:面板先落用户轮与 pending 回答轮,再发 CHAT_ASK。history 取自面板
    * 当前会话(currentConversation 已裁剪且不含本轮的悬空用户轮);两 turn 的落账
    * 由面板自身完成(appendUserTurn/completeAssistantTurn 直接写面板历史)。
@@ -856,7 +907,13 @@ export class SessionController {
     const request = this.pageRequest({
       type: "CHAT_ASK",
       conversationId,
-      context: { kind: "sentence", sentence: sentence.input, core: sentence.core },
+      context: {
+        kind: "sentence",
+        sentence: sentence.input,
+        core: sentence.core,
+        // 段落级参考上下文:本段 + 文档序前后各一段(截断在 content 侧完成)。
+        surroundings: this.#chatSurroundingsFor(sentence),
+      },
       history: conversation.history,
       question,
     });
