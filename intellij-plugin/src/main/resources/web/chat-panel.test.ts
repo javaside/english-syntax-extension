@@ -596,4 +596,96 @@ describe("ChatPanel", () => {
     // 清态是 bootstrap 回调的职责(重铸 id + open 复位),面板不动自己的历史
     expect(panel.currentConversation()).not.toBeNull();
   });
+
+  // —— 受限 markdown 渲染(2026-11-27 spec):assistant 气泡经 web/chat-markdown.ts
+  //    渲染,user/error/notice 保持纯文本;流式逐片全量重渲,未闭合标记字面显示。 ——
+
+  it("assistant 回答经受限 markdown 渲染:加粗成 strong,标记符不显示", () => {
+    const panel = openPanel();
+    panel.appendUserTurn("问1");
+    panel.beginAssistantTurn(CONVERSATION);
+    panel.completeAssistantTurn(CONVERSATION, "这是**加粗**的说明");
+
+    const bubble = assistantBubbles(panel)[0]!;
+    expect(bubble.querySelector("strong")!.textContent).toBe("加粗");
+    expect(bubble.textContent).toContain("加粗");
+    expect(bubble.textContent).not.toContain("**");
+  });
+
+  it("user 气泡不渲染 markdown:标记原样显示", () => {
+    const panel = openPanel();
+    panel.appendUserTurn("**不是粗体**");
+
+    const userBubble = panel.host.querySelector<HTMLElement>(
+      ".english-syntax-chat-message--user",
+    )!;
+    expect(userBubble.querySelector("strong")).toBeNull();
+    expect(userBubble.textContent).toBe("**不是粗体**");
+  });
+
+  it("流式逐片全量重渲:未闭合的字面显示,闭合后成 strong", () => {
+    const panel = openPanel();
+    panel.appendUserTurn("问1");
+    panel.beginAssistantTurn(CONVERSATION);
+
+    panel.renderStreamedText(CONVERSATION, "生成中的**粗");
+    const mid = assistantBubbles(panel)[0]!;
+    expect(mid.querySelector("strong")).toBeNull();
+    expect(mid.textContent).toContain("**粗");
+
+    panel.renderStreamedText(CONVERSATION, "生成中的**粗体**完毕");
+    const done = assistantBubbles(panel)[0]!;
+    expect(done.querySelector("strong")!.textContent).toBe("粗体");
+    expect(done.textContent).not.toContain("**");
+  });
+
+  it("restoreHistory 的 assistant 轮同样渲染 markdown,user 轮仍纯文本", () => {
+    const panel = openPanel();
+    panel.restoreHistory([
+      { role: "user", content: "问1" },
+      { role: "assistant", content: "带**标记**的回答" },
+    ]);
+
+    const bubbles = [
+      ...panel.host.querySelectorAll<HTMLElement>(".english-syntax-chat-message"),
+    ];
+    expect(bubbles[1]!.querySelector("strong")!.textContent).toBe("标记");
+    expect(bubbles[0]!.textContent).toBe("问1");
+  });
+
+  it("error 气泡不渲染 markdown:错误文案里的标记原样显示", () => {
+    const panel = openPanel();
+    panel.appendUserTurn("问1");
+    panel.beginAssistantTurn(CONVERSATION);
+
+    panel.failAssistantTurn(CONVERSATION, "NETWORK_ERROR：**失败**详情");
+
+    const errorBubble = panel.host.querySelector<HTMLElement>(
+      ".english-syntax-chat-message--error",
+    )!;
+    expect(errorBubble.querySelector("strong")).toBeNull();
+    expect(errorBubble.textContent).toContain("**失败**");
+  });
+
+  // markdown 元素样式活在 preview.css(不进 bundle):缺失的症状是单测全绿、
+  // 真机列表/代码块挤成一团——按文本钉住(亮/暗两套)。
+  it("preview.css 钉住 assistant 气泡的 markdown 渲染规则(含暗色)", () => {
+    const css = readPreviewCss();
+    const assistantBlock = cssRuleBlock(css, ".english-syntax-chat-message--assistant {");
+    expect(assistantBlock).toMatch(/white-space:\s*normal/);
+    expect(assistantBlock).not.toMatch(/white-space:\s*pre-wrap/); // 换行改由 br 承担
+    expect(css).toMatch(/\.english-syntax-chat-message--assistant\s+p\s*\{/);
+    expect(css).toMatch(
+      /\.english-syntax-chat-message--assistant\s+ul\s*,\s*\.english-syntax-chat-message--assistant\s+ol\s*\{/,
+    );
+    expect(css).toMatch(/\.english-syntax-chat-message--assistant\s+pre\s*\{/);
+    expect(css).toMatch(/\.english-syntax-chat-message--assistant\s+blockquote\s*\{/);
+    // 暗色主题:代码块底色与引用边框必须跟主题换,否则暗页上亮块刺眼。
+    expect(css).toMatch(
+      /:root\[data-english-syntax-dark="true"\]\s+\.english-syntax-chat-message--assistant\s+pre\s*,\s*:root\[data-english-syntax-dark="true"\]\s+\.english-syntax-chat-message--assistant\s+code\s*\{/,
+    );
+    expect(css).toMatch(
+      /:root\[data-english-syntax-dark="true"\]\s+\.english-syntax-chat-message--assistant\s+blockquote\s*\{/,
+    );
+  });
 });

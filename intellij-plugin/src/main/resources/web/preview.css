@@ -388,7 +388,8 @@ button.english-syntax-annotation:hover {
   padding: 10px 12px;
 }
 
-/* 气泡是纯文本：不引 markdown，换行交给 pre-wrap，XSS 面只有 textContent。 */
+/* user/error/notice 气泡是纯文本：换行交给 pre-wrap。assistant 气泡经
+   web/chat-markdown.ts 走受限 markdown 渲染（见下方 --assistant 规则）。 */
 .english-syntax-chat-message {
   max-width: 85%;
   padding: 6px 10px;
@@ -409,6 +410,58 @@ button.english-syntax-annotation:hover {
   background: #f4f4f5;
   color: #111;
   border-end-start-radius: 3px;
+  /* markdown 渲染后换行由 br 承担,撤 pre-wrap(其余消息类保留)。 */
+  white-space: normal;
+}
+
+/* —— assistant 气泡的受限 markdown 元素样式（2026-11-27 spec）：渲染器只发
+   语义标签（p/h4/ul/ol/blockquote/pre/code）,视觉全部由这里承担。 —— */
+.english-syntax-chat-message--assistant p {
+  margin: 0 0 0.35em;
+}
+
+.english-syntax-chat-message--assistant p:last-child {
+  margin-bottom: 0;
+}
+
+.english-syntax-chat-message--assistant h4 {
+  margin: 0.45em 0 0.2em;
+  font-size: 1.05em;
+  font-weight: 700;
+}
+
+.english-syntax-chat-message--assistant ul,
+.english-syntax-chat-message--assistant ol {
+  margin: 0.2em 0;
+  padding-left: 1.4em;
+}
+
+.english-syntax-chat-message--assistant blockquote {
+  margin: 0.3em 0;
+  padding: 0 0 0 0.7em;
+  border-left: 3px solid #d4d4d8;
+  color: #52525b;
+}
+
+.english-syntax-chat-message--assistant pre {
+  margin: 0.3em 0;
+  padding: 6px 8px;
+  background: #e4e4e7;
+  border-radius: 6px;
+  overflow-x: auto;
+  font-size: 12px;
+}
+
+.english-syntax-chat-message--assistant code {
+  background: #e4e4e7;
+  padding: 1px 4px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.english-syntax-chat-message--assistant pre code {
+  background: none;
+  padding: 0;
 }
 
 .english-syntax-chat-message--pending {
@@ -575,6 +628,18 @@ button.english-syntax-annotation:hover {
 :root[data-english-syntax-dark="true"] .english-syntax-chat-message--assistant,
 :root[data-english-syntax-dark="true"] .english-syntax-chat-input:disabled {
   background: #374151;
+}
+
+/* assistant 气泡 markdown 元素的暗色覆盖：代码块底色与引用边框/文字随主题换,
+   否则暗页上亮色代码块刺眼(与浅色面板不随主题换是同一个坑)。 */
+:root[data-english-syntax-dark="true"] .english-syntax-chat-message--assistant pre,
+:root[data-english-syntax-dark="true"] .english-syntax-chat-message--assistant code {
+  background: #1f2937;
+}
+
+:root[data-english-syntax-dark="true"] .english-syntax-chat-message--assistant blockquote {
+  border-color: #4b5563;
+  color: #9ca3af;
 }
 
 :root[data-english-syntax-dark="true"] .english-syntax-chat-message--pending {
