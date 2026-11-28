@@ -26,6 +26,18 @@ interface PageRequestBase extends MessageBase {
  */
 export const MAX_SENTENCES_PER_REQUEST = 6;
 
+/**
+ * 追问对话段落上下文(before/current/after)的逐段字符封顶:current 是提问句
+ * 所在段、预算最大,before/after 是相邻参考段、预算依次收紧。上限判在
+ * isChatSurroundings 守卫(wire 层);content 侧计算直接 import 这些常量截断,
+ * 不自己写数字。双端共五处同值(Chrome:本守卫 + content 计算;IntelliJ:桥
+ * 双镜像 + web 计算),值与截断策略钉死在
+ * docs/superpowers/specs/2026-11-28-chat-paragraph-context-design.md,改值须五处同步。
+ */
+export const MAX_CHAT_SURROUNDING_BEFORE_CHARS = 1200;
+export const MAX_CHAT_SURROUNDING_CURRENT_CHARS = 4000;
+export const MAX_CHAT_SURROUNDING_AFTER_CHARS = 800;
+
 export interface SentenceInput {
   sentenceId: string;
   text: string;
@@ -279,11 +291,26 @@ export interface ChatTurn {
   content: string;
 }
 
-/** 追问对话的上下文锚点。v1 只有句子级:原文 + tokens + 已核实的成分划分(含译文)。 */
+/**
+ * 段落级参考上下文:提问句所在段(current)与其前后段(before/after)的原文。
+ * 三键全部可选,但至少一键在场——只用于解析跨句指代,不做成分分析;缺段
+ * (轻量会话的合成锚脱 DOM 等)就是缺键,由 prompt 侧按 `none` 占位。
+ */
+export interface ChatSurroundings {
+  before?: string;
+  current?: string;
+  after?: string;
+}
+
+/**
+ * 追问对话的上下文锚点。v1 只有句子级:原文 + tokens + 已核实的成分划分(含译文)。
+ * surroundings 是可选的段落级参考上下文,缺省时仍按纯句子锚点提问。
+ */
 export interface ChatContext {
   kind: "sentence";
   sentence: SentenceInput;
   core: CoreAnalysis;
+  surroundings?: ChatSurroundings;
 }
 
 /**
@@ -444,13 +471,38 @@ function isChatTurn(value: unknown): value is ChatTurn {
   );
 }
 
+/**
+ * 段落上下文守卫:键集恰为 before/current/after 的子集,且至少一键在场(三键
+ * 全缺的空对象没有上下文意义,拒);在场的每键都是 trim 后非空、不超过各自
+ * MAX_CHAT_SURROUNDING_*_CHARS 封顶的 string。截断在 content 侧,这里只兜底把关。
+ */
+function isChatSurroundings(value: unknown): value is ChatSurroundings {
+  return (
+    isRecord(value) &&
+    hasOnlyKeys(value, ["before", "current", "after"]) &&
+    (value.before !== undefined || value.current !== undefined || value.after !== undefined) &&
+    isBoundedChatSurroundingText(value.before, MAX_CHAT_SURROUNDING_BEFORE_CHARS) &&
+    isBoundedChatSurroundingText(value.current, MAX_CHAT_SURROUNDING_CURRENT_CHARS) &&
+    isBoundedChatSurroundingText(value.after, MAX_CHAT_SURROUNDING_AFTER_CHARS)
+  );
+}
+
+/** 单段上下文文本的界内判定:缺席(undefined)即合法;在场则须非空白且不超封顶。 */
+function isBoundedChatSurroundingText(value: unknown, maxChars: number): boolean {
+  return (
+    value === undefined ||
+    (typeof value === "string" && value.trim().length > 0 && value.length <= maxChars)
+  );
+}
+
 function isChatContext(value: unknown): value is ChatContext {
   return (
     isRecord(value) &&
-    hasOnlyKeys(value, ["kind", "sentence", "core"]) &&
+    hasOnlyKeys(value, ["kind", "sentence", "core", "surroundings"]) &&
     value.kind === "sentence" &&
     isSentenceInput(value.sentence) &&
-    isCoreAnalysis(value.core)
+    isCoreAnalysis(value.core) &&
+    (value.surroundings === undefined || isChatSurroundings(value.surroundings))
   );
 }
 

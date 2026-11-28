@@ -3,7 +3,13 @@ import { GrammarRole } from "../shared/grammar";
 import { CORE_SCHEMA_VERSION } from "../shared/versions";
 import type { CoreAnalysis } from "../shared/grammar";
 import { tokenize } from "../language/segmenter";
-import type { BlockDiagnosis, ChatContext, ChatTurn, SentenceInput } from "../shared/protocol";
+import type {
+  BlockDiagnosis,
+  ChatContext,
+  ChatSurroundings,
+  ChatTurn,
+  SentenceInput,
+} from "../shared/protocol";
 import {
   buildChatPrompt,
   buildCorePrompt,
@@ -691,9 +697,17 @@ describe("buildChatPrompt", () => {
     { role: "assistant", content: "因为它是动作中心。" },
   ];
   const question = "整句再讲一遍是什么意思？";
+  const chatSurroundings: ChatSurroundings = {
+    before: "Before text.",
+    current: "Current text.",
+    after: "After text.",
+  };
 
-  function prompt(): string {
-    const context: ChatContext = { kind: "sentence", sentence, core };
+  function prompt(surroundings?: ChatSurroundings): string {
+    const context: ChatContext =
+      surroundings === undefined
+        ? { kind: "sentence", sentence, core }
+        : { kind: "sentence", sentence, core, surroundings };
     return buildChatPrompt({ context, history, question });
   }
 
@@ -703,6 +717,45 @@ describe("buildChatPrompt", () => {
     expect(text.split("\n")[0]).toBe("Discuss the verified translation analysis with the reader.");
     // contracts.json + Kotlin 双侧钉死了那张表——chat 首行进表就破坏 Chrome-only 范围。
     expect(PROMPT_FIRST_LINES).not.toHaveProperty("chat");
+  });
+
+  it("带段落上下文时拼成 11 段，第七段四行骨架逐字命中", () => {
+    const sections = prompt(chatSurroundings).split("\n\n");
+
+    expect(sections).toHaveLength(11);
+    expect(sections[6]).toBe(
+      "Surrounding context (reference only; not the topic):\n" +
+        "Paragraph before: Before text.\n" +
+        "Paragraph containing the selected sentence: Current text.\n" +
+        "Paragraph after: After text.",
+    );
+    // 插入位置钉死：紧凑 core 之后、历史段头之前。
+    expect(sections[7]).toBe("Conversation history (oldest first):");
+  });
+
+  it("不带 surroundings 时上下文段三处占位 none，段数仍为 11", () => {
+    const sections = prompt().split("\n\n");
+
+    expect(sections).toHaveLength(11);
+    expect(sections[6]).toBe(
+      "Surrounding context (reference only; not the topic):\n" +
+        "Paragraph before: none\n" +
+        "Paragraph containing the selected sentence: none\n" +
+        "Paragraph after: none",
+    );
+  });
+
+  it("系统指令段以邻段参考语义的追加句收尾（含前导空格，逐字）", () => {
+    const sections = prompt(chatSurroundings).split("\n\n");
+    const appended =
+      " The surrounding paragraphs are reference context only: use them to resolve references " +
+      "that point outside the sentence (for example what a pronoun refers to), but keep every " +
+      "answer about the selected sentence — do not analyze, divide, or translate the context " +
+      "paragraphs.";
+
+    // 追加句前缀一个空格拼在既有指令串尾（原文是 "split it into short paragraphs."，
+    // 计划的省略引文漏了 "it"——以代码原文为准），字节精确钉住衔接处。
+    expect(sections[1]!.endsWith("split it into short paragraphs." + appended)).toBe(true);
   });
 
   it("系统指令要求中文回答且不得重新划分成分", () => {

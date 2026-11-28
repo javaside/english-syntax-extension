@@ -19,10 +19,19 @@
 - **追问对话重开恢复**:点「关闭」或换句追问后,同句再点「问」,气泡与历史原样回来(每端内存内按句停靠,最近 8 句,随会话停止/换代清空)。conversationId 每次打开重新生成——恢复的是对话内容而不是会话 id,关闭前在飞的一轮答案不会窜进重开后的新问题里。
 - **面板头部新增「新对话」按钮**:同一句想重新开始时显式丢弃当前对话(换新会话、清空历史);重开恢复上线后「再点一次问」不再重置,重置入口由该按钮承担。
 
+追问对话的模型上下文从「本句」升到「段」(2026-11-28 拍板):本句所在段整段 + 前后各一段的**原文**注入 chat prompt——指代(this/it/they)、省略、跨句衔接的先行词常常落在别的句子里,上下文钉死单句时这类追问回答不准。邻段只作参考(指令钉死「答案只谈本句」,不做成分分析、不翻译上下文段落)。双端同构落地(prompt 五段骨架逐字节一致、封顶常量五处同值),会话、缓存、调度与流式语义零变化(chat 本就无缓存;协议面唯一变化:新增可选 surroundings 字段与桥白名单 8→9 键)。
+
+### 双端新增
+
+- **段落级上下文(Chrome `CHAT_ASK.context.surroundings` / IntelliJ 桥 `CHAT_ASK.surroundings`)**:`askChat` 按 `compareDocumentPosition` 的**文档序**取本段 ±1——刻意不用 Map 插入序,「轻量→全量升级」(悬停块先注册)与突变刷新(失效块删后重插尾部)都会让插入序错位、静默喂错「上一段」;轻量会话(选中/悬停冷启动)首次追问做一次性只读扫描取清单(不注册块、不观察视口、不触发解析,换代作废)。邻段原文带封顶过 SW/桥,**服务侧只校验不截断**;IntelliJ 的句子与已核实 core 仍不过桥(Kotlin 从 `SentenceRecord` 重建,防伪造面不扩大),connector 把桥类型 `ChatSurroundings` 映射成 model 类型穿参进提示词(沿用 `ChatTurn` 的桥/模型分层先例)。
+- **封顶与截断**:before 1200(保尾)/ current 4000(句锚窗口,锚句起点优先)/ after 800(保头);`…` 截断标记(U+2026)**计入封顶**——截断产出恒 ≤ cap,与 SW 守卫/IntelliJ 桥门「length ≤ cap」判据一致,真机长段落不会被 `MALFORMED_MESSAGE` 拒收/整条拒收。常量五处同值:Chrome `shared/protocol.ts`(单一来源,content 侧 import)、IntelliJ web `bridge.ts` 与 Kotlin `BridgeProtocol.kt` 各自镜像、加上 IntelliJ web `chat-surroundings.ts` import `bridge.ts` 常量(计算侧消费,不在提示词侧)。
+- **协议与 prompt**:Chrome `ChatContext` 增可选 `surroundings`、IntelliJ 桥 `CHAT_ASK` 升**九键白名单**(键可缺,在场则须对象、键集 ⊆ before/current/after 且至少一键、各值 trim 后非空、≤ 各自封顶,违者整条拒收;值**原样透传不 trim**——机器输出只校验,用户输入才规范化);chat prompt 升为**五段**结构,`Surrounding context` 段骨架逐字固定(缺省占位 `none`),双端逐字节一致由两端提示词测试的**镜像字面断言**长期钉住(Chrome `prompts.test.ts` / IntelliJ `PromptsTest` 各自逐字断言同组字符串;开发期临时对拍 fixture 已移除),上下文原文**直排**、不走 `serialize`(无需 Token 定位,紧凑直文已是最省)。
+- **IntelliJ 端到端钉子**:`PageMessageWiringTest` 从真实桥 JSON(CHAT_ASK 带 `surroundings`)断言服务层 `chat` 收到**逐字段等值**的模型 `ChatSurroundings`——桥门、connector 映射、session/服务穿参任何一环断开或漂移(换位/丢键/换类型)都会红。
+
 ### 测试
 
-- Chrome:单测 1503 项(渲染器 13 项 + 面板接线 4 项,含 `<script>` 字面显示与定界符游程安全断言)、Playwright E2E 49 通过 2 跳过全绿(chat 回答带 `**粗体**`,真实浏览器断言 `<p>`/`<strong>` 渲染)。
-- IntelliJ:web vitest 209 项全绿(渲染器 13 项同构 + 面板接线 6 项,含 preview.css 亮/暗文本钉与暗色字色断言);`bundle.js` 已随 web 源码重建(CSP 文本守卫三查全 0)。
+- Chrome:单测 1529 项(重开恢复 11 项 + 段落上下文 26 项——`chat-surroundings` 纯函数、SW 守卫与 wire 边界、`askChat` 文档序 ±1/轻量会话一次性扫描;渲染器 13 项 + 面板接线 4 项,含 `<script>` 字面显示与定界符游程安全断言)、Playwright E2E 49 通过 2 跳过全绿(chat 回答带 `**粗体**` 真实浏览器断言 `<p>`/`<strong>` 渲染;既有 chat 用例扩展「prompt 携带骨架与本段真实文本」的值形断言)。
+- IntelliJ:web vitest 243 项全绿(重开恢复 7 项 + 段落上下文 34 项——桥 `surroundings` 门 7 项、`chat-surroundings` 镜像纯函数/渲染/bootstrap 集成 27 项;渲染器 13 项同构 + 面板接线 6 项,含 preview.css 亮/暗文本钉与暗色字色断言);`bundle.js` 已随合并后 web 源码重建(CSP 文本守卫三查全 0);Gradle `test` 474 项全绿(+9:桥门 `BridgeProtocolTest`、prompt 五段 `PromptsTest`、服务穿参 `AnalysisServiceTest`;另既有 `PreviewSessionTest`/`PageMessageWiringTest` 强化穿参与端到端断言)。
 
 ## 1.8.1 — 2026-11-24
 

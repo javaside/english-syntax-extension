@@ -15,7 +15,7 @@ import type {
   ResponseMessage,
   SessionStatus,
 } from "../shared/protocol";
-import { isSessionComplete } from "../shared/protocol";
+import { isSessionComplete, MAX_CHAT_SURROUNDING_CURRENT_CHARS } from "../shared/protocol";
 import { segmentBlock } from "../language/segmenter";
 import type { CandidateBlock } from "./document-scanner";
 import { scanDocument } from "./document-scanner";
@@ -2743,12 +2743,18 @@ describe("SessionController 追问对话接线", () => {
   /**
    * 每例一份全新 Window 文档:句法事件监听挂在 document 上,共享全局 document 的
    * 旧控制器(未 stop)会收到本例的事件并打开自己的浮层,污染 chatHost() 查询。
+   *
+   * text 传 string[] 即多段页面:句 id 工厂切换为含 blockId 的唯一形态
+   * (`s-${blockId}-${order}`)——只带 order 的话各段首句会撞成同一个 id;
+   * 单段(既有用例)保持 `sentence-${order + 1}` 不变。options.scanOrder 让
+   * scan 按打乱的顺序返回候选,模拟「Map 插入序 ≠ 文档序」的错位场景。
    */
   function chatHarness(
-    text = "Readers understand complex sentences.",
+    text: string | readonly string[] = "Readers understand complex sentences.",
     onAsk: (
       message: Extract<RequestMessage, { type: "CHAT_ASK" }>,
     ) => ResponseMessage | Promise<ResponseMessage> = (message) => chatResultMessage(message, "答"),
+    options: { scanOrder?: readonly number[] } = {},
   ) {
     const transport = new FakeTransport((message: RequestMessage) =>
       message.type === "CHAT_ASK"
@@ -2763,16 +2769,28 @@ describe("SessionController 追问对话接线", () => {
                 : [],
           }),
     );
+    const paragraphs = typeof text === "string" ? [text] : [...text];
     const page = new Window().document as unknown as Document;
-    page.body.innerHTML = `<main><p>${text}</p></main>`;
-    const candidate = { id: "block-1", element: page.querySelector("p")!, text };
+    page.body.innerHTML = `<main>${paragraphs
+      .map((paragraph) => `<p>${paragraph}</p>`)
+      .join("")}</main>`;
+    const elements = [...page.querySelectorAll("p")];
+    const candidates = elements.map((element, index) => ({
+      id: `block-${index + 1}`,
+      element,
+      text: paragraphs[index]!,
+    }));
+    const scanList = options.scanOrder?.map((index) => candidates[index]!) ?? candidates;
     let viewport!: FakeViewport;
     const controller = new SessionController({
       tabId: 9,
       document: page,
       transport,
-      scan: () => [candidate],
-      createSentenceId: ({ order }) => Promise.resolve(`sentence-${order + 1}`),
+      scan: () => scanList,
+      createSentenceId:
+        typeof text === "string"
+          ? ({ order }) => Promise.resolve(`sentence-${order + 1}`)
+          : ({ blockId, order }) => Promise.resolve(`s-${blockId}-${order}`),
       viewportFactory: (callback) => (viewport = new FakeViewport(callback)),
       learningBlockFactory: () => new FakeLearningBlock(),
       replacementFactory: () => new FakeReplacement(),
@@ -3248,6 +3266,146 @@ describe("SessionController 追问对话接线", () => {
     subject.controller.openChat("sentence-1");
     await subject.controller.askChat("sentence-1", "问2");
     expect(chatAsks(subject.transport)[1]!.history).toEqual([]);
+  });
+
+  // —— 段落级上下文(2026-11-28 spec):本段 + 文档序前后各一段 ——
+
+  const PARAGRAPH_FIRST = "First paragraph introduces the topic clearly.";
+  const PARAGRAPH_MIDDLE =
+    "Second paragraph develops the argument further. It adds supporting detail.";
+  const PARAGRAPH_LAST = "Third paragraph concludes the discussion.";
+
+  it("askChat 携带段落上下文:before/after 恰为前/后段,current 为本段整段文本", async () => {
+    const subject = chatHarness([PARAGRAPH_FIRST, PARAGRAPH_MIDDLE, PARAGRAPH_LAST]);
+    await subject.controller.start();
+    // 扫描即全量注册(视口只管派发解析);这里只派发中段,前后段无需有 core
+    subject.viewport.emit(1);
+    await vi.waitFor(() => expect(subject.controller.status.ready).toBe(2));
+    openChatFor(subject.page, "s-block-2-1");
+
+    await subject.controller.askChat("s-block-2-1", "这个 it 指什么");
+
+    expect(chatAsks(subject.transport)[0]!.context.surroundings).toStrictEqual({
+      before: PARAGRAPH_FIRST,
+      current: PARAGRAPH_MIDDLE,
+      after: PARAGRAPH_LAST,
+    });
+  });
+
+  it("文档序钉子:scan 顺序打乱(Map 插入序错位)时 before 仍取 DOM 序前段", async () => {
+    // scan 返回 [c2, c1, c3] → this.blocks 插入序是 [block-2, block-1, block-3]:
+    // 按插入序取 ±1 会得到 before=undefined、after=前段文本——必须按文档序。
+    const subject = chatHarness([PARAGRAPH_FIRST, PARAGRAPH_MIDDLE, PARAGRAPH_LAST], undefined, {
+      scanOrder: [1, 0, 2],
+    });
+    await subject.controller.start();
+    subject.viewport.emit(0); // observed 即 scan 序,中段(block-2)在首位
+    await vi.waitFor(() => expect(subject.controller.status.ready).toBe(2));
+    openChatFor(subject.page, "s-block-2-1");
+
+    await subject.controller.askChat("s-block-2-1", "这个 it 指什么");
+
+    expect(chatAsks(subject.transport)[0]!.context.surroundings).toStrictEqual({
+      before: PARAGRAPH_FIRST,
+      current: PARAGRAPH_MIDDLE,
+      after: PARAGRAPH_LAST,
+    });
+  });
+
+  it("轻量会话(悬停冷启动)首次追问:一次性只读扫描恰一次、零注册、缓存、stop 作废", async () => {
+    // 沿用「快捷键冷启动」用例的模式:全局 document + hoverTarget 注入,轻量启动
+    // 不做全页扫描(会话里只有悬停段);全程直调方法、不派发 DOM 事件,不会漏进
+    // 共享全局 document 的旧控制器。
+    const paragraphs = [PARAGRAPH_FIRST, PARAGRAPH_MIDDLE, PARAGRAPH_LAST];
+    document.body.innerHTML = `<main>${paragraphs
+      .map((paragraph) => `<p>${paragraph}</p>`)
+      .join("")}</main>`;
+    refreshPrincipalRoot();
+    const elements = [...document.querySelectorAll("p")];
+    const scan = vi.fn(() =>
+      elements.map((element, index) => ({
+        id: `scan-${index + 1}`,
+        element,
+        text: paragraphs[index]!,
+      })),
+    );
+    const transport = new FakeTransport((message: RequestMessage) =>
+      message.type === "CHAT_ASK"
+        ? Promise.resolve(chatResultMessage(message, "答"))
+        : Promise.resolve({
+            version: 1,
+            requestId: message.requestId,
+            type: "CORE_RESULT",
+            analyses:
+              message.type === "ANALYZE_CORE"
+                ? message.sentences.map((sentence) => core(sentence.sentenceId))
+                : [],
+          }),
+    );
+    // parseHoveredBlock 走 immediate 派发,不经视口回调;工厂照常注入 FakeViewport
+    const controller = new SessionController({
+      tabId: 9,
+      document,
+      transport,
+      scan,
+      createSentenceId: ({ order }) => Promise.resolve(`hovered-sentence-${order + 1}`),
+      hoverTarget: () => elements[1]!,
+      viewportFactory: (callback) => new FakeViewport(callback),
+      learningBlockFactory: () => new FakeLearningBlock(),
+      replacementFactory: () => new FakeReplacement(),
+    });
+
+    await controller.parseHoveredBlock();
+    await vi.waitFor(() => expect(controller.status.ready).toBe(2));
+    expect(scan).not.toHaveBeenCalled(); // 轻量启动不扫描
+    expect(controller.status.discovered).toBe(2); // 只有悬停段的两句
+
+    controller.openChat("hovered-sentence-2");
+    await controller.askChat("hovered-sentence-2", "这个 it 指什么");
+
+    expect(scan).toHaveBeenCalledTimes(1); // 首次追问:一次性扫描恰好多调一次
+    expect(controller.status.discovered).toBe(2); // 只读:扫描结果零注册
+    expect(chatAsks(transport)[0]!.context.surroundings).toStrictEqual({
+      before: PARAGRAPH_FIRST,
+      current: PARAGRAPH_MIDDLE,
+      after: PARAGRAPH_LAST,
+    });
+
+    await controller.askChat("hovered-sentence-2", "再问一句");
+    expect(scan).toHaveBeenCalledTimes(1); // 缓存:第二次不再扫
+
+    controller.stop();
+    // stop 后事件监听已拆:直接调 openChat(与上一用例同一既有语义)
+    controller.openChat("hovered-sentence-2");
+    await controller.askChat("hovered-sentence-2", "stop 后再问");
+    expect(scan).toHaveBeenCalledTimes(2); // stop 清空缓存:重新扫描
+    expect(controller.status.discovered).toBe(2); // 仍然零注册
+    controller.stop();
+  });
+
+  it("巨长本段(> 4000):current 封顶 ≤ 4000(… 计入)且句锚窗口完整包含锚句", async () => {
+    const middleSentences = [1, 2, 3, 4].map(
+      (index) => `Middle sentence ${index} ${"carries many ordinary words ".repeat(47)}ends here.`,
+    );
+    const hugeMiddle = middleSentences.join(" ");
+    const subject = chatHarness([PARAGRAPH_FIRST, hugeMiddle, PARAGRAPH_LAST]);
+    await subject.controller.start();
+    subject.viewport.emit(1);
+    await vi.waitFor(() => expect(subject.controller.status.ready).toBe(4));
+    openChatFor(subject.page, "s-block-2-1");
+
+    await subject.controller.askChat("s-block-2-1", "这句为什么这么长");
+
+    const surroundings = chatAsks(subject.transport)[0]!.context.surroundings!;
+    expect(surroundings.before).toBe(PARAGRAPH_FIRST);
+    expect(surroundings.after).toBe(PARAGRAPH_LAST);
+    const current = surroundings.current!;
+    // 截断标记计入封顶(2026-11-28 裁决):截断产出恒 ≤ 4000,SW 守卫不再拒收
+    expect(current.length).toBeLessThanOrEqual(MAX_CHAT_SURROUNDING_CURRENT_CHARS);
+    expect(current).toContain(middleSentences[1]!); // 句锚窗口完整包含锚句
+    // 锚句位于第 2 句,回看 1200 后头尾都是真截断 → 两端各一个 …
+    expect(current.startsWith("…")).toBe(true);
+    expect(current.endsWith("…")).toBe(true);
   });
 });
 

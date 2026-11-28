@@ -19,6 +19,7 @@ import dev.codetui.englishsyntax.language.ValidationResult
 import dev.codetui.englishsyntax.language.validateCoreBatch
 import dev.codetui.englishsyntax.language.validateDetail
 import dev.codetui.englishsyntax.model.ChatMessage
+import dev.codetui.englishsyntax.model.ChatSurroundings
 import dev.codetui.englishsyntax.model.ChatTurn
 import dev.codetui.englishsyntax.model.DETAIL_OUTPUT_SHAPE
 import dev.codetui.englishsyntax.model.JsonSchemaSpec
@@ -121,7 +122,8 @@ interface AnalysisServicePort {
 
   /**
    * 追问对话一轮：返回最终全文。无缓存、无修复轮；文本在回调与返回前都已过脱敏。
-   * 上下文（句子 + 已核实 core）由调用方取好传入，sentenceId 不进签名。
+   * 上下文（句子 + 已核实 core + 可选邻段 surroundings）由调用方取好传入，sentenceId
+   * 不进签名。surroundings 为 null 时提示词骨架段以 `none` 占位（与 Chrome 同形）。
    */
   suspend fun chat(
     profile: ModelProfile,
@@ -129,6 +131,7 @@ interface AnalysisServicePort {
     conversationId: String,
     input: SentenceInput,
     core: CoreAnalysis,
+    surroundings: ChatSurroundings?,
     history: List<ChatTurn>,
     question: String,
     onStreamedText: StreamedTextSink? = null,
@@ -405,9 +408,10 @@ class AnalysisService(
    * 追问对话：不查/不写缓存、无修复轮（自由文本无 schema 可校验）；错误原样上抛。
    * 调度走 `"${documentId}:chat"` 独立命名空间（取消绝不连坐该页在跑的 core/detail）、
    * DETAIL_CLICK 优先级、按轮唯一 cacheKey（防同会话两问被调度器去重合并）。
-   * onStreamedText 每次回调给的都是截至目前完整回答（先脱敏）——与 CORE_STREAM 的
-   * 整段重画约定一致,调度器对可重试错误静默重跑后重试天然无害;前提是累积器
-   * 声明在调度 run 块内部,每次尝试从零累积。
+   * 提示词五段（11 元素）由 [buildChatPrompt] 构造——surroundings 原样穿参，null/字段
+   * null 都在骨架段落 `none`（与 Chrome 逐字一致）。onStreamedText 每次回调给的都是
+   * 截至目前完整回答（先脱敏）——与 CORE_STREAM 的整段重画约定一致,调度器对可重试
+   * 错误静默重跑后重试天然无害;前提是累积器声明在调度 run 块内部,每次尝试从零累积。
    */
   override suspend fun chat(
     profile: ModelProfile,
@@ -415,12 +419,13 @@ class AnalysisService(
     conversationId: String,
     input: SentenceInput,
     core: CoreAnalysis,
+    surroundings: ChatSurroundings?,
     history: List<ChatTurn>,
     question: String,
     onStreamedText: StreamedTextSink?,
   ): String {
     val secrets = client.secretsFor(profile)
-    val messages = listOf(ChatMessage("user", buildChatPrompt(input, core, history, question)))
+    val messages = listOf(ChatMessage("user", buildChatPrompt(input, core, surroundings, history, question)))
     return scheduler.schedule(
       ScheduledRequest(
         cacheKey = chatCacheKey(conversationId, question),

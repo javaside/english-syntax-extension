@@ -12,6 +12,7 @@ import dev.codetui.englishsyntax.domain.TokenRange
 import dev.codetui.englishsyntax.language.tokenize
 import dev.codetui.englishsyntax.language.validateCoreBatch
 import dev.codetui.englishsyntax.model.ChatMessage
+import dev.codetui.englishsyntax.model.ChatSurroundings
 import dev.codetui.englishsyntax.model.ChatTurn
 import dev.codetui.englishsyntax.model.JsonSchemaSpec
 import dev.codetui.englishsyntax.model.OpenAiCompatibleClient
@@ -732,9 +733,10 @@ class AnalysisServiceTest {
   fun `chat streams the accumulated full text and wires the chat prompt`() = runBlocking {
     server.enqueueSse(listOf("这个", "动词", "是谓语。"))
     val pushed = mutableListOf<String>()
+    val surroundings = ChatSurroundings(before = "Previous paragraph text.", current = "Current paragraph text.", after = "Next paragraph text.")
 
     val answer = service.chat(
-      profile(), "doc-1", "c1", chatInput, chatCore,
+      profile(), "doc-1", "c1", chatInput, chatCore, surroundings,
       listOf(ChatTurn("user", "上一问"), ChatTurn("assistant", "上一答")),
       "validates 是什么成分？",
       StreamedTextSink { pushed += it },
@@ -747,14 +749,37 @@ class AnalysisServiceTest {
     val content = server.requests[0].body.getValue("messages").jsonArray.first().jsonObject
       .getValue("content").jsonPrimitive.content
     assertTrue(content.startsWith("Discuss the verified translation analysis with the reader."))
+    // 段落级上下文穿参：非空 surroundings 拼出骨架段（头行 + 三行直排原文）。
+    assertTrue(content.contains("Surrounding context (reference only; not the topic):"))
+    assertTrue(content.contains("Paragraph before: Previous paragraph text.\nParagraph containing the selected sentence: Current paragraph text.\nParagraph after: Next paragraph text."))
     assertTrue(content.contains("""{"role":"user","content":"上一问"}"""))
+  }
+
+  @Test
+  fun `chat without surroundings renders the skeleton with three none placeholders`() = runBlocking {
+    server.enqueueJson("答")
+
+    service.chat(profile(), "doc-1", "c1", chatInput, chatCore, null, emptyList(), "问")
+
+    assertEquals(1, server.requests.size)
+    val content = server.requests[0].body.getValue("messages").jsonArray.first().jsonObject
+      .getValue("content").jsonPrimitive.content
+    assertTrue(
+      content.contains(
+        "Surrounding context (reference only; not the topic):\n" +
+          "Paragraph before: none\n" +
+          "Paragraph containing the selected sentence: none\n" +
+          "Paragraph after: none",
+      ),
+      "null surroundings must render the three-none skeleton: $content",
+    )
   }
 
   @Test
   fun `chat buffered path returns free text without cache or repair`() = runBlocking {
     server.enqueueJson("对不起，这个问题与句法无关。")
 
-    val answer = service.chat(profile(), "doc-1", "c1", chatInput, chatCore, emptyList(), "今天天气如何？")
+    val answer = service.chat(profile(), "doc-1", "c1", chatInput, chatCore, null, emptyList(), "今天天气如何？")
 
     // 自由文本原样返回：既不走 JSON 校验，也没有修复轮。
     assertEquals("对不起，这个问题与句法无关。", answer)
@@ -767,8 +792,8 @@ class AnalysisServiceTest {
     server.enqueueJson("第一次回答")
     server.enqueueJson("第二次回答")
 
-    val first = service.chat(profile(), "doc-1", "c1", chatInput, chatCore, emptyList(), "同一句重复问")
-    val second = service.chat(profile(), "doc-1", "c1", chatInput, chatCore, emptyList(), "同一句重复问")
+    val first = service.chat(profile(), "doc-1", "c1", chatInput, chatCore, null, emptyList(), "同一句重复问")
+    val second = service.chat(profile(), "doc-1", "c1", chatInput, chatCore, null, emptyList(), "同一句重复问")
 
     assertEquals("第一次回答", first)
     assertEquals("第二次回答", second)
@@ -781,9 +806,9 @@ class AnalysisServiceTest {
     server.enqueueJson("回答甲")
     server.enqueueJson("回答乙")
 
-    val first = async { service.chat(profile(), "doc-1", "c1", chatInput, chatCore, emptyList(), "问题甲") }
+    val first = async { service.chat(profile(), "doc-1", "c1", chatInput, chatCore, null, emptyList(), "问题甲") }
     while (server.requests.isEmpty()) delay(10)
-    val second = async { service.chat(profile(), "doc-1", "c1", chatInput, chatCore, emptyList(), "问题乙") }
+    val second = async { service.chat(profile(), "doc-1", "c1", chatInput, chatCore, null, emptyList(), "问题乙") }
 
     assertEquals("回答甲", first.await())
     assertEquals("回答乙", second.await())
@@ -796,7 +821,7 @@ class AnalysisServiceTest {
     server.enqueueSlowSse(listOf("缓", "慢", "回", "答"), gapMillis = 120)
 
     val job = async {
-      service.chat(profile(), "doc-1", "c1", chatInput, chatCore, emptyList(), "问", StreamedTextSink { })
+      service.chat(profile(), "doc-1", "c1", chatInput, chatCore, null, emptyList(), "问", StreamedTextSink { })
     }
     while (server.requests.isEmpty()) delay(10)
     // 页面命名空间的取消精确匹配，绝不连坐 "${documentId}:chat"。
@@ -812,7 +837,7 @@ class AnalysisServiceTest {
     // runCatching 放在 async 内部：async 子协程的失败会取消 runBlocking 父协程。
     val job = async {
       runCatching {
-        service.chat(profile(), "doc-1", "c1", chatInput, chatCore, emptyList(), "问", StreamedTextSink { })
+        service.chat(profile(), "doc-1", "c1", chatInput, chatCore, null, emptyList(), "问", StreamedTextSink { })
       }
     }
     while (server.requests.isEmpty()) delay(10)
@@ -845,7 +870,7 @@ class AnalysisServiceTest {
     val pushed = mutableListOf<String>()
 
     val answer = deterministic.chat(
-      profile(timeoutMs = 120), "doc-1", "c1", chatInput, chatCore, emptyList(), "问",
+      profile(timeoutMs = 120), "doc-1", "c1", chatInput, chatCore, null, emptyList(), "问",
       StreamedTextSink { pushed += it },
     )
 
@@ -875,7 +900,7 @@ class AnalysisServiceTest {
     // 更早入队的是第二个 core（ACTIVE_VISIBLE_CORE），更晚入队的 chat 必须先出队。
     val laterJob = async { singleSlot.analyzeCore(profile(), "doc-1", listOf(laterSentence)) }
     val chatJob = async {
-      singleSlot.chat(profile(), "doc-1", "c1", chatInput, chatCore, emptyList(), "问")
+      singleSlot.chat(profile(), "doc-1", "c1", chatInput, chatCore, null, emptyList(), "问")
     }
 
     assertEquals(1, coreJob.await().result.size)
@@ -897,7 +922,7 @@ class AnalysisServiceTest {
     val pushed = mutableListOf<String>()
 
     val answer = secretService.chat(
-      profile(), "doc-1", "c1", chatInput, chatCore, emptyList(), "问",
+      profile(), "doc-1", "c1", chatInput, chatCore, null, emptyList(), "问",
       StreamedTextSink { pushed += it },
     )
 

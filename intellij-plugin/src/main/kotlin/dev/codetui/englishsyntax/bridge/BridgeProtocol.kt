@@ -1,6 +1,7 @@
 package dev.codetui.englishsyntax.bridge
 
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
@@ -58,11 +59,12 @@ sealed interface PageMessage {
   ) : PageMessage
 
   /**
-   * 追问对话（JS→Kotlin）：基于该句已核实分析继续多轮提问。上下文不过桥——
-   * Kotlin 侧从 SentenceRecord 重建（input + core），桥上只有定位与对话载荷。
+   * 追问对话（JS→Kotlin）：基于该句已核实分析继续多轮提问。句子锚点上下文不过桥——
+   * Kotlin 侧从 SentenceRecord 重建（input + core）；surroundings 是可选的段落级
+   * 参考上下文（本段 + 前后邻段原文，web 侧按封顶截断后过桥，桥门只校验不改写）。
    * 桥是唯一防伪造门（IntelliJ 没有 Chrome 式 content 路由第二层），history
-   * 数量/字符上限与 question 的 trim 1..2000 全部在 [BridgeProtocol] 的 parse 里
-   * 结构化校验。
+   * 数量/字符上限与 question 的 trim 1..2000、surroundings 各键封顶全部在
+   * [BridgeProtocol] 的 parse 里结构化校验。
    */
   data class ChatAsk(
     override val previewId: String,
@@ -71,9 +73,19 @@ sealed interface PageMessage {
     val sentenceId: String,
     val history: List<ChatTurn>,
     val question: String,
+    val surroundings: ChatSurroundings?,
   ) : PageMessage {
     /** 一轮历史：用户提问或模型回答（不含 system——系统指令由 Kotlin 侧拼）。 */
     data class ChatTurn(val role: String, val content: String)
+
+    /**
+     * 段落级参考上下文：提问句所在段（current）与前后段（before/after）的原文。
+     * 三键全部可选，但 parse 门要求至少一键在场；值由 web 侧计算时已封顶截断
+     * （… 标记计入上限），过桥只校验不改写。与 web/bridge.ts 的 `ChatSurroundings`
+     * 镜像；与 model 层的 `ChatSurroundings` 分立——沿用 [ChatTurn] 的桥/模型分层
+     * 先例，connector 做映射。
+     */
+    data class ChatSurroundings(val before: String?, val current: String?, val after: String?)
   }
 
   /**
@@ -228,6 +240,14 @@ object BridgeProtocol {
   const val MAX_CHAT_HISTORY_CHARACTERS = 8000
   const val MAX_CHAT_QUESTION_CHARACTERS = 2000
 
+  // 追问对话段落上下文封顶（与 web/bridge.ts 同步；Chrome protocol.ts 同值，五处同值
+  // 见 Chrome 端注释）：current 是提问句所在段、预算最大，before/after 是相邻参考段、
+  // 预算依次收紧。… 截断标记计入各自上限——门按裸 length ≤ cap 判，不做标记感知；
+  // 值原样透传不 trim（web 侧计算时已封顶，门只兜底把关）。
+  const val MAX_CHAT_SURROUNDING_BEFORE_CHARS = 1200
+  const val MAX_CHAT_SURROUNDING_CURRENT_CHARS = 4000
+  const val MAX_CHAT_SURROUNDING_AFTER_CHARS = 800
+
   // 纠正反馈入站上限（与 CHAT_ASK 的 question 同值同款）：trim 后 1..2000。
   const val MAX_FEEDBACK_CHARACTERS = 2000
 
@@ -323,7 +343,7 @@ object BridgeProtocol {
    * IntelliJ 的 JCEF 页面可直接 post，这里合并为唯一一层——形状与上限都判。
    */
   private fun parseChatAsk(value: JsonObject, previewId: String, generation: Int): PageMessage.ChatAsk? {
-    if (!hasOnlyKeys(value, "version", "type", "previewId", "generation", "conversationId", "sentenceId", "history", "question")) return null
+    if (!hasOnlyKeys(value, "version", "type", "previewId", "generation", "conversationId", "sentenceId", "history", "question", "surroundings")) return null
     val conversationId = value.string("conversationId")?.takeIf { it.isNotEmpty() } ?: return null
     val sentenceId = value.string("sentenceId")?.takeIf { it.isNotEmpty() } ?: return null
     val history = value["history"] as? JsonArray ?: return null
@@ -345,7 +365,46 @@ object BridgeProtocol {
     // 裁剪字符集与 JS `.trim()` 逐字符一致（U+FEFF 算空白、U+001C–U+001F 不算）。
     val question = trimJsWhitespace(value.string("question") ?: return null)
     if (question.isEmpty() || question.length > MAX_CHAT_QUESTION_CHARACTERS) return null
-    return PageMessage.ChatAsk(previewId, generation, conversationId, sentenceId, turns, question)
+    // 段落上下文门（与 web/bridge.ts 的 surroundings 分支镜像）：键在场但解析被拒 →
+    // 整条拒收；键缺席 → null 下发（无上下文，合法）。
+    val rawSurroundings = value["surroundings"]
+    val surroundings = parseChatSurroundings(rawSurroundings)
+    if (rawSurroundings != null && surroundings == null) return null
+    return PageMessage.ChatAsk(previewId, generation, conversationId, sentenceId, turns, question, surroundings)
+  }
+
+  /**
+   * CHAT_ASK 的段落上下文门（与 web/bridge.ts parse 的 surroundings 分支镜像）：
+   * 键缺席 → null（无上下文，合法）；在场 → 须为 JsonObject、键集恰为
+   * before/current/after 的子集且至少一键在场、每个在场键为 string 且
+   * trimJsWhitespace 后非空、长度 ≤ 对应 [MAX_CHAT_SURROUNDING_BEFORE_CHARS] 等封顶
+   * （… 截断标记计入上限，裸长度判）——违规返回 null，调用方以「键在场但结果为
+   * null」整条拒收。值原样透传不 trim：surroundings 是 web 侧算好的已封顶文本，
+   * question 在门里 trim 的做法刻意不复制——机器输出只校验，用户输入才规范化。
+   * 空白判断走 [trimJsWhitespace]，与 JS `.trim()` 同一字符集。
+   */
+  private fun parseChatSurroundings(element: JsonElement?): PageMessage.ChatAsk.ChatSurroundings? {
+    if (element == null) return null
+    val raw = element as? JsonObject ?: return null
+    if (!hasOnlyKeys(raw, "before", "current", "after")) return null
+    var before: String? = null
+    var current: String? = null
+    var after: String? = null
+    if ("before" in raw) {
+      before = raw.string("before") ?: return null
+      if (trimJsWhitespace(before).isEmpty() || before.length > MAX_CHAT_SURROUNDING_BEFORE_CHARS) return null
+    }
+    if ("current" in raw) {
+      current = raw.string("current") ?: return null
+      if (trimJsWhitespace(current).isEmpty() || current.length > MAX_CHAT_SURROUNDING_CURRENT_CHARS) return null
+    }
+    if ("after" in raw) {
+      after = raw.string("after") ?: return null
+      if (trimJsWhitespace(after).isEmpty() || after.length > MAX_CHAT_SURROUNDING_AFTER_CHARS) return null
+    }
+    // 空对象（零键）与三键全缺没有上下文意义——照 web 端同款拒收。
+    if (before == null && current == null && after == null) return null
+    return PageMessage.ChatAsk.ChatSurroundings(before, current, after)
   }
 
   /**

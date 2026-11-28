@@ -391,24 +391,37 @@ export function buildDiagnosisPrompt(diagnosis: BlockDiagnosis): string {
  * contracts.json + Kotlin 双侧钉死，动它就破坏 Chrome-only 范围（buildDiagnosisPrompt
  * 先例）。假服务器 detectKind 按首行前缀识别请求类型，E2E 依赖此约定。
  *
- * 四段结构（spec §AnalysisService）全部拼在单条 user 消息里：系统指令 →
- * `serializeSentence` 句载荷 + `serialize` 紧凑 core → 历史轮次 → 本轮问题。
+ * 五段结构（spec §AnalysisService）全部拼在单条 user 消息里：系统指令（含「邻段
+ * 仅供参考、答案只谈本句」追加句）→ `serializeSentence` 句载荷 + `serialize` 紧凑
+ * core → Surrounding context 段 → 历史轮次 → 本轮问题。上下文段是单数组元素的四
+ * 行骨架，字段缺省占位 `none`：骨架逐字固定（含占位）才能被 Kotlin 侧逐字节镜像
+ * （Task 6）；邻段原文**直排**、不走 serialize/serializeSentence——那两条服务需要
+ * Token ID 定位的句载荷，上下文无需定位，紧凑直文已是最省。
  */
 export function buildChatPrompt(input: {
   context: ChatContext;
   history: readonly ChatTurn[];
   question: string;
 }): string {
+  const surroundings = input.context.surroundings;
   return [
     "Discuss the verified translation analysis with the reader.",
     "Answer the reader's question in Chinese based on the verified core analysis below. " +
       "Do not re-divide or re-tag the grammatical components: the verified analysis is fixed. " +
       "If the analysis conflicts with the question, follow the analysis and say so. " +
-      "Keep the answer concise and split it into short paragraphs.",
+      "Keep the answer concise and split it into short paragraphs. " +
+      "The surrounding paragraphs are reference context only: use them to resolve references " +
+      "that point outside the sentence (for example what a pronoun refers to), but keep every " +
+      "answer about the selected sentence — do not analyze, divide, or translate the context " +
+      "paragraphs.",
     "Selected sentence:",
     serializeSentence(input.context.sentence),
     "Verified core result:",
     serialize(input.context.core),
+    "Surrounding context (reference only; not the topic):\n" +
+      `Paragraph before: ${surroundings?.before ?? "none"}\n` +
+      `Paragraph containing the selected sentence: ${surroundings?.current ?? "none"}\n` +
+      `Paragraph after: ${surroundings?.after ?? "none"}`,
     "Conversation history (oldest first):",
     serialize(input.history),
     "Reader question:",

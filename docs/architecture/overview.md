@@ -166,9 +166,14 @@ MV3 把扩展拆成互不共享内存的几个世界。**每个模块能做什�
   │     重开恢复(2026-11-25):关闭/换句时快照停靠到控制器按句 Map(LRU 8),
   │     同句重开恢复历史(恢复内容不恢复 id);「新对话」按钮显式丢弃后重置
   ├─ 面板 Enter 提交 → askChat(): 面板先落用户轮 + pending 回答轮,再发 CHAT_ASK
-  │     {context: {sentence, core}, history(面板已裁剪、不含本轮悬空用户轮), question}
-  ├─ SW → chat(): 不查/不写缓存、无修复轮;流式经同一端口推 CHAT_STREAM(累积全量),
-  │     handleStreamPush 的 CHAT_STREAM 分支按 conversationId 转发面板整段重画
+  │     {context: {sentence, core, surroundings}, history(面板已裁剪、不含本轮悬空用户轮), question}
+  │     surroundings = 段落级参考上下文(2026-11-28):#chatSurroundingsFor 按文档序取本段 ±1
+  │     (轻量会话首次追问一次性只读扫描并缓存,不注册块/不触发解析),封顶 1200/4000/800
+  │     (… 计入封顶)后随消息过 SW——服务侧只校验,SW 不截断
+  ├─ SW → chat(): 不查/不写缓存、无修复轮;buildChatPrompt 五段(系统指令 → 句载荷+core
+  │     → Surrounding context 段(骨架固定,缺省占位 none) → 历史 → 问题),流式经同一端口
+  │     推 CHAT_STREAM(累积全量),handleStreamPush 的 CHAT_STREAM 分支按 conversationId
+  │     转发面板整段重画
   └─ SW → content: CHAT_RESULT 以缓冲答案校平收尾;ERROR 渲染 `${code}：${message}` 并撤销悬空用户轮
 ```
 

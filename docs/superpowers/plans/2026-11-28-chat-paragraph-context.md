@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- **五处封顶常量必须同值**：`MAX_CHAT_SURROUNDING_BEFORE_CHARS = 1200`（保尾，截断前置 `…`）、`MAX_CHAT_SURROUNDING_CURRENT_CHARS = 4000`（整段；超长句锚窗口）、`MAX_CHAT_SURROUNDING_AFTER_CHARS = 800`（保头，截断后置 `…`）。分布：`chrome-plugin/src/shared/protocol.ts`、`chrome-plugin/src/content/chat-surroundings.ts`（import 前者）、`intellij-plugin/src/main/resources/web/bridge.ts`、`intellij-plugin/src/main/resources/web/chat-surroundings.ts`（import 前者）、`intellij-plugin/src/main/kotlin/dev/codetui/englishsyntax/bridge/BridgeProtocol.kt`。
+- **五处封顶常量必须同值**：`MAX_CHAT_SURROUNDING_BEFORE_CHARS = 1200`（保尾，截断前置 `…`）、`MAX_CHAT_SURROUNDING_CURRENT_CHARS = 4000`（整段；超长句锚窗口）、`MAX_CHAT_SURROUNDING_AFTER_CHARS = 800`（保头，截断后置 `…`）。**`…` 标记计入各自上限**——截断产出的字段值恒 ≤ cap，与守卫/桥门「length ≤ cap」判据一致（2026-11-28 裁决：豁免标记会把标记知识扩散进双端四处门、破坏同值不变量）。分布：`chrome-plugin/src/shared/protocol.ts`、`chrome-plugin/src/content/chat-surroundings.ts`（import 前者）、`intellij-plugin/src/main/resources/web/bridge.ts`、`intellij-plugin/src/main/resources/web/chat-surroundings.ts`（import 前者）、`intellij-plugin/src/main/kotlin/dev/codetui/englishsyntax/bridge/BridgeProtocol.kt`。
 - **prompt 首行不动**（`Discuss the verified translation analysis with the reader.`）；`PROMPT_FIRST_LINES` 不含 chat；`contracts.json` 的 `promptFirstLines` 零变更；`CORE/DETAIL` 版本常量不动。
 - **双端五段逐字一致**。两段原文如下，Task 2（TS）与 Task 6（Kotlin）必须逐字节照抄：
   - 指令追加句（拼在现有指令串 `…split into short paragraphs.` 之后，前缀一个空格）：
@@ -152,11 +152,11 @@ export function documentOrderedNeighbors(
   candidates: readonly SurroundingCandidate[],
   current: SurroundingCandidate,
 ): { before?: SurroundingCandidate; after?: SurroundingCandidate };
-/** trim 后 ≤1200 原样返回;超长取尾部 1200 字符并前置 "…"(U+2026)。 */
+/** trim 后 ≤1200 原样返回;超长 = "…"(U+2026) + 尾 1199,总长恰 1200(标记计入)。 */
 export function capSurroundingBefore(text: string): string;
-/** trim 后 ≤800 原样返回;超长取头部 800 字符并后置 "…"。 */
+/** trim 后 ≤800 原样返回;超长 = 头 799 + "…",总长恰 800(标记计入)。 */
 export function capSurroundingAfter(text: string): string;
-/** trim 后 ≤4000 原样返回;超长取句锚窗口(算法见 Step 3),两端按需 "…"。 */
+/** trim 后 ≤4000 原样返回;超长取句锚窗口,总长 ≤4000(标记计入,不变量见 Step 3)。 */
 export function capSurroundingCurrent(text: string, anchorText: string): string;
 export function buildChatSurroundings(input: {
   neighbors: { before?: string; after?: string };
@@ -168,9 +168,9 @@ export function buildChatSurroundings(input: {
 - [ ] **Step 1: Write the failing tests（纯函数）**
 
 `chat-surroundings.test.ts`（happy-dom 造元素）：
-- `capSurroundingBefore`：1200 恰好原样；1201 取尾 1200 且首字符 `…`；首尾空白先 trim。
-- `capSurroundingAfter`：800 边界与 `…` 后置。
-- `capSurroundingCurrent`：≤4000 原样；超长且 anchor 命中 → 输出**完整包含** anchorText 且 ≤4000+2；anchor 长于窗口 → 从 anchor 起始处开窗；anchor 不命中 → 头部窗口；两端 `…` 仅在真截断时出现。
+- `capSurroundingBefore`：1200 恰好原样；超长产出 = `…` + 尾 1199（**总长恰 1200**，标记计入）；首尾空白先 trim。
+- `capSurroundingAfter`：800 恰好原样；超长产出 = 头 799 + `…`（总长恰 800）。
+- `capSurroundingCurrent`：≤4000 原样；超长且 anchor 命中 → 输出**完整包含** anchorText 且**总长 ≤4000（`…` 计入）**；anchor 长于窗口 → 从 anchor 起始处开窗（锚句允许被截断）；anchor 不命中 → 头部窗口；`…` 仅在真截断处出现。
 - `documentOrderedNeighbors`：三个段落按 DOM 顺序构造但 candidates 乱序传入 → before/after 是 DOM 序 ±1；current 不在 candidates 里 → 并入后仍取到真实邻块；current 脱 DOM（`remove()`）→ `{}`。
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -181,7 +181,7 @@ Expected: FAIL（模块不存在）
 - [ ] **Step 3: Implement `chat-surroundings.ts`**
 
 `documentOrderedNeighbors`：过滤 `element.isConnected`；`[...candidates, current]` 去重（按 element 身份）后以 `a.element.compareDocumentPosition(b.element) & Node.DOCUMENT_POSITION_FOLLOWING` 排序；定位 current 取 ±1。
-`capSurroundingCurrent` 算法（签名与测试不定死的部分）：`trimmed = text.trim()`；`idx = trimmed.indexOf(anchorText)`；`start = idx >= 0 ? Math.max(0, idx - 1200) : 0`；`end = start + 4000`；若 `idx >= 0 && end < idx + anchorText.length` 则 `start = idx; end = idx + 4000`；`end = Math.min(trimmed.length, end)`；返回 `(start > 0 ? "…" : "") + trimmed.slice(start, end) + (end < trimmed.length ? "…" : "")`。
+`capSurroundingCurrent` 不变量（窗口算术实现自选，测试钉死不变量）：`trimmed = text.trim()`；≤4000 原样；超长时 `idx = trimmed.indexOf(anchorText)` 定窗（命中则回看约 1200 字符；锚句装不下整个窗口时从 `idx` 起窗、锚句允许被截断；未命中取头部），窗口净长按「4000 − 两侧标记数」预留、贴边侧无标记时省下的预算如数还给窗口，产出**总长 ≤ 4000、`…` 仅在真截断处**。
 `buildChatSurroundings`：`{ before: cap 前(neighbors.before), current: capSurroundingCurrent(currentText, anchorText), after: cap 后(neighbors.after) }`，缺省字段不置（undefined）。
 
 - [ ] **Step 4: Run tests to verify they pass**
@@ -195,7 +195,7 @@ Expected: PASS
 1. **常规**：`askChat("sentence-2"...)`（中段句）→ 发出的 `CHAT_ASK.context.surroundings.before`/`after` 恰为前/后段文本，`current` 为中段整段文本。
 2. **文档序钉子**：`scan: () => [c2, c1, c3]`（扫描序刻意打乱模拟插入序错位）→ 中段句的 before 仍是 DOM 序前段（c1）。
 3. **轻量一次性扫描**：按既有显式手势测试的模式构造未扫描会话（`parseHoveredBlock`/`parseSelection` 路径，参考同文件既有用例）→ 首次 `askChat` 后 `options.scan` 恰好多调一次（spy 计数）、扫描结果**未**注册块（`status.discovered` 不变）；第二次 `askChat` 不再调用（缓存）；`stop()` 后缓存作废（重新调用）。
-4. **合法巨长块**：本段文本 > 4000 → `surroundings.current` ≤ 4002 且含锚句。
+4. **合法巨长块**：本段文本 > 4000 → `surroundings.current` ≤ 4000 且含锚句（`…` 计入总长）。
 
 - [ ] **Step 6: Run tests to verify they fail**
 

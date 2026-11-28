@@ -1,6 +1,8 @@
 var EnglishSyntaxPreview = (function(exports) {
 	Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
 	const MAX_CHAT_QUESTION_CHARACTERS = 2e3;
+	const MAX_CHAT_SURROUNDING_BEFORE_CHARS = 1200;
+	const MAX_CHAT_SURROUNDING_CURRENT_CHARS = 4e3;
 	const MAX_FEEDBACK_CHARACTERS = 2e3;
 	const FORBIDDEN_KEYS = /* @__PURE__ */ new Set([
 		"apiKey",
@@ -428,13 +430,22 @@ var EnglishSyntaxPreview = (function(exports) {
 		if (englishRatio(text) < ENGLISH_RATIO) return;
 		into.push(element);
 	}
-	function scanMarkdownBlocks(root) {
+	/**
+	* 共用候选走查（2026-11-28 spec 抽出）：querySelectorAll 先序遍历 + 标签过滤 +
+	* `collectCandidates` 资格门。`scanMarkdownBlocks` 与 `collectContextBlocks` 各自
+	* 消费同一实现——门的单一来源，改门只动这一处，防两处漂移（走查漏掉扫描新增的
+	* 排除区会让追问上下文喂进代码/数学段）。
+	*/
+	function collectEligibleElements(root) {
 		const elements = [];
 		for (const element of root.querySelectorAll("*")) {
 			if (!STANDARD_CANDIDATE_TAGS.has(element.tagName) && !isHyphenatedCustomElement(element)) continue;
 			collectCandidates(element, elements);
 		}
-		return elements.filter((element) => !registeredElements.has(element) && !element.hasAttribute("data-english-syntax-hidden")).map((element) => {
+		return elements;
+	}
+	function scanMarkdownBlocks(root) {
+		return collectEligibleElements(root).filter((element) => !registeredElements.has(element) && !element.hasAttribute("data-english-syntax-hidden")).map((element) => {
 			registeredElements.add(element);
 			return {
 				blockId: ensureBlockId(element),
@@ -442,6 +453,93 @@ var EnglishSyntaxPreview = (function(exports) {
 				text: (element.textContent ?? "").trim()
 			};
 		});
+	}
+	/**
+	* 只读走查（追问段落上下文，2026-11-28 spec）：收集候选块供 sendChatAsk 计算段落
+	* 上下文。与 `scanMarkdownBlocks` 共用同一候选走查（标签过滤 + `collectCandidates`
+	* 资格门），但**忽略 `registeredElements` 与 `HIDDEN_ATTRIBUTE` 两项过滤**——auto
+	* 模式整页挂卡且全部已注册，套用扫描的防重/防重复解析过滤会让走查拿不到任何候选
+	* （正是本特性要修的失败模式）；**零副作用**——不 `ensureBlockId`、不登记注册表
+	* （走查后再 `scanMarkdownBlocks` 仍返回空）。文本取 `(element.textContent ?? "")
+	* .trim()`（原文被卡片替换后只是打 HIDDEN 属性隐藏，textContent 不变）；
+	* `querySelectorAll` 先序即文档序（供 `documentOrderedNeighbors` 的 ±1 取邻段）。
+	*/
+	function collectContextBlocks(root) {
+		return collectEligibleElements(root).map((element) => ({
+			element,
+			text: (element.textContent ?? "").trim()
+		}));
+	}
+	//#endregion
+	//#region src/main/resources/web/chat-surroundings.ts
+	/**
+	* 候选按 compareDocumentPosition 排文档序,返回 current 的 ±1;current 脱 DOM
+	* 或不在候选里时按并入排序处理,均无邻块则两项 undefined。
+	*
+	* 文档序是唯一真相:Map 插入序在「轻量→全量升级」(悬停块先注册,扫描其余按
+	* fresh 过滤追加)与突变刷新(失效块删后重插到尾部)下都会错位,拿它取邻段会
+	* 静默喂错「上一段」——正是本特性要修的失败模式。current 脱 DOM(轻量会话的
+	* 选区锚被回收)时没有文档序锚点,两项邻块均不置(prompt 侧按 `none` 占位)。
+	*/
+	function documentOrderedNeighbors(candidates, current) {
+		const pool = [];
+		for (const candidate of [...candidates, current]) {
+			if (!candidate.element.isConnected) continue;
+			if (pool.some(({ element }) => element === candidate.element)) continue;
+			pool.push(candidate);
+		}
+		const ordered = pool.sort((a, b) => a.element.compareDocumentPosition(b.element) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1);
+		const index = ordered.findIndex(({ element }) => element === current.element);
+		if (index === -1) return {};
+		const neighbors = {};
+		if (index > 0) neighbors.before = ordered[index - 1];
+		if (index < ordered.length - 1) neighbors.after = ordered[index + 1];
+		return neighbors;
+	}
+	/** trim 后 ≤1200 原样返回;超长 = "…"(U+2026) + 尾 1199,总长恰 1200(标记计入)。 */
+	function capSurroundingBefore(text) {
+		const trimmed = text.trim();
+		if (trimmed.length <= 1200) return trimmed;
+		return `…${trimmed.slice(trimmed.length - 1199)}`;
+	}
+	/** trim 后 ≤800 原样返回;超长 = 头 799 + "…",总长恰 800(标记计入)。 */
+	function capSurroundingAfter(text) {
+		const trimmed = text.trim();
+		if (trimmed.length <= 800) return trimmed;
+		return `${trimmed.slice(0, 799)}…`;
+	}
+	/**
+	* current 段封顶:trim 后 ≤4000 原样返回;超长取句锚窗口——以锚句在段内的
+	* 命中位置定窗(命中则向前回看至多 1200,与 before 段同一预算,是算法钉死的
+	* 取值,引用同一常量而不是写出第二处 1200;未命中回落头部窗口)。`…` 标记
+	* 计入 4000 总预算(2026-11-28 裁决):两侧都真截断时净窗 4000−2;一侧贴到
+	* 段尾(无该侧标记)时省下的预算还给窗口;产出总长恒 ≤4000,与 Kotlin 桥门的
+	* 「length ≤ cap」判据一致。锚句连同回看前缀装不进从回看起点出发的最宽净窗
+	* 时,改从锚句起始处开窗——宁可截掉锚句尾部也不丢起点(锚句允许被截断)。
+	* 标记只出现在真截断边界。锚句不命中(理论到不了:锚句是段文本的子串)回落
+	* 头部窗口。
+	*/
+	function capSurroundingCurrent(text, anchorText) {
+		const trimmed = text.trim();
+		if (trimmed.length <= 4e3) return trimmed;
+		const budgetFrom = (start) => MAX_CHAT_SURROUNDING_CURRENT_CHARS - (start > 0 ? 1 : 0);
+		const widestEnd = (start) => {
+			const budget = budgetFrom(start);
+			return start + budget >= trimmed.length ? trimmed.length : start + budget - 1;
+		};
+		const idx = trimmed.indexOf(anchorText);
+		let start = idx >= 0 ? Math.max(0, idx - MAX_CHAT_SURROUNDING_BEFORE_CHARS) : 0;
+		if (idx >= 0 && idx + anchorText.length > widestEnd(start)) start = idx;
+		const end = widestEnd(start);
+		return `${start > 0 ? "…" : ""}${trimmed.slice(start, end)}${end < trimmed.length ? "…" : ""}`;
+	}
+	/** 组装 ChatSurroundings:邻段缺省(undefined)不置键,current 恒置。 */
+	function buildChatSurroundings(input) {
+		return {
+			...input.neighbors.before === void 0 ? {} : { before: capSurroundingBefore(input.neighbors.before) },
+			current: capSurroundingCurrent(input.currentText, input.anchorText),
+			...input.neighbors.after === void 0 ? {} : { after: capSurroundingAfter(input.neighbors.after) }
+		};
 	}
 	//#endregion
 	//#region src/main/resources/web/roles.ts
@@ -1329,6 +1427,20 @@ var EnglishSyntaxPreview = (function(exports) {
 		*/
 		sentenceText(sentenceId) {
 			return this.#originalText(sentenceId);
+		}
+		/**
+		* 句子所在块的原元素（#sentences 的 blockId → #blocks 的 element）。
+		* 供 bootstrap 在追问发送侧（sendChatAsk）定位本段元素——刻意经注册表查,
+		* **不做 sentenceId 字符串反解**（`s-{blockId}-{index}` 的形态契约归 Kotlin 侧
+		* 持有,反解会让 web 侧与该格式耦合,格式一变这里静默错位）。卡片渲染后仍返回
+		* 原 <p>（不是卡片）:collectContextBlocks 的候选集收录的正是原段落元素,追问
+		* current 要与它身份相等才能命中。未注册句返回 null——调用方据此省略
+		* CHAT_ASK 的 surroundings 键（优雅降级,不发空对象）。
+		*/
+		sentenceBlockElement(sentenceId) {
+			const entry = this.#sentences.get(sentenceId);
+			if (entry === void 0) return null;
+			return this.#blocks.get(entry.blockId)?.element ?? null;
 		}
 		restoreAll() {
 			this.#closeCorrection();
@@ -2430,12 +2542,34 @@ var EnglishSyntaxPreview = (function(exports) {
 	* 面板 submit → 构造并发送 CHAT_ASK。图标点击时**绝不下发**这条消息——那时还没有合法
 	* question，Kotlin 侧 parseChatAsk（trim 后 1..2000 + 白名单键集）会直接拒收。history 只做
 	* 最浅的防呆（收敛到 {role, content} 键集 + 取最近 6 项）；按字符裁剪是面板职责，硬门在 Kotlin。
+	*
+	* 段落级上下文（2026-11-28 spec）：current = 本句所在块元素（renderer 访问器定位，
+	* 不做 sentenceId 反解），候选集每次现走查（`collectContextBlocks` 只读零副作用，
+	* 已注册/已挂卡的原段照常收录），邻段按文档序 ±1，封顶截断由 `chat-surroundings`
+	* 的纯函数完成（Chrome 端逐函数镜像）。renderer 找不到本句元素（未注册句）时
+	* **省略 surroundings 键**——空对象过不了 Kotlin 桥门的「至少一键在场」，宁可
+	* 无上下文也不发错的段（优雅降级）。
 	*/
 	function sendChatAsk(input) {
 		const s = state;
 		if (s === null || s.previewId === "") return false;
 		const question = input.question.trim();
 		if (question.length === 0 || question.length > 2e3) return false;
+		const currentEl = s.renderer.sentenceBlockElement(input.sentenceId);
+		const candidates = collectContextBlocks(document.body);
+		const current = currentEl === null ? null : candidates.find((c) => c.element === currentEl) ?? {
+			element: currentEl,
+			text: (currentEl.textContent ?? "").trim()
+		};
+		const neighbors = current === null ? void 0 : documentOrderedNeighbors(candidates, current);
+		const surroundings = current === null ? void 0 : buildChatSurroundings({
+			neighbors: {
+				before: neighbors?.before?.text,
+				after: neighbors?.after?.text
+			},
+			currentText: current.text,
+			anchorText: s.renderer.sentenceText(input.sentenceId)
+		});
 		postToHost({
 			version: 1,
 			type: "CHAT_ASK",
@@ -2447,7 +2581,8 @@ var EnglishSyntaxPreview = (function(exports) {
 				role: turn.role,
 				content: turn.content
 			})),
-			question
+			question,
+			...surroundings === void 0 ? {} : { surroundings }
 		});
 		return true;
 	}

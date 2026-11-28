@@ -1260,6 +1260,21 @@ export class PreviewRenderer {
     return this.#originalText(sentenceId);
   }
 
+  /**
+   * 句子所在块的原元素（#sentences 的 blockId → #blocks 的 element）。
+   * 供 bootstrap 在追问发送侧（sendChatAsk）定位本段元素——刻意经注册表查,
+   * **不做 sentenceId 字符串反解**（`s-{blockId}-{index}` 的形态契约归 Kotlin 侧
+   * 持有,反解会让 web 侧与该格式耦合,格式一变这里静默错位）。卡片渲染后仍返回
+   * 原 <p>（不是卡片）:collectContextBlocks 的候选集收录的正是原段落元素,追问
+   * current 要与它身份相等才能命中。未注册句返回 null——调用方据此省略
+   * CHAT_ASK 的 surroundings 键（优雅降级,不发空对象）。
+   */
+  sentenceBlockElement(sentenceId: string): HTMLElement | null {
+    const entry = this.#sentences.get(sentenceId);
+    if (entry === undefined) return null;
+    return this.#blocks.get(entry.blockId)?.element ?? null;
+  }
+
   restoreAll(): void {
     // F2：清卡是「我方主动 restore」，纠正行随之收走（行钉在卡片/原文块之后）。
     this.#closeCorrection();

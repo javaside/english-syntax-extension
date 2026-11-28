@@ -13,6 +13,13 @@ export const MAX_BLOCK_TEXT = 20_000;
 export const MAX_CHAT_HISTORY_TURNS = 6;
 export const MAX_CHAT_HISTORY_CHARACTERS = 8000;
 export const MAX_CHAT_QUESTION_CHARACTERS = 2000;
+// 追问对话段落上下文封顶（与 Kotlin BridgeProtocol 同步；Chrome protocol.ts 同值，
+// 五处同值见该文件注释）：current 是提问句所在段、预算最大，before/after 是相邻
+// 参考段、预算依次收紧。… 截断标记计入各自上限——门按裸 length ≤ cap 判，不做
+// 标记感知；值原样透传不 trim（web 侧计算时已封顶，门只兜底把关）。
+export const MAX_CHAT_SURROUNDING_BEFORE_CHARS = 1200;
+export const MAX_CHAT_SURROUNDING_CURRENT_CHARS = 4000;
+export const MAX_CHAT_SURROUNDING_AFTER_CHARS = 800;
 // 纠正反馈入站上限（与 Kotlin BridgeProtocol.MAX_FEEDBACK_CHARACTERS 同步；CHAT_ASK question 同值同款）。
 export const MAX_FEEDBACK_CHARACTERS = 2000;
 
@@ -72,9 +79,24 @@ export interface ChatTurn {
 }
 
 /**
- * 追问对话（JS→Kotlin）：基于该句已核实分析继续多轮提问。上下文不过桥——
- * Kotlin 侧从 SentenceRecord 重建，桥上只有定位与对话载荷。question 为 trim 后
- * 1..2000、history ≤6 项/≤8000 字符的上限在 parse 里结构化校验（防伪造门）。
+ * 追问对话的段落级参考上下文：提问句所在段（current）与前后段（before/after）的
+ * 原文。三键全部可选，但 parse 门要求至少一键在场；值由页面侧计算时已封顶截断
+ * （… 标记计入上限），过桥只校验不改写——与 question 在门里 trim 的做法刻意不同：
+ * 机器输出只校验，用户输入才规范化。与 Kotlin `PageMessage.ChatAsk.ChatSurroundings`
+ * 镜像。
+ */
+export interface ChatSurroundings {
+  before?: string;
+  current?: string;
+  after?: string;
+}
+
+/**
+ * 追问对话（JS→Kotlin）：基于该句已核实分析继续多轮提问。句子锚点上下文不过桥——
+ * Kotlin 侧从 SentenceRecord 重建；surroundings 是可选的段落级参考上下文（本段 +
+ * 前后邻段原文），桥门只校验不改写。question 为 trim 后 1..2000、history ≤6 项/
+ * ≤8000 字符、surroundings 各键 trim 后非空且 ≤ 对应封顶的上限在 parse 里结构化
+ * 校验（防伪造门）。
  */
 export interface ChatAskPageMessage extends PageMessageBase {
   type: "CHAT_ASK";
@@ -82,6 +104,7 @@ export interface ChatAskPageMessage extends PageMessageBase {
   sentenceId: string;
   history: ChatTurn[];
   question: string;
+  surroundings?: ChatSurroundings;
 }
 
 /**
@@ -201,7 +224,7 @@ const PAGE_KEYS_BY_TYPE: Readonly<Record<string, readonly string[]>> = {
   RETRY_SENTENCE: ["version", "type", "previewId", "generation", "sentenceId"],
   PREVIEW_RENDERED: ["version", "type", "previewId", "generation"],
   PARSE_BLOCK: ["version", "type", "previewId", "generation", "blockId", "text"],
-  CHAT_ASK: ["version", "type", "previewId", "generation", "conversationId", "sentenceId", "history", "question"],
+  CHAT_ASK: ["version", "type", "previewId", "generation", "conversationId", "sentenceId", "history", "question", "surroundings"],
   FEEDBACK_REQUEST: ["version", "type", "previewId", "generation", "sentenceId", "feedback"],
   TTS_SPEAK: ["version", "type", "previewId", "generation", "sentenceId", "text"],
   TTS_STOP: ["version", "type", "previewId", "generation"],
@@ -321,6 +344,48 @@ export function parsePageMessage(value: unknown): PageMessage | null {
         if (historyCharacters > MAX_CHAT_HISTORY_CHARACTERS) return null;
         history.push({ role: turn.role, content: turn.content });
       }
+      // 段落上下文封顶门（与 Kotlin parseChatAsk 的 surroundings 分支镜像）：
+      // 键缺席即无上下文（合法）；在场须为 record、键集恰为 before/current/after 的
+      // 子集且至少一键在场、每个在场键是 trim() 非空且不超对应封顶的 string。
+      // 值原样透传不 trim——surroundings 是机器算好的已封顶文本（… 标记计入上限），
+      // question 在门里 trim 的做法刻意不复制。
+      let surroundings: ChatSurroundings | undefined;
+      if (value.surroundings !== undefined) {
+        const raw = value.surroundings;
+        if (!isRecord(raw)) return null;
+        if (!hasOnlyKeys(raw, ["before", "current", "after"])) return null;
+        const { before, current, after } = raw;
+        if (before === undefined && current === undefined && after === undefined) return null;
+        const parsed: ChatSurroundings = {};
+        if (before !== undefined) {
+          if (
+            typeof before !== "string" ||
+            before.trim().length === 0 ||
+            before.length > MAX_CHAT_SURROUNDING_BEFORE_CHARS
+          )
+            return null;
+          parsed.before = before;
+        }
+        if (current !== undefined) {
+          if (
+            typeof current !== "string" ||
+            current.trim().length === 0 ||
+            current.length > MAX_CHAT_SURROUNDING_CURRENT_CHARS
+          )
+            return null;
+          parsed.current = current;
+        }
+        if (after !== undefined) {
+          if (
+            typeof after !== "string" ||
+            after.trim().length === 0 ||
+            after.length > MAX_CHAT_SURROUNDING_AFTER_CHARS
+          )
+            return null;
+          parsed.after = after;
+        }
+        surroundings = parsed;
+      }
       return {
         version: BRIDGE_VERSION,
         type: "CHAT_ASK",
@@ -330,6 +395,7 @@ export function parsePageMessage(value: unknown): PageMessage | null {
         sentenceId: value.sentenceId,
         history,
         question,
+        surroundings,
       };
     }
     case "FEEDBACK_REQUEST": {

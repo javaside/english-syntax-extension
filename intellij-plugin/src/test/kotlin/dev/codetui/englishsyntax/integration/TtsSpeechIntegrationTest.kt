@@ -72,6 +72,7 @@ class TtsSpeechIntegrationTest {
       conversationId: String,
       input: dev.codetui.englishsyntax.domain.SentenceInput,
       core: dev.codetui.englishsyntax.domain.CoreAnalysis,
+      surroundings: dev.codetui.englishsyntax.model.ChatSurroundings?,
       history: List<dev.codetui.englishsyntax.model.ChatTurn>,
       question: String,
       onStreamedText: dev.codetui.englishsyntax.analysis.StreamedTextSink?,

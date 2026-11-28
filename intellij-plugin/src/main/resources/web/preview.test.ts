@@ -2,9 +2,11 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  collectContextBlocks,
   deepestHovered,
   ensureBlockId,
   HOVER_CHAIN_SELECTOR,
+  HIDDEN_ATTRIBUTE,
   nearestPreviewBlock,
   observeBlocks,
   resetScanRegistry,
@@ -208,6 +210,99 @@ describe("scanMarkdownBlocks semantic document blocks", () => {
     expect(found).not.toContain("mermaid");
     expect(found).not.toContain("button");
     expect(found).not.toContain("card");
+  });
+});
+
+/**
+ * 只读走查（追问段落上下文，2026-11-28 spec）：collectContextBlocks 与
+ * scanMarkdownBlocks 共用同一候选走查（标签过滤 + collectCandidates 资格门），但
+ * **忽略 registeredElements 与 HIDDEN_ATTRIBUTE 两项过滤**——auto 模式整页挂卡且
+ * 全部已注册，套用扫描过滤会拿不到任何候选（正是本特性要修的失败模式）。
+ */
+describe("collectContextBlocks", () => {
+  beforeEach(() => {
+    document.body.replaceChildren();
+  });
+
+  it("先 scanMarkdownBlocks 注册全部块后走查：已注册块照旧返回，门仍生效", () => {
+    const container = fixture();
+    // auto 语义：先注册全部块（含 ensureBlockId 与 registeredElements 登记）。
+    const scanned = scanMarkdownBlocks(container);
+    expect(scanned.length).toBeGreaterThan(0);
+    // 模拟已挂卡的块：原文被打上 HIDDEN 属性（renderer 在卡片出现后写入）。
+    document.getElementById("plain")!.setAttribute(HIDDEN_ATTRIBUTE, "true");
+
+    const candidates = collectContextBlocks(container);
+    const found = candidates.map((candidate) => candidate.element.id);
+    // 已注册块与已挂卡隐藏的块都在——走查刻意忽略这两项过滤。
+    expect(found).toContain("title");
+    expect(found).toContain("plain");
+    expect(found).toContain("hard-gate");
+    expect(found).toContain("important");
+    expect(found).toContain("list-item-1");
+    expect(found).toContain("quote-inner");
+    expect(found).toContain("cell");
+    expect(found).toContain("nested-inner");
+    // 门（排除区/最短长度/英文占比）与 scanMarkdownBlocks 单一来源，不因走查放宽。
+    expect(found).not.toContain("code");
+    expect(found).not.toContain("math");
+    expect(found).not.toContain("mermaid");
+    expect(found).not.toContain("button");
+    expect(found).not.toContain("card");
+    expect(found).not.toContain("list-item-short");
+    expect(found).not.toContain("chinese");
+    // 文本取 (element.textContent ?? "").trim()。
+    expect(candidates.find((candidate) => candidate.element.id === "plain")?.text).toBe(
+      "The service validates every response before returning it.",
+    );
+  });
+
+  it("零副作用：走查后再 scanMarkdownBlocks 仍返回空（注册态未被扰动）", () => {
+    const container = fixture();
+    const first = scanMarkdownBlocks(container);
+    expect(first.length).toBeGreaterThan(0);
+
+    const candidates = collectContextBlocks(container);
+    expect(candidates.length).toBeGreaterThan(0);
+
+    // 走查不得把元素写进注册表：二次 scan 仍返回空（WeakSet 防重扫描未被触碰）。
+    expect(scanMarkdownBlocks(container)).toHaveLength(0);
+  });
+
+  it("零副作用：不写 block id 属性、不新增任何 data-* 标记", () => {
+    const container = fixture();
+
+    collectContextBlocks(container);
+
+    // ensureBlockId 的副作用是 data-english-syntax-block 属性；走查必须一个不写。
+    expect(container.querySelectorAll("[data-english-syntax-block]")).toHaveLength(0);
+    expect(container.querySelectorAll(`[${HIDDEN_ATTRIBUTE}]`)).toHaveLength(0);
+  });
+
+  it("返回 DOM 先序（querySelectorAll 先序即文档序）", () => {
+    const container = document.createElement("div");
+    container.innerHTML = `
+      <p id="first">First paragraph with plenty of english words inside.</p>
+      <ul><li id="item">List item with plenty of english words inside.</li></ul>
+      <blockquote><p id="quoted">Quoted paragraph with plenty of english words.</p></blockquote>
+      <table><tr><td id="cell">Table cell with plenty of english words here.</td></tr></table>
+      <p id="last">Last paragraph with plenty of english words inside it.</p>
+    `;
+    document.body.append(container);
+
+    const candidates = collectContextBlocks(container);
+    // blockquote 的内层 p 会被收录**两次**：blockquote 分支递归取内部叶子 +
+    // querySelectorAll 先序随后又直接遍历到它——与 scanMarkdownBlocks 同款既有
+    // 行为（已用 HEAD 版本验证），重复候选的去重由 documentOrderedNeighbors 按
+    // element 身份完成（Chrome 镜像模块的既定语义），刻意不在走查里加去重。
+    expect(candidates.map((candidate) => candidate.element.id)).toEqual([
+      "first",
+      "item",
+      "quoted",
+      "quoted",
+      "cell",
+      "last",
+    ]);
   });
 });
 

@@ -50,6 +50,7 @@ class PageMessageWiringTest {
     var chatCalls = 0
     var lastChatConversationId: String? = null
     var lastChatQuestion: String? = null
+    var lastChatSurroundings: dev.codetui.englishsyntax.model.ChatSurroundings? = null
     var chatPushes: List<String> = emptyList()
     var chatAnswer = ""
     val cancelledDocuments = mutableListOf<String>()
@@ -85,6 +86,7 @@ class PageMessageWiringTest {
       conversationId: String,
       input: SentenceInput,
       core: CoreAnalysis,
+      surroundings: dev.codetui.englishsyntax.model.ChatSurroundings?,
       history: List<ChatTurn>,
       question: String,
       onStreamedText: StreamedTextSink?,
@@ -92,6 +94,7 @@ class PageMessageWiringTest {
       chatCalls += 1
       lastChatConversationId = conversationId
       lastChatQuestion = question
+      lastChatSurroundings = surroundings
       onStreamedText?.let { sink -> chatPushes.forEach { sink.onText(it) } }
       return chatAnswer
     }
@@ -214,13 +217,21 @@ class PageMessageWiringTest {
     )
 
     panel.onPageMessage(
-      """{"version":1,"type":"CHAT_ASK","previewId":"${panel.previewId}","generation":${panel.generation},"conversationId":"${panel.previewId}:chat:1","sentenceId":"s-b1-0","history":[{"role":"user","content":"上一轮问题"}],"question":"这个短语修饰谁?"}""",
+      """{"version":1,"type":"CHAT_ASK","previewId":"${panel.previewId}","generation":${panel.generation},"conversationId":"${panel.previewId}:chat:1","sentenceId":"s-b1-0","history":[{"role":"user","content":"上一轮问题"}],"question":"这个短语修饰谁?","surroundings":{"before":"Paragraph before the answer sentence.","current":"The service validates every response today.","after":"Paragraph after the answer sentence."}}""",
     )
     delay(150)
 
     assertEquals(1, port.chatCalls, "CHAT_ASK 必须真正派发到会话（Task 1 曾是 Unit 占位）")
     assertEquals("${panel.previewId}:chat:1", port.lastChatConversationId)
     assertEquals("这个短语修饰谁?", port.lastChatQuestion)
+    // 端到端钉子：surroundings 经桥门（九键白名单 + 封顶/子集校验）→ connector 的
+    // 桥→模型映射 → session 穿参 → 服务层 chat 收到的必须是逐字段等值的模型
+    // ChatSurroundings（不是桥类型、不是非 null 就够）——映射漂移（换位/丢键/换类型）都会红。
+    val mapped = port.lastChatSurroundings
+    assertNotNull(mapped, "surroundings 必须过桥并映射到模型 ChatSurroundings（null = 整条链断开）")
+    assertEquals("Paragraph before the answer sentence.", mapped.before, "before 必须逐字透传")
+    assertEquals("The service validates every response today.", mapped.current, "current 必须逐字透传")
+    assertEquals("Paragraph after the answer sentence.", mapped.after, "after 必须逐字透传")
     assertTrue(sentScripts.any { it.contains("CHAT_STREAM") && it.contains("前半段") }, "流式分片要回到页面通道")
     assertTrue(sentScripts.any { it.contains("CHAT_RESULT") && it.contains("完整回答") }, "最终全文要回到页面通道")
     assertTrue(sentScripts.none { it.contains("CHAT_ERROR") }, "成功路径不得夹带 CHAT_ERROR")

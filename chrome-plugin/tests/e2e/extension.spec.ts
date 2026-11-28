@@ -1115,6 +1115,18 @@ test("追问对话 chat 面板：两段流式回答拼齐且第二轮携带多�
   const firstRound = harness.fakeModel.recordedOfKind("chat");
   expect(firstRound).toHaveLength(1);
   expect(firstRound[0]!.streamed).toBe(true);
+  // 段落级上下文(2026-11-28):单段页面上骨架四行俱全,current 行携带本段真实文本、
+  // 邻段占位 none——按值形断言而非只查骨架头:骨架在而值错(上下文没过 SW 守卫、或
+  // content 取错段)同样红。封顶/文档序 ±1 已由 chat-surroundings/session-controller
+  // 单测钉住,E2E 只钉端到端接线(探针:假服务器记录的请求体,不用墙钟)。
+  expect(firstRound[0]!.promptText).toContain(
+    [
+      "Surrounding context (reference only; not the topic):",
+      "Paragraph before: none",
+      `Paragraph containing the selected sentence: ${SINGLE_SENTENCE}`,
+      "Paragraph after: none",
+    ].join("\n"),
+  );
 
   // 第二轮:先探输入框恢复可用(上一轮 CHAT_RESULT 已收尾),再发第二问。
   await expect(composer).toBeEnabled();
