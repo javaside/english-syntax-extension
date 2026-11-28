@@ -28,10 +28,23 @@
 - **协议与 prompt**:Chrome `ChatContext` 增可选 `surroundings`、IntelliJ 桥 `CHAT_ASK` 升**九键白名单**(键可缺,在场则须对象、键集 ⊆ before/current/after 且至少一键、各值 trim 后非空、≤ 各自封顶,违者整条拒收;值**原样透传不 trim**——机器输出只校验,用户输入才规范化);chat prompt 升为**五段**结构,`Surrounding context` 段骨架逐字固定(缺省占位 `none`),双端逐字节一致由两端提示词测试的**镜像字面断言**长期钉住(Chrome `prompts.test.ts` / IntelliJ `PromptsTest` 各自逐字断言同组字符串;开发期临时对拍 fixture 已移除),上下文原文**直排**、不走 `serialize`(无需 Token 定位,紧凑直文已是最省)。
 - **IntelliJ 端到端钉子**:`PageMessageWiringTest` 从真实桥 JSON(CHAT_ASK 带 `surroundings`)断言服务层 `chat` 收到**逐字段等值**的模型 `ChatSurroundings`——桥门、connector 映射、session/服务穿参任何一环断开或漂移(换位/丢键/换类型)都会红。
 
+### 功能:悬停解析快捷键(Alt+T)升级为开关循环
+
+翻译完的段落,鼠标停在上面再按一次就恢复英文原文,再按一次卡片按既有译文回来(不重新调模型)。双端对等,协议、SW、Kotlin 桥零改动。
+
+- **开关循环**:解析完成后鼠标停在卡片(或已隐藏原文)上再按 = 恢复原文;卡片被收起后再按 = 重显卡片——句子相位、块记录、缓存全部不动,重显不发新请求。卡片是否在页上就是开关状态,没有新状态字段。
+- **只有悬停快捷键获得开关语义**:选区解析与右键「解析此区域」维持「该段已解析」提示。
+- 解析进行中再按:提示「该段正在解析中…」,不做取消;开关动作与首次按键共用 400ms 去抖,窗口内的连按静默忽略,防止翻译/原文来回闪。
+
+#### 端点行为
+
+- **Chrome**:整块纯缓存未命中(skipped,卡片从未上页)不参与开关,维持「该段已解析」提示;失败行随卡片一起收起、重显后「重新解析」按钮照旧可用;关卡时追问面板若锚定该块的句子,随停停靠收走。
+- **IntelliJ**:renderer 新增单块 `restoreBlock`/`repaintBlock` 与句子→块查询;重显路径绝不走 `registerBlock`(会丢句子映射,卡片虽回却点不动);关卡同步复位「有卡片」基线,避免删卡被误判成官方重渲染而触发换代重扫(那会让「开」退化成重新下发、追问停靠被清);追问面板仅当其锚定句属于被关的块时随停停靠收走,锚定别的块不受牵连;纠错行与详解状态按块收,别的块卡片不动。
+
 ### 测试
 
-- Chrome:单测 1529 项(重开恢复 11 项 + 段落上下文 26 项——`chat-surroundings` 纯函数、SW 守卫与 wire 边界、`askChat` 文档序 ±1/轻量会话一次性扫描;渲染器 13 项 + 面板接线 4 项,含 `<script>` 字面显示与定界符游程安全断言)、Playwright E2E 49 通过 2 跳过全绿(chat 回答带 `**粗体**` 真实浏览器断言 `<p>`/`<strong>` 渲染;既有 chat 用例扩展「prompt 携带骨架与本段真实文本」的值形断言)。
-- IntelliJ:web vitest 243 项全绿(重开恢复 7 项 + 段落上下文 34 项——桥 `surroundings` 门 7 项、`chat-surroundings` 镜像纯函数/渲染/bootstrap 集成 27 项;渲染器 13 项同构 + 面板接线 6 项,含 preview.css 亮/暗文本钉与暗色字色断言);`bundle.js` 已随合并后 web 源码重建(CSP 文本守卫三查全 0);Gradle `test` 474 项全绿(+9:桥门 `BridgeProtocolTest`、prompt 五段 `PromptsTest`、服务穿参 `AnalysisServiceTest`;另既有 `PreviewSessionTest`/`PageMessageWiringTest` 强化穿参与端到端断言)。
+- Chrome:单测 1535 项(段落上下文 26 项、markdown 渲染与面板接线、开关循环 8 项含追问面板判块收走)、Playwright E2E 50 通过 2 跳过全绿(「再按快捷键」改造 + 三连按循环用例,core fetch 计数探针钉死重显不调模型)。
+- IntelliJ:web vitest 251 项全绿(重开恢复、markdown 渲染、段落上下文、开关循环含「关卡不误报重渲染」与「关后去抖窗口内『开』静默」);`bundle.js` 已随合并后 web 源码重建;Kotlin 零改动(开关循环),Gradle `test` 474 项全绿。
 
 ## 1.8.1 — 2026-11-24
 

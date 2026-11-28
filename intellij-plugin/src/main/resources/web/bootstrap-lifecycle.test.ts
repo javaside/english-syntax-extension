@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // 的判据里用到，RESTORE_ALL 分支会把它复位，详见用例）。
 import { installChatPanel, sendChatAsk, setChatPanel, type ChatPanelSeam } from "./bootstrap-entry";
 import { MAX_CHAT_SURROUNDING_CURRENT_CHARS } from "./bridge";
+import { CHAT_ASK_REQUEST_EVENT } from "./render";
 
 interface Posted {
   type: string;
@@ -70,9 +71,13 @@ describe("bootstrap-entry 停止回归", () => {
     // 忘了 npm run bundle-web 的症状是「Kotlin 侧全绿、真机按快捷键毫无反应」。
     expect(bundle).toContain("PARSE_BLOCK");
     expect(bundle).toContain("__englishSyntaxParseHoveredBlock");
-    // 「该段已解析」有两处判据：鼠标停在卡片里、以及停在已出过卡的原文上（卡片的兄弟节点）。
-    // 少一处就会对同一段重复下发，页面永远停在「解析中」——而这两条判据都只活在 bundle 里。
-    expect(bundle.match(/该段已解析/g) ?? []).toHaveLength(2);
+    // 开关循环(2026-11-28 spec)两处「关」判据——鼠标停在卡片里、停在已出过卡的原文上
+    // (卡片的兄弟节点)——都只活在 bundle 里;少一处就有一半入口漏判(对同一段重复下发或
+    // 误报未找到)。两处都提示「该段正在解析中…」,只剩孤儿卡片兜底走「该段已解析」。
+    expect(bundle.match(/该段正在解析中/g) ?? []).toHaveLength(2);
+    expect(bundle).toContain("restoreBlock");
+    expect(bundle).toContain("repaintBlock");
+    expect(bundle).toContain("dataset.blockId");
     // F2 纠正反馈：桥消息与内联输入行同样只经 bundle 进真机——忘了重建 bundle 的症状
     // 是「单测全绿、真机失败行没有纠正按钮」。
     expect(bundle).toContain("FEEDBACK_REQUEST");
@@ -329,35 +334,45 @@ describe("bootstrap-entry 按段解析", () => {
     expect(label()).toContain("未找到");
   });
 
-  it("悬停在已渲染的卡片上时提示该段已解析", async () => {
-    const card = document.createElement("div");
-    card.setAttribute("data-english-syntax-card", "true");
-    const inner = document.createElement("span");
-    inner.textContent = "Rendered card text.";
-    card.append(inner);
-    document.body.append(card);
+  it("悬停在卡片上再按：恢复原文（卡片探针）", async () => {
+    // 开关循环(2026-11-28 spec):解析 settle 后鼠标停在卡片上再按 = 关。
+    // 原用例只造静态卡片验「不落未找到」,现在走真实链路(renderer 建卡带 data-block-id)。
+    const para = document.createElement("p");
+    para.textContent = "The service validates every response before returning anything.";
+    document.body.append(para);
 
     initialize()("pv-card", 0, false);
     await flush();
     posted.length = 0;
 
-    parseHovered()(inner);
+    parseHovered()(para);
+    await flush();
+    const blockId = para.getAttribute("data-english-syntax-block")!;
+    hostMessage()(coreResultMessage("pv-card", 0, blockId));
+    await flush();
+    const card = document.querySelector("[data-english-syntax-card]")!;
+    expect(card).not.toBeNull();
+    expect(para.hasAttribute("data-english-syntax-hidden")).toBe(true);
+    posted.length = 0;
+
+    vi.spyOn(Date, "now").mockReturnValue(Date.now() + 5_000);
+    parseHovered()(card);
     await flush();
 
-    expect(posted.some((m) => m.type === "PARSE_BLOCK")).toBe(false);
-    expect(label()).toContain("该段已解析");
+    expect(para.hasAttribute("data-english-syntax-hidden")).toBe(false);
+    expect(document.querySelector("[data-english-syntax-card]")).toBeNull();
+    expect(posted.filter((m) => m.type === "PARSE_BLOCK")).toHaveLength(0);
   });
 
-  it("同一段解析完再按：提示已解析、不重复下发，卡片仍点得动", async () => {
-    // 用户 bug：「同一段，已经按过快捷键翻译好，再按的话就一直显示在翻译状态，
-    // 原来翻译出来的句子也点击不了。」两处成因都钉在这条用例里：
+  it("同一段解析完再按：恢复原文；再按重显卡片，句子映射不丢、成分仍点得动", async () => {
+    // 用户 bug 的两处成因都钉在这条用例里（开关循环后行为升级）：
     //  ① 卡片插在原文之后，原文是卡片的**兄弟**节点 —— 上一条用例的
     //     `closest([data-english-syntax-card])` 只拦得住「鼠标停在卡片里」，
     //     停在原文上照样放行 → 对同一段重复下发 PARSE_BLOCK，而 Kotlin 侧那段已全 READY，
-    //     于是没有任何 CORE_RESULT 回来撤掉「解析中」竖条与浮层。
+    //     于是没有任何 CORE_RESULT 回来撤掉「解析中」竖条与浮层。 → 原文探针也是关。
     //  ② 放行后 `renderer.registerBlock` 会清空该块的句子映射，卡片虽然还在 DOM 上、
     //     监听器也还在，但 `#showDetailLoading`/`#showDetailPanel` 查 `#sentences` 全部落空，
-    //     点成分毫无反应。
+    //     点成分毫无反应。 → 重显路径绝不走 registerBlock,映射原样保留。
     const para = document.createElement("p");
     para.textContent = "The service validates every response before returning anything.";
     document.body.append(para);
@@ -377,17 +392,27 @@ describe("bootstrap-entry 按段解析", () => {
     expect(para.hasAttribute("data-english-syntax-hidden")).toBe(true);
 
     // 跨过 400ms 去抖窗口：要证明拦住第二次的是「这段已出卡」判据，而不是去抖顺手挡掉。
-    const later = Date.now() + 5_000;
+    let later = Date.now() + 5_000;
     vi.spyOn(Date, "now").mockReturnValue(later);
     posted.length = 0;
 
+    // 关:原文探针(原文此刻已隐藏,hover 链 quirks 同款)。
     parseHovered()(para);
     await flush();
 
     expect(posted.filter((m) => m.type === "PARSE_BLOCK")).toHaveLength(0);
-    expect(label()).toContain("该段已解析");
-    // 卡片没被清掉，且渲染器的句子映射还在 —— 点成分要能发出 DETAIL_REQUEST，
-    // 并就地插出「正在加载详解…」占位（占位正是需要 `#sentences` 命中才画得出来的那一步）。
+    expect(para.hasAttribute("data-english-syntax-hidden")).toBe(false);
+    expect(document.querySelector("[data-english-syntax-card]")).toBeNull();
+
+    // 开:卡片按既有渲染回来,不重新下发、不走 registerBlock(映射在,成分点得动)。
+    later += 5_000;
+    vi.spyOn(Date, "now").mockReturnValue(later);
+    parseHovered()(para);
+    await flush();
+
+    expect(posted.filter((m) => m.type === "PARSE_BLOCK")).toHaveLength(0);
+    expect(document.querySelector("[data-english-syntax-card]")).not.toBeNull();
+    expect(para.hasAttribute("data-english-syntax-hidden")).toBe(true);
     const component = document.querySelector<HTMLElement>(".english-syntax-component");
     expect(component).not.toBeNull();
     component!.click();
@@ -395,6 +420,166 @@ describe("bootstrap-entry 按段解析", () => {
 
     expect(posted.filter((m) => m.type === "DETAIL_REQUEST")).toHaveLength(1);
     expect(document.querySelector(".english-syntax-detail-loading")).not.toBeNull();
+  });
+
+  it("流式预览期间停在卡片上再按：提示正在解析中，卡片不动", async () => {
+    // CORE_STREAM 已出预览卡、CORE_RESULT 未落地(requested 未 settled):这一按不得关。
+    const para = document.createElement("p");
+    para.textContent = "The service validates every response before returning anything.";
+    document.body.append(para);
+
+    initialize()("pv-stream", 0, false);
+    await flush();
+    posted.length = 0;
+
+    parseHovered()(para);
+    await flush();
+    const blockId = para.getAttribute("data-english-syntax-block")!;
+    hostMessage()({
+      version: 1,
+      type: "CORE_STREAM",
+      previewId: "pv-stream",
+      generation: 0,
+      sentenceId: `s-${blockId}-0`,
+      blockId,
+      componentsJson: JSON.stringify([
+        { startToken: 0, endToken: 1, role: "SUBJECT", translation: "该服务", text: "The service" },
+      ]),
+      tokensJson: JSON.stringify([
+        { id: 0, text: "The", leadingWhitespace: "", punctuation: false },
+        { id: 1, text: "service", leadingWhitespace: " ", punctuation: false },
+      ]),
+    });
+    await flush();
+    const card = document.querySelector("[data-english-syntax-card]")!;
+    expect(card).not.toBeNull();
+    posted.length = 0;
+
+    vi.spyOn(Date, "now").mockReturnValue(Date.now() + 5_000);
+    parseHovered()(card);
+    await flush();
+
+    expect(label()).toContain("该段正在解析中");
+    expect(document.querySelector("[data-english-syntax-card]")).not.toBeNull();
+    expect(para.hasAttribute("data-english-syntax-hidden")).toBe(true);
+    expect(posted.filter((m) => m.type === "PARSE_BLOCK")).toHaveLength(0);
+  });
+
+  it("toggle 收走追问面板仅当其锚定句属于被关的块", async () => {
+    // 面板是 document 级浮层、不挂在卡内:关别的块不得误收;关锚定块才随卡停停靠收走。
+    const p1 = document.createElement("p");
+    p1.textContent = "The service validates every response before returning anything.";
+    const p2 = document.createElement("p");
+    p2.textContent = "Another service handles completely different requests today.";
+    document.body.append(p1, p2);
+
+    initialize()("pv-chatblk", 0, false);
+    await flush();
+    posted.length = 0;
+
+    parseHovered()(p1);
+    await flush();
+    hostMessage()(coreResultMessage("pv-chatblk", 0, p1.getAttribute("data-english-syntax-block")!));
+    parseHovered()(p2);
+    await flush();
+    hostMessage()(coreResultMessage("pv-chatblk", 0, p2.getAttribute("data-english-syntax-block")!));
+    await flush();
+    expect(document.querySelectorAll("[data-english-syntax-card]")).toHaveLength(2);
+
+    // p1 的句子打开追问面板(真单例,挂 document.documentElement)。
+    installChatPanel();
+    document.dispatchEvent(
+      new CustomEvent(CHAT_ASK_REQUEST_EVENT, {
+        detail: { sentenceId: `s-${p1.getAttribute("data-english-syntax-block")!}-0`, anchor: { x: 10, y: 10 } },
+      }),
+    );
+    await flush();
+    expect(document.querySelector("[data-english-syntax-chat-panel]")).not.toBeNull();
+
+    // 跨去抖后关 p2:面板锚定 p1,不受牵连。
+    vi.spyOn(Date, "now").mockReturnValue(Date.now() + 5_000);
+    const p2Card = p2.nextElementSibling as HTMLElement;
+    parseHovered()(p2Card);
+    await flush();
+    expect(p2.hasAttribute("data-english-syntax-hidden")).toBe(false);
+    expect(document.querySelector("[data-english-syntax-chat-panel]")).not.toBeNull();
+
+    // 再关 p1(锚定块):面板随停停靠收走。
+    const later = Date.now() + 10_000;
+    vi.spyOn(Date, "now").mockReturnValue(later);
+    parseHovered()(p1);
+    await flush();
+    expect(p1.hasAttribute("data-english-syntax-hidden")).toBe(false);
+    expect(document.querySelector("[data-english-syntax-chat-panel]")).toBeNull();
+  });
+
+  it("关掉页面上最后一张卡不误报官方重渲染（不触发换代）", async () => {
+    // PREVIEW_RENDERED 的 true→false 边沿必须排除「我方主动删卡」:RESTORE_ALL 分支早已
+    // 同步复位 previewHadCards,单块 toggle 关同样删卡——按段解析是轻量模式,页上通常
+    // 只有这一张卡,Alt+T 关它是最主流用法,恰好制造边沿。误报会让 Kotlin 换代重扫
+    // (取消在飞请求、清追问停靠),第三按「开」退化成重新下发+registerBlock。
+    const para = document.createElement("p");
+    para.textContent = "The service validates every response before returning anything.";
+    document.body.append(para);
+
+    initialize()("pv-lastcard", 0, false);
+    await flush();
+    posted.length = 0;
+
+    parseHovered()(para);
+    await flush();
+    const blockId = para.getAttribute("data-english-syntax-block")!;
+    hostMessage()(coreResultMessage("pv-lastcard", 0, blockId));
+    await flush();
+    expect(document.querySelector("[data-english-syntax-card]")).not.toBeNull();
+    posted.length = 0;
+
+    vi.spyOn(Date, "now").mockReturnValue(Date.now() + 5_000);
+    parseHovered()(para);
+    await flush();
+
+    expect(para.hasAttribute("data-english-syntax-hidden")).toBe(false);
+    expect(document.querySelector("[data-english-syntax-card]")).toBeNull();
+    expect(posted.some((m) => m.type === "PREVIEW_RENDERED")).toBe(false);
+  });
+
+  it("关之后去抖窗口内按「开」静默忽略，窗口过后重显卡片", async () => {
+    const para = document.createElement("p");
+    para.textContent = "The service validates every response before returning anything.";
+    document.body.append(para);
+
+    initialize()("pv-reopen", 0, false);
+    await flush();
+    posted.length = 0;
+
+    parseHovered()(para);
+    await flush();
+    const blockId = para.getAttribute("data-english-syntax-block")!;
+    hostMessage()(coreResultMessage("pv-reopen", 0, blockId));
+    await flush();
+    expect(document.querySelector("[data-english-syntax-card]")).not.toBeNull();
+
+    // 关(跨首按去抖)。
+    vi.spyOn(Date, "now").mockReturnValue(Date.now() + 5_000);
+    parseHovered()(para);
+    await flush();
+    expect(document.querySelector("[data-english-syntax-card]")).toBeNull();
+    posted.length = 0;
+
+    // 同一时刻仍在关的去抖窗口内:「开」静默忽略,卡片不得闪回。
+    parseHovered()(para);
+    await flush();
+    expect(document.querySelector("[data-english-syntax-card]")).toBeNull();
+    expect(posted.filter((m) => m.type === "PARSE_BLOCK")).toHaveLength(0);
+
+    // 窗口过后:重显。
+    const later = Date.now() + 5_000;
+    vi.spyOn(Date, "now").mockReturnValue(later);
+    parseHovered()(para);
+    await flush();
+    expect(document.querySelector("[data-english-syntax-card]")).not.toBeNull();
+    expect(para.hasAttribute("data-english-syntax-hidden")).toBe(true);
+    expect(posted.filter((m) => m.type === "PARSE_BLOCK")).toHaveLength(0);
   });
 
   it("keydown 兼底逐位匹配修饰键，并随 setHotkey 改键", async () => {

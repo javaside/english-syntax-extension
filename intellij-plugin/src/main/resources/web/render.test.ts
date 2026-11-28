@@ -285,6 +285,79 @@ describe("PreviewRenderer", () => {
     expect(document.querySelector("[data-english-syntax-card]")).toBeNull();
   });
 
+  // —— 开关循环(2026-11-28 spec):单块还原/重显,bootstrap 的悬停快捷键按它切换。 ——
+
+  it("restoreBlock 还原单块：本块卡片移除，别的块照旧", () => {
+    const { renderer, element } = setup();
+    const other = paragraph("p2");
+    renderer.registerBlock("b2", other);
+    renderer.registerSentence("b2", "s2");
+    renderer.renderCoreResult(
+      "s1",
+      "b1",
+      corePayload("s1", [
+        { startToken: 0, endToken: 1, role: "SUBJECT", translation: "该服务", text: "The service" },
+      ]),
+    );
+    renderer.renderCoreResult(
+      "s2",
+      "b2",
+      corePayload("s2", [
+        { startToken: 0, endToken: 1, role: "OBJECT", translation: "每个响应", text: "every response" },
+      ]),
+    );
+    expect(document.querySelectorAll("[data-english-syntax-card]")).toHaveLength(2);
+
+    const restored = renderer.restoreBlock("b1");
+
+    expect(restored).toBe(true);
+    expect(element.hasAttribute(HIDDEN)).toBe(false);
+    expect(document.querySelectorAll("[data-english-syntax-card]")).toHaveLength(1);
+    expect(other.hasAttribute(HIDDEN)).toBe(true);
+    // 未注册的块返回 false(调用方据此走提示路径,不会误报成功)。
+    expect(renderer.restoreBlock("b9")).toBe(false);
+  });
+
+  it("卡片元素带 data-block-id，供 bootstrap 从悬停卡片反查块", () => {
+    const { renderer } = setup();
+    renderer.renderCoreResult(
+      "s1",
+      "b1",
+      corePayload("s1", [
+        { startToken: 0, endToken: 1, role: "SUBJECT", translation: "该服务", text: "The service" },
+      ]),
+    );
+
+    const card = document.querySelector("[data-english-syntax-card]") as HTMLElement;
+    expect(card.dataset.blockId).toBe("b1");
+  });
+
+  it("restoreBlock 后 repaintBlock 重显卡片，句子内容不丢", () => {
+    const { renderer, element } = setup();
+    renderer.renderCoreResult(
+      "s1",
+      "b1",
+      corePayload("s1", [
+        { startToken: 0, endToken: 1, role: "SUBJECT", translation: "该服务", text: "The service" },
+      ]),
+    );
+    renderer.restoreBlock("b1");
+    expect(document.querySelector("[data-english-syntax-card]")).toBeNull();
+
+    renderer.repaintBlock("b1");
+
+    expect(element.hasAttribute(HIDDEN)).toBe(true);
+    const card = document.querySelector("[data-english-syntax-card]");
+    expect(card).not.toBeNull();
+    expect(card?.textContent).toContain("该服务");
+  });
+
+  it("sentenceBlockId 反查句子的宿主块，未注册句返回 null", () => {
+    const { renderer } = setup();
+    expect(renderer.sentenceBlockId("s1")).toBe("b1");
+    expect(renderer.sentenceBlockId("s9")).toBeNull();
+  });
+
   /**
    * 「停止并恢复原文」后再点开始：JS 侧 initialize 重扫同一批元素，对同一个 blockId
    * 再 registerBlock，sentenceId（`s-{blockId}-{index}`）也照旧复用。#sentences 是全局

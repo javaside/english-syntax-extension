@@ -1551,21 +1551,215 @@ describe("SessionController", () => {
     });
   });
 
-  it("同一段落重复触发快捷键幂等：不重复注册句子", async () => {
+  it("同一段解析完成后再按快捷键：恢复原文且不重复注册句子（toggle 关，原文探针）", async () => {
+    let clock = 0;
     const subject = harness("Readers understand complex sentences.", new FakeTransport(), {
       hoverTarget: () => document.querySelector("p"),
+      now: () => clock,
     });
     refreshPrincipalRoot();
 
     await subject.controller.parseHoveredBlock();
     await vi.waitFor(() => expect(subject.controller.status.ready).toBe(1));
+    const replacement = subject.replacements[0]!;
+    expect(replacement.active).toBe(true);
+    clock = 1000; // 拨过去抖窗口:toggle 动作自身也受 400ms 去抖保护
     const error = await subject.controller.parseHoveredBlock();
 
+    // 原文探针:hover 链在 quirks 页面可能仍指原文(display:none 的兄弟),卡片在页上即「关」。
+    // 不重复注册句子、不发第二条 ANALYZE_CORE、句子相位与状态计数全部不动。
     expect(subject.controller.status.discovered).toBe(1);
-    // 此前这一按是**静默**返回(queueVisibleBlock 的终态闸门直接 return):快捷键没有右键菜单
-    // 那样的「已触发」反馈,什么都不说等于让用户以为键坏了。
-    expect(error).toMatchObject({ code: "UNSAFE_CONTENT_BLOCK", message: "该段已解析" });
+    expect(error).toBeUndefined();
+    expect(replacement.restores).toBe(1);
+    expect(replacement.active).toBe(false);
+    expect(subject.markers[0]!.marked).toBeNull();
+    expect(subject.controller.status.ready).toBe(1);
     expect(subject.transport.sent.filter(({ type }) => type === "ANALYZE_CORE")).toHaveLength(1);
+    subject.controller.stop();
+  });
+
+  it("鼠标停在卡片上再按快捷键：恢复原文（toggle 关，卡片探针）", async () => {
+    // 真实交互里卡片替换原文后鼠标停在的一定是卡片(blockShowing 判据的入口)。
+    let clock = 0;
+    const subject = harness("Readers understand complex sentences.", new FakeTransport(), {
+      hoverTarget: () => target,
+      now: () => clock,
+    });
+    let target: Element | null = document.querySelector("p");
+    refreshPrincipalRoot();
+
+    await subject.controller.parseHoveredBlock();
+    await vi.waitFor(() => expect(subject.controller.status.ready).toBe(1));
+    target = subject.replacements[0]!.displayed;
+    clock = 1000;
+    const error = await subject.controller.parseHoveredBlock();
+
+    expect(error).toBeUndefined();
+    expect(subject.replacements[0]!.restores).toBe(1);
+    expect(subject.controller.status.ready).toBe(1);
+    expect(subject.transport.sent.filter(({ type }) => type === "ANALYZE_CORE")).toHaveLength(1);
+    subject.controller.stop();
+  });
+
+  it("关之后鼠标停在原文上再按：重显卡片，不重新下发（toggle 开）", async () => {
+    let clock = 0;
+    const subject = harness("Readers understand complex sentences.", new FakeTransport(), {
+      hoverTarget: () => document.querySelector("p"),
+      now: () => clock,
+    });
+    refreshPrincipalRoot();
+
+    await subject.controller.parseHoveredBlock();
+    await vi.waitFor(() => expect(subject.controller.status.ready).toBe(1));
+    const replacement = subject.replacements[0]!;
+    clock = 1_000;
+    await subject.controller.parseHoveredBlock();
+    expect(replacement.restores).toBe(1);
+    expect(replacement.active).toBe(false);
+
+    clock = 2_000;
+    const error = await subject.controller.parseHoveredBlock();
+
+    // 重显走内存里的既有渲染:卡片回来、不发第二条 ANALYZE_CORE、句子相位与计数不动。
+    expect(error).toBeUndefined();
+    expect(replacement.shows).toBe(2);
+    expect(replacement.active).toBe(true);
+    expect(subject.controller.status.ready).toBe(1);
+    expect(subject.controller.status.discovered).toBe(1);
+    expect(subject.transport.sent.filter(({ type }) => type === "ANALYZE_CORE")).toHaveLength(1);
+    subject.controller.stop();
+  });
+
+  it("开关循环可来回翻转：翻译→原文→卡片→原文", async () => {
+    let clock = 0;
+    const subject = harness("Readers understand complex sentences.", new FakeTransport(), {
+      hoverTarget: () => document.querySelector("p"),
+      now: () => clock,
+    });
+    refreshPrincipalRoot();
+
+    await subject.controller.parseHoveredBlock();
+    await vi.waitFor(() => expect(subject.controller.status.ready).toBe(1));
+    const replacement = subject.replacements[0]!;
+
+    clock = 1_000;
+    await subject.controller.parseHoveredBlock(); // 关
+    clock = 2_000;
+    await subject.controller.parseHoveredBlock(); // 开
+    clock = 3_000;
+    const error = await subject.controller.parseHoveredBlock(); // 再关
+
+    expect(error).toBeUndefined();
+    expect(replacement.restores).toBe(2);
+    expect(replacement.shows).toBe(2);
+    expect(replacement.active).toBe(false);
+    expect(subject.transport.sent.filter(({ type }) => type === "ANALYZE_CORE")).toHaveLength(1);
+    subject.controller.stop();
+  });
+
+  it("去抖窗口内的开关第二按被静默忽略，窗口过后生效", async () => {
+    let clock = 0;
+    const subject = harness("Readers understand complex sentences.", new FakeTransport(), {
+      hoverTarget: () => document.querySelector("p"),
+      now: () => clock,
+    });
+    refreshPrincipalRoot();
+
+    await subject.controller.parseHoveredBlock();
+    await vi.waitFor(() => expect(subject.controller.status.ready).toBe(1));
+    const replacement = subject.replacements[0]!;
+
+    // 距首次按键(0)仍在 400ms 去抖窗口内:静默忽略,卡片不得闪回。
+    clock = 100;
+    const ignored = await subject.controller.parseHoveredBlock();
+    expect(ignored).toBeUndefined();
+    expect(replacement.restores).toBe(0);
+
+    clock = 1_000;
+    const error = await subject.controller.parseHoveredBlock();
+    expect(error).toBeUndefined();
+    expect(replacement.restores).toBe(1);
+    subject.controller.stop();
+  });
+
+  it("纯缓存未命中的块（整块 skipped）不参与开关：仍提示该段已解析", async () => {
+    // 卡片从未上页(finishBlock 对全 skipped 块保持原 DOM),「关」无从关、「重显」无从显——
+    // 维持与选区/右键同款的「该段已解析」提示,不得凭空插一张纯文本卡。
+    let clock = 0;
+    const transport = new FakeTransport((message) =>
+      Promise.resolve({
+        version: 1,
+        requestId: message.requestId,
+        type: "CORE_RESULT",
+        analyses: [],
+        cacheOnly: true,
+      }),
+    );
+    const subject = harness("Readers understand complex sentences.", transport, {
+      hoverTarget: () => document.querySelector("p"),
+      now: () => clock,
+    });
+    refreshPrincipalRoot();
+
+    await subject.controller.parseHoveredBlock();
+    await vi.waitFor(() => expect(subject.learningBlocks[0]!.skips).toHaveLength(1));
+
+    clock = 1_000;
+    const error = await subject.controller.parseHoveredBlock();
+
+    expect(error).toMatchObject({ message: "该段已解析" });
+    expect(subject.replacements[0]!.restores).toBe(0);
+    expect(subject.replacements[0]!.shows).toBe(0);
+    subject.controller.stop();
+  });
+
+  it("关卡收走锚定该块的追问面板，别的块不受牵连", async () => {
+    // 面板是 documentElement 上的 fixed 浮层(不在卡片子树里):关锚定块必须随停停靠收走
+    // (dispose 先触发 onClose 停靠再摘 host,与用户点关闭按钮同路径),关别的块不得误收。
+    let clock = 0;
+    let target: Element | null = null;
+    const subject = harness("Readers understand complex sentences.", new FakeTransport(), {
+      scan: () => refreshPrincipalRoot(),
+      createSentenceId: ({ blockId, order }) => Promise.resolve(`s-${blockId}-${order}`),
+      hoverTarget: () => target,
+      now: () => clock,
+    });
+    const main = document.querySelector("main")!;
+    const p1 = document.querySelector("p")!;
+    const p2 = document.createElement("p");
+    p2.textContent = "Writers craft each paragraph carefully today.";
+    main.append(p2);
+    refreshPrincipalRoot();
+
+    target = p1;
+    await subject.controller.parseHoveredBlock();
+    target = p2;
+    clock = 1_000;
+    await subject.controller.parseHoveredBlock();
+    await vi.waitFor(() => expect(subject.controller.status.ready).toBe(2));
+    const p1SentenceId = (
+      subject.transport.sent.find(({ type }) => type === "ANALYZE_CORE") as {
+        sentences: Array<{ sentenceId: string }>;
+      }
+    ).sentences[0]!.sentenceId;
+
+    subject.controller.openChat(p1SentenceId);
+    expect(document.querySelector("[data-syntax-chat-panel]")).not.toBeNull();
+
+    // 关 p2(卡片探针):面板锚定 p1 的句子,不受牵连。
+    clock = 5_000;
+    target = subject.replacements[1]!.displayed;
+    await subject.controller.parseHoveredBlock();
+    expect(subject.replacements[1]!.restores).toBe(1);
+    expect(document.querySelector("[data-syntax-chat-panel]")).not.toBeNull();
+
+    // 关 p1(锚定块):面板随停停靠收走。
+    clock = 10_000;
+    target = subject.replacements[0]!.displayed;
+    await subject.controller.parseHoveredBlock();
+    expect(subject.replacements[0]!.restores).toBe(1);
+    expect(document.querySelector("[data-syntax-chat-panel]")).toBeNull();
+    subject.controller.stop();
   });
 
   it("同一段在飞时再按快捷键：不重复下发，只提示正在解析中", async () => {
@@ -1657,27 +1851,35 @@ describe("SessionController", () => {
     expect(subject.transport.sent.filter(({ type }) => type === "ANALYZE_CORE")).toHaveLength(2);
   });
 
-  it("鼠标停在已替换的卡片上：提示该段已解析，而不是「未找到可解析的段落」", async () => {
+  it("鼠标停在已替换的卡片上：恢复原文，而不是「未找到可解析的段落」", async () => {
     // 替换后原文是 display:none 的兄弟节点,扫描的可见性判据会跳过它,所以第二次按键落在的
     // 一定是卡片;而卡片宿主在浅 DOM 里没有文本,nearestSafeBlock 一路向上只会返回 null——
     // 不先认卡片,用户拿到的提示与事实相反(IntelliJ 侧同款判据见 rendering.md)。
+    // 开关循环(2026-11-28 spec):这一按从「提示已解析」改为「关」。
+    let clock = 0;
     let hovered: Element | null = null;
     const subject = harness("Readers understand complex sentences.", new FakeTransport(), {
       hoverTarget: () => hovered ?? document.querySelector("p"),
+      now: () => clock,
     });
     refreshPrincipalRoot();
 
     await subject.controller.parseHoveredBlock();
     await vi.waitFor(() => expect(subject.controller.status.ready).toBe(1));
     hovered = subject.replacements[0]!.displayed;
+    clock = 1_000;
 
     const error = await subject.controller.parseHoveredBlock();
 
-    expect(error).toMatchObject({ message: "该段已解析" });
+    expect(error).toBeUndefined();
+    expect(subject.replacements[0]!.restores).toBe(1);
     expect(subject.transport.sent.filter(({ type }) => type === "ANALYZE_CORE")).toHaveLength(1);
   });
 
-  it("整块解析失败后再按：提示失败句数并指向卡片里的「重新解析」", async () => {
+  it("整块解析失败后再按：恢复原文，失败行随卡片收起、重显后仍可重试", async () => {
+    // 失败句也是终态:toggle 关把整卡(含失败行)一起收起;第三按重显卡片,失败行与
+    // 「重新解析」按钮照旧在——失败信息不因开关丢失,只是暂时不可见。
+    let clock = 0;
     const transport = new FakeTransport((message) =>
       Promise.resolve({
         version: 1,
@@ -1688,15 +1890,18 @@ describe("SessionController", () => {
     );
     const subject = harness("Readers understand complex sentences.", transport, {
       hoverTarget: () => document.querySelector("p"),
+      now: () => clock,
     });
     refreshPrincipalRoot();
 
     await subject.controller.parseHoveredBlock();
     await vi.waitFor(() => expect(subject.controller.status.failed).toBe(1));
+    clock = 1_000;
 
     const error = await subject.controller.parseHoveredBlock();
 
-    expect(error).toMatchObject({ message: "该段已解析，1 句失败，可点卡片里的「重新解析」" });
+    expect(error).toBeUndefined();
+    expect(subject.replacements[0]!.restores).toBe(1);
     expect(transport.sent.filter(({ type }) => type === "ANALYZE_CORE")).toHaveLength(1);
   });
 
